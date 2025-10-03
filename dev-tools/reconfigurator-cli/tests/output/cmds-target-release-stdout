@@ -3227,7 +3227,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: ba87399e-e9b7-4ee4-8cb7-0032822630e9 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: ba87399e-e9b7-4ee4-8cb7-0032822630e9 (omicron_zone), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
 generated blueprint 24b6e243-100c-428d-8ea6-35b504226f55 based on parent blueprint 6fad8fd4-e825-433f-b76d-495484e068ce
 blueprint source: planner with report:
 planning report:
@@ -5318,7 +5318,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: e14f91b0-0c41-48a0-919d-e5078d2b89b0 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: e14f91b0-0c41-48a0-919d-e5078d2b89b0 (omicron_zone), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
 generated blueprint e7a01ffc-6b0e-408b-917b-b1efe18b3110 based on parent blueprint 02078c95-3d58-4b7b-a03f-9b160361c50a
 blueprint source: planner with report:
 planning report:
@@ -7084,7 +7084,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
-INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 9e2e0774-3cf6-4f75-9a12-92db05c77b81 (service), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
+INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIncomplete { zone_id: 9e2e0774-3cf6-4f75-9a12-92db05c77b81 (omicron_zone), zone_kind: InternalNtp, reason: MissingInInventory { bp_image_source: Artifact { version: Available { version: ArtifactVersion("1.0.0") }, hash: ArtifactHash("67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439") } } }]
 generated blueprint e8b088a8-7da0-480b-a2dc-75ffef068ece based on parent blueprint 2182613d-dc9f-41eb-9c6a-d33801849caa
 blueprint source: planner with report:
 planning report:

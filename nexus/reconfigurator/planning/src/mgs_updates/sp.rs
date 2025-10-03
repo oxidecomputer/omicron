@@ -6,12 +6,13 @@
 
 use super::MgsUpdateStatus;
 use super::mgs_update_status_inactive_versions;
+use crate::mgs_updates::MgsUpdateOutcome;
 
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+use nexus_types::deployment::planning_report::FailedSpUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -23,7 +24,7 @@ use tufaceous_artifact::KnownArtifactKind;
 
 /// Compares a configured SP update with information from inventory and
 /// determines the current status of the update.  See `MgsUpdateStatus`.
-pub fn mgs_update_status_sp(
+pub(super) fn update_status(
     desired_version: &ArtifactVersion,
     expected_active_version: &ArtifactVersion,
     expected_inactive_version: &ExpectedVersion,
@@ -56,22 +57,20 @@ pub fn mgs_update_status_sp(
 
 /// Determine if the given baseboard needs an SP update and, if so, returns it.
 /// An error means an update is still necessary but cannot be completed.
-pub fn try_make_update_sp(
+pub(super) fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    // TODO-K: Like the Host OS, use an enum here as the return type as suggested in
-    // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
-) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
+) -> Result<MgsUpdateOutcome, FailedSpUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::SpNotInInventory);
+        return Err(FailedSpUpdateReason::SpNotInInventory);
     };
 
     let Some(active_caboose) =
         inventory.caboose_for(CabooseWhich::SpSlot0, baseboard_id)
     else {
-        return Err(FailedMgsUpdateReason::CabooseNotInInventory(
+        return Err(FailedSpUpdateReason::CabooseNotInInventory(
             CabooseWhich::SpSlot0,
         ));
     };
@@ -79,7 +78,7 @@ pub fn try_make_update_sp(
     let expected_active_version = match active_caboose.caboose.version.parse() {
         Ok(v) => v,
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
+            return Err(FailedSpUpdateReason::FailedVersionParse {
                 caboose: CabooseWhich::SpSlot0,
                 err: format!("{}", e),
             });
@@ -124,7 +123,7 @@ pub fn try_make_update_sp(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
+        return Err(FailedSpUpdateReason::NoMatchingArtifactFound);
     }
 
     if matching_artifacts.len() > 1 {
@@ -140,7 +139,7 @@ pub fn try_make_update_sp(
     // needed.
     if artifact.id.version == expected_active_version {
         debug!(log, "no SP update needed for board"; baseboard_id);
-        return Ok(None);
+        return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
     // Begin configuring an update.
@@ -152,14 +151,14 @@ pub fn try_make_update_sp(
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
+            return Err(FailedSpUpdateReason::FailedVersionParse {
                 caboose: CabooseWhich::SpSlot1,
                 err: format!("{}", e),
             });
         }
     };
 
-    Ok(Some(PendingMgsUpdate {
+    Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
         slot_id: sp_info.sp_slot,
@@ -186,12 +185,12 @@ mod tests {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
-    use gateway_client::types::SpType;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::inventory::SpType;
     use std::collections::BTreeSet;
 
     // Short hand-rolled update sequence that exercises some basic behavior for

@@ -40,7 +40,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
             // Verify that the device is the one we think it is.
             let state = mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
-                    mgs_client.sp_get(update.sp_type, update.slot_id).await
+                    mgs_client.sp_get(&update.sp_type, update.slot_id).await
                 })
                 .await?
                 .into_inner();
@@ -63,7 +63,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
                         .sp_component_caboose_get(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             SpComponent::SP_ITSELF.const_as_str(),
                             0,
@@ -109,7 +109,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
                 .try_all_serially(log, move |mgs_client| async move {
                     mgs_client
                         .sp_component_caboose_get(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             SpComponent::SP_ITSELF.const_as_str(),
                             1,
@@ -150,7 +150,7 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
                     debug!(log, "attempting to reset device");
                     mgs_client
                         .sp_component_reset(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             SpComponent::SP_ITSELF.const_as_str(),
                         )

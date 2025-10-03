@@ -187,7 +187,7 @@
             "name": "demo_saga_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForDemoSagaKind"
+              "$ref": "#/components/schemas/DemoSagaUuid"
             }
           }
         ],
@@ -974,7 +974,7 @@
             "name": "instance_id",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+              "$ref": "#/components/schemas/InstanceUuid"
             }
           }
         ],
@@ -1487,14 +1487,6 @@
               }
             ]
           },
-          "component": {
-            "description": "type of SP component that we attempted to update",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MgsUpdateComponent"
-              }
-            ]
-          },
           "reason": {
             "description": "reason why the update failed",
             "allOf": [
@@ -1506,7 +1498,6 @@
         },
         "required": [
           "baseboard_id",
-          "component",
           "reason"
         ]
       },
@@ -1555,7 +1546,7 @@
             "description": "unique identifier for this blueprint",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -1596,7 +1587,7 @@
             "description": "which blueprint this blueprint is based on",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -1709,7 +1700,7 @@
             "$ref": "#/components/schemas/BlueprintDatasetDisposition"
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            "$ref": "#/components/schemas/DatasetUuid"
           },
           "kind": {
             "$ref": "#/components/schemas/DatasetKind"
@@ -1858,7 +1849,7 @@
             "description": "unique identifier for this blueprint",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -1883,7 +1874,7 @@
             "description": "which blueprint this blueprint is based on",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -1951,13 +1942,13 @@
             "$ref": "#/components/schemas/BlueprintPhysicalDiskDisposition"
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
           },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
           },
           "pool_id": {
-            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            "$ref": "#/components/schemas/ZpoolUuid"
           }
         },
         "required": [
@@ -2033,7 +2024,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               }
             ]
           },
@@ -2194,7 +2185,7 @@
             "description": "id of the blueprint that the system is trying to make real",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -2218,13 +2209,22 @@
             "type": "boolean"
           },
           "target_id": {
-            "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+            "$ref": "#/components/schemas/BlueprintUuid"
           }
         },
         "required": [
           "enabled",
           "target_id"
         ]
+      },
+      "BlueprintUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::BlueprintUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "BlueprintZoneConfig": {
         "description": "Describes one Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintSledConfig`].",
@@ -2247,7 +2247,7 @@
             ]
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+            "$ref": "#/components/schemas/OmicronZoneUuid"
           },
           "image_source": {
             "$ref": "#/components/schemas/BlueprintZoneImageSource"
@@ -3316,12 +3316,21 @@
         "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
         "type": "string"
       },
+      "DatasetUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DatasetUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "DemoSaga": {
         "description": "Identifies an instance of the demo saga",
         "type": "object",
         "properties": {
           "demo_saga_id": {
-            "$ref": "#/components/schemas/TypedUuidForDemoSagaKind"
+            "$ref": "#/components/schemas/DemoSagaUuid"
           },
           "saga_id": {
             "type": "string",
@@ -3332,6 +3341,15 @@
           "demo_saga_id",
           "saga_id"
         ]
+      },
+      "DemoSagaUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::DemoSagaUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "DiscretionaryZonePlacement": {
         "type": "object",
@@ -3461,8 +3479,17 @@
           }
         ]
       },
-      "FailedMgsUpdateReason": {
-        "description": "Describes the reason why an SP component failed to update",
+      "ExternalIpUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ExternalIpUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
+      "FailedHostOsUpdateReason": {
+        "description": "Describes the reason why a Host OS failed to update",
         "oneOf": [
           {
             "description": "The active host phase 1 slot does not match the boot disk",
@@ -3515,25 +3542,6 @@
             },
             "required": [
               "type"
-            ]
-          },
-          {
-            "description": "The component's caboose was missing a value for \"sign\"",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "caboose_missing_sign"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/CabooseWhich"
-              }
-            },
-            "required": [
-              "type",
-              "value"
             ]
           },
           {
@@ -3621,13 +3629,13 @@
             ]
           },
           {
-            "description": "No artifact with the required conditions for the component was found",
+            "description": "No artifacts with the required conditions for the component were found",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "no_matching_artifact_found"
+                  "no_matching_artifacts_found"
                 ]
               }
             },
@@ -3636,13 +3644,28 @@
             ]
           },
           {
-            "description": "RoT state was not found in inventory",
+            "description": "No artifact with the required conditions for phase 1 was found",
             "type": "object",
             "properties": {
               "type": {
                 "type": "string",
                 "enum": [
-                  "rot_state_not_in_inventory"
+                  "no_matching_phase1_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for phase 2 was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_phase2_artifact_found"
                 ]
               }
             },
@@ -3735,6 +3758,395 @@
           }
         ]
       },
+      "FailedMgsUpdateReason": {
+        "description": "Describes the reason why an SP component failed to update",
+        "oneOf": [
+          {
+            "description": "There was a failed attempt to plan a Host OS update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "host_os"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedHostOsUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "There was a failed attempt to plan an RoT update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedRotUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "There was a failed attempt to plan an RoT bootloader update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_bootloader"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedRotBootloaderUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "There was a failed attempt to plan an SP update",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/FailedSpUpdateReason"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "FailedRotBootloaderUpdateReason": {
+        "description": "Describes the reason why an RoT bootloader failed to update",
+        "oneOf": [
+          {
+            "description": "The component's caboose was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "FailedRotUpdateReason": {
+        "description": "Describes the reason why an RoT failed to update",
+        "oneOf": [
+          {
+            "description": "The component's caboose was missing a value for \"sign\"",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_missing_sign"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "RoT state was not found in inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rot_state_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "FailedSpUpdateReason": {
+        "description": "Describes the reason why an SP failed to update",
+        "oneOf": [
+          {
+            "description": "The component's caboose was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "caboose_not_in_inventory"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/CabooseWhich"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "The version in the caboose or artifact was not able to be parsed",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "failed_version_parse"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "caboose": {
+                    "$ref": "#/components/schemas/CabooseWhich"
+                  },
+                  "err": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "caboose",
+                  "err"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "No artifact with the required conditions for the component was found",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_matching_artifact_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding SP was not found in the inventory",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sp_not_in_inventory"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -3807,7 +4219,7 @@
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/TypedUuidForSledKind"
+                    "$ref": "#/components/schemas/SledUuid"
                   }
                 ]
               },
@@ -4357,15 +4769,6 @@
           "sp"
         ]
       },
-      "MgsUpdateComponent": {
-        "type": "string",
-        "enum": [
-          "sp",
-          "rot",
-          "rot_bootloader",
-          "host_os"
-        ]
-      },
       "MgsUpdateDriverStatus": {
         "description": "Status of ongoing update attempts, recently completed attempts, and update requests that are waiting for retry.",
         "type": "object",
@@ -4418,6 +4821,15 @@
           "recent",
           "waiting"
         ]
+      },
+      "MupdateOverrideUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::MupdateOverrideUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "Name": {
         "title": "A name unique within the parent collection",
@@ -4635,7 +5047,7 @@
             "type": "string"
           },
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+            "$ref": "#/components/schemas/ExternalIpUuid"
           }
         },
         "required": [
@@ -4648,7 +5060,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+            "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "ip": {
             "type": "string",
@@ -4665,7 +5077,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForExternalIpKind"
+            "$ref": "#/components/schemas/ExternalIpUuid"
           },
           "snat_cfg": {
             "$ref": "#/components/schemas/SourceNatConfig"
@@ -5034,6 +5446,15 @@
           }
         ]
       },
+      "OmicronZoneUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::OmicronZoneUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "OximeterReadMode": {
         "description": "Where oximeter should read from",
         "oneOf": [
@@ -5358,7 +5779,7 @@
             "description": "which blueprint id we'd be fully caught up to upon completion",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -5414,6 +5835,15 @@
         "required": [
           "disk_id"
         ]
+      },
+      "PhysicalDiskUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::PhysicalDiskUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "Ping": {
         "type": "object",
@@ -5503,7 +5933,7 @@
           "sleds_getting_ntp_and_discretionary_zones": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
@@ -5512,35 +5942,35 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+                "$ref": "#/components/schemas/ZpoolUuid"
               }
             }
           },
           "sleds_missing_ntp_zone": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
           "sleds_waiting_for_ntp_zone": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
           "sleds_without_ntp_zones_in_inventory": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
           "sleds_without_zpools_for_ntp_zones": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             },
             "uniqueItems": true
           },
@@ -5618,7 +6048,7 @@
             "description": "Decommissioned sleds that unexpectedly appeared as commissioned.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TypedUuidForSledKind"
+              "$ref": "#/components/schemas/SledUuid"
             }
           }
         },
@@ -5633,7 +6063,7 @@
             "description": "Expunged disks not present in the parent blueprint.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/TypedUuidForPhysicalDiskKind"
+              "$ref": "#/components/schemas/PhysicalDiskUuid"
             }
           }
         },
@@ -5834,7 +6264,7 @@
             "type": "object",
             "properties": {
               "id": {
-                "$ref": "#/components/schemas/TypedUuidForMupdateOverrideKind"
+                "$ref": "#/components/schemas/MupdateOverrideUuid"
               },
               "type": {
                 "type": "string",
@@ -5975,13 +6405,29 @@
           "desired_image_source": {
             "$ref": "#/components/schemas/BlueprintZoneImageSource"
           },
-          "zone_config": {
-            "$ref": "#/components/schemas/BlueprintZoneConfig"
+          "zone": {
+            "$ref": "#/components/schemas/PlanningReportBlueprintZone"
           }
         },
         "required": [
           "desired_image_source",
-          "zone_config"
+          "zone"
+        ]
+      },
+      "PlanningReportBlueprintZone": {
+        "description": "Reduced form of a `BlueprintZoneConfig` stored in a [`PlanningReport`].",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/OmicronZoneUuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ZoneKind"
+          }
+        },
+        "required": [
+          "id",
+          "kind"
         ]
       },
       "PlanningZoneUpdatesStepReport": {
@@ -5992,7 +6438,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -6016,7 +6462,7 @@
             "additionalProperties": {
               "type": "array",
               "items": {
-                "$ref": "#/components/schemas/BlueprintZoneConfig"
+                "$ref": "#/components/schemas/PlanningReportBlueprintZone"
               }
             }
           },
@@ -6507,7 +6953,7 @@
             "description": "blueprint id that we're \"fully drained up to\"\n\nIf this value is non-`None`, that means that:\n\n- saga creation is disallowed - no sagas are running - we have re-assigned sagas from other Nexus instances expunged in this blueprint or earlier - we have finished recovery for all those sagas (that had been assigned to us as of the re-assignment pass for this blueprint id)\n\nThis means that the only way we can wind up running another saga is if there's a new blueprint that expunges a different Nexus zone.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -6528,7 +6974,7 @@
             "description": "blueprint id associated with last successful saga reassignment\n\nSimilar to the generation number, this is used to track whether we've accounted for all sagas for all expungements up through this target blueprint.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -6549,7 +6995,7 @@
             "description": "blueprint id that saga recovery has \"caught up to\"\n\nThis means that we have finished recovering any sagas that were re-assigned to us due to expungements of other Nexus zones up through this blueprint.  Put differently: we know that we will never be assigned more sagas due to expungement unless the target blueprint changes past this one.\n\nThis does not mean that we've fully drained all sagas up through this blueprint.  There may still be sagas running.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/TypedUuidForBlueprintKind"
+                "$ref": "#/components/schemas/BlueprintUuid"
               }
             ]
           },
@@ -6745,7 +7191,7 @@
             "$ref": "#/components/schemas/HostPhase2Status"
           },
           "sled_id": {
-            "$ref": "#/components/schemas/TypedUuidForSledKind"
+            "$ref": "#/components/schemas/SledUuid"
           },
           "zones": {
             "title": "IdOrdMap",
@@ -6776,7 +7222,7 @@
         "type": "object",
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/TypedUuidForSledKind"
+            "$ref": "#/components/schemas/SledUuid"
           }
         },
         "required": [
@@ -6878,6 +7324,15 @@
           }
         ]
       },
+      "SledUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::SledUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "SourceNatConfig": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
@@ -6922,7 +7377,6 @@
         ]
       },
       "SpType": {
-        "description": "`SpType`\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -7105,42 +7559,6 @@
           }
         ]
       },
-      "TypedUuidForBlueprintKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForDatasetKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForDemoSagaKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForExternalIpKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForMupdateOverrideKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForOmicronZoneKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForPhysicalDiskKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForSledKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForZpoolKind": {
-        "type": "string",
-        "format": "uuid"
-      },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
         "type": "object",
@@ -7317,6 +7735,24 @@
           }
         ]
       },
+      "ZoneKind": {
+        "description": "Like [`OmicronZoneType`], but without any associated data.\n\nThis enum is meant to correspond exactly 1:1 with `OmicronZoneType`.\n\n# String representations of this type\n\nThere are no fewer than six string representations for this type, all slightly different from each other.\n\n1. [`Self::zone_prefix`]: Used to construct zone names. 2. [`Self::service_prefix`]: Used to construct SMF service names. 3. [`Self::name_prefix`]: Used to construct `Name` instances. 4. [`Self::report_str`]: Used for reporting and testing. 5. [`Self::artifact_id_name`]: Used to match TUF artifact IDs. 6. [`Self::artifact_in_install_dataset`]: Used to match zone image tarballs in the install dataset. (This method is equivalent to appending `.tar.gz` to the result of [`Self::zone_prefix`].)\n\nThere is no `Display` impl to ensure that users explicitly choose the representation they want. (Please play close attention to this! The functions are all similar but different, and we don't currently have great type safety around the choice.)\n\n## Adding new representations\n\nIf you have a new use case for a string representation, please reuse one of the six representations if at all possible. If you must add a new one, please add it here rather than doing something ad-hoc in the calling code so it's more legible.",
+        "type": "string",
+        "enum": [
+          "boundary_ntp",
+          "clickhouse",
+          "clickhouse_keeper",
+          "clickhouse_server",
+          "cockroach_db",
+          "crucible",
+          "crucible_pantry",
+          "external_dns",
+          "internal_dns",
+          "internal_ntp",
+          "nexus",
+          "oximeter"
+        ]
+      },
       "ZoneStatus": {
         "type": "object",
         "properties": {
@@ -7324,7 +7760,7 @@
             "$ref": "#/components/schemas/TufRepoVersion"
           },
           "zone_id": {
-            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
+            "$ref": "#/components/schemas/OmicronZoneUuid"
           },
           "zone_type": {
             "$ref": "#/components/schemas/OmicronZoneType"
@@ -7519,6 +7955,15 @@
         "type": "string",
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       },
+      "ZpoolUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ZpoolUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
+      },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
@@ -7550,7 +7995,12 @@
           }
         ]
       },
-      "TypedUuidForInstanceKind": {
+      "InstanceUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::InstanceUuid",
+          "version": "*"
+        },
         "type": "string",
         "format": "uuid"
       }

@@ -6,12 +6,13 @@
 
 use super::MgsUpdateStatus;
 use super::mgs_update_status_inactive_versions;
+use crate::mgs_updates::MgsUpdateOutcome;
 
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -23,7 +24,7 @@ use tufaceous_artifact::KnownArtifactKind;
 
 /// Compares a configured RoT bootloader update with information from inventory
 /// and determines the current status of the update.  See `MgsUpdateStatus`.
-pub fn mgs_update_status_rot_bootloader(
+pub(super) fn update_status(
     desired_version: &ArtifactVersion,
     expected_stage0_version: &ArtifactVersion,
     expected_stage0_next_version: &ExpectedVersion,
@@ -57,22 +58,20 @@ pub fn mgs_update_status_rot_bootloader(
 /// Determine if the given baseboard needs an RoT bootloader update and, if so,
 /// returns it. An error means an update is still necessary but cannot be
 /// completed.
-pub fn try_make_update_rot_bootloader(
+pub(super) fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    // TODO-K: Like the Host OS, use an enum here as the return type as suggested in
-    // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
-) -> Result<Option<PendingMgsUpdate>, FailedMgsUpdateReason> {
+) -> Result<MgsUpdateOutcome, FailedRotBootloaderUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::SpNotInInventory);
+        return Err(FailedRotBootloaderUpdateReason::SpNotInInventory);
     };
 
     let Some(stage0_caboose) =
         inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
     else {
-        return Err(FailedMgsUpdateReason::CabooseNotInInventory(
+        return Err(FailedRotBootloaderUpdateReason::CabooseNotInInventory(
             CabooseWhich::Stage0,
         ));
     };
@@ -80,7 +79,7 @@ pub fn try_make_update_rot_bootloader(
     let expected_stage0_version = match stage0_caboose.caboose.version.parse() {
         Ok(v) => v,
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
+            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
                 caboose: CabooseWhich::Stage0,
                 err: format!("{}", e),
             });
@@ -89,7 +88,7 @@ pub fn try_make_update_rot_bootloader(
 
     let board = &stage0_caboose.caboose.board;
     let Some(rkth) = &stage0_caboose.caboose.sign else {
-        return Err(FailedMgsUpdateReason::CabooseMissingSign(
+        return Err(FailedRotBootloaderUpdateReason::CabooseMissingSign(
             CabooseWhich::Stage0,
         ));
     };
@@ -143,7 +142,7 @@ pub fn try_make_update_rot_bootloader(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
+        return Err(FailedRotBootloaderUpdateReason::NoMatchingArtifactFound);
     }
 
     if matching_artifacts.len() > 1 {
@@ -163,7 +162,7 @@ pub fn try_make_update_rot_bootloader(
     // needed.
     if artifact.id.version == expected_stage0_version {
         debug!(log, "no RoT bootloader update needed for board"; baseboard_id);
-        return Ok(None);
+        return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
     // Begin configuring an update.
@@ -175,14 +174,14 @@ pub fn try_make_update_rot_bootloader(
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
         Err(e) => {
-            return Err(FailedMgsUpdateReason::FailedVersionParse {
+            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
                 caboose: CabooseWhich::Stage0Next,
                 err: format!("{}", e),
             });
         }
     };
 
-    Ok(Some(PendingMgsUpdate {
+    Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
         slot_id: sp_info.sp_slot,
@@ -211,12 +210,12 @@ mod tests {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
-    use gateway_client::types::SpType;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::inventory::SpType;
     use std::collections::BTreeSet;
 
     // Short hand-rolled update sequence that exercises some basic behavior for

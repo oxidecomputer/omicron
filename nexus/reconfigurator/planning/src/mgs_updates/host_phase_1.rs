@@ -6,15 +6,16 @@
 
 use super::MgsUpdateStatus;
 use super::MgsUpdateStatusError;
-use gateway_client::types::SpType;
+use crate::mgs_updates::MgsUpdateOutcome;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::SpType;
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
@@ -22,7 +23,6 @@ use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 use slog::debug;
 use slog::error;
-use slog::warn;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
@@ -273,39 +273,36 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    // TODO-K: Instead of this convoluted return type use an enum as suggested in
-    // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
-) -> Result<
-    Option<(PendingMgsUpdate, PendingHostPhase2Changes)>,
-    FailedMgsUpdateReason,
-> {
+) -> Result<MgsUpdateOutcome, FailedHostOsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::SpNotInInventory);
+        return Err(FailedHostOsUpdateReason::SpNotInInventory);
     };
 
     // Only configure host OS updates for sleds.
     //
-    // We don't bother logging a return value of `None` for non-sleds, because
-    // we will never attempt to configure an update for them (nor should we).
-    // For the same reason, we do not return an error.
+    // We don't bother logging a return value of `NoUpdateNeeded` for non-sleds,
+    // because we will never attempt to configure an update for them (nor should
+    // we). For the same reason, we do not return an error.
     match sp_info.sp_type {
         SpType::Sled => (),
-        SpType::Power | SpType::Switch => return Ok(None),
+        SpType::Power | SpType::Switch => {
+            return Ok(MgsUpdateOutcome::NoUpdateNeeded);
+        }
     }
 
     let Some(sled_agent) = inventory.sled_agents.iter().find(|sled_agent| {
         sled_agent.baseboard_id.as_ref() == Some(baseboard_id)
     }) else {
-        return Err(FailedMgsUpdateReason::SledAgentInfoNotInInventory);
+        return Err(FailedHostOsUpdateReason::SledAgentInfoNotInInventory);
     };
     let Some(last_reconciliation) = sled_agent.last_reconciliation.as_ref()
     else {
-        return Err(FailedMgsUpdateReason::LastReconciliationNotInInventory);
+        return Err(FailedHostOsUpdateReason::LastReconciliationNotInInventory);
     };
     let boot_disk = match &last_reconciliation.boot_partitions.boot_disk {
         Ok(boot_disk) => *boot_disk,
         Err(err) => {
-            return Err(FailedMgsUpdateReason::UnableToDetermineBootDisk(
+            return Err(FailedHostOsUpdateReason::UnableToDetermineBootDisk(
                 err.to_string(),
             ));
         }
@@ -315,17 +312,19 @@ pub(super) fn try_make_update(
             Ok(details) => details.artifact_hash,
             Err(err) => {
                 return Err(
-                    FailedMgsUpdateReason::UnableToRetrieveBootDiskPhase2Image(
-                        err.to_string(),
-                    ),
-                );
+                FailedHostOsUpdateReason::UnableToRetrieveBootDiskPhase2Image(
+                    err.to_string(),
+                ),
+            );
             }
         };
 
     let Some(active_phase_1_slot) =
         inventory.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
     else {
-        return Err(FailedMgsUpdateReason::ActiveHostPhase1SlotNotInInventory);
+        return Err(
+            FailedHostOsUpdateReason::ActiveHostPhase1SlotNotInInventory,
+        );
     };
 
     // TODO-correctness What should we do if the active phase 1 slot doesn't
@@ -341,7 +340,7 @@ pub(super) fn try_make_update(
     // this current implementation. As far as we know they shouldn't happen.
     if active_phase_1_slot != boot_disk {
         return Err(
-            FailedMgsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch(
+            FailedHostOsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch(
                 active_phase_1_slot,
             ),
         );
@@ -351,9 +350,11 @@ pub(super) fn try_make_update(
         .host_phase_1_flash_hash_for(active_phase_1_slot, baseboard_id)
         .map(|h| h.hash)
     else {
-        return Err(FailedMgsUpdateReason::ActiveHostPhase1HashNotInInventory(
-            active_phase_1_slot,
-        ));
+        return Err(
+            FailedHostOsUpdateReason::ActiveHostPhase1HashNotInInventory(
+                active_phase_1_slot,
+            ),
+        );
     };
 
     let Some(inactive_phase_1_hash) = inventory
@@ -363,15 +364,8 @@ pub(super) fn try_make_update(
         )
         .map(|h| h.hash)
     else {
-        warn!(
-            log,
-            "cannot configure host OS update for board \
-             (missing inactive phase 1 hash from inventory)";
-            baseboard_id,
-            "slot" => ?active_phase_1_slot.toggled(),
-        );
         return Err(
-            FailedMgsUpdateReason::InactiveHostPhase1HashNotInInventory(
+            FailedHostOsUpdateReason::InactiveHostPhase1HashNotInInventory(
                 active_phase_1_slot.toggled(),
             ),
         );
@@ -392,19 +386,26 @@ pub(super) fn try_make_update(
         match (phase_1_artifacts.as_slice(), phase_2_artifacts.as_slice()) {
             // Common case: Exactly 1 of each artifact.
             ([p1], [p2]) => (p1, p2),
-            // "TUF is broken" cases: missing one or the other.
+            // "TUF is broken" cases: missing both, one or the other.
+            ([], []) => {
+                return Err(FailedHostOsUpdateReason::NoMatchingArtifactsFound);
+            }
             ([], _) => {
-                return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
+                return Err(
+                    FailedHostOsUpdateReason::NoMatchingPhase1ArtifactFound,
+                );
             }
             (_, []) => {
-                return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
+                return Err(
+                    FailedHostOsUpdateReason::NoMatchingPhase2ArtifactFound,
+                );
             }
             // "TUF is broken" cases: have multiple of one or the other. This
             // should be impossible unless we shipped a TUF repo with multiple
             // host OS images. We can't proceed, because we don't know how to
             // pair up which phase 1 matches which phase 2.
             (_, _) => {
-                return Err(FailedMgsUpdateReason::TooManyMatchingArtifacts);
+                return Err(FailedHostOsUpdateReason::TooManyMatchingArtifacts);
             }
         };
 
@@ -416,7 +417,7 @@ pub(super) fn try_make_update(
     // this sled will fail to boot if it were rebooted now.)
     if active_phase_2_hash == phase_2_artifact.hash {
         debug!(log, "no host OS update needed for board"; baseboard_id);
-        return Ok(None);
+        return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
     // Before we can proceed with the phase 1 update, we need sled-agent to
@@ -432,7 +433,7 @@ pub(super) fn try_make_update(
         phase_2_artifact,
     );
 
-    Ok(Some((
+    Ok(MgsUpdateOutcome::Pending(
         PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp_info.sp_type,
@@ -452,7 +453,7 @@ pub(super) fn try_make_update(
             artifact_version: phase_1_artifact.id.version.clone(),
         },
         pending_host_phase_2_changes,
-    )))
+    ))
 }
 
 #[cfg(test)]
@@ -469,13 +470,13 @@ mod tests {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
-    use gateway_client::types::SpType;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::inventory::SpType;
     use omicron_common::disk::M2Slot;
     use std::collections::BTreeSet;
 

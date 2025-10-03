@@ -15,31 +15,7 @@ pub use newtype_uuid::{
 };
 
 use daft::Diffable;
-#[cfg(feature = "schemars08")]
-use schemars::JsonSchema;
-
-macro_rules! impl_typed_uuid_kind {
-    ($($kind:ident => $tag:literal),* $(,)?) => {
-        $(
-            paste::paste! {
-                #[cfg_attr(feature = "schemars08", derive(JsonSchema))]
-                #[derive(Debug, PartialEq, Eq, Diffable)]
-                pub enum [< $kind Kind>] {}
-
-                impl TypedUuidKind for [< $kind Kind >] {
-                    #[inline]
-                    fn tag() -> TypedUuidTag {
-                        // `const` ensures that tags are validated at compile-time.
-                        const TAG: TypedUuidTag = TypedUuidTag::new($tag);
-                        TAG
-                    }
-                }
-
-                pub type [< $kind Uuid>] = TypedUuid::<[< $kind Kind >]>;
-            }
-        )*
-    };
-}
+use newtype_uuid_macros::impl_typed_uuid_kinds;
 
 // NOTE:
 //
@@ -49,60 +25,72 @@ macro_rules! impl_typed_uuid_kind {
 // repos.
 //
 // Please keep this list in alphabetical order.
-
-impl_typed_uuid_kind! {
-    AccessToken => "access_token",
-    AffinityGroup => "affinity_group",
-    Alert => "alert",
-    AlertReceiver => "alert_receiver",
-    AntiAffinityGroup => "anti_affinity_group",
-    Blueprint => "blueprint",
-    BuiltInUser => "built_in_user",
-    Collection => "collection",
-    ConsoleSession => "console_session",
-    Dataset => "dataset",
-    DemoSaga => "demo_saga",
-    Downstairs => "downstairs",
-    DownstairsRegion => "downstairs_region",
-    EreporterRestart => "ereporter_restart",
-    ExternalIp => "external_ip",
-    ExternalZpool => "external_zpool",
-    Instance => "instance",
-    InternalZpool => "internal_zpool",
-    LoopbackAddress => "loopback_address",
-    Mupdate => "mupdate",
-    MupdateOverride => "mupdate_override",
-    // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
-    // for them when they're serialized to the database during inventory
-    // collection. This ID type is therefore only used by nexus-db-model and
-    // nexus-db-queries.
-    OmicronSledConfig => "omicron_sled_config",
-    OmicronZone => "service",
-    PhysicalDisk => "physical_disk",
-    Propolis => "propolis",
-    Rack => "rack",
-    RackInit => "rack_init",
-    RackReset => "rack_reset",
-    ReconfiguratorSim => "reconfigurator_sim",
-    Region => "region",
-    SiloGroup => "silo_group",
-    SiloUser => "silo_user",
-    Sled => "sled",
-    SpUpdate => "sp_update",
-    SupportBundle => "support_bundle",
-    TufArtifact => "tuf_artifact",
-    TufRepo => "tuf_repo",
-    TufTrustRoot => "tuf_trust_root",
-    Upstairs => "upstairs",
-    UpstairsRepair => "upstairs_repair",
-    UpstairsSession => "upstairs_session",
-    UserDataExport => "user_data_export",
-    Vnic => "vnic",
-    Volume => "volume",
-    WebhookDelivery => "webhook_delivery",
-    WebhookDeliveryAttempt => "webhook_delivery_attempt",
-    WebhookSecret => "webhook_secret",
-    Zpool => "zpool",
+impl_typed_uuid_kinds! {
+    settings = {
+        attrs = [#[derive(Diffable)]],
+        schemars08 = {
+            attrs = [#[cfg(feature = "schemars08")]],
+            rust_type = {
+                crate = "omicron-uuid-kinds",
+                version = "*",
+                path = "omicron_uuid_kinds",
+            },
+        },
+    },
+    kinds = {
+        AccessToken = {},
+        AffinityGroup = {},
+        Alert = {},
+        AlertReceiver = {},
+        AntiAffinityGroup = {},
+        Blueprint = {},
+        BuiltInUser = {},
+        Collection = {},
+        ConsoleSession = {},
+        Dataset = {},
+        DemoSaga = {},
+        Downstairs = {},
+        DownstairsRegion = {},
+        EreporterRestart = {},
+        ExternalIp = {},
+        ExternalZpool = {},
+        Instance = {},
+        InternalZpool = {},
+        LoopbackAddress = {},
+        Mupdate = {},
+        MupdateOverride = {},
+        // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
+        // for them when they're serialized to the database during inventory
+        // collection. This ID type is therefore only used by nexus-db-model and
+        // nexus-db-queries.
+        OmicronSledConfig = {},
+        OmicronZone = {},
+        PhysicalDisk = {},
+        Propolis = {},
+        Rack = {},
+        RackInit = {},
+        RackReset = {},
+        ReconfiguratorSim = {},
+        Region = {},
+        SiloGroup = {},
+        SiloUser = {},
+        Sled = {},
+        SpUpdate = {},
+        SupportBundle = {},
+        TufArtifact = {},
+        TufRepo = {},
+        TufTrustRoot = {},
+        Upstairs = {},
+        UpstairsRepair = {},
+        UpstairsSession = {},
+        UserDataExport = {},
+        Vnic = {},
+        Volume = {},
+        WebhookDelivery = {},
+        WebhookDeliveryAttempt = {},
+        WebhookSecret = {},
+        Zpool = {},
+    },
 }
 
 impl From<ExternalZpoolKind> for ZpoolKind {

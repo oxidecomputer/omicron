@@ -87,6 +87,7 @@ impl TufRepoDescription {
 pub struct TufRepo {
     pub id: DbTypedUuid<TufRepoKind>,
     pub time_created: DateTime<Utc>,
+    pub time_pruned: Option<DateTime<Utc>>,
     // XXX: We're overloading ArtifactHash here to also mean the hash of the
     // repository zip itself.
     pub sha256: ArtifactHash,
@@ -108,6 +109,7 @@ impl TufRepo {
         Self {
             id: TypedUuid::new_v4().into(),
             time_created: Utc::now(),
+            time_pruned: None,
             sha256,
             targets_role_version: targets_role_version as i64,
             valid_until,

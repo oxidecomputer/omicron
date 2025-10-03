@@ -11,7 +11,6 @@ use crate::test_util::test_artifacts::TestArtifacts;
 use crate::test_util::updates::ExpectedSpComponent;
 use crate::test_util::updates::UpdateDescription;
 use assert_matches::assert_matches;
-use gateway_client::types::SpType;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup::GatewayTestContext;
 use nexus_types::internal_api::views::UpdateAttemptStatus;

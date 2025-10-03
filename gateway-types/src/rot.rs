@@ -180,6 +180,7 @@ impl From<gateway_messages::RotBootInfo> for RotState {
     JsonSchema,
 )]
 #[serde(tag = "slot", rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum RotSlot {
     A,
     B,

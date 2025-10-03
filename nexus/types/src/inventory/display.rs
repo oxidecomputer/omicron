@@ -12,7 +12,7 @@ use std::{
 
 use chrono::SecondsFormat;
 use clap::Subcommand;
-use gateway_client::types::SpType;
+use gateway_types::component::SpType;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use itertools::Itertools;

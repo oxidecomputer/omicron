@@ -7,10 +7,8 @@ use dropshot::{
     EmptyScanParams, HttpError, HttpResponseDeleted, HttpResponseOk,
     PaginationParams, Query, RequestContext, ResultsPage,
 };
+use dropshot_api_manager_types::api_versions;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
-use openapi_manager_types::{
-    SupportedVersion, SupportedVersions, api_versions,
-};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, time::Duration};
