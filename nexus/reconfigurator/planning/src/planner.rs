@@ -1419,13 +1419,16 @@ impl<'a> Planner<'a> {
                     BlueprintZoneDisposition::is_in_service,
                 );
 
+                let mut unsafe_zone_report = BTreeMap::new();
+
                 let unsafe_zones: Vec<_> = zones
                     .into_iter()
                     .filter(|zone| {
-                        !self.can_zone_be_shut_down_safely(
-                            zone,
-                            &mut report.unsafe_zones,
-                        )
+                        let (is_zone_safe, mut zone_report) =
+                            self.can_zone_be_shut_down_safely(&zone);
+                        unsafe_zone_report.append(&mut zone_report);
+
+                        !is_zone_safe
                     })
                     .map(|zone| zone.kind().report_str())
                     .collect();
@@ -1627,11 +1630,11 @@ impl<'a> Planner<'a> {
         ) = out_of_date_zones
             .into_iter()
             .filter(|(_, zone, _)| {
-                self.are_zones_ready_for_updates(mgs_updates)
-                    && self.can_zone_be_shut_down_safely(
-                        &zone,
-                        &mut report.unsafe_zones,
-                    )
+                let (is_zone_safe, mut zone_report) =
+                    self.can_zone_be_shut_down_safely(&zone);
+                report.unsafe_zones.append(&mut zone_report);
+
+                self.are_zones_ready_for_updates(mgs_updates) && is_zone_safe
             })
             .partition(|(_, zone, _)| zone.zone_type.is_nexus());
 
@@ -2463,9 +2466,9 @@ impl<'a> Planner<'a> {
     fn can_zone_be_shut_down_safely(
         &self,
         zone: &BlueprintZoneConfig,
-        unsafe_zones: &mut BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>,
-    ) -> bool {
+    ) -> (bool, BTreeMap<OmicronZoneUuid, ZoneUnsafeToShutdown>) {
         use ZoneUnsafeToShutdown::*;
+        let mut unsafe_zones = BTreeMap::new();
         match zone.zone_type.kind() {
             ZoneKind::CockroachDb => {
                 use CockroachdbUnsafeToShutdown::*;
@@ -2477,7 +2480,7 @@ impl<'a> Planner<'a> {
                         zone.id,
                         Cockroachdb { reason: NotEnoughNodes },
                     );
-                    return false;
+                    return (false, unsafe_zones);
                 }
 
                 // All nodes must report: "We have the necessary redundancy, and
@@ -2490,7 +2493,7 @@ impl<'a> Planner<'a> {
                             zone.id,
                             Cockroachdb { reason: MissingUnderreplicatedStat },
                         );
-                        return false;
+                        return (false, unsafe_zones);
                     };
                     if ranges_underreplicated != 0 {
                         unsafe_zones.insert(
@@ -2501,14 +2504,14 @@ impl<'a> Planner<'a> {
                                 },
                             },
                         );
-                        return false;
+                        return (false, unsafe_zones);
                     }
                     let Some(live_nodes) = status.liveness_live_nodes else {
                         unsafe_zones.insert(
                             zone.id,
                             Cockroachdb { reason: MissingLiveNodesStat },
                         );
-                        return false;
+                        return (false, unsafe_zones);
                     };
                     if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
                         unsafe_zones.insert(
@@ -2517,10 +2520,10 @@ impl<'a> Planner<'a> {
                                 reason: NotEnoughLiveNodes { live_nodes },
                             },
                         );
-                        return false;
+                        return (false, unsafe_zones);
                     }
                 }
-                true
+                (true, unsafe_zones)
             }
             ZoneKind::BoundaryNtp => {
                 // Find all boundary NTP zones expected to be in-service by our
@@ -2560,9 +2563,9 @@ impl<'a> Planner<'a> {
                             synchronized_count: synchronized_boundary_ntp_count,
                         },
                     );
-                    false
+                    (false, unsafe_zones)
                 } else {
-                    true
+                    (true, unsafe_zones)
                 }
             }
             ZoneKind::InternalDns => {
@@ -2615,7 +2618,7 @@ impl<'a> Planner<'a> {
                 // tolerate "at least one upgrade, and at least one failure
                 // during that upgrade window".
                 if synchronized_internal_dns_count >= INTERNAL_DNS_REDUNDANCY {
-                    true
+                    (true, unsafe_zones)
                 } else {
                     unsafe_zones.insert(
                         zone.id,
@@ -2624,10 +2627,10 @@ impl<'a> Planner<'a> {
                             synchronized_count: synchronized_internal_dns_count,
                         },
                     );
-                    false
+                    (false, unsafe_zones)
                 }
             }
-            _ => true, // other zone kinds have no special safety checks
+            _ => (true, unsafe_zones), // other zone kinds have no special safety checks
         }
     }
 }

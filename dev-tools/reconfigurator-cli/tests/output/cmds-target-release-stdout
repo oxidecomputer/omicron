@@ -3952,9 +3952,6 @@ planning report:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
-* 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * discretionary zones placed:
   * internal_dns zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -4927,9 +4924,6 @@ planning report:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 7 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
-* 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 698d1d82-0620-4978-93ac-0ba5d40f3da9: only 2/2 internal DNS zones are synchronized; require at least 3
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * discretionary zones placed:
   * internal_dns zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones
@@ -6819,9 +6813,6 @@ planning report:
 * skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 7 zones are already from artifacts
-* 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 698d1d82-0620-4978-93ac-0ba5d40f3da9: only 2/2 internal DNS zones are synchronized; require at least 3
-  * zone abd27551-4027-4084-8b52-13a575b035b4: only 2/2 internal DNS zones are synchronized; require at least 3
 * discretionary zones placed:
   * internal_dns zone on sled d81c6a84-79b8-4958-ae41-ea46c9b19763 from source artifact: version 1.0.0
 * zone updates waiting on discretionary zones

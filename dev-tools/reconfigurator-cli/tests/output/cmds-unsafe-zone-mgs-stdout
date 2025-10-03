@@ -1309,9 +1309,6 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
@@ -1376,9 +1373,6 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
@@ -1452,9 +1446,6 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
-* 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
 
@@ -1536,9 +1527,6 @@ planning report:
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * 1 pending MGS update:
   * model1:serial1: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
-* 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * 1 blocked MGS update:
   * model0:serial0: failed to plan an SP update: sled contains zones that are unsafe to shut down: "internal_dns"
 * zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
@@ -1628,9 +1616,6 @@ planning report:
 * skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
 * skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * noop converting host phase 2 slot B to Artifact on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
-* 2 zones not ready to shut down safely for an MGS driven update:
-  * zone 427ec88f-f467-42fa-9bbb-66a91a36103c: only 2/2 internal DNS zones are synchronized; require at least 3
-  * zone ea5b4030-b52f-44b2-8d70-45f15f987d01: only 2/2 internal DNS zones are synchronized; require at least 3
 * 2 blocked MGS updates:
   * model0:serial0: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "internal_dns"
   * model2:serial2: failed to plan a Host OS update: sled contains zones that are unsafe to shut down: "internal_dns"
