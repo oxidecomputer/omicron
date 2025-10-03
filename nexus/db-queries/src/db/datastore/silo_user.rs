@@ -20,6 +20,7 @@ use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
@@ -131,9 +132,9 @@ impl From<SiloUser> for views::User {
 #[derive(Debug, Clone)]
 pub struct SiloUserApiOnly {
     pub id: SiloUserUuid,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub time_modified: chrono::DateTime<chrono::Utc>,
-    pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
     pub silo_id: Uuid,
 
     /// The identity provider's ID for this user.
@@ -144,8 +145,8 @@ impl SiloUserApiOnly {
     pub fn new(silo_id: Uuid, id: SiloUserUuid, external_id: String) -> Self {
         Self {
             id,
-            time_created: chrono::Utc::now(),
-            time_modified: chrono::Utc::now(),
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
             time_deleted: None,
             silo_id,
             external_id,
@@ -189,9 +190,9 @@ impl From<SiloUserApiOnly> for views::User {
 #[derive(Debug, Clone)]
 pub struct SiloUserJit {
     pub id: SiloUserUuid,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub time_modified: chrono::DateTime<chrono::Utc>,
-    pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
     pub silo_id: Uuid,
 
     /// The identity provider's ID for this user.
@@ -202,8 +203,8 @@ impl SiloUserJit {
     pub fn new(silo_id: Uuid, id: SiloUserUuid, external_id: String) -> Self {
         Self {
             id,
-            time_created: chrono::Utc::now(),
-            time_modified: chrono::Utc::now(),
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
             time_deleted: None,
             silo_id,
             external_id,

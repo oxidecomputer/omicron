@@ -16,6 +16,7 @@ use crate::db::model::UserProvisionType;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
@@ -130,9 +131,9 @@ impl From<SiloGroup> for views::Group {
 #[derive(Debug, Clone)]
 pub struct SiloGroupApiOnly {
     pub id: SiloGroupUuid,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub time_modified: chrono::DateTime<chrono::Utc>,
-    pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
     pub silo_id: Uuid,
 
     /// The identity provider's ID for this group.
@@ -143,8 +144,8 @@ impl SiloGroupApiOnly {
     pub fn new(silo_id: Uuid, id: SiloGroupUuid, external_id: String) -> Self {
         Self {
             id,
-            time_created: chrono::Utc::now(),
-            time_modified: chrono::Utc::now(),
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
             time_deleted: None,
             silo_id,
             external_id,
@@ -188,9 +189,9 @@ impl From<SiloGroupApiOnly> for views::Group {
 #[derive(Debug, Clone)]
 pub struct SiloGroupJit {
     pub id: SiloGroupUuid,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub time_modified: chrono::DateTime<chrono::Utc>,
-    pub time_deleted: Option<chrono::DateTime<chrono::Utc>>,
+    pub time_created: DateTime<Utc>,
+    pub time_modified: DateTime<Utc>,
+    pub time_deleted: Option<DateTime<Utc>>,
     pub silo_id: Uuid,
 
     /// The identity provider's ID for this user.
@@ -201,8 +202,8 @@ impl SiloGroupJit {
     pub fn new(silo_id: Uuid, id: SiloGroupUuid, external_id: String) -> Self {
         Self {
             id,
-            time_created: chrono::Utc::now(),
-            time_modified: chrono::Utc::now(),
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
             time_deleted: None,
             silo_id,
             external_id,
