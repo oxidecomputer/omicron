@@ -20,7 +20,9 @@ use indent_write::fmt::IndentWriter;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::M2Slot;
+use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -79,7 +81,7 @@ impl PlanningReport {
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
-            mgs_updates: PlanningMgsUpdatesStepReport::empty(),
+            mgs_updates: PlanningMgsUpdatesStepReport::new(),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
             nexus_generation_bump: PlanningNexusGenerationBumpReport::new(),
@@ -502,16 +504,16 @@ impl PlanningMupdateOverrideStepReport {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedMgsUpdateReason {
     /// There was a failed attempt to plan a Host OS update
-    #[error("failed to plan a Host OS update")]
+    #[error("failed to plan a Host OS update: {0}")]
     HostOs(#[from] FailedHostOsUpdateReason),
     /// There was a failed attempt to plan an RoT update
-    #[error("failed to plan an RoT update")]
+    #[error("failed to plan an RoT update: {0}")]
     Rot(#[from] FailedRotUpdateReason),
     /// There was a failed attempt to plan an RoT bootloader update
-    #[error("failed to plan an RoT bootloader update")]
+    #[error("failed to plan an RoT bootloader update: {0}")]
     RotBootloader(#[from] FailedRotBootloaderUpdateReason),
     /// There was a failed attempt to plan an SP update
-    #[error("failed to plan an SP update")]
+    #[error("failed to plan an SP update: {0}")]
     Sp(#[from] FailedSpUpdateReason),
 }
 
@@ -618,6 +620,10 @@ pub enum FailedSpUpdateReason {
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
+    /// The component's corresponding sled contains zones that are unsafe to
+    /// shut down
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
 }
 
 /// Describes the reason why a Host OS failed to update
@@ -685,6 +691,10 @@ pub enum FailedHostOsUpdateReason {
     /// details
     #[error("sled agent was unable to retrieve boot disk phase 2 image: {0:?}")]
     UnableToRetrieveBootDiskPhase2Image(String),
+    /// The component's corresponding sled contains zones that are unsafe to
+    /// shut down
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
 }
 
 #[derive(
@@ -711,22 +721,15 @@ impl IdOrdItem for BlockedMgsUpdate {
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlanningMgsUpdatesStepReport {
-    pub pending_mgs_updates: PendingMgsUpdates,
     pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
+    pub pending_mgs_updates: PendingMgsUpdates,
 }
 
 impl PlanningMgsUpdatesStepReport {
-    pub fn new(
-        pending_mgs_updates: PendingMgsUpdates,
-        blocked_mgs_updates: Vec<BlockedMgsUpdate>,
-    ) -> Self {
-        Self { pending_mgs_updates, blocked_mgs_updates }
-    }
-
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self {
-            pending_mgs_updates: PendingMgsUpdates::new(),
             blocked_mgs_updates: Vec::new(),
+            pending_mgs_updates: PendingMgsUpdates::new(),
         }
     }
 
@@ -738,7 +741,7 @@ impl PlanningMgsUpdatesStepReport {
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { pending_mgs_updates, blocked_mgs_updates } = self;
+        let Self { blocked_mgs_updates, pending_mgs_updates } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -751,6 +754,7 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                 )?;
             }
         }
+
         if !blocked_mgs_updates.is_empty() {
             let n = blocked_mgs_updates.len();
             let s = plural(n);
@@ -1424,11 +1428,19 @@ impl fmt::Display for ZoneUnsafeToShutdown {
             Self::BoundaryNtp {
                 total_boundary_ntp_zones: t,
                 synchronized_count: s,
-            } => write!(f, "only {s}/{t} boundary NTP zones are synchronized"),
+            } => write!(
+                f,
+                "only {s}/{t} boundary NTP zones are synchronized; require at least {}",
+                BOUNDARY_NTP_REDUNDANCY
+            ),
             Self::InternalDns {
                 total_internal_dns_zones: t,
                 synchronized_count: s,
-            } => write!(f, "only {s}/{t} internal DNS zones are synchronized"),
+            } => write!(
+                f,
+                "only {s}/{t} internal DNS zones are synchronized; require at least {}",
+                INTERNAL_DNS_REDUNDANCY
+            ),
         }
     }
 }
