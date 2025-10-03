@@ -77,7 +77,9 @@ impl From<IpVersion> for shared::IpVersion {
 /// IP pools can be external or internal. External IP pools can be associated
 /// with a silo or project so that instance IP allocation draws from that pool
 /// instead of a system pool.
-#[derive(Queryable, Insertable, Selectable, Clone, Debug, Resource)]
+#[derive(
+    Queryable, Insertable, Selectable, Clone, Debug, Resource, PartialEq,
+)]
 #[diesel(table_name = ip_pool)]
 pub struct IpPool {
     #[diesel(embed)]
@@ -89,9 +91,15 @@ pub struct IpPool {
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
+
+    /// True if the IP Pool has been delegated for Oxide use.
+    pub is_delegated: bool,
 }
 
 impl IpPool {
+    /// Create a new IP Pool.
+    ///
+    /// The pool is not delegated to Oxide.
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
@@ -103,15 +111,38 @@ impl IpPool {
             ),
             ip_version,
             rcgen: 0,
+            is_delegated: false,
         }
     }
 
+    /// Create a new pool delegated for Oxide's internal use.
+    pub fn new_delegated(
+        pool_identity: &external::IdentityMetadataCreateParams,
+        ip_version: IpVersion,
+    ) -> Self {
+        Self {
+            identity: IpPoolIdentity::new(
+                Uuid::new_v4(),
+                pool_identity.clone(),
+            ),
+            ip_version,
+            rcgen: 0,
+            is_delegated: true,
+        }
+    }
+
+    /// Create a new IPv4 IP Pool.
+    ///
+    /// The pool is not delegated to Oxide.
     pub fn new_v4(
         pool_identity: &external::IdentityMetadataCreateParams,
     ) -> Self {
         Self::new(pool_identity, IpVersion::V4)
     }
 
+    /// Create a new IPv6 IP Pool.
+    ///
+    /// The pool is not delegated to Oxide.
     pub fn new_v6(
         pool_identity: &external::IdentityMetadataCreateParams,
     ) -> Self {

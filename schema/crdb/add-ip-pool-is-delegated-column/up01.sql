@@ -1,0 +1,3 @@
+ALTER TABLE omicron.public.ip_pool
+ADD COLUMN IF NOT EXISTS is_delegated BOOL NOT NULL
+DEFAULT FALSE;

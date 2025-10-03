@@ -57,7 +57,6 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
-use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -675,8 +674,12 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        // We may need to populate external IP records for both IPv4 and IPv6
-        // service pools, so fetch both now.
+        // The `RackInit` request will eventually be modified to include the
+        // full details of the IP Pool(s) delegated to Oxide at RSS time. For
+        // now, we still rely on the pre-populated IP Pools. There's one for
+        // IPv4 and one for IPv6.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/8946.
         let service_ip_pools =
             self.ip_pools_service_lookup_both_versions(&opctx).await?;
 
@@ -983,12 +986,13 @@ impl DataStore {
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        // Insert and link the services IP Pool for both IP versions.
+        // Insert a delegated IP Pool for both IP versions.
         for (version, name) in [
             (IpVersion::V4, SERVICE_IPV4_POOL_NAME),
             (IpVersion::V6, SERVICE_IPV6_POOL_NAME),
         ] {
-            let internal_pool = db::model::IpPool::new(
+            // Create a delegated IP Pool, if needed.
+            let internal_pool = db::model::IpPool::new_delegated(
                 &IdentityMetadataCreateParams {
                     name: name.parse::<Name>().unwrap(),
                     description: format!(
@@ -997,28 +1001,9 @@ impl DataStore {
                 },
                 version,
             );
-            // Create the pool, and link it to the internal silo if needed. But
-            // we cannot set a default.
-            let internal_pool_id = internal_pool.id();
-            let internal_created = self
-                .ip_pool_create(opctx, internal_pool)
-                .await
-                .map(|_| true)
-                .or_else(|e| match e {
-                    Error::ObjectAlreadyExists { .. } => Ok(false),
-                    _ => Err(e),
-                })?;
-            if internal_created {
-                self.ip_pool_link_silo(
-                    opctx,
-                    db::model::IpPoolResource {
-                        ip_pool_id: internal_pool_id,
-                        resource_type: db::model::IpPoolResourceType::Silo,
-                        resource_id: INTERNAL_SILO_ID,
-                        is_default: false,
-                    },
-                )
-                .await?;
+            match self.ip_pool_create(opctx, internal_pool).await {
+                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => {}
+                Err(e) => return Err(e),
             }
         }
 
