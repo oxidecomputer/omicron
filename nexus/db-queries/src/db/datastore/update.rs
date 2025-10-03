@@ -22,38 +22,20 @@ use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
     ArtifactHash, TargetRelease, TufArtifact, TufRepo, TufRepoDescription,
-    TufTrustRoot, to_db_typed_uuid,
+    TufRepoUpload, TufRepoUploadStatus, TufTrustRoot, to_db_typed_uuid,
 };
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
-    ListResultVec, LookupResult, LookupType, ResourceType, TufRepoInsertStatus,
-    UpdateResult,
+    ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
 };
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_uuid_kinds::TufRepoKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
+use semver::Version;
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
-
-/// The return value of [`DataStore::tuf_repo_insert`].
-///
-/// This is similar to [`external::TufRepoInsertResponse`], but uses
-/// nexus-db-model's types instead of external types.
-pub struct TufRepoInsertResponse {
-    pub recorded: TufRepoDescription,
-    pub status: TufRepoInsertStatus,
-}
-
-impl TufRepoInsertResponse {
-    pub fn into_external(self) -> external::TufRepoInsertResponse {
-        external::TufRepoInsertResponse {
-            recorded: self.recorded.into_external(),
-            status: self.status,
-        }
-    }
-}
 
 async fn artifacts_for_repo(
     repo_id: TypedUuid<TufRepoKind>,
@@ -88,7 +70,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         description: &external::TufRepoDescription,
-    ) -> CreateResult<TufRepoInsertResponse> {
+    ) -> CreateResult<TufRepoUpload> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let log = opctx.log.new(
             slog::o!(
@@ -147,19 +129,19 @@ impl DataStore {
         Ok(TufRepoDescription { repo, artifacts })
     }
 
-    /// Returns the TUF repo description corresponding to this system version.
+    /// Returns the TUF repo corresponding to this system version.
     pub async fn tuf_repo_get_by_version(
         &self,
         opctx: &OpContext,
         system_version: SemverVersion,
-    ) -> LookupResult<TufRepoDescription> {
+    ) -> LookupResult<TufRepo> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
         use nexus_db_schema::schema::tuf_repo::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let repo = dsl::tuf_repo
+        dsl::tuf_repo
             .filter(dsl::system_version.eq(system_version.clone()))
             .select(TufRepo::as_select())
             .first_async::<TufRepo>(&*conn)
@@ -172,12 +154,7 @@ impl DataStore {
                         LookupType::ByCompositeId(system_version.to_string()),
                     ),
                 )
-            })?;
-
-        let artifacts = artifacts_for_repo(repo.id.into(), &conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(TufRepoDescription { repo, artifacts })
+            })
     }
 
     /// Returns the list of all TUF repo artifacts known to the system.
@@ -438,6 +415,58 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// List all TUF repositories (without artifacts) ordered by system version (newest first by default).
+    pub async fn tuf_repo_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Version>,
+    ) -> ListResultVec<TufRepo> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::tuf_repo;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let marker_owner = pagparams
+            .marker
+            .map(|version| SemverVersion::from(version.clone()));
+        let db_pagparams = DataPageParams {
+            marker: marker_owner.as_ref(),
+            direction: pagparams.direction,
+            limit: pagparams.limit,
+        };
+
+        paginated(tuf_repo::table, tuf_repo::system_version, &db_pagparams)
+            .select(TufRepo::as_select())
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List artifacts for a specific TUF repository by system version.
+    pub async fn tuf_repo_artifacts_list_by_version(
+        &self,
+        opctx: &OpContext,
+        system_version: SemverVersion,
+        _pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<TufArtifact> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // First get the repo by version
+        let repo = self.tuf_repo_get_by_version(opctx, system_version).await?;
+
+        // Get all artifacts for this repo and apply simple pagination
+        let all_artifacts = artifacts_for_repo(repo.id.into(), &conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // For now, return all artifacts since each repo should only have a few (under 20)
+        // The existing artifacts_for_repo comment mentions this limitation
+        Ok(all_artifacts)
+    }
+
     /// List the trusted TUF root roles in the trust store.
     pub async fn tuf_trust_root_list(
         &self,
@@ -510,7 +539,7 @@ async fn insert_impl(
     conn: async_bb8_diesel::Connection<DbConnection>,
     desc: &external::TufRepoDescription,
     err: OptionalError<InsertError>,
-) -> Result<TufRepoInsertResponse, DieselError> {
+) -> Result<TufRepoUpload, DieselError> {
     // Load the current generation from the database and increment it, then
     // use that when creating the `TufRepoDescription`. If we determine there
     // are any artifacts to be inserted, we update the generation to this value
@@ -547,9 +576,9 @@ async fn insert_impl(
 
             let recorded =
                 TufRepoDescription { repo: existing_repo, artifacts };
-            return Ok(TufRepoInsertResponse {
+            return Ok(TufRepoUpload {
                 recorded,
-                status: TufRepoInsertStatus::AlreadyExists,
+                status: TufRepoUploadStatus::AlreadyExists,
             });
         }
 
@@ -753,10 +782,7 @@ async fn insert_impl(
     }
 
     let recorded = TufRepoDescription { repo, artifacts: all_artifacts };
-    Ok(TufRepoInsertResponse {
-        recorded,
-        status: TufRepoInsertStatus::Inserted,
-    })
+    Ok(TufRepoUpload { recorded, status: TufRepoUploadStatus::Inserted })
 }
 
 async fn get_generation(

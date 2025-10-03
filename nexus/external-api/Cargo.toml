@@ -22,3 +22,4 @@ openapiv3.workspace = true
 oximeter-types.workspace = true
 oxql-types.workspace = true
 omicron-uuid-kinds.workspace = true
+tufaceous-artifact.workspace = true

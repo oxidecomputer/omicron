@@ -30,6 +30,7 @@ use std::fmt;
 use std::net::IpAddr;
 use std::sync::LazyLock;
 use strum::{EnumIter, IntoEnumIterator};
+use tufaceous_artifact::ArtifactHash;
 use url::Url;
 use uuid::Uuid;
 
@@ -1569,6 +1570,50 @@ pub struct UpdatesTrustRoot {
     /// The trusted root role itself, a JSON document as described by The Update
     /// Framework.
     pub root_role: TufSignedRootRole,
+}
+
+/// Metadata about a TUF repository
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepo {
+    /// The hash of the repository.
+    ///
+    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
+    /// individual artifacts within the repository. However, we use it here for
+    /// convenience.
+    pub hash: ArtifactHash,
+
+    /// The system version in artifacts.json
+    pub system_version: Version,
+
+    /// The file name of the repository
+    ///
+    /// This is purely used for debugging and may not always be correct (e.g.,
+    /// with wicket, we read the file contents from stdin so we don't know the
+    /// correct file name).
+    pub file_name: String,
+
+    /// Time the repository was uploaded
+    pub time_created: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoUpload {
+    pub repo: TufRepo,
+    pub status: TufRepoUploadStatus,
+}
+
+/// Whether the uploaded TUF repo already existed or was new and had to be
+/// inserted. Part of `TufRepoUpload`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TufRepoUploadStatus {
+    /// The repository already existed in the database
+    AlreadyExists,
+
+    /// The repository did not exist, and was inserted into the database
+    Inserted,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
