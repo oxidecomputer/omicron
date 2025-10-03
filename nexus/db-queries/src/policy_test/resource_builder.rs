@@ -7,6 +7,7 @@
 
 use super::coverage::Coverage;
 use crate::db;
+use crate::db::datastore::SiloUserApiOnly;
 use authz::ApiResource;
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -112,10 +113,9 @@ impl<'a> ResourceBuilder<'a> {
                 silo_id,
                 LookupType::ById(silo_id),
             );
-            let silo_user =
-                db::model::SiloUser::new(silo_id, user_id, username);
+            let silo_user = SiloUserApiOnly::new(silo_id, user_id, username);
             datastore
-                .silo_user_create(&authz_silo, silo_user)
+                .silo_user_create(&authz_silo, silo_user.into())
                 .await
                 .expect("failed to create silo user");
 
