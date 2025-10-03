@@ -593,6 +593,23 @@ impl slog::KV for DebugDatasetsRendezvousStats {
     }
 }
 
+/// The status of an `inventory_load` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum InventoryLoadStatus {
+    /// An error occurred.
+    Error(String),
+
+    /// We have no collections.
+    NoCollections,
+
+    /// We've loaded the most recent collection as of `time_loaded`.
+    Loaded {
+        collection_id: CollectionUuid,
+        time_started: DateTime<Utc>,
+        time_loaded: DateTime<Utc>,
+    },
+}
+
 /// The status of a `blueprint_planner` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum BlueprintPlannerStatus {

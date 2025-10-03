@@ -20,6 +20,7 @@ omicron-common.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 slog.workspace = true
+tokio.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true

@@ -52,6 +52,7 @@ use slog::Logger;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::sync::watch;
 
 #[macro_use]
 extern crate slog;
@@ -399,6 +400,10 @@ impl nexus_test_interface::NexusServer for Server {
 
     fn datastore(&self) -> &Arc<db::DataStore> {
         self.apictx.context.nexus.datastore()
+    }
+
+    fn inventory_load_rx(&self) -> watch::Receiver<Option<Arc<Collection>>> {
+        self.apictx.context.nexus.inventory_load_rx()
     }
 
     async fn get_http_server_external_address(&self) -> SocketAddr {

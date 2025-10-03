@@ -7173,6 +7173,7 @@ dependencies = [
  "omicron-workspace-hack",
  "pq-sys",
  "slog",
+ "tokio",
  "uuid",
 ]
 

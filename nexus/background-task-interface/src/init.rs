@@ -17,6 +17,7 @@ pub struct BackgroundTasks {
     pub task_nat_cleanup: Activator,
     pub task_bfd_manager: Activator,
     pub task_inventory_collection: Activator,
+    pub task_inventory_loader: Activator,
     pub task_support_bundle_collector: Activator,
     pub task_physical_disk_adoption: Activator,
     pub task_decommissioned_disk_cleaner: Activator,
