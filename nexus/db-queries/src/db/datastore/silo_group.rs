@@ -83,11 +83,12 @@ impl From<model::SiloGroup> for SiloGroup {
                     time_modified: record.time_modified(),
                     time_deleted: record.time_deleted,
                     silo_id: record.silo_id,
-                    // SAFETY: there is a database constraint that prevents a group
-                    // with provision type 'api_only' from having a null external id
+                    // About the expect here: the mentioned database constraint
+                    // prevents a group with provision type 'api_only' from
+                    // having a null external id.
                     external_id: record
                         .external_id
-                        .expect("database constraint exists"),
+                        .expect("constraint lookup_silo_group_by_silo exists"),
                 })
             }
 
@@ -97,11 +98,12 @@ impl From<model::SiloGroup> for SiloGroup {
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
                 silo_id: record.silo_id,
-                // SAFETY: there is a database constraint that prevents a group
-                // with provision type 'jit' from having a null external id
+                // About the expect here: the mentioned database constraint
+                // prevents a group with provision type 'jit' from having a null
+                // external id
                 external_id: record
                     .external_id
-                    .expect("database constraint exists"),
+                    .expect("constraint lookup_silo_group_by_silo exists"),
             }),
         }
     }
