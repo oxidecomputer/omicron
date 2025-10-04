@@ -45,6 +45,7 @@ proptest.workspace = true
 serde_json.workspace = true
 test-strategy.workspace = true
 trust-quorum-test-utils.workspace = true
+pki-playground.workspace = true
 
 [features]
 # Impl `PartialEq` and `Eq` for types implementing `subtle::ConstantTimeEq` when
