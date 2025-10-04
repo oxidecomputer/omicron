@@ -8,6 +8,7 @@ use crate::{BaseboardId, Node, NodeCtx};
 use camino::Utf8PathBuf;
 use slog::{Logger, error, info, o, warn};
 use sprockets_tls::Stream;
+use sprockets_tls::client::Client;
 use sprockets_tls::keys::SprocketsConfig;
 use sprockets_tls::server::Server;
 use std::collections::BTreeSet;
@@ -119,8 +120,12 @@ mod tests {
                 let baseboard_id = platform_id_to_baseboard_id(
                     &pki_playground::sprockets::platform_id(i),
                 );
-                let listen_addr =
-                    SocketAddrV6::new(std::net::Ipv6Addr::LOCALHOST, 0, 0, 0);
+                let listen_addr = SocketAddrV6::new(
+                    std::net::Ipv6Addr::LOCALHOST,
+                    11222,
+                    0,
+                    0,
+                );
                 let sprockets_auth_key_name = sprockets_auth_prefix(i);
                 let alias_key_name = alias_prefix(i);
                 let sprockets = SprocketsConfig {
@@ -177,6 +182,20 @@ mod tests {
 
         let configs = pki_doc_to_node_configs(dir, num_nodes);
 
-        println!("{configs:#?}");
+        let mut server = AsyncNode::new(configs[0].clone(), &logctx.log);
+        tokio::spawn(async move { server.run().await });
+
+        loop {
+            if let Err(e) = Client::connect(
+                configs[1].sprockets.clone(),
+                configs[0].listen_addr,
+                vec![],
+                logctx.log.clone(),
+            )
+            .await
+            {
+                continue;
+            }
+        }
     }
 }
