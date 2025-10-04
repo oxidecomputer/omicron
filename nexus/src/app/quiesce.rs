@@ -988,10 +988,12 @@ mod test {
             .expect("reading access records");
         assert_eq!(records.len(), 3);
         assert!(
-            records.iter().all(|r| r.state() == DbMetadataNexusState::Active)
+            records.iter().all(|r| r.state() == DbMetadataNexusState::Active
+                && r.time_quiesced().is_none())
         );
 
         // Now finish that saga.  All three handles should quiesce.
+        let time_before = Utc::now();
         drop(saga_ref);
         wait_for_condition(
             || async {
@@ -1009,6 +1011,7 @@ mod test {
         )
         .await
         .expect("did not quiesce within timeout");
+        let time_after = Utc::now();
 
         // Each "Nexus" record should say that it's quiesced.
         //
@@ -1023,9 +1026,14 @@ mod test {
             .await
             .expect("reading access records");
         assert_eq!(records.len(), 3);
-        assert!(
-            records.iter().all(|r| r.state() == DbMetadataNexusState::Quiesced)
-        );
+        assert!(records.iter().all(|r| {
+            let time_quiesced = r
+                .time_quiesced()
+                .expect("quiesced record should have time quiesced");
+            r.state() == DbMetadataNexusState::Quiesced
+                && time_quiesced >= time_before
+                && time_quiesced <= time_after
+        }));
 
         testdb.terminate().await;
         logctx.cleanup_successful();
