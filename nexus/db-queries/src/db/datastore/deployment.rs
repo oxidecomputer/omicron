@@ -9,8 +9,10 @@ use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
@@ -562,6 +564,46 @@ impl DataStore {
         );
 
         Ok(())
+    }
+
+    /// Get a count of the number of blueprints in the database.
+    ///
+    /// This (necessarily) does a full table scan on the blueprint table, so it
+    /// must only be used in places that care about the count, such as the
+    /// blueprint_planner background task.
+    pub async fn blueprint_count(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<u64, Error> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let count = self
+            .transaction_retry_wrapper("blueprint_count")
+            .transaction(&conn, |conn| {
+                async move {
+                    // We need this to call "COUNT(*)" below.
+                    use nexus_db_schema::schema::blueprint::dsl;
+
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
+                    dsl::blueprint
+                        .select(diesel::dsl::count_star())
+                        .first_async::<i64>(&conn)
+                        .await
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let count = u64::try_from(count).map_err(|_| {
+            Error::internal_error(&format!(
+                "error converting blueprint count {} into \
+                 u64 (how is it negative?)",
+                count
+            ))
+        })?;
+
+        Ok(count)
     }
 
     /// Read a complete blueprint from the database
