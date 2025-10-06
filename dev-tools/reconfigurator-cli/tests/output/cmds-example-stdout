@@ -17,6 +17,9 @@ internal DNS generations: 1
 external DNS generations: 1
 target number of Nexus instances: default
 target release (generation 1): unset
+active nexus zone generation: 1
+active nexus zones: inferred from generation
+not-yet nexus zones: inferred from generation
 planner config:
     add zones with mupdate override:   false
 
@@ -602,11 +605,11 @@ INFO skipping noop image source check for all sleds, reason: no target release i
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
 planning report:
-* zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled 89d02b1b-478c-401a-8e28-7a26f74fa41b: 18 zones
 
+* adding zones despite being blocked, because: target release generation is 1
 * zone updates waiting on zone add blockers
 
 
@@ -1855,12 +1858,12 @@ INFO skipping noop image source check for all sleds, reason: no target release i
 generated blueprint 86db3308-f817-4626-8838-4085949a6a41 based on parent blueprint ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 blueprint source: planner with report:
 planning report:
-* zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
     - sled 2eb69596-f081-4e2d-9425-9994926e0832: 4 zones
     - sled 89d02b1b-478c-401a-8e28-7a26f74fa41b: 17 zones
 
+* adding zones despite being blocked, because: target release generation is 1
 * zone updates waiting on zone add blockers
 
 

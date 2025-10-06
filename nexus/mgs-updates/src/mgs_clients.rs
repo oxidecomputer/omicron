@@ -10,8 +10,8 @@ use gateway_client::HostPhase1HashError;
 use gateway_client::types::SpComponentResetError;
 use slog::Logger;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::VecDeque;
-use std::fmt;
 use std::sync::Arc;
 
 pub(super) type GatewayClientError =
@@ -24,7 +24,7 @@ pub(super) type GatewaySpComponentResetError =
 ///
 /// For each error type, we need to know whether we should retry the request (by
 /// sending it to the next MGS instance).
-pub(super) trait RetryableMgsError: fmt::Display {
+pub(super) trait RetryableMgsError: std::error::Error {
     fn should_try_next_mgs(&self) -> bool;
 }
 
@@ -131,7 +131,7 @@ impl MgsClients {
                                 log, "retryable error with MGS; \
                                       will try next client";
                                 "mgs_addr" => client.baseurl(),
-                                "err" => %err,
+                                InlineErrorChain::new(&err),
                             );
                         }
                         last_err = Some(err);

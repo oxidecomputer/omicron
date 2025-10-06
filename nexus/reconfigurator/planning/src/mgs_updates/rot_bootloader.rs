@@ -6,11 +6,13 @@
 
 use super::MgsUpdateStatus;
 use super::mgs_update_status_inactive_versions;
+use crate::mgs_updates::MgsUpdateOutcome;
 
 use nexus_types::deployment::ExpectedVersion;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
+use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
@@ -22,7 +24,7 @@ use tufaceous_artifact::KnownArtifactKind;
 
 /// Compares a configured RoT bootloader update with information from inventory
 /// and determines the current status of the update.  See `MgsUpdateStatus`.
-pub fn mgs_update_status_rot_bootloader(
+pub(super) fn update_status(
     desired_version: &ArtifactVersion,
     expected_stage0_version: &ArtifactVersion,
     expected_stage0_next_version: &ExpectedVersion,
@@ -54,56 +56,41 @@ pub fn mgs_update_status_rot_bootloader(
 }
 
 /// Determine if the given baseboard needs an RoT bootloader update and, if so,
-/// returns it.
-pub fn try_make_update_rot_bootloader(
+/// returns it. An error means an update is still necessary but cannot be
+/// completed.
+pub(super) fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-) -> Option<PendingMgsUpdate> {
+) -> Result<MgsUpdateOutcome, FailedRotBootloaderUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board \
-             (missing SP info from inventory)";
-            baseboard_id
-        );
-        return None;
+        return Err(FailedRotBootloaderUpdateReason::SpNotInInventory);
     };
 
     let Some(stage0_caboose) =
         inventory.caboose_for(CabooseWhich::Stage0, baseboard_id)
     else {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board \
-             (missing stage0 caboose from inventory)";
-            baseboard_id,
-        );
-        return None;
+        return Err(FailedRotBootloaderUpdateReason::CabooseNotInInventory(
+            CabooseWhich::Stage0,
+        ));
     };
 
-    let Ok(expected_stage0_version) = stage0_caboose.caboose.version.parse()
-    else {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board \
-             (cannot parse current stage0 version as an ArtifactVersion)";
-            baseboard_id,
-            "found_version" => &stage0_caboose.caboose.version,
-        );
-        return None;
+    let expected_stage0_version = match stage0_caboose.caboose.version.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::Stage0,
+                err: format!("{}", e),
+            });
+        }
     };
 
     let board = &stage0_caboose.caboose.board;
     let Some(rkth) = &stage0_caboose.caboose.sign else {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board \
-             (missing sign in stage0 caboose from inventory)";
-            baseboard_id
-        );
-        return None;
+        return Err(FailedRotBootloaderUpdateReason::CabooseMissingSign(
+            CabooseWhich::Stage0,
+        ));
     };
 
     let matching_artifacts: Vec<_> = current_artifacts
@@ -155,12 +142,7 @@ pub fn try_make_update_rot_bootloader(
         })
         .collect();
     if matching_artifacts.is_empty() {
-        warn!(
-            log,
-            "cannot configure RoT bootloader update for board (no matching artifact)";
-            baseboard_id,
-        );
-        return None;
+        return Err(FailedRotBootloaderUpdateReason::NoMatchingArtifactFound);
     }
 
     if matching_artifacts.len() > 1 {
@@ -180,7 +162,7 @@ pub fn try_make_update_rot_bootloader(
     // needed.
     if artifact.id.version == expected_stage0_version {
         debug!(log, "no RoT bootloader update needed for board"; baseboard_id);
-        return None;
+        return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
     // Begin configuring an update.
@@ -191,18 +173,15 @@ pub fn try_make_update_rot_bootloader(
     {
         Ok(None) => ExpectedVersion::NoValidVersion,
         Ok(Some(v)) => ExpectedVersion::Version(v),
-        Err(_) => {
-            warn!(
-                log,
-                "cannot configure RoT bootloader update for board \
-                 (found stage0 next contents but version was not valid)";
-                baseboard_id
-            );
-            return None;
+        Err(e) => {
+            return Err(FailedRotBootloaderUpdateReason::FailedVersionParse {
+                caboose: CabooseWhich::Stage0Next,
+                err: format!("{}", e),
+            });
         }
     };
 
-    Some(PendingMgsUpdate {
+    Ok(MgsUpdateOutcome::pending_with_update_only(PendingMgsUpdate {
         baseboard_id: baseboard_id.clone(),
         sp_type: sp_info.sp_type,
         slot_id: sp_info.sp_slot,
@@ -214,7 +193,7 @@ pub fn try_make_update_rot_bootloader(
         ),
         artifact_hash: artifact.hash,
         artifact_version: artifact.id.version.clone(),
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -231,12 +210,12 @@ mod tests {
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
-    use gateway_client::types::SpType;
     use nexus_types::deployment::ExpectedVersion;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateRotBootloaderDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
+    use nexus_types::inventory::SpType;
     use std::collections::BTreeSet;
 
     // Short hand-rolled update sequence that exercises some basic behavior for

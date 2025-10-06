@@ -27,7 +27,7 @@ pub enum Alarm {
     MismatchedConfigurations {
         config1: Configuration,
         config2: Configuration,
-        // Either a stringified `PlatformId` or "Nexus"
+        // Either a stringified `BaseboardId` or "Nexus"
         from: String,
     },
 

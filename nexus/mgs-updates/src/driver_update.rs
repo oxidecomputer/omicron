@@ -12,12 +12,13 @@ use crate::driver::UpdateAttemptStatusUpdater;
 use crate::mgs_clients::GatewayClientError;
 use crate::{ArtifactCache, ArtifactCacheError, MgsClients};
 use gateway_client::SpComponent;
+use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
-use gateway_client::types::{SpType, SpUpdateStatus};
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::internal_api::views::UpdateAttemptStatus;
 use nexus_types::internal_api::views::UpdateCompletedHow;
+use nexus_types::inventory::SpType;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SpUpdateUuid;
 use qorb::resolver::AllBackends;
@@ -193,34 +194,18 @@ pub enum ApplyUpdateError {
     WaitError(#[source] PrecheckError),
 }
 
-/// Construct an MGS client.
-//
-// We split this into a prod version and a test version to work around timeout
-// issues in tests. In practice we expect basically all requests to MGS to be
-// fulfilled very quickly, even in tests, but our test infrastructure allows us
-// to _pause_ an update for extended periods of time. If we start an update then
-// happen to pause it as its making an MGS request, leave it paused for more
-// than 15 seconds (the default progenitor client timeout), then try to resume
-// it, we'll immediately fail with a timeout (even though MGS is perfectly
-// responsive!).
-#[cfg(not(test))]
+/// Construct a set of MGS clients.
 fn make_mgs_clients(backends: &AllBackends, log: &slog::Logger) -> MgsClients {
     MgsClients::from_clients(backends.iter().map(|(backend_name, backend)| {
-        gateway_client::Client::new(
-            &format!("http://{}", backend.address),
-            log.new(o!(
-                "mgs_backend_name" => backend_name.0.to_string(),
-                "mgs_backend_addr" => backend.address.to_string(),
-            )),
-        )
-    }))
-}
-#[cfg(test)]
-fn make_mgs_clients(backends: &AllBackends, log: &slog::Logger) -> MgsClients {
-    MgsClients::from_clients(backends.iter().map(|(backend_name, backend)| {
+        // MGS has its own timeouts it applies to communications on our behalf
+        // to SPs. The longest of these timeouts is currently set to 60 seconds
+        // (specifically: MGS will wait up to 60 seconds for devices to reset,
+        // because we've seen sidecars take 20+ seconds to reset). We should
+        // therefore wait at least as long as its timeouts; we'll add a buffer
+        // here to leave plenty of time for minor weather between us and MGS.
         let client = reqwest::ClientBuilder::new()
-            .connect_timeout(Duration::from_secs(60))
-            .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(75))
+            .timeout(Duration::from_secs(75))
             .build()
             .unwrap();
 
@@ -312,7 +297,7 @@ pub(crate) async fn apply_update(
             async move {
                 client
                     .sp_component_update(
-                        sp_type,
+                        &sp_type,
                         sp_slot,
                         component,
                         sp_update.firmware_slot,
@@ -525,7 +510,7 @@ async fn wait_for_delivery(
         let status = mgs_clients
             .try_all_serially(log, |client| async move {
                 let update_status = client
-                    .sp_component_update_status(sp_type, sp_slot, component)
+                    .sp_component_update_status(&sp_type, sp_slot, component)
                     .await?;
 
                 debug!(
@@ -624,7 +609,7 @@ async fn abort_update(
         .try_all_serially(log, |mgs_client| async move {
             let arg = UpdateAbortBody { id: update_id };
             mgs_client
-                .sp_component_update_abort(sp_type, sp_slot, component, &arg)
+                .sp_component_update_abort(&sp_type, sp_slot, component, &arg)
                 .await
         })
         .await
@@ -778,7 +763,6 @@ mod test {
     use crate::test_util::updates::ExpectedSpComponent;
     use crate::test_util::updates::UpdateDescription;
     use assert_matches::assert_matches;
-    use gateway_client::types::SpType;
     use gateway_messages::SpPort;
     use gateway_test_utils::setup::GatewayTestContext;
     use gateway_types::rot::RotSlot;
@@ -787,6 +771,7 @@ mod test {
     use nexus_types::internal_api::views::UpdateAttemptStatus;
     use nexus_types::internal_api::views::UpdateCompletedHow;
     use nexus_types::inventory::BaseboardId;
+    use nexus_types::inventory::SpType;
     use slog_error_chain::InlineErrorChain;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;

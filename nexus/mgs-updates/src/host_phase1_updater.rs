@@ -138,10 +138,10 @@ use futures::future::BoxFuture;
 use gateway_client::HostPhase1HashError;
 use gateway_client::SpComponent;
 use gateway_client::types::SpComponentFirmwareSlot;
-use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::BootPartitionContents;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
+use nexus_types::inventory::SpType;
 use omicron_common::disk::M2Slot;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
@@ -176,7 +176,7 @@ impl ReconfiguratorHostPhase1Updater {
         // Verify that the device is the one we think it is.
         let state = mgs_clients
             .try_all_serially(log, move |mgs_client| async move {
-                mgs_client.sp_get(update.sp_type, update.slot_id).await
+                mgs_client.sp_get(&update.sp_type, update.slot_id).await
             })
             .await?
             .into_inner();
@@ -207,7 +207,7 @@ impl ReconfiguratorHostPhase1Updater {
                 .try_all_serially(log, |mgs_client| async move {
                     mgs_client
                         .sp_component_active_slot_get(
-                            update.sp_type,
+                            &update.sp_type,
                             update.slot_id,
                             SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
                         )
@@ -471,7 +471,7 @@ impl ReconfiguratorHostPhase1Updater {
                 let persist = true;
                 mgs_client
                     .sp_component_active_slot_set(
-                        update.sp_type,
+                        &update.sp_type,
                         update.slot_id,
                         SpComponent::HOST_CPU_BOOT_FLASH.const_as_str(),
                         persist,
@@ -497,7 +497,7 @@ impl ReconfiguratorHostPhase1Updater {
             .try_all_serially(log, |mgs_client| async move {
                 mgs_client
                     .sp_component_reset(
-                        update.sp_type,
+                        &update.sp_type,
                         update.slot_id,
                         SpComponent::SP_ITSELF.const_as_str(),
                     )

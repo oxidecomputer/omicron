@@ -70,6 +70,7 @@ use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
 use nexus_types::internal_api::background::TufArtifactReplicationStatus;
+use nexus_types::internal_api::background::TufRepoPrunerStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
@@ -1199,6 +1200,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "tuf_artifact_replication" => {
             print_task_tuf_artifact_replication(details);
         }
+        "tuf_repo_pruner" => {
+            print_task_tuf_repo_pruner(details);
+        }
         "alert_dispatcher" => {
             print_task_alert_dispatcher(details);
         }
@@ -1295,14 +1299,20 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
-        BlueprintPlannerStatus::Unchanged { parent_blueprint_id } => {
+        BlueprintPlannerStatus::Unchanged { parent_blueprint_id, report } => {
             println!("    plan unchanged from parent {parent_blueprint_id}");
+            println!("{report}");
         }
-        BlueprintPlannerStatus::Planned { parent_blueprint_id, error } => {
+        BlueprintPlannerStatus::Planned {
+            parent_blueprint_id,
+            error,
+            report,
+        } => {
             println!(
                 "    planned new blueprint from parent {parent_blueprint_id}, \
                      but could not make it the target: {error}"
             );
+            println!("{report}");
         }
         BlueprintPlannerStatus::Targeted { blueprint_id, report, .. } => {
             println!(
@@ -2567,6 +2577,19 @@ fn print_task_tuf_artifact_replication(details: &serde_json::Value) {
     }
 }
 
+fn print_task_tuf_repo_pruner(details: &serde_json::Value) {
+    match serde_json::from_value::<TufRepoPrunerStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {}: {:?}",
+            InlineErrorChain::new(&error),
+            details
+        ),
+        Ok(status) => {
+            print!("{}", status);
+        }
+    }
+}
+
 fn print_task_alert_dispatcher(details: &serde_json::Value) {
     use nexus_types::internal_api::background::AlertDispatched;
     use nexus_types::internal_api::background::AlertDispatcherStatus;
@@ -2853,6 +2876,7 @@ fn print_task_webhook_deliverator(details: &serde_json::Value) {
 }
 
 fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
+    use ereporter_status_fields::*;
     use nexus_types::internal_api::background::SpEreportIngesterStatus;
     use nexus_types::internal_api::background::SpEreporterStatus;
 
@@ -2868,15 +2892,8 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
             Ok(status) => status,
         };
 
-    const NEW_EREPORTS: &str = "new ereports ingested:";
-    const HTTP_REQUESTS: &str = "HTTP requests sent:";
-    const ERRORS: &str = "errors:";
-    const WIDTH: usize =
-        const_max_len(&[NEW_EREPORTS, HTTP_REQUESTS, ERRORS]) + 1;
-    const NUM_WIDTH: usize = 3;
-
     if !errors.is_empty() {
-        println!("{ERRICON} {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        println!("    errors listing reporters:");
         for error in errors {
             println!("      - {error}");
         }
@@ -2895,6 +2912,7 @@ fn print_task_sp_ereport_ingester(details: &serde_json::Value) {
                  some SP statuses were recorded!"
             )
         }
+
         println!("\n    service processors:");
         for SpEreporterStatus { sp_type, slot, status } in &sps {
             println!(
@@ -2952,21 +2970,7 @@ fn print_ereporter_status_totals<'status>(
         }
     }
 
-    const EREPORTS_RECEIVED: &str = "total ereports received:";
-    const NEW_EREPORTS: &str = "  new ereports ingested:";
-    const HTTP_REQUESTS: &str = "total HTTP requests sent:";
-    const ERRORS: &str = "  total collection errors:";
-    const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
-    const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
-    const WIDTH: usize = const_max_len(&[
-        EREPORTS_RECEIVED,
-        NEW_EREPORTS,
-        HTTP_REQUESTS,
-        ERRORS,
-        REPORTERS_WITH_EREPORTS,
-    ]) + 1;
-    const NUM_WIDTH: usize = 4;
-
+    use ereporter_status_fields::*;
     println!("    {EREPORTS_RECEIVED:<WIDTH$}{total_received:>NUM_WIDTH$}");
     println!("    {NEW_EREPORTS:<WIDTH$}{total_new:>NUM_WIDTH$}");
     println!("    {HTTP_REQUESTS:<WIDTH$}{total_reqs:>NUM_WIDTH$}");
@@ -2979,6 +2983,29 @@ fn print_ereporter_status_totals<'status>(
         "    {REPORTERS_WITH_ERRORS:<WIDTH$}\
          {reporters_with_errors:>NUM_WIDTH$}"
     );
+}
+
+mod ereporter_status_fields {
+    pub const TOTAL_NEW_EREPORTS: &str = "new ereports ingested:";
+    pub const TOTAL_HTTP_REQUESTS: &str = "HTTP requests sent:";
+
+    pub const EREPORTS_RECEIVED: &str = "total ereports received:";
+    pub const NEW_EREPORTS: &str = "  new ereports ingested:";
+    pub const HTTP_REQUESTS: &str = "total HTTP requests sent:";
+    pub const ERRORS: &str = "  total collection errors:";
+    pub const REPORTERS_WITH_EREPORTS: &str = "reporters with ereports:";
+    pub const REPORTERS_WITH_ERRORS: &str = "reporters with collection errors:";
+    pub const WIDTH: usize = super::const_max_len(&[
+        TOTAL_NEW_EREPORTS,
+        TOTAL_HTTP_REQUESTS,
+        EREPORTS_RECEIVED,
+        NEW_EREPORTS,
+        HTTP_REQUESTS,
+        ERRORS,
+        REPORTERS_WITH_EREPORTS,
+        REPORTERS_WITH_ERRORS,
+    ]) + 1;
+    pub const NUM_WIDTH: usize = 4;
 }
 
 const ERRICON: &str = "/!\\";

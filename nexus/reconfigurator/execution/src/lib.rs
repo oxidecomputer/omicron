@@ -228,6 +228,7 @@ pub async fn realize_blueprint(
         creator,
         overrides.unwrap_or(&*overridables::DEFAULT),
         sled_list.clone(),
+        nexus_id,
     );
 
     register_cleanup_expunged_zones_step(
@@ -492,6 +493,7 @@ fn register_plumb_firewall_rules_step<'a>(
         .register();
 }
 
+#[allow(clippy::too_many_arguments)]
 fn register_dns_records_step<'a>(
     registrar: &ComponentRegistrar<'_, 'a>,
     opctx: &'a OpContext,
@@ -500,12 +502,17 @@ fn register_dns_records_step<'a>(
     creator: OmicronZoneUuid,
     overrides: &'a Overridables,
     sleds: SharedStepHandle<Arc<IdOrdMap<Sled>>>,
+    nexus_id: Option<OmicronZoneUuid>,
 ) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy DNS records",
             async move |cx| {
+                let Some(nexus_id) = nexus_id else {
+                    return StepSkipped::new((), "not running as Nexus").into();
+                };
+
                 let sleds_by_id = sleds.into_value(cx.token()).await;
 
                 let res = dns::deploy_dns(
@@ -515,6 +522,7 @@ fn register_dns_records_step<'a>(
                     blueprint,
                     &sleds_by_id,
                     overrides,
+                    nexus_id,
                 )
                 .await
                 .map_err(|e| anyhow!("{}", InlineErrorChain::new(&e)));

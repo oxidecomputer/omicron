@@ -150,9 +150,7 @@ impl ReconfiguratorSim {
         builder.set_internal_dns_version(parent_blueprint.internal_dns_version);
         builder.set_external_dns_version(parent_blueprint.external_dns_version);
 
-        let mut active_nexus_zones = BTreeSet::new();
-        let mut not_yet_nexus_zones = BTreeSet::new();
-
+        // Handle zone networking setup first
         for (_, zone) in parent_blueprint
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
@@ -174,21 +172,61 @@ impl ReconfiguratorSim {
                     .add_omicron_zone_nic(zone.id, nic)
                     .context("adding omicron zone NIC")?;
             }
+        }
 
-            match &zone.zone_type {
-                nexus_types::deployment::BlueprintZoneType::Nexus(nexus) => {
-                    if nexus.nexus_generation
-                        == parent_blueprint.nexus_generation
-                    {
-                        active_nexus_zones.insert(zone.id);
-                    } else if nexus.nexus_generation
-                        > parent_blueprint.nexus_generation
-                    {
-                        not_yet_nexus_zones.insert(zone.id);
-                    }
+        // Determine active and not-yet nexus zones (use explicit overrides if available)
+        let active_nexus_zones = if let Some(explicit) =
+            state.config().explicit_active_nexus_zones()
+        {
+            explicit.clone()
+        } else {
+            // Infer from generation
+            let active_nexus_gen =
+                state.config().active_nexus_zone_generation();
+            let mut active_nexus_zones = BTreeSet::new();
+            for (_, zone, nexus) in parent_blueprint
+                .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            {
+                if nexus.nexus_generation == active_nexus_gen {
+                    active_nexus_zones.insert(zone.id);
                 }
-                _ => (),
             }
+            active_nexus_zones
+        };
+
+        let not_yet_nexus_zones = if let Some(explicit) =
+            state.config().explicit_not_yet_nexus_zones()
+        {
+            explicit.clone()
+        } else {
+            // Infer from generation
+            let active_nexus_gen =
+                state.config().active_nexus_zone_generation();
+            let mut not_yet_nexus_zones = BTreeSet::new();
+            for (_, zone) in parent_blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+            {
+                match &zone.zone_type {
+                    nexus_types::deployment::BlueprintZoneType::Nexus(
+                        nexus,
+                    ) => {
+                        if nexus.nexus_generation > active_nexus_gen {
+                            not_yet_nexus_zones.insert(zone.id);
+                        }
+                    }
+                    _ => (),
+                }
+            }
+            not_yet_nexus_zones
+        };
+
+        if active_nexus_zones.is_empty() {
+            let active_nexus_gen =
+                state.config().active_nexus_zone_generation();
+            bail!(
+                "no Nexus zones found at current active generation \
+                 ({active_nexus_gen})"
+            );
         }
 
         builder.set_active_nexus_zones(active_nexus_zones);
@@ -1185,6 +1223,20 @@ enum SetArgs {
     Seed { seed: String },
     /// target number of Nexus instances (for planning)
     NumNexus { num_nexus: u16 },
+    /// specify the generation of Nexus zones that are considered active when
+    /// running the blueprint planner
+    ActiveNexusGen { gen: Generation },
+    /// Control the set of Nexus zones seen as input to the planner
+    NexusZones {
+        #[clap(long, conflicts_with = "active")]
+        active_inferred: bool,
+        #[clap(long, num_args = 0.., required_unless_present = "active_inferred")]
+        active: Vec<OmicronZoneUuid>,
+        #[clap(long, conflicts_with = "not_yet")]
+        not_yet_inferred: bool,
+        #[clap(long, num_args = 0.., required_unless_present = "not_yet_inferred")]
+        not_yet: Vec<OmicronZoneUuid>,
+    },
     /// system's external DNS zone name (suffix)
     ExternalDnsZoneName { zone_name: String },
     /// system target release
@@ -2436,14 +2488,26 @@ fn cmd_blueprint_diff(
     // each blueprint.  To do that we need to construct a list of sleds suitable
     // for the executor.
     let sleds_by_id = make_sleds_by_id(state.system().description())?;
+
+    // It's tricky to figure out which active Nexus generation number to use
+    // when diff'ing blueprints.  What's currently active might be wholly
+    // different from what's here.  (Imagine generation 7 is active and these
+    // blueprints are from Nexus generation 4.)  What's most likely useful is
+    // picking the Nexus generation of the blueprint itself.
+    let blueprint1_active_nexus_generation =
+        blueprint_active_nexus_generation(&blueprint1);
+    let blueprint2_active_nexus_generation =
+        blueprint_active_nexus_generation(&blueprint2);
     let internal_dns_config1 = blueprint_internal_dns_config(
         &blueprint1,
         &sleds_by_id,
+        blueprint1_active_nexus_generation,
         &Default::default(),
     )?;
     let internal_dns_config2 = blueprint_internal_dns_config(
         &blueprint2,
         &sleds_by_id,
+        blueprint2_active_nexus_generation,
         &Default::default(),
     )?;
     let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
@@ -2455,11 +2519,13 @@ fn cmd_blueprint_diff(
         &blueprint1,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
+        blueprint1_active_nexus_generation,
     );
     let external_dns_config2 = blueprint_external_dns_config(
         &blueprint2,
         state.config().silo_names(),
         external_dns_zone_name.to_owned(),
+        blueprint2_active_nexus_generation,
     );
     let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
         .context("failed to assemble external DNS diff")?;
@@ -2517,12 +2583,15 @@ fn cmd_blueprint_diff_dns(
         }
     };
 
+    let blueprint_active_generation =
+        blueprint_active_nexus_generation(&blueprint);
     let blueprint_dns_zone = match dns_group {
         CliDnsGroup::Internal => {
             let sleds_by_id = make_sleds_by_id(state.system().description())?;
             blueprint_internal_dns_config(
                 blueprint,
                 &sleds_by_id,
+                blueprint_active_generation,
                 &Default::default(),
             )?
         }
@@ -2530,6 +2599,7 @@ fn cmd_blueprint_diff_dns(
             blueprint,
             state.config().silo_names(),
             state.config().external_dns_zone_name().to_owned(),
+            blueprint_active_generation,
         ),
     };
 
@@ -2699,6 +2769,36 @@ fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
             );
         }
     }
+
+    // Show nexus zone state information
+    swriteln!(
+        s,
+        "active nexus zone generation: {}",
+        state.config().active_nexus_zone_generation()
+    );
+
+    if let Some(zones) = state.config().explicit_active_nexus_zones() {
+        swriteln!(
+            s,
+            "explicit active nexus zones ({}): {}",
+            zones.len(),
+            zones.iter().map(|z| z.to_string()).collect::<Vec<_>>().join(", ")
+        );
+    } else {
+        swriteln!(s, "active nexus zones: inferred from generation");
+    }
+
+    if let Some(zones) = state.config().explicit_not_yet_nexus_zones() {
+        swriteln!(
+            s,
+            "explicit not-yet nexus zones ({}): {}",
+            zones.len(),
+            zones.iter().map(|z| z.to_string()).collect::<Vec<_>>().join(", ")
+        );
+    } else {
+        swriteln!(s, "not-yet nexus zones: inferred from generation");
+    }
+
     swriteln!(s, "planner config:");
     // No need for swriteln! here because .display() adds its own newlines at
     // the end.
@@ -2734,6 +2834,51 @@ fn cmd_set(
                 .system_mut()
                 .description_mut()
                 .target_nexus_zone_count(usize::from(num_nexus));
+            rv
+        }
+        SetArgs::ActiveNexusGen { gen } => {
+            let rv =
+                format!("will use active Nexus zones from generation {gen}");
+            state.config_mut().set_active_nexus_zone_generation(gen);
+            rv
+        }
+        SetArgs::NexusZones {
+            active_inferred,
+            active,
+            not_yet_inferred,
+            not_yet,
+        } => {
+            use std::collections::BTreeSet;
+            let mut rv = String::new();
+            if active_inferred {
+                rv.push_str("inferring active nexus zones from generation");
+                state.config_mut().set_explicit_active_nexus_zones(None);
+            } else {
+                let zone_set: BTreeSet<_> = active.into_iter().collect();
+                let count = zone_set.len();
+                rv.push_str(&format!(
+                    "set {} explicit active Nexus zones",
+                    count
+                ));
+                state
+                    .config_mut()
+                    .set_explicit_active_nexus_zones(Some(zone_set));
+            }
+            rv.push_str(", ");
+            if not_yet_inferred {
+                rv.push_str("inferring not-yet nexus zones from generation");
+                state.config_mut().set_explicit_not_yet_nexus_zones(None);
+            } else {
+                let zone_set: BTreeSet<_> = not_yet.into_iter().collect();
+                let count = zone_set.len();
+                rv.push_str(&format!(
+                    "set {} explicit not-yet Nexus zones",
+                    count
+                ));
+                state
+                    .config_mut()
+                    .set_explicit_not_yet_nexus_zones(Some(zone_set));
+            }
             rv
         }
         SetArgs::ExternalDnsZoneName { zone_name } => {
@@ -2992,9 +3137,12 @@ fn cmd_load_example(
 
     // Generate the internal and external DNS configs based on the blueprint.
     let sleds_by_id = make_sleds_by_id(&example.system)?;
+    let blueprint_nexus_generation =
+        blueprint_active_nexus_generation(&blueprint);
     let internal_dns = blueprint_internal_dns_config(
         &blueprint,
         &sleds_by_id,
+        blueprint_nexus_generation,
         &Default::default(),
     )?;
     let external_dns_zone_name =
@@ -3003,6 +3151,7 @@ fn cmd_load_example(
         &blueprint,
         state.config_mut().silo_names(),
         external_dns_zone_name,
+        blueprint_nexus_generation,
     );
 
     let blueprint_id = blueprint.id;
@@ -3068,4 +3217,31 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
     );
 
     Ok(Some(s))
+}
+
+/// Returns the "active Nexus generation" to use for a historical blueprint
+/// (i.e., a blueprint that may not have been generated or executed against the
+/// current simulated state).  This is used for `blueprint-diff`, for example,
+/// which avoids assuming anything about the simulated state in comparing the
+/// two blueprints.
+///
+/// In general, the active Nexus generation for a blueprint is not well-defined.
+/// We cannot know what the active Nexus generation was at some point in the
+/// past.  But we do know that it's one of these two values:
+///
+/// - `blueprint.nexus_generation - 1`, if this blueprint was created as part
+///   of an upgrade, starting with the point where the Nexus handoff was
+///   initiated (inclusive) and ending with the first blueprint after the
+///   handoff (exclusive).  In most cases, this means that this is the single
+///   blueprint during an upgrade that triggered the handoff.
+/// - `blueprint.nexus_generation` otherwise (which includes all other
+///   blueprints that are created during an upgrade and all blueprints created
+///   outside of an upgrade).
+///
+/// This implementation always returns `blueprint.nexus_generation`.  In the
+/// second case above, this is always correct.  In the first case, this is
+/// basically equivalent to assuming that the Nexus handoff had happened
+/// instantaneously when the blueprint was created.
+fn blueprint_active_nexus_generation(blueprint: &Blueprint) -> Generation {
+    blueprint.nexus_generation
 }

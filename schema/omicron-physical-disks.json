@@ -58,23 +58,33 @@
       ],
       "properties": {
         "id": {
-          "$ref": "#/definitions/TypedUuidForPhysicalDiskKind"
+          "$ref": "#/definitions/PhysicalDiskUuid"
         },
         "identity": {
           "$ref": "#/definitions/DiskIdentity"
         },
         "pool_id": {
-          "$ref": "#/definitions/TypedUuidForZpoolKind"
+          "$ref": "#/definitions/ZpoolUuid"
         }
       }
     },
-    "TypedUuidForPhysicalDiskKind": {
+    "PhysicalDiskUuid": {
       "type": "string",
-      "format": "uuid"
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::PhysicalDiskUuid",
+        "version": "*"
+      }
     },
-    "TypedUuidForZpoolKind": {
+    "ZpoolUuid": {
       "type": "string",
-      "format": "uuid"
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::ZpoolUuid",
+        "version": "*"
+      }
     }
   }
 }

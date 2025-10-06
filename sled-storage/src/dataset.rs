@@ -48,10 +48,10 @@ pub const DUMP_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(100);
 // passed to zfs create -o compression=
 pub const DUMP_DATASET_COMPRESSION: CompressionAlgorithm =
     CompressionAlgorithm::GzipN { level: GzipLevel::new::<9>() };
-// TODO-correctness: This value of 20 GiB is a wild guess -- given TUF repo
-// sizes as of Oct 2024, it would be capable of storing about 10 distinct system
+// TODO-correctness: This value of 40 GiB is a wild guess -- given TUF repo
+// sizes as of Sep 2025, it would be capable of storing about 16 distinct system
 // versions.
-pub const ARTIFACT_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(20);
+pub const ARTIFACT_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(40);
 
 // U.2 datasets live under the encrypted dataset and inherit encryption
 pub const ZONE_DATASET: &'static str = "crypt/zone";

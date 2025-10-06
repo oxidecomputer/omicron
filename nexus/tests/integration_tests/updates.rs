@@ -9,6 +9,8 @@ use chrono::{DateTime, Duration, Timelike, Utc};
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pub_test_utils::helpers::insert_test_tuf_repo;
+use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -426,7 +428,7 @@ async fn test_repo_upload() -> Result<()> {
 
     // Upload a new repository with a different system version but no other
     // changes. This should be accepted.
-    {
+    let initial_installinator_doc = {
         let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
         let response = trust_root
             .assemble_repo(&logctx.log, tweaks)
@@ -507,7 +509,9 @@ async fn test_repo_upload() -> Result<()> {
             description, get_description,
             "initial description matches fetched description"
         );
-    }
+
+        installinator_doc_1
+    };
     // The installinator document changed, so the generation number is bumped to
     // 3.
     assert_eq!(
@@ -523,6 +527,75 @@ async fn test_repo_upload() -> Result<()> {
     assert_eq!(status.last_run_counters.put_ok, 3);
     assert_eq!(status.last_run_counters.copy_ok, 1);
     assert_eq!(status.local_repos, 1);
+    // Run the replication background task again; the local repos should be
+    // dropped.
+    let status =
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
+    assert_eq!(status.last_run_counters.list_ok, 4);
+    assert_eq!(status.last_run_counters.sum(), 8);
+    assert_eq!(status.local_repos, 0);
+
+    // Verify the initial installinator document is present on all sled-agents.
+    let installinator_doc_hash = initial_installinator_doc.hash.to_string();
+    for sled_agent in &cptestctx.sled_agents {
+        for dir in sled_agent.sled_agent().artifact_store().storage_paths() {
+            let path = dir.join(&installinator_doc_hash);
+            assert!(path.exists(), "{path} does not exist");
+        }
+    }
+    // Collect watchers for all of the sled-agent artifact delete reconcilers.
+    let mut delete_watchers = cptestctx
+        .sled_agents
+        .iter()
+        .map(|sled_agent| {
+            sled_agent.sled_agent().artifact_store().subscribe_delete_done()
+        })
+        .collect::<Vec<_>>();
+    // Manually prune the first repo.
+    let initial_repo = datastore
+        .tuf_repo_get_by_version(
+            &opctx,
+            "1.0.0".parse::<Version>().unwrap().into(),
+        )
+        .await?;
+    let recent_releases =
+        datastore.target_release_fetch_recent_distinct(&opctx, 3).await?;
+    datastore
+        .tuf_repo_mark_pruned(
+            &opctx,
+            status.generation,
+            &recent_releases,
+            initial_repo.repo.id(),
+        )
+        .await
+        .unwrap();
+    // Marking a repository as pruned bumps the generation number.
+    assert_eq!(
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
+        4u32.into()
+    );
+    // Run the replication background task; we should see new configs be put.
+    let status =
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
+    assert_eq!(status.last_run_counters.list_ok, 4);
+    assert_eq!(status.last_run_counters.sum(), 8);
+    assert_eq!(status.generation, 4u32.into());
+    // Wait for the delete reconciler to finish on all sled agents.
+    futures::future::join_all(
+        delete_watchers.iter_mut().map(|watcher| watcher.changed()),
+    )
+    .await;
+    // Verify the installinator document from the initial repo is deleted.
+    for sled_agent in &cptestctx.sled_agents {
+        for dir in sled_agent.sled_agent().artifact_store().storage_paths() {
+            let path = dir.join(&installinator_doc_hash);
+            assert!(!path.exists(), "{path} was not deleted");
+        }
+    }
 
     cptestctx.teardown().await;
     Ok(())
@@ -624,4 +697,45 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
         .parsed_body()
         .expect("failed to parse list after delete response");
     assert!(response.items.is_empty());
+}
+
+#[nexus_test]
+async fn test_repo_prune(cptestctx: &ControlPlaneTestContext) {
+    let logctx = &cptestctx.logctx;
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+
+    // Wait for one activation of the task to avoid racing with it.
+    let client = &cptestctx.lockstep_client;
+    activate_background_task(client, "tuf_repo_pruner").await;
+
+    // Insert four TUF repos.
+    let repo1id = insert_test_tuf_repo(&opctx, datastore, 1).await;
+    let repo2id = insert_test_tuf_repo(&opctx, datastore, 2).await;
+    let repo3id = insert_test_tuf_repo(&opctx, datastore, 3).await;
+    let repo4id = insert_test_tuf_repo(&opctx, datastore, 4).await;
+
+    // Immediately, all four repos ought to be visible.
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 4);
+    assert!(repos.iter().any(|r| r.id() == repo1id));
+    assert!(repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
+
+    // Activate the task again and wait for it to complete.  Exactly one of
+    // the repos should be pruned.
+    activate_background_task(client, "tuf_repo_pruner").await;
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 3);
+    assert!(!repos.iter().any(|r| r.id() == repo1id));
+    assert!(repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
 }

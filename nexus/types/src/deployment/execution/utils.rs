@@ -6,7 +6,10 @@ use std::net::{IpAddr, SocketAddrV6};
 
 use iddqd::{IdOrdItem, id_upcast};
 use nexus_sled_agent_shared::inventory::SledRole;
-use omicron_common::address::{Ipv6Subnet, SLED_PREFIX};
+use omicron_common::{
+    address::{Ipv6Subnet, SLED_PREFIX},
+    api::external::Generation,
+};
 use omicron_uuid_kinds::SledUuid;
 
 use crate::{
@@ -81,16 +84,16 @@ impl IdOrdItem for Sled {
     id_upcast!();
 }
 
-/// Return the Nexus external addresses according to the given blueprint
-pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
+/// Return the active Nexus external addresses according to the given blueprint
+pub fn blueprint_nexus_external_ips(
+    blueprint: &Blueprint,
+    active_generation: Generation,
+) -> Vec<IpAddr> {
     blueprint
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        .filter_map(|(_, z)| match z.zone_type {
-            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                external_ip,
-                ..
-            }) => Some(external_ip.ip),
-            _ => None,
+        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .filter_map(|(_sled_id, _zone_config, nexus_config)| {
+            (nexus_config.nexus_generation == active_generation)
+                .then_some(nexus_config.external_ip.ip)
         })
         .collect()
 }
