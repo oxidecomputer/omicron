@@ -106,7 +106,7 @@ fn start_dropshot_server(
             .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
-                    gateway_api::VERSION_NEWTYPE_UUID_BUMP,
+                    gateway_api::latest_version(),
                 ),
             )))
             .start()
