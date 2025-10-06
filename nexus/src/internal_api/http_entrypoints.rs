@@ -452,25 +452,6 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    async fn bgtask_activate(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<BackgroundTasksActivateRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = &rqctx.context().context;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_internal_api(&rqctx).await;
-            let nexus = &apictx.nexus;
-            let body = body.into_inner();
-            nexus.bgtask_activate(&opctx, body.bgtask_names).await?;
-            Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .internal_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     // NAT RPW internal APIs
 
     async fn ipv4_nat_changeset(
@@ -516,6 +497,20 @@ impl NexusInternalApi for NexusInternalApiImpl {
                     .probe_list_for_sled(&opctx, &pagparams, path.sled)
                     .await?,
             ))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn refresh_vpc_routes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            apictx.nexus.refresh_vpc_routes();
+            Ok(HttpResponseUpdatedNoContent())
         };
         apictx
             .internal_latencies

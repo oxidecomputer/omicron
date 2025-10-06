@@ -10,34 +10,6 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/bgtasks/activate": {
-      "post": {
-        "summary": "**Do not use in new code!**",
-        "description": "Callers to this API should either be capable of using the nexus-lockstep API or should be rewritten to use a doorbell API to activate a specific task. Task names are internal to Nexus.",
-        "operationId": "bgtask_activate",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BackgroundTasksActivateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request": {
       "post": {
         "summary": "An Upstairs will update this endpoint if a Downstairs client task is",
@@ -497,6 +469,7 @@
     "/probes/{sled}": {
       "get": {
         "summary": "Get all the probes associated with a given sled.",
+        "description": "This should not be used in new code, and abandoned if a change is required. See #9157.",
         "operationId": "probes_get",
         "parameters": [
           {
@@ -589,6 +562,24 @@
           },
           "required": true
         },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/refresh-vpc-routes": {
+      "post": {
+        "summary": "Request that Nexus refreshes VPC routes.",
+        "description": "This should not be used in new code, and abandoned if a change is required. See #9157.",
+        "operationId": "refresh_vpc_routes",
         "responses": {
           "204": {
             "description": "resource updated"
@@ -882,22 +873,6 @@
         "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
         "type": "string",
         "pattern": "^[a-zA-Z0-9._+-]{1,63}$"
-      },
-      "BackgroundTasksActivateRequest": {
-        "description": "Query parameters for Background Task activation requests.",
-        "type": "object",
-        "properties": {
-          "bgtask_names": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "uniqueItems": true
-          }
-        },
-        "required": [
-          "bgtask_names"
-        ]
       },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
