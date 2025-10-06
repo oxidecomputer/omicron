@@ -768,7 +768,11 @@ impl DataStore {
         let nexus_id = nexus_db_model::to_db_typed_uuid(nexus_id);
         let count = diesel::update(dsl::db_metadata_nexus)
             .filter(dsl::nexus_id.eq(nexus_id))
-            .set(dsl::state.eq(DbMetadataNexusState::Quiesced))
+            .filter(dsl::state.ne(DbMetadataNexusState::Quiesced))
+            .set((
+                dsl::state.eq(DbMetadataNexusState::Quiesced),
+                dsl::time_quiesced.eq(Utc::now()),
+            ))
             .execute_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -1017,7 +1021,10 @@ impl DataStore {
         // Update all "not_yet" records to "active"
         diesel::update(dsl::db_metadata_nexus)
             .filter(dsl::state.eq(DbMetadataNexusState::NotYet))
-            .set(dsl::state.eq(DbMetadataNexusState::Active))
+            .set((
+                dsl::state.eq(DbMetadataNexusState::Active),
+                dsl::time_active.eq(Utc::now()),
+            ))
             .execute_async(&conn)
             .await?;
 
@@ -1750,7 +1757,9 @@ mod test {
         assert_eq!(nexus3_before.state(), DbMetadataNexusState::Quiesced);
 
         // Attempt handoff with nexus2 - should succeed
+        let before = Utc::now();
         let result = datastore.attempt_handoff(nexus2_id).await;
+        let after = Utc::now();
         if let Err(ref e) = result {
             panic!("Handoff should succeed but got error: {}", e);
         }
@@ -1775,7 +1784,17 @@ mod test {
             .expect("nexus3 should exist");
 
         assert_eq!(nexus1_after.state(), DbMetadataNexusState::Active);
+        let nexus1_after_active_time = nexus1_after
+            .time_active()
+            .expect("active record should have time_active");
+        assert!(nexus1_after_active_time >= before);
+        assert!(nexus1_after_active_time <= after);
         assert_eq!(nexus2_after.state(), DbMetadataNexusState::Active);
+        let nexus2_after_active_time = nexus2_after
+            .time_active()
+            .expect("active record should have time_active");
+        assert!(nexus2_after_active_time >= before);
+        assert!(nexus2_after_active_time <= after);
         // Should remain unchanged
         assert_eq!(nexus3_after.state(), DbMetadataNexusState::Quiesced);
 

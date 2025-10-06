@@ -71,14 +71,26 @@ pub struct DbMetadataNexus {
     nexus_id: DbTypedUuid<OmicronZoneKind>,
     last_drained_blueprint_id: Option<DbTypedUuid<BlueprintKind>>,
     state: DbMetadataNexusState,
+    time_row_created: Option<DateTime<Utc>>,
+    time_quiesced: Option<DateTime<Utc>>,
+    time_active: Option<DateTime<Utc>>,
 }
 
 impl DbMetadataNexus {
     pub fn new(nexus_id: OmicronZoneUuid, state: DbMetadataNexusState) -> Self {
+        let now = Utc::now();
+        let (time_active, time_quiesced) = match state {
+            DbMetadataNexusState::Active => (Some(now), None),
+            DbMetadataNexusState::Quiesced => (None, Some(now)),
+            DbMetadataNexusState::NotYet => (None, None),
+        };
         Self {
             nexus_id: nexus_id.into(),
             last_drained_blueprint_id: None,
             state,
+            time_row_created: Some(now),
+            time_quiesced,
+            time_active,
         }
     }
 
@@ -92,5 +104,13 @@ impl DbMetadataNexus {
 
     pub fn last_drained_blueprint_id(&self) -> Option<BlueprintUuid> {
         self.last_drained_blueprint_id.map(|id| id.into())
+    }
+
+    pub fn time_active(&self) -> Option<DateTime<Utc>> {
+        self.time_active
+    }
+
+    pub fn time_quiesced(&self) -> Option<DateTime<Utc>> {
+        self.time_quiesced
     }
 }

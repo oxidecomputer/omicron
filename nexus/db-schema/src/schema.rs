@@ -2398,6 +2398,9 @@ table! {
         nexus_id -> Uuid,
         last_drained_blueprint_id -> Nullable<Uuid>,
         state -> crate::enums::DbMetadataNexusStateEnum,
+        time_row_created -> Nullable<Timestamptz>,
+        time_quiesced -> Nullable<Timestamptz>,
+        time_active -> Nullable<Timestamptz>,
     }
 }
 
