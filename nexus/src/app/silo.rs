@@ -661,7 +661,7 @@ impl super::Nexus {
             SiloUser::ApiOnly(user) => user,
             SiloUser::Jit(_) => {
                 return Err(Error::invalid_request(
-                    "invalid user type for password set",
+                    "invalid user type (JIT) for password set",
                 ));
             }
         };
