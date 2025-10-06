@@ -4,7 +4,7 @@
 
 //! Handler functions (entrypoints) for HTTP APIs internal to the control plane
 
-use super::params::{OximeterInfo, RackInitializationRequest};
+use super::params::OximeterInfo;
 use crate::context::ApiContext;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -107,29 +107,6 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
-    }
-
-    async fn rack_initialization_complete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<RackPathParam>,
-        info: TypedBody<RackInitializationRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = &rqctx.context().context;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let request = info.into_inner();
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-
-        nexus
-            .rack_initialize(
-                &opctx,
-                path.rack_id,
-                request,
-                true, // blueprint_execution_enabled
-            )
-            .await?;
-
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn switch_put(
