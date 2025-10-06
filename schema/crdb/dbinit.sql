@@ -2086,6 +2086,12 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
     'v6'
 );
 
+/* Indicates what an IP Pool is reserved for. */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
+    'external_silos',
+    'oxide_internal'
+);
+
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
  */
@@ -2104,8 +2110,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     /* The IP version of the ranges contained in this pool. */
     ip_version omicron.public.ip_version NOT NULL,
 
-    /* Indicates the pool is delegated by an operator for internal Oxide use */
-    is_delegated BOOL NOT NULL
+    /* Indicates what the IP Pool is reserved for. */
+    reservation_type omicron.public.ip_pool_reservation_type NOT NULL
 );
 
 /*

@@ -986,13 +986,13 @@ impl DataStore {
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        // Insert a delegated IP Pool for both IP versions.
+        // Insert an IP Pool for both IP versions, reserved for Oxide internal
+        // use.
         for (version, name) in [
             (IpVersion::V4, SERVICE_IPV4_POOL_NAME),
             (IpVersion::V6, SERVICE_IPV6_POOL_NAME),
         ] {
-            // Create a delegated IP Pool, if needed.
-            let internal_pool = db::model::IpPool::new_delegated(
+            let internal_pool = db::model::IpPool::new_oxide_internal(
                 &IdentityMetadataCreateParams {
                     name: name.parse::<Name>().unwrap(),
                     description: format!(

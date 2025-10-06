@@ -1,3 +1,3 @@
 ALTER TABLE omicron.public.ip_pool
-ALTER COLUMN is_delegated
+ALTER COLUMN reservation_type
 DROP DEFAULT;

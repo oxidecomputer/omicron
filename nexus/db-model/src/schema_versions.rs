@@ -28,7 +28,7 @@ static KNOWN_VERSIONS: LazyLock<Vec<KnownVersion>> = LazyLock::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(196, "add-ip-pool-is-delegated-column"),
+        KnownVersion::new(196, "add-ip-pool-reservation-type-column"),
         KnownVersion::new(195, "tuf-pruned-index"),
         KnownVersion::new(194, "tuf-pruned"),
         KnownVersion::new(193, "nexus-lockstep-port"),

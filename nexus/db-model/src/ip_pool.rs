@@ -25,6 +25,37 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 impl_enum_type!(
+    IpPoolReservationTypeEnum:
+
+    #[derive(
+        AsExpression,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        FromSqlRow,
+        PartialEq,
+        schemars::JsonSchema,
+        serde::Deserialize,
+        serde::Serialize,
+    )]
+    pub enum IpPoolReservationType;
+
+    ExternalSilos => b"external_silos"
+    OxideInternal => b"oxide_internal"
+);
+
+impl ::std::fmt::Display for IpPoolReservationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            IpPoolReservationType::ExternalSilos => "external_silos",
+            IpPoolReservationType::OxideInternal => "oxide_internal",
+        };
+        f.write_str(s)
+    }
+}
+
+impl_enum_type!(
     IpVersionEnum:
 
     #[derive(
@@ -92,14 +123,14 @@ pub struct IpPool {
     /// the contained ranges.
     pub rcgen: i64,
 
-    /// True if the IP Pool has been delegated for Oxide use.
-    pub is_delegated: bool,
+    /// Indicates what the pool is reserved for.
+    pub reservation_type: IpPoolReservationType,
 }
 
 impl IpPool {
     /// Create a new IP Pool.
     ///
-    /// The pool is not delegated to Oxide.
+    /// The pool is reserved for external customer Silos.
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
@@ -111,12 +142,12 @@ impl IpPool {
             ),
             ip_version,
             rcgen: 0,
-            is_delegated: false,
+            reservation_type: IpPoolReservationType::ExternalSilos,
         }
     }
 
-    /// Create a new pool delegated for Oxide's internal use.
-    pub fn new_delegated(
+    /// Create a new pool reserved for Oxide's internal use.
+    pub fn new_oxide_internal(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
     ) -> Self {
@@ -127,13 +158,13 @@ impl IpPool {
             ),
             ip_version,
             rcgen: 0,
-            is_delegated: true,
+            reservation_type: IpPoolReservationType::OxideInternal,
         }
     }
 
     /// Create a new IPv4 IP Pool.
     ///
-    /// The pool is not delegated to Oxide.
+    /// The pool is reserved for external customer Silos.
     pub fn new_v4(
         pool_identity: &external::IdentityMetadataCreateParams,
     ) -> Self {
@@ -142,7 +173,7 @@ impl IpPool {
 
     /// Create a new IPv6 IP Pool.
     ///
-    /// The pool is not delegated to Oxide.
+    /// The pool is reserved for external customer Silos.
     pub fn new_v6(
         pool_identity: &external::IdentityMetadataCreateParams,
     ) -> Self {

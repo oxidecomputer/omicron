@@ -16,6 +16,7 @@ use crate::db::identity::Resource;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolRange;
+use crate::db::model::IpPoolReservationType;
 use crate::db::model::IpPoolResource;
 use crate::db::model::IpPoolResourceType;
 use crate::db::model::IpPoolUpdate;
@@ -46,6 +47,7 @@ use nexus_db_model::IpVersion;
 use nexus_db_model::Project;
 use nexus_db_model::Vpc;
 use nexus_db_schema::enums::IpKindEnum;
+use nexus_db_schema::enums::IpPoolReservationTypeEnum;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::CreateResult;
@@ -93,9 +95,9 @@ impl ServiceIpPools {
 }
 
 // Error message emitted when a user attempts to link an IP Pool and internal
-// Silo, but the pool is already linked to an external Silo, or vice versa.
+// Silo, but the pool is already reserved for internal use, or vice versa.
 const BAD_SILO_LINK_ERROR: &str = "IP Pools cannot be both linked to external \
-    Silos and delegated for internal Oxide usage.";
+    Silos and reserved for internal Oxide usage.";
 
 // Error message emitted when a user attempts to unlink an IP Pool from a Silo
 // while the pool has external IP addresses allocated from it.
@@ -104,16 +106,16 @@ const POOL_HAS_IPS_ERROR: &str =
 
 // Error message emitted when a user attempts to unlink an IP Pool from the
 // Oxide internal Silo, without at least one other IP Pool linked to it.
-const LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool delegated to \
-    Oxide internal usage. Create and delegate at least one more IP Pool \
+const LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool reserved for \
+    Oxide internal usage. Create and reserve at least one more IP Pool \
     before deleting this one.";
 
 impl DataStore {
-    /// List IP Pools by their delegation state and optionally IP version, paginated.
-    async fn ip_pools_list_paginated(
+    /// List IP Pools by their reservation type and optionally IP version, paginated.
+    pub async fn ip_pools_list_paginated(
         &self,
         opctx: &OpContext,
-        is_delegated: bool,
+        reservation_type: IpPoolReservationType,
         version: Option<IpVersion>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IpPool> {
@@ -137,8 +139,7 @@ impl DataStore {
         };
         query
             .filter(ip_pool::time_deleted.is_null())
-            .filter(ip_pool::is_delegated.eq(is_delegated))
-            .limit(pagparams.limit().get().into())
+            .filter(ip_pool::reservation_type.eq(reservation_type))
             .select(IpPool::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -153,7 +154,13 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IpPool> {
-        self.ip_pools_list_paginated(opctx, false, None, pagparams).await
+        self.ip_pools_list_paginated(
+            opctx,
+            IpPoolReservationType::ExternalSilos,
+            None,
+            pagparams,
+        )
+        .await
     }
 
     /// Look up whether the given pool is available to users in the current
@@ -258,16 +265,6 @@ impl DataStore {
             })
     }
 
-    /// List IP Pools delegated for Oxide's internal usage.
-    pub async fn ip_pools_delegated_list(
-        &self,
-        opctx: &OpContext,
-        version: Option<IpVersion>,
-        pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<IpPool> {
-        self.ip_pools_list_paginated(opctx, true, version, pagparams).await
-    }
-
     /// Look up internal service IP Pools for both IP versions.
     ///
     /// This is useful when you need to handle resources like external IPs where
@@ -293,7 +290,8 @@ impl DataStore {
     ///
     /// This method may require an index by Availability Zone in the future.
     //
-    // TODO-remove: Use ip_pools_delegated_list instead.
+    // TODO-remove: Use ip_pools_list_paginated with the right enum type
+    // instead.
     //
     // See https://github.com/oxidecomputer/omicron/issues/8947.
     pub async fn ip_pools_service_lookup(
@@ -338,7 +336,7 @@ impl DataStore {
     /// Delete an IP Pool, and any links between it an any Silos.
     ///
     /// This fails if there are still IP Ranges in the pool, or if we're
-    /// deleting the last delegated pool.
+    /// deleting the last pool reserved for Oxide use.
     pub async fn ip_pool_delete(
         &self,
         opctx: &OpContext,
@@ -369,12 +367,17 @@ impl DataStore {
         }
 
         // Add a small subquery, if needed, to ensure that we don't delete this
-        // IP Pool if it's the last delegated pool. There has to always be at
+        // IP Pool if it's the last reserved pool. There has to always be at
         // least one of these.
-        let ensure_delegated = if db_pool.is_delegated {
-            diesel::dsl::sql::<sql_types::Bool>(ENSURE_DELEGATED_COUNT_SUBQUERY)
-        } else {
+        let enough_reserved_pools = if matches!(
+            db_pool.reservation_type,
+            IpPoolReservationType::ExternalSilos
+        ) {
             diesel::dsl::sql::<sql_types::Bool>("TRUE")
+        } else {
+            diesel::dsl::sql::<sql_types::Bool>(&count_reserved_pools_subquery(
+                db_pool.reservation_type,
+            ))
         };
 
         // Delete the pool, conditional on the rcgen not having changed. This
@@ -385,7 +388,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
-            .filter(ensure_delegated)
+            .filter(enough_reserved_pools)
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*conn)
             .await
@@ -425,10 +428,11 @@ impl DataStore {
     /// Check whether the pool is internal by checking that it exists and is
     /// associated with the internal silo
     //
-    // TODO-remove: This should probably go away when we let operators link any
-    // IP Pools to the internal Silo. The pool belongs to them, even if they've
-    // delegated it to us. See
-    // https://github.com/oxidecomputer/omicron/issues/8947.
+    // TODO-remove: This should go away when we let operators reserve any IP
+    // Pools for internal Oxide usage. The pool belongs to them even in that
+    // case, and so we should show it to them.
+    //
+    // See https://github.com/oxidecomputer/omicron/issues/8947.
     pub async fn ip_pool_is_internal(
         &self,
         opctx: &OpContext,
@@ -438,7 +442,10 @@ impl DataStore {
         ip_pool::table
             .find(authz_pool.id())
             .filter(ip_pool::time_deleted.is_null())
-            .select(ip_pool::is_delegated)
+            .select(
+                ip_pool::reservation_type
+                    .ne(IpPoolReservationType::ExternalSilos),
+            )
             .first_async::<bool>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
@@ -472,25 +479,40 @@ impl DataStore {
             })
     }
 
-    /// Delegate an IP Pool for Oxide internal use.
-    pub async fn ip_pool_delegate(
+    /// Reserve an IP Pool for a specific use.
+    pub async fn ip_pool_reserve(
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
         db_pool: &IpPool,
+        reservation_type: IpPoolReservationType,
     ) -> UpdateResult<()> {
-        if db_pool.is_delegated {
-            return Err(Error::invalid_request("IP Pool is already delegated"));
+        if db_pool.reservation_type == reservation_type {
+            return Err(Error::invalid_request(format!(
+                "IP Pool already has reservation type '{}'",
+                reservation_type,
+            )));
         }
-        let n_rows = delegate_ip_pool_query(authz_pool.id())
+        let n_rows = reserve_ip_pool_query(db_pool, reservation_type)
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| match e {
                 DieselError::DatabaseError(
                     DatabaseErrorKind::Unknown,
                     ref info,
-                ) if info.message().ends_with("invalid bool value") => {
-                    Error::invalid_request(BAD_SILO_LINK_ERROR)
+                ) => {
+                    let message = info.message();
+                    if message.ends_with("invalid bool value") {
+                        Error::invalid_request(BAD_SILO_LINK_ERROR)
+                    } else if message.contains("division by zero") {
+                        Error::invalid_request(POOL_HAS_IPS_ERROR)
+                    } else if message.starts_with("could not parse")
+                        && message.contains("as type int")
+                    {
+                        Error::invalid_request(LAST_POOL_ERROR)
+                    } else {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    }
                 }
                 _ => public_error_from_diesel(
                     e,
@@ -506,46 +528,16 @@ impl DataStore {
         }
     }
 
-    /// Revoke an IP Pool previously delegated for Oxide internal use.
+    /// Unreserve an IP.
+    ///
+    /// TODO(ben) Remove this, use reserve with specific type for everything.
     pub async fn ip_pool_revoke(
         &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-        db_pool: &IpPool,
+        _opctx: &OpContext,
+        _authz_pool: &authz::IpPool,
+        _db_pool: &IpPool,
     ) -> UpdateResult<()> {
-        if !db_pool.is_delegated {
-            return Err(Error::invalid_request(
-                "Cannot revoke a pool that has not been previously delegated",
-            ));
-        }
-        let n_rows = revoke_ip_pool_query(authz_pool.id())
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| match e {
-                DieselError::DatabaseError(
-                    DatabaseErrorKind::Unknown,
-                    ref info,
-                ) => {
-                    if info.message().ends_with("invalid bool value") {
-                        Error::invalid_request(LAST_POOL_ERROR)
-                    } else if info.message().contains("division by zero") {
-                        Error::invalid_request(POOL_HAS_IPS_ERROR)
-                    } else {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    }
-                }
-                _ => public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_pool),
-                ),
-            })?;
-        if n_rows == 0 {
-            Err(Error::invalid_request(
-                "update failed to due concurrent modification",
-            ))
-        } else {
-            Ok(())
-        }
+        todo!("remove me");
     }
 
     /// Return the number of IPs allocated from and the capacity of the provided
@@ -744,7 +736,8 @@ impl DataStore {
         if ip_pool_resource.resource_id == INTERNAL_SILO_ID {
             return Err(Error::internal_error(
                 "IP Pools should not be linked to the internal silo. \
-                    Set the `is_delegated` column to true instead.",
+                    Set the `reservation_type` column to an internal \
+                    variant instead.",
             ));
         }
         opctx
@@ -774,13 +767,13 @@ impl DataStore {
                     // Handle intentional errors in the query.
                     DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info) => {
                         let is_uuid_cast_error = |msg: &str, sentinel: &str| -> bool {
+                            // We're unfortunately allocating here, but this
+                            // error path isn't expected to be common.
                             let expected = format!(
-                                "could not parse \"{}\" as type uuid: uuid: \
-                                incorrect UUID length: {}",
-                                sentinel,
+                                "uuid: incorrect UUID length: {}",
                                 sentinel,
                             );
-                            msg == expected
+                            msg.ends_with(&expected)
                         };
                         let msg = info.message();
                         if is_uuid_cast_error(msg, BAD_SILO_LINK_SENTINEL) {
@@ -1113,8 +1106,8 @@ impl DataStore {
 
         if authz_silo.id() == INTERNAL_SILO_ID {
             return Err(Error::internal_error(
-                "Cannot unlink a delegated IP Pool. \
-                    Use the `is_delegated` column instead.",
+                "Cannot unlink an internally-reserved IP Pool. \
+                    Use the `reservation_type` column instead.",
             ));
         }
 
@@ -1390,10 +1383,14 @@ const IP_POOL_DELETED_SENTINEL: &str = "ip-pool-deleted";
 // between selecting it and trying to insert the link.
 const SILO_DELETED_SENTINEL: &str = "silo-deleted";
 
+// Sentinel we try to cast as an integer when removing the reservation on the
+// last internal pool of a given type.
+const LAST_POOL_SENTINEL: &str = "last-pool";
+
 // Query to conditionally link an IP Pool to an external customer Silo.
 //
 // This method returns a SQL query to conditionally insert a link between an IP
-// Pool and a Silo. It maintains the invariant that a pool can be delegated for
+// Pool and a Silo. It maintains the invariant that a pool can be reserved for
 // Oxide internal usage XOR linked to customer silos. It also checks that the
 // pool and silo still exist when the query is run.
 //
@@ -1402,16 +1399,20 @@ const SILO_DELETED_SENTINEL: &str = "silo-deleted";
 // ```sql
 // WITH
 //   -- Select the IP Pool by ID, used to ensure it still exists when we run
-//   -- this query. Also select the delegation state, and fail if the pool is
-//   -- currently delegated to Oxide.
+//   -- this query. Also select the reservation type, and fail if the pool is
+//   -- currently reserved for Oxide.
 //   ip_pool AS (
-//      SELECT CAST(IF(is_delegated, 'bad-link-type', 'id') AS UUID)
+//      SELECT CAST(IF(
+//          reservation_type != 'external_silos',
+//          'bad-link-type',
+//          $1)
+//      AS UUID)
 //      FROM ip_pool
-//      WHERE id = $1 AND time_deleted IS NULL
+//      WHERE id = $2 AND time_deleted IS NULL
 //   )
 //   -- Select the Silo by ID, used to ensure it still exists when we run this
 //   -- query
-//   silo AS (SELECT id FROM silo WHERE id = $2 AND time_deleted IS NULL),
+//   silo AS (SELECT id FROM silo WHERE id = $3 AND time_deleted IS NULL),
 // INSERT
 // INTO
 //   ip_pool_resource (ip_pool_id, resource_type, resource_id, is_default)
@@ -1421,12 +1422,12 @@ const SILO_DELETED_SENTINEL: &str = "silo-deleted";
 //   -- This is the "true or cast error" trick we use in many places.
 //   CAST(COALESCE(CAST(ip.id AS STRING), 'ip-pool-deleted') AS UUID),
 //   -- The resource type, always 'silo' here.
-//   $5,
+//   $4,
 //   -- If the silo exists, take its ID as a string. If it does not exist, take
 //   -- the string `'silo-deleted'`. Attempt to cast the result to a UUID.
 //   -- This is the "true or cast error" trick we use in many places.
 //   CAST(COALESCE(CAST(s.id AS STRING), 'silo-deleted') AS UUID),
-//    $11
+//    $5
 // FROM
 //   (SELECT 1) AS dummy
 //   LEFT JOIN ip_pool AS ip ON true
@@ -1439,7 +1440,12 @@ fn link_ip_pool_to_external_silo_query(
 ) -> TypedSqlQuery<SelectableSql<IpPoolResource>> {
     let mut builder = QueryBuilder::new();
     builder
-        .sql("WITH ip_pool AS (SELECT CAST(IF(is_delegated, '")
+        .sql("WITH ip_pool AS (SELECT CAST(IF(reservation_type != ")
+        .param()
+        .bind::<IpPoolReservationTypeEnum, _>(
+            IpPoolReservationType::ExternalSilos,
+        )
+        .sql(", '")
         .sql(BAD_SILO_LINK_SENTINEL)
         .sql("', ")
         .param()
@@ -1612,76 +1618,139 @@ fn unlink_ip_pool_from_external_silo_query(
         );
     builder.query()
 }
-// Helper subquery which fails with a bool-cast error if there are fewer
-// than two delegated IP Pools. This is useful when we're trying to delete
-// or revoke a delegated pool, to ensure there's at least one left.
-const ENSURE_DELEGATED_COUNT_SUBQUERY: &str = "(SELECT CAST(IF((\
-            SELECT COUNT(1) \
-            FROM ip_pool \
-            WHERE time_deleted IS NULL AND is_delegated LIMIT 2\
+
+// Generate a small helper subquery which fails with a bool-cast error if there
+// are fewer than 2 IP Pools reserved for the provided use. It must be internal.
+fn count_reserved_pools_subquery(
+    reservation_type: IpPoolReservationType,
+) -> String {
+    assert!(!matches!(reservation_type, IpPoolReservationType::ExternalSilos));
+    format!(
+        "CAST(IF(\
+        (SELECT COUNT(1) \
+             FROM ip_pool \
+             WHERE time_deleted IS NULL AND reservation_type = '{}' LIMIT 2\
         ) >= 2, \
         'true', \
-        'last-pool') \
-        AS BOOL) \
-    )";
-
-fn revoke_ip_pool_query(ip_pool_id: Uuid) -> TypedSqlQuery<()> {
-    let mut builder = QueryBuilder::new();
-    builder
-        .sql(
-            "\
-            UPDATE ip_pool \
-            SET is_delegated = FALSE, time_modified = NOW() \
-            WHERE id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(ip_pool_id)
-        .sql(
-            " AND time_deleted IS NULL AND is_delegated = TRUE AND \
-            CAST(IF((\
-                SELECT COUNT(1) \
-                FROM ip_pool \
-                WHERE time_deleted is NULL AND is_delegated LIMIT 2\
-            ) >= 2, \
-            'true', \
-            'last-pool') \
-            AS BOOL) AND \
-            CAST(IF(EXISTS(\
-                SELECT 1 \
-                FROM external_ip \
-                WHERE time_deleted IS NULL AND ip_pool_id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(ip_pool_id)
-        .sql("), 1/0, 1) AS BOOL)");
-    builder.query()
+        '{}') \
+        AS BOOL)",
+        reservation_type, LAST_POOL_SENTINEL,
+    )
 }
 
-// Conditionally delegate an IP Pool, checking that the pool isn't linked to any
-// external silos.
-fn delegate_ip_pool_query(ip_pool_id: Uuid) -> TypedSqlQuery<()> {
+// Conditionally reserve an IP Pool for a specific use.
+//
+// # Panics
+//
+// Panics if the current and new reservation type are the same.
+fn reserve_ip_pool_query(
+    pool: &IpPool,
+    reservation_type: IpPoolReservationType,
+) -> TypedSqlQuery<()> {
+    assert_ne!(pool.reservation_type, reservation_type);
+    match pool.reservation_type {
+        IpPoolReservationType::ExternalSilos => {
+            reserve_external_ip_pool_query(pool, reservation_type)
+        }
+        IpPoolReservationType::OxideInternal => {
+            reserve_internal_ip_pool_query(pool, reservation_type)
+        }
+    }
+}
+
+// Query to conditionally reserve an IP Pool that is currently reserved for
+// external silo use.
+//
+// Checks that the pool is not currently linked to any silos first. Note that
+// this means there cannot be any silo-specific resources using the pool.
+fn reserve_external_ip_pool_query(
+    ip_pool: &IpPool,
+    new_reservation_type: IpPoolReservationType,
+) -> TypedSqlQuery<()> {
     let mut builder = QueryBuilder::new();
     builder
-        .sql(
-            "\
-            UPDATE ip_pool \
-            SET is_delegated = TRUE, time_modified = NOW() \
-            WHERE id = ",
-        )
+        .sql("UPDATE ip_pool SET reservation_type = ")
         .param()
-        .bind::<sql_types::Uuid, _>(ip_pool_id)
+        .bind::<IpPoolReservationTypeEnum, _>(new_reservation_type)
+        .sql(", time_modified = NOW() WHERE id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql(" AND time_deleted IS NULL AND reservation_type = ")
+        .param()
+        .bind::<IpPoolReservationTypeEnum, _>(ip_pool.reservation_type)
         .sql(
-            " AND time_deleted IS NULL AND is_delegated = FALSE AND (\
-            SELECT CAST(IF(EXISTS(\
+            " AND CAST(IF(EXISTS(\
                 SELECT 1 \
                 FROM ip_pool_resource \
                 WHERE ip_pool_id = ",
         )
         .param()
-        .bind::<sql_types::Uuid, _>(ip_pool_id)
-        .sql("), '")
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql(" LIMIT 1), '")
         .sql(BAD_SILO_LINK_SENTINEL)
-        .sql("', 'TRUE') AS BOOL))");
+        .sql("', 'TRUE') AS BOOL)");
+    builder.query()
+}
+
+// Query to conditionally reserve an IP Pool that is currently reserved for Oxide
+// internal use.
+//
+// Checks that:
+//
+// - There are no external IPs in use by Oxide resources.
+// - There is at least one other internal pool of the same reservation type.
+fn reserve_internal_ip_pool_query(
+    ip_pool: &IpPool,
+    new_reservation_type: IpPoolReservationType,
+) -> TypedSqlQuery<()> {
+    let mut builder = QueryBuilder::new();
+    builder
+        .sql("UPDATE ip_pool SET reservation_type = ")
+        .param()
+        .bind::<IpPoolReservationTypeEnum, _>(new_reservation_type)
+        .sql(", time_modified = NOW() WHERE id = ")
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql(" AND time_deleted IS NULL AND reservation_type = ")
+        .param()
+        .bind::<IpPoolReservationTypeEnum, _>(ip_pool.reservation_type)
+        // Generate div-by-zero error if there are IPs
+        .sql(
+            " AND (\
+            SELECT CAST(IF(EXISTS(\
+                SELECT 1 \
+                FROM external_ip \
+                WHERE ip_pool_id = ",
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(ip_pool.id())
+        .sql(
+            " AND \
+            external_ip.is_service AND \
+            time_deleted IS NULL \
+            LIMIT 1\
+        ), 1/0, 1) AS BOOL))",
+        )
+        // Generate int-cast error if this is the last pool of this reservation
+        // type.
+        .sql(
+            " AND CAST(IF(\
+                (SELECT COUNT(1) \
+                    FROM ip_pool \
+                    WHERE time_deleted IS NULL \
+                    AND reservation_type = ",
+        )
+        .param()
+        .bind::<IpPoolReservationTypeEnum, _>(ip_pool.reservation_type)
+        .sql(
+            " \
+                LIMIT 2\
+                ) >= 2, \
+            '1', ",
+        )
+        .param()
+        .bind::<sql_types::Text, _>(LAST_POOL_SENTINEL)
+        .sql(") AS INT) = 1");
     builder.query()
 }
 
@@ -1693,8 +1762,8 @@ mod test {
     use crate::authz;
     use crate::db::datastore::ip_pool::{
         BAD_SILO_LINK_ERROR, LAST_POOL_ERROR, POOL_HAS_IPS_ERROR,
-        delegate_ip_pool_query, link_ip_pool_to_external_silo_query,
-        revoke_ip_pool_query, unlink_ip_pool_from_external_silo_query,
+        link_ip_pool_to_external_silo_query, reserve_ip_pool_query,
+        unlink_ip_pool_from_external_silo_query,
     };
     use crate::db::explain::ExplainableAsync as _;
     use crate::db::model::{
@@ -1709,7 +1778,7 @@ mod test {
         ExpressionMethods as _, QueryDsl as _, SelectableHelper as _,
     };
     use nexus_db_lookup::LookupPath;
-    use nexus_db_model::IpVersion;
+    use nexus_db_model::{IpPoolIdentity, IpPoolReservationType, IpVersion};
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::{
         OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
@@ -2304,7 +2373,7 @@ mod test {
         }
         customer_pools.sort_by_key(|pool| pool.id());
 
-        // Create a bunch which _are_ delegated for Oxide's usage.
+        // Create a bunch which _are_ reserved for Oxide's usage.
         let mut oxide_pools = Vec::with_capacity(N_POOLS);
         for i in 0..N_POOLS {
             // Create the pool
@@ -2315,15 +2384,15 @@ mod test {
             let pool = datastore
                 .ip_pool_create(
                     opctx,
-                    IpPool::new_delegated(&identity, IpVersion::V4),
+                    IpPool::new_oxide_internal(&identity, IpVersion::V4),
                 )
                 .await
-                .expect("Failed to create delegated IP pool");
+                .expect("Failed to create reserved IP pool");
             oxide_pools.push(pool);
         }
         assert_eq!(oxide_pools.len(), N_POOLS);
 
-        let fetch_paginated = |is_delegated| async move {
+        let fetch_paginated = |reservation_type| async move {
             let mut found = Vec::with_capacity(N_POOLS);
             let mut paginator = Paginator::new(
                 NonZeroU32::new(5).unwrap(),
@@ -2333,7 +2402,7 @@ mod test {
                 let batch = datastore
                     .ip_pools_list_paginated(
                         opctx,
-                        is_delegated,
+                        reservation_type,
                         None,
                         &PaginatedBy::Id(page.current_pagparams()),
                     )
@@ -2346,17 +2415,19 @@ mod test {
         };
 
         // Paginate all the customer-reserved.
-        let customer_pools_found = fetch_paginated(false).await;
+        let customer_pools_found =
+            fetch_paginated(IpPoolReservationType::ExternalSilos).await;
         assert_eq!(customer_pools.len(), customer_pools_found.len());
         assert_eq!(customer_pools, customer_pools_found);
 
-        // Paginate all those delegated to Oxide.
+        // Paginate all those reserved for Oxide.
         //
         // Note that we have 2 extra pools today, which are the builtin service
         // pools. These will go away in the future, so we'll unfortunately need
         // to update this test at that time. Until then, fetch those service
         // pools explicitly and add them.
-        let oxide_reserved_found = fetch_paginated(true).await;
+        let oxide_reserved_found =
+            fetch_paginated(IpPoolReservationType::OxideInternal).await;
         let pools = datastore
             .ip_pools_service_lookup_both_versions(opctx)
             .await
@@ -2415,9 +2486,10 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_link_delegated_pool_to_external_silo() {
-        let logctx =
-            dev::test_setup_log("cannot_link_delegated_pool_to_external_silo");
+    async fn cannot_link_oxide_internal_pool_to_external_silo() {
+        let logctx = dev::test_setup_log(
+            "cannot_link_oxide_internal_pool_to_external_silo",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -2429,7 +2501,7 @@ mod test {
         let ip_pool = datastore
             .ip_pool_create(
                 opctx,
-                IpPool::new_delegated(&identity, IpVersion::V4),
+                IpPool::new_oxide_internal(&identity, IpVersion::V4),
             )
             .await
             .expect("Failed to create IP pool");
@@ -2441,23 +2513,28 @@ mod test {
             resource_id: uuid::uuid!("cfb16a9d-764e-4c5d-8d0d-cf737885b84a"),
             is_default: false,
         };
-        let err = datastore.ip_pool_link_silo(&opctx, link).await.expect_err(
-            "Expected to fail linking a delegated IP Pool to an external Silo",
-        );
-        println!("{err:#?}");
+        let res = datastore.ip_pool_link_silo(&opctx, link).await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Expected to fail linking an internally-reserved \
+                IP Pool to an external Silo, found: {res:#?}",
+            );
+        };
+        assert_eq!(message.external_message(), BAD_SILO_LINK_ERROR);
 
         db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
-    async fn cannot_delegate_externally_linked_pool() {
-        let logctx =
-            dev::test_setup_log("cannot_delegate_externally_linked_pool");
+    async fn cannot_reserve_externally_linked_pool_for_internal_use() {
+        let logctx = dev::test_setup_log(
+            "cannot_reserve_externally_linked_pool_for_internal_use",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Create the pool, non-delegated.
+        // Create the pool, reserved for external silos.
         let identity = IdentityMetadataCreateParams {
             name: "external-ip-pool".parse().unwrap(),
             description: "".to_string(),
@@ -2479,21 +2556,25 @@ mod test {
             .await
             .expect("Should be able to link unlinked pool to default silo");
 
-        // We should fail to delegate it now.
+        // We should fail to reserve it for Oxide-internal use now.
         let (authz_pool, db_pool) = LookupPath::new(opctx, datastore)
             .ip_pool_id(ip_pool.id())
             .fetch_for(authz::Action::Modify)
             .await
             .unwrap();
-        let err = datastore
-            .ip_pool_delegate(opctx, &authz_pool, &db_pool)
-            .await
-            .expect_err(
+        let res = datastore
+            .ip_pool_reserve(
+                opctx,
+                &authz_pool,
+                &db_pool,
+                IpPoolReservationType::OxideInternal,
+            )
+            .await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
                 "Expected to fail delegating an IP Pool \
-                when it's already linked to an external silo",
+                when it's already linked to an external silo, found {res:#?}"
             );
-        let Error::InvalidRequest { message } = err else {
-            panic!("Expected InvalidRequest, got {err:#?}");
         };
         assert_eq!(message.external_message(), BAD_SILO_LINK_ERROR);
 
@@ -2618,9 +2699,10 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_delete_last_delegated_ip_pool() {
-        let logctx =
-            dev::test_setup_log("cannot_delete_last_delegated_ip_pool");
+    async fn cannot_delete_last_internally_reserved_ip_pool() {
+        let logctx = dev::test_setup_log(
+            "cannot_delete_last_internally_reserved_ip_pool",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -2631,13 +2713,13 @@ mod test {
             .unwrap();
 
         // We should be able to delete one of these.
-        let _ = datastore.ip_pool_delete(
-            opctx,
-            &pools.ipv4.authz_pool,
-            &pools.ipv4.db_pool
-        )
+        let _ = datastore
+            .ip_pool_delete(opctx, &pools.ipv4.authz_pool, &pools.ipv4.db_pool)
             .await
-            .expect("Should be able to delete delegated IP Pool when at least one remains");
+            .expect(
+                "Should be able to delete internally-reserved \
+                IP Pool when at least one remains",
+            );
 
         // Check there's only one left.
         let pagparams = &PaginatedBy::Id(DataPageParams {
@@ -2646,26 +2728,37 @@ mod test {
             limit: 100.try_into().unwrap(),
         });
         let l = datastore
-            .ip_pools_delegated_list(opctx, None, &pagparams)
+            .ip_pools_list_paginated(
+                opctx,
+                IpPoolReservationType::OxideInternal,
+                None,
+                &pagparams,
+            )
             .await
             .unwrap();
         assert_eq!(l.len(), 1);
 
         // We should _not_ be able to delete the other now, because there's only
         // one left.
-        let err = datastore.ip_pool_delete(
-            opctx,
-            &pools.ipv6.authz_pool,
-            &pools.ipv6.db_pool,
-        ).await
-            .expect_err("Should not be able to delete delegated IP Pool when only one remains");
-        let Error::InvalidRequest { message } = err else {
-            panic!("Expected InvalidRequest error, found {err:#?}");
+        let res = datastore
+            .ip_pool_delete(opctx, &pools.ipv6.authz_pool, &pools.ipv6.db_pool)
+            .await;
+
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Should not be able to delete internally-reserved \
+                IP Pool when only one remains, found {res:#?}"
+            );
         };
         assert_eq!(message.external_message(), LAST_POOL_ERROR);
 
         let l = datastore
-            .ip_pools_delegated_list(opctx, None, &pagparams)
+            .ip_pools_list_paginated(
+                opctx,
+                IpPoolReservationType::OxideInternal,
+                None,
+                &pagparams,
+            )
             .await
             .unwrap();
         assert_eq!(l.len(), 1);
@@ -2675,9 +2768,10 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_revoke_last_delegated_ip_pool() {
-        let logctx =
-            dev::test_setup_log("cannot_revoke_last_delegated_ip_pool");
+    async fn cannot_externally_reserve_last_internally_reserved_ip_pool() {
+        let logctx = dev::test_setup_log(
+            "cannot_externally_reserve_last_internally_reserved_ip_pool",
+        );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -2687,14 +2781,19 @@ mod test {
             .await
             .unwrap();
 
-        // We should be able to revoke one of these.
-        let _ = datastore.ip_pool_revoke(
-            opctx,
-            &pools.ipv4.authz_pool,
-            &pools.ipv4.db_pool
-        )
+        // We should be able to reserve one of these for external use.
+        let _ = datastore
+            .ip_pool_reserve(
+                opctx,
+                &pools.ipv4.authz_pool,
+                &pools.ipv4.db_pool,
+                IpPoolReservationType::ExternalSilos,
+            )
             .await
-            .expect("Should be able to revoke delegated IP Pool when at least one remains");
+            .expect(
+                "Should be able to externally reserve IP Pool \
+                when at least one internally-reserved pool remains",
+            );
 
         // Check there's only one left.
         let pagparams = &PaginatedBy::Id(DataPageParams {
@@ -2703,23 +2802,42 @@ mod test {
             limit: 100.try_into().unwrap(),
         });
         let l = datastore
-            .ip_pools_delegated_list(opctx, None, &pagparams)
+            .ip_pools_list_paginated(
+                opctx,
+                IpPoolReservationType::OxideInternal,
+                None,
+                &pagparams,
+            )
             .await
             .unwrap();
         assert_eq!(l.len(), 1);
 
-        // We should _not_ be able to revoke the other now, because there's only
-        // one left.
-        let err = datastore.ip_pool_revoke(
-            opctx,
-            &pools.ipv6.authz_pool,
-            &pools.ipv6.db_pool,
-        ).await
-            .expect_err("Should not be able to revoke delegated IP Pool when only one remains");
-        assert_matches!(err, Error::InvalidRequest { .. });
+        // We should _not_ be able to reserve the other for external use now,
+        // because there's only one left for internal use.
+        let res = datastore
+            .ip_pool_reserve(
+                opctx,
+                &pools.ipv6.authz_pool,
+                &pools.ipv6.db_pool,
+                IpPoolReservationType::ExternalSilos,
+            )
+            .await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Should not be able to externally-reserve an \
+                internally-reserved IP Pool when only one remains, \
+                found {res:#?}"
+            );
+        };
+        assert_eq!(message.external_message(), LAST_POOL_ERROR);
 
         let l = datastore
-            .ip_pools_delegated_list(opctx, None, &pagparams)
+            .ip_pools_list_paginated(
+                opctx,
+                IpPoolReservationType::OxideInternal,
+                None,
+                &pagparams,
+            )
             .await
             .unwrap();
         assert_eq!(l.len(), 1);
@@ -2729,9 +2847,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_revoke_delegated_ip_pool_with_outstanding_external_ips() {
+    async fn cannot_externally_reserve_ip_pool_with_outstanding_external_ips() {
         let logctx = dev::test_setup_log(
-            "cannot_revoke_delegated_ip_pool_with_outstanding_external_ips",
+            "cannot_externally_reserve_ip_pool_with_outstanding_external_ips",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -2775,30 +2893,34 @@ mod test {
             .await
             .expect("Should be able to create zone external IP");
 
-        // Should not be able to revoke the IPv4 pool now, since we've got an
-        // address in use.
-        let err = datastore.ip_pool_revoke(
-            opctx,
-            &pools.ipv4.authz_pool,
-            &pools.ipv4.db_pool
-        ).await
-            .expect_err("Should not be able to revoke internal IP Pool when an address is in use");
-        let Error::InvalidRequest { message } = err else {
-            panic!("Expected InvalidRequest, got: {err:#?}");
+        // Should not be able to externally-reserve the IPv4 pool now, since
+        // we've got an address in use.
+        let res = datastore
+            .ip_pool_reserve(
+                opctx,
+                &pools.ipv4.authz_pool,
+                &pools.ipv4.db_pool,
+                IpPoolReservationType::ExternalSilos,
+            )
+            .await;
+        let Err(Error::InvalidRequest { message }) = &res else {
+            panic!(
+                "Should not be able to externally reserve internal \
+                IP Pool when an address is in use, found {res:#?}"
+            );
         };
         assert_eq!(message.external_message(), POOL_HAS_IPS_ERROR);
 
-        // Delete the address, and now we can delete the link.
+        // Delete the address, and now we can reserve the pool for external use.
         let _ = datastore
             .deallocate_external_ip(opctx, eip.id)
             .await
             .expect("Should be able to delete external IP");
-
-        // We should be able to delete one of these.
-        let _ = datastore.ip_pool_revoke(
+        let _ = datastore.ip_pool_reserve(
             opctx,
             &pools.ipv4.authz_pool,
             &pools.ipv4.db_pool,
+            IpPoolReservationType::ExternalSilos,
         ).await
             .expect(
                 "Should be able to delete internal IP Pool when more than one remains, \
@@ -2810,14 +2932,29 @@ mod test {
     }
 
     #[tokio::test]
-    async fn can_explain_delegate_ip_pool_query() {
-        let logctx = dev::test_setup_log("can_explain_delegate_ip_pool_query");
+    async fn can_explain_reserve_external_ip_pool_query() {
+        let logctx =
+            dev::test_setup_log("can_explain_reserve_external_ip_pool_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let ip_pool_id = uuid::uuid!("27b74f5d-0a76-45db-8768-cd043c644f1d");
-        let query = delegate_ip_pool_query(ip_pool_id);
+        let ip_pool = IpPool {
+            identity: IpPoolIdentity::new(
+                uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
+                IdentityMetadataCreateParams {
+                    name: "some-pool".parse().unwrap(),
+                    description: String::new(),
+                },
+            ),
+            ip_version: IpVersion::V4,
+            rcgen: 0,
+            reservation_type: IpPoolReservationType::ExternalSilos,
+        };
+        let query = reserve_ip_pool_query(
+            &ip_pool,
+            IpPoolReservationType::OxideInternal,
+        );
         let _ = query
             .explain_async(&conn)
             .await
@@ -2828,14 +2965,54 @@ mod test {
     }
 
     #[tokio::test]
-    async fn can_explain_revoke_ip_pool_query() {
-        let logctx = dev::test_setup_log("can_explain_revoke_ip_pool_query");
+    async fn expectorate_reserve_external_ip_pool_query() {
+        let ip_pool = IpPool {
+            identity: IpPoolIdentity::new(
+                uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
+                IdentityMetadataCreateParams {
+                    name: "some-pool".parse().unwrap(),
+                    description: String::new(),
+                },
+            ),
+            ip_version: IpVersion::V4,
+            rcgen: 0,
+            reservation_type: IpPoolReservationType::ExternalSilos,
+        };
+        let query = reserve_ip_pool_query(
+            &ip_pool,
+            IpPoolReservationType::OxideInternal,
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/reserve_external_ip_pool.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn can_explain_reserve_internal_ip_pool_query() {
+        let logctx =
+            dev::test_setup_log("can_explain_reserve_internal_ip_pool_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let ip_pool_id = uuid::uuid!("27b74f5d-0a76-45db-8768-cd043c644f1d");
-        let query = revoke_ip_pool_query(ip_pool_id);
+        let ip_pool = IpPool {
+            identity: IpPoolIdentity::new(
+                uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
+                IdentityMetadataCreateParams {
+                    name: "some-pool".parse().unwrap(),
+                    description: String::new(),
+                },
+            ),
+            ip_version: IpVersion::V4,
+            rcgen: 0,
+            reservation_type: IpPoolReservationType::OxideInternal,
+        };
+        let query = reserve_ip_pool_query(
+            &ip_pool,
+            IpPoolReservationType::ExternalSilos,
+        );
         let _ = query
             .explain_async(&conn)
             .await
@@ -2843,5 +3020,30 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_reserve_internal_ip_pool_query() {
+        let ip_pool = IpPool {
+            identity: IpPoolIdentity::new(
+                uuid::uuid!("93fea64d-5d0a-4cc6-8f94-7c527ee640a9"),
+                IdentityMetadataCreateParams {
+                    name: "some-pool".parse().unwrap(),
+                    description: String::new(),
+                },
+            ),
+            ip_version: IpVersion::V4,
+            rcgen: 0,
+            reservation_type: IpPoolReservationType::OxideInternal,
+        };
+        let query = reserve_ip_pool_query(
+            &ip_pool,
+            IpPoolReservationType::ExternalSilos,
+        );
+        expectorate_query_contents(
+            &query,
+            "tests/output/reserve_internal_ip_pool.sql",
+        )
+        .await;
     }
 }
