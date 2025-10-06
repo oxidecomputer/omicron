@@ -31,9 +31,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use uuid::Uuid;
@@ -344,14 +342,22 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-            // This function is _not_ transactional, meaning a delete could race
-            // between the ensure query and the lookup.
+            // This function is _not_ transactional, meaning two types of delete
+            // could race between the ensure query and the lookup:
+            //
+            // - a silo delete could win the race, which will delete all the
+            //   groups in that silo (including this newly created one).
+            //
+            // - a silo group delete (probably preceded by a silo group lookup
+            //   by name) could win the race, which will delete this specific
+            //   group.
+            //
+            // If either deletes win, return a conflict instead of a not found.
 
             let Some(silo_group) = maybe_silo_group else {
-                return Err(Error::not_found_by_id(
-                    ResourceType::SiloGroup,
-                    group_id.as_untyped_uuid(),
-                ));
+                return Err(Error::conflict(format!(
+                    "group {group_id} deleted"
+                )));
             };
 
             silo_group
