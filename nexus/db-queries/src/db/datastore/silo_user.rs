@@ -88,11 +88,12 @@ impl From<model::SiloUser> for SiloUser {
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
                 silo_id: record.silo_id,
-                // SAFETY: there is a database constraint that prevents a user
-                // with provision type 'api_only' from having a null external id
+                // About the expect here: the mentioned database constraint
+                // prevents a user with provision type 'api_only' from having a
+                // null external id.
                 external_id: record
                     .external_id
-                    .expect("database constraint exists"),
+                    .expect("constraint lookup_silo_user_by_silo exists"),
             }),
 
             UserProvisionType::Jit => SiloUser::Jit(SiloUserJit {
@@ -101,11 +102,12 @@ impl From<model::SiloUser> for SiloUser {
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
                 silo_id: record.silo_id,
-                // SAFETY: there is a database constraint that prevents a user
-                // with provision type 'jit' from having a null external id
+                // About the expect here: the mentioned database constraint
+                // prevents a user with provision type 'jit' from having a null
+                // external id.
                 external_id: record
                     .external_id
-                    .expect("database constraint exists"),
+                    .expect("constraint lookup_silo_user_by_silo exists"),
             }),
         }
     }
