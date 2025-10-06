@@ -138,6 +138,8 @@ enum NexusCommands {
     Blueprints(BlueprintsArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
+    /// fetch an omdb binary associated with an active Nexus
+    FetchOmdb(FetchOmdbArgs),
     /// print information about pending MGS updates
     MgsUpdates,
     /// interact with oximeter read policy
@@ -413,6 +415,12 @@ enum ClickhousePolicyMode {
     ClusterOnly,
     // Run both single-node and clustered clickhouse deployments
     Both,
+}
+
+#[derive(Debug, Args)]
+struct FetchOmdbArgs {
+    /// output path to write the fetched omdb
+    output: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -730,6 +738,10 @@ impl NexusArgs {
                     cmd_nexus_clickhouse_policy_set(&client, args, token).await
                 }
             },
+
+            NexusCommands::FetchOmdb(args) => {
+                cmd_nexus_fetch_omdb(&client, args).await
+            }
 
             NexusCommands::MgsUpdates => cmd_nexus_mgs_updates(&client).await,
 
@@ -3636,6 +3648,25 @@ async fn cmd_nexus_clickhouse_policy_get(
         }
     }
 
+    Ok(())
+}
+
+async fn cmd_nexus_fetch_omdb(
+    client: &nexus_lockstep_client::Client,
+    args: &FetchOmdbArgs,
+) -> Result<(), anyhow::Error> {
+    let mut out = tokio::fs::File::create_new(&args.output)
+        .await
+        .with_context(|| format!("could not create `{}`", args.output))?;
+    let body = client.fetch_omdb().await?;
+    let mut stream = body.into_inner().into_inner();
+    while let Some(maybe_chunk) = stream.next().await {
+        let chunk =
+            maybe_chunk.context("failed reading chunk from Nexus")?;
+        tokio::io::copy(&mut std::io::Cursor::new(chunk), &mut out)
+            .await
+            .with_context(|| format!("failed writing to `{}`", args.output))?;
+    }
     Ok(())
 }
 

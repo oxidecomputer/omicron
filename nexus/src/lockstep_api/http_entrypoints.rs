@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use dropshot::ApiDescription;
 use dropshot::Body;
+use dropshot::ErrorStatusCode;
 use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
@@ -21,6 +22,7 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use http::Response;
+use http::StatusCode;
 use nexus_lockstep_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -57,6 +59,7 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_uuid_kinds::*;
 use range_requests::PotentialRange;
+use slog_error_chain::InlineErrorChain;
 
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::ApiContext;
@@ -73,6 +76,33 @@ enum NexusLockstepApiImpl {}
 
 impl NexusLockstepApi for NexusLockstepApiImpl {
     type Context = ApiContext;
+
+    async fn fetch_omdb(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError> {
+        // TODO config?
+        let path = "/opt/oxide/omdb/bin/omdb";
+        let f = tokio::fs::File::open(path).await.map_err(|err| {
+            let err = format!(
+                "could not open {path}: {}",
+                InlineErrorChain::new(&err)
+            );
+            HttpError {
+                status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
+                error_code: None,
+                external_message: err.clone(),
+                internal_message: err,
+                headers: None,
+            }
+        })?;
+        let f = hyper_staticfile::vfs::TokioFileAccess::new(f);
+        let f = hyper_staticfile::util::FileBytesStream::new(f);
+        let body = Body::wrap(hyper_staticfile::Body::Full(f));
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, "application/octet-stream")
+            .body(body)?)
+    }
 
     async fn instance_migrate(
         rqctx: RequestContext<Self::Context>,
