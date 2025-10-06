@@ -317,9 +317,11 @@ impl DataStore {
                 model.user_provision_type,
             );
 
-            return Err(Error::invalid_request(
-                "user provision type of silo does not match silo group",
-            ));
+            return Err(Error::internal_error(&format!(
+                "user provision type of silo ({:?}) does not match \
+                silo group ({:?})",
+                silo.user_provision_type, model.user_provision_type,
+            )));
         }
 
         DataStore::silo_group_ensure_query(opctx, authz_silo, model)
