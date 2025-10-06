@@ -180,6 +180,22 @@ mod tests {
         )
         .unwrap();
 
+        // This is just a made up digest. We aren't currently using a corpus, so it
+        // doesn't matter what the measurements are, just that there is at least
+        // one in a file named "log.bin".
+        let digest =
+            "be4df4e085175f3de0c8ac4837e1c2c9a34e8983209dac6b549e94154f7cdd9c"
+                .into();
+        let attest_log_doc = attest_mock::log::Document {
+            measurements: vec![attest_mock::log::Measurement {
+                algorithm: "sha3-256".into(),
+                digest,
+            }],
+        };
+        // Write out the log document to the filesystem
+        let out = attest_mock::log::mock(attest_log_doc).unwrap();
+        std::fs::write(dir.join("log.bin"), &out).unwrap();
+
         let configs = pki_doc_to_node_configs(dir, num_nodes);
 
         let mut server = AsyncNode::new(configs[0].clone(), &logctx.log);
