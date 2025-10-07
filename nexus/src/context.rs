@@ -12,6 +12,7 @@ use authn::external::token::HttpAuthnToken;
 use camino::Utf8PathBuf;
 use chrono::Duration;
 use nexus_config::NexusConfig;
+use nexus_config::OmdbConfig;
 use nexus_config::SchemeName;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authn::ConsoleSessionWithSiloId;
@@ -107,6 +108,8 @@ pub struct ServerContext {
     pub(crate) external_tls_enabled: bool,
     /// tunable settings needed for the console at runtime
     pub(crate) console_config: ConsoleConfig,
+    /// config supporting `omdb` system introspection
+    pub(crate) omdb_config: Option<OmdbConfig>,
 }
 
 pub(crate) struct ConsoleConfig {
@@ -324,6 +327,7 @@ impl ServerContext {
                 ),
                 static_dir,
             },
+            omdb_config: config.pkg.omdb.clone(),
         }))
     }
 }

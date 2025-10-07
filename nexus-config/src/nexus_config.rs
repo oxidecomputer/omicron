@@ -882,6 +882,12 @@ pub struct PackageConfig {
     /// Timeseries database configuration.
     #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
+    /// Nexus-side support for `omdb`-based debugging.
+    ///
+    /// This is only meaningful on real, multi-sled systems where `omdb` is in
+    /// use from the switch zone.
+    #[serde(default)]
+    pub omdb: Option<OmdbConfig>,
     /// Describes how to handle and perform schema changes.
     #[serde(default)]
     pub schema: Option<SchemaConfig>,
@@ -1167,6 +1173,8 @@ mod test {
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .unwrap();
@@ -1236,6 +1244,9 @@ mod test {
                             0,
                         ))),
                     },
+                    omdb: Some(OmdbConfig {
+                        bin_path: "/nonexistent/path/to/omdb".into(),
+                    }),
                     schema: None,
                     tunables: Tunables {
                         max_vpc_ipv4_subnet_prefix: 27,
@@ -1716,4 +1727,21 @@ pub enum RegionAllocationStrategy {
 
     /// Like Random, but ensures that each region is allocated on its own sled.
     RandomWithDistinctSleds { seed: Option<u64> },
+}
+
+/// Configuration details relevant to supporting `omdb`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OmdbConfig {
+    /// Path to the `omdb` binary that is packaged alongside Nexus.
+    ///
+    /// `omdb` is not typically used from within a Nexus zone, but we ship it
+    /// alongside Nexus to ensure we always have a version of `omdb` on the
+    /// system that matches the active version of Nexus. (During an upgrade, the
+    /// `omdb` shipped in the switch zone will be updated much earlier in the
+    /// process than the running Nexus zones, which means there's a period where
+    /// the switch zone `omdb` is expecting the systems it pokes to be running
+    /// already-updated software; this is particularly problematic for `omdb db
+    /// ...` when the schema migration to the new version hasn't been applied
+    /// yet.)
+    pub bin_path: Utf8PathBuf,
 }
