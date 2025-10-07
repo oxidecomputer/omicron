@@ -602,7 +602,9 @@ pub enum BlueprintPlannerStatus {
 
     /// The blueprint limit was reached, so automatic blueprint planning was
     /// disabled.
-    LimitReached { limit: u64 },
+    ///
+    /// `report` contains what was planned.
+    LimitReached { limit: u64, report: Arc<PlanningReport> },
 
     /// An error occurred during planning or blueprint insertion.
     Error(String),

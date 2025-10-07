@@ -99,10 +99,6 @@ impl BlueprintPlanner {
             return BlueprintPlannerStatus::Disabled;
         }
 
-        if let Some(status) = self.check_blueprint_limit_reached(opctx).await {
-            return status;
-        }
-
         // Get the current target blueprint to use as a parent.
         // Cloned so that we don't block the channel.
         let Some(loaded) = self.rx_blueprint.borrow_and_update().clone() else {
@@ -224,6 +220,21 @@ impl BlueprintPlanner {
             }
         };
 
+        // Check if the blueprint limit has been reached.
+        //
+        // Do this after the planning report is generated so that we can include
+        // the report in the LimitReached case.
+        //
+        // Do this *before* comparing the new blueprint to its parent, since we
+        // want to return this error even if the blueprint is unchanged (the
+        // next time there's a change we'll return an error anyway -- the limit
+        // being reached is bad whether we'd store the next blueprint or not).
+        if let Some(status) =
+            self.check_blueprint_limit_reached(opctx, &report).await
+        {
+            return status;
+        }
+
         // Compare the new blueprint to its parent.
         {
             let summary = blueprint.diff_since_blueprint(&parent);
@@ -322,6 +333,7 @@ impl BlueprintPlanner {
     async fn check_blueprint_limit_reached(
         &self,
         opctx: &OpContext,
+        report: &Arc<PlanningReport>,
     ) -> Option<BlueprintPlannerStatus> {
         let blueprint_count = match self
             .datastore
@@ -336,6 +348,7 @@ impl BlueprintPlanner {
                 );
                 return Some(BlueprintPlannerStatus::LimitReached {
                     limit: self.blueprint_limit,
+                    report: report.clone(),
                 });
             }
             Ok(BlueprintLimitReachedOutput::No { count }) => count,
@@ -648,7 +661,8 @@ mod test {
             }),
         );
         // The inventory and blueprint channels don't need to be Some because we
-        // don't run through the whole planner, instead bailing early.
+        // don't run through the whole planner -- we just call
+        // check_blueprint_limit_reached.
         let (_tx_inventory, rx_inventory) = watch::channel(None);
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
 
@@ -665,7 +679,9 @@ mod test {
 
         // This should work since there are 49 blueprints, which is one less
         // than the limit (50).
-        if let Some(status) = planner.check_blueprint_limit_reached(opctx).await
+        let report = Arc::new(PlanningReport::new());
+        if let Some(status) =
+            planner.check_blueprint_limit_reached(opctx, &report).await
         {
             panic!(
                 "check_blueprint_limit_reached should have returned None, \
@@ -689,14 +705,20 @@ mod test {
             },
         );
 
-        // Since blueprint 50 was created, doing an activation should fail with
-        // LimitExceeded.
-        let status = serde_json::from_value::<BlueprintPlannerStatus>(
-            planner.activate(&opctx).await,
-        )
-        .expect("can't activate planner");
-        eprintln!("status after second activation: {:?}", status);
-        assert_eq!(status, BlueprintPlannerStatus::LimitReached { limit: 50 });
+        // Since blueprint 50 was created, check_blueprint_limit_reached should
+        // fail with LimitExceeded.
+        let status = planner
+            .check_blueprint_limit_reached(&opctx, &report)
+            .await
+            .expect("check_blueprint_limit_reached should return LimitReached");
+        eprintln!("status after second check: {:?}", status);
+        assert_eq!(
+            status,
+            BlueprintPlannerStatus::LimitReached {
+                limit: 50,
+                report: report.clone(),
+            }
+        );
 
         // But manual planning should continue to work.
         let blueprint = BlueprintBuilder::build_empty_with_sleds(
@@ -712,12 +734,18 @@ mod test {
                 );
             },
         );
-        let status = serde_json::from_value::<BlueprintPlannerStatus>(
-            planner.activate(&opctx).await,
-        )
-        .expect("can't activate planner");
-        eprintln!("status after second activation: {:?}", status);
-        assert_eq!(status, BlueprintPlannerStatus::LimitReached { limit: 50 });
+        let status = planner
+            .check_blueprint_limit_reached(&opctx, &report)
+            .await
+            .expect("check_blueprint_limit_reached should return LimitReached");
+        eprintln!("status after third check: {:?}", status);
+        assert_eq!(
+            status,
+            BlueprintPlannerStatus::LimitReached {
+                limit: 50,
+                report: report.clone(),
+            }
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
