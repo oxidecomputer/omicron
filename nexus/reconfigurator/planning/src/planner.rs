@@ -1423,18 +1423,14 @@ impl<'a> Planner<'a> {
                 let unsafe_zones: Vec<_> = zones
                     .into_iter()
                     .filter(|zone| {
-  //                      let zone_report =
-  //                          self.can_zone_be_shut_down_safely(&zone);
-  //                      unsafe_zone_report.insert(zone.id, zone_report.unwrap().1);
-
-                        if let Some((_, zone_report)) = self.can_zone_be_shut_down_safely(&zone) {
+                        if let Some(zone_report) =
+                            self.zone_unsafe_to_shut_down_details(&zone)
+                        {
                             unsafe_zone_report.insert(zone.id, zone_report);
                             true
                         } else {
                             false
                         }
-
-//                        unsafe_zone_report.len() > 0
                     })
                     .map(|zone| zone.kind().report_str())
                     .collect();
@@ -1639,17 +1635,14 @@ impl<'a> Planner<'a> {
         ) = out_of_date_zones
             .into_iter()
             .filter(|(_, zone, _)| {
-                //let zone_report = self.can_zone_be_shut_down_safely(&zone);
-
-                if let Some((_, zone_report)) = self.can_zone_be_shut_down_safely(&zone) {
-                report.unsafe_zones.insert(zone.id, zone_report);
-                false
-            } else {
-                self.are_zones_ready_for_updates(mgs_updates)
-            }
-
-                //self.are_zones_ready_for_updates(mgs_updates)
-                //    && (report.unsafe_zones.len() == 0)
+                if let Some(zone_report) =
+                    self.zone_unsafe_to_shut_down_details(&zone)
+                {
+                    report.unsafe_zones.insert(zone.id, zone_report);
+                    false
+                } else {
+                    self.are_zones_ready_for_updates(mgs_updates)
+                }
             })
             .partition(|(_, zone, _)| zone.zone_type.is_nexus());
 
@@ -2466,8 +2459,9 @@ impl<'a> Planner<'a> {
         Ok(true)
     }
 
-    /// Return `true` iff we believe a zone can safely be shut down; e.g., any
+    /// Return `None` iff we believe a zone can safely be shut down; e.g., any
     /// data it's responsible for is sufficiently persisted or replicated.
+    /// Otherwise, return the details of why a zone cannot be safely shut down.
     ///
     /// "shut down" includes both "discretionary expunge" (e.g., if we're
     /// dealing with a zone that is updated via expunge -> replace) or "shut
@@ -2477,12 +2471,11 @@ impl<'a> Planner<'a> {
     /// because the underlying disk / sled has been expunged" case. In this
     /// case, we have no choice but to reconcile with the fact that the zone is
     /// now gone.
-    fn can_zone_be_shut_down_safely(
+    fn zone_unsafe_to_shut_down_details(
         &self,
         zone: &BlueprintZoneConfig,
-    ) -> Option<(OmicronZoneUuid, ZoneUnsafeToShutdown)> {
+    ) -> Option<ZoneUnsafeToShutdown> {
         use ZoneUnsafeToShutdown::*;
-        //let mut unsafe_zones = BTreeMap::new();
         match zone.zone_type.kind() {
             ZoneKind::CockroachDb => {
                 use CockroachdbUnsafeToShutdown::*;
@@ -2490,11 +2483,7 @@ impl<'a> Planner<'a> {
                 // We must hear from all nodes
                 let all_statuses = &self.inventory.cockroach_status;
                 if all_statuses.len() < COCKROACHDB_REDUNDANCY {
-                    //unsafe_zones.insert(
-                    //    zone.id,
-                    //    Cockroachdb { reason: NotEnoughNodes },
-                    //);
-                    return Some((zone.id, Cockroachdb { reason: NotEnoughNodes }));
+                    return Some(Cockroachdb { reason: NotEnoughNodes });
                 }
 
                 // All nodes must report: "We have the necessary redundancy, and
@@ -2503,44 +2492,26 @@ impl<'a> Planner<'a> {
                     let Some(ranges_underreplicated) =
                         status.ranges_underreplicated
                     else {
-                        //unsafe_zones.insert(
-                        //    zone.id,
-                        //    Cockroachdb { reason: MissingUnderreplicatedStat },
-                        //);
-                        return Some((zone.id, Cockroachdb { reason: MissingUnderreplicatedStat }));
+                        return Some(Cockroachdb {
+                            reason: MissingUnderreplicatedStat,
+                        });
                     };
                     if ranges_underreplicated != 0 {
-                        //unsafe_zones.insert(
-                        //    zone.id,
-                        //    Cockroachdb {
-                        //        reason: UnderreplicatedRanges {
-                        //            n: ranges_underreplicated,
-                        //        },
-                        //    },
-                        //);
-                        return Some((zone.id, Cockroachdb {
+                        return Some(Cockroachdb {
                             reason: UnderreplicatedRanges {
                                 n: ranges_underreplicated,
                             },
-                        }));
+                        });
                     }
                     let Some(live_nodes) = status.liveness_live_nodes else {
-                        //unsafe_zones.insert(
-                        //    zone.id,
-                        //    Cockroachdb { reason: MissingLiveNodesStat },
-                        //);
-                        return Some((zone.id, Cockroachdb { reason: MissingLiveNodesStat }));
+                        return Some(Cockroachdb {
+                            reason: MissingLiveNodesStat,
+                        });
                     };
                     if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
-                        //unsafe_zones.insert(
-                        //    zone.id,
-                        //    Cockroachdb {
-                        //        reason: NotEnoughLiveNodes { live_nodes },
-                        //    },
-                        //);
-                        return Some((zone.id, Cockroachdb {
+                        return Some(Cockroachdb {
                             reason: NotEnoughLiveNodes { live_nodes },
-                        }));
+                        });
                     }
                 }
                 None
@@ -2576,17 +2547,10 @@ impl<'a> Planner<'a> {
                 }
 
                 if synchronized_boundary_ntp_count < BOUNDARY_NTP_REDUNDANCY {
-                    //unsafe_zones.insert(
-                    //    zone.id,
-                    //    BoundaryNtp {
-                    //        total_boundary_ntp_zones: boundary_ntp_zones.len(),
-                    //        synchronized_count: synchronized_boundary_ntp_count,
-                    //    },
-                    //);
-                    return Some((zone.id, BoundaryNtp {
+                    return Some(BoundaryNtp {
                         total_boundary_ntp_zones: boundary_ntp_zones.len(),
                         synchronized_count: synchronized_boundary_ntp_count,
-                    }));
+                    });
                 }
                 None
             }
@@ -2640,19 +2604,12 @@ impl<'a> Planner<'a> {
                 // tolerate "at least one upgrade, and at least one failure
                 // during that upgrade window".
                 if synchronized_internal_dns_count >= INTERNAL_DNS_REDUNDANCY {
-                    return None
+                    return None;
                 } else {
-                    //unsafe_zones.insert(
-                    //    zone.id,
-                    //    InternalDns {
-                    //        total_internal_dns_zones: internal_dns_zones.len(),
-                    //        synchronized_count: synchronized_internal_dns_count,
-                    //    },
-                    //);
-                    return Some((zone.id, InternalDns {
+                    return Some(InternalDns {
                         total_internal_dns_zones: internal_dns_zones.len(),
                         synchronized_count: synchronized_internal_dns_count,
-                    }));
+                    });
                 }
             }
             _ => None, // other zone kinds have no special safety check
