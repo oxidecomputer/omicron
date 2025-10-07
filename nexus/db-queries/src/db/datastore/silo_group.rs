@@ -80,12 +80,11 @@ impl From<model::SiloGroup> for SiloGroup {
                     time_modified: record.time_modified(),
                     time_deleted: record.time_deleted,
                     silo_id: record.silo_id,
-                    // About the expect here: the mentioned database constraint
-                    // prevents a group with provision type 'api_only' from
-                    // having a null external id.
-                    external_id: record
-                        .external_id
-                        .expect("constraint external_id_consistency exists"),
+                    external_id: record.external_id.expect(
+                        "the constraint `external_id_consistency` prevents a \
+                        group with provision type 'api_only' from having a \
+                        null external_id",
+                    ),
                 })
             }
 
@@ -95,12 +94,11 @@ impl From<model::SiloGroup> for SiloGroup {
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
                 silo_id: record.silo_id,
-                // About the expect here: the mentioned database constraint
-                // prevents a group with provision type 'jit' from having a null
-                // external id
-                external_id: record
-                    .external_id
-                    .expect("constraint external_id_consistency exists"),
+                external_id: record.external_id.expect(
+                    "the constraint `external_id_consistency` prevents a \
+                    group with provision type 'jit' from having a null \
+                    external_id",
+                ),
             }),
 
             UserProvisionType::Scim => SiloGroup::Scim(SiloGroupScim {
@@ -109,12 +107,11 @@ impl From<model::SiloGroup> for SiloGroup {
                 time_modified: record.time_modified(),
                 time_deleted: record.time_deleted,
                 silo_id: record.silo_id,
-                // About the expect here: the mentioned database constraint
-                // prevents a group with provision type 'scim' from having a
-                // null display name
-                display_name: record
-                    .display_name
-                    .expect("constraint display_name_consistency exists"),
+                display_name: record.display_name.expect(
+                    "the constraint `display_name_consistency` prevents a \
+                    group with provision type 'scim' from having a null \
+                    display_name",
+                ),
                 external_id: record.external_id,
             }),
         }
