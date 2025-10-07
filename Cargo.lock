@@ -2976,9 +2976,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f448e29400392b55ed2c0133c79841e1bc1bc771e6e20841cb1a5c70a77ef65"
+checksum = "6d0c9a9b3587eb5c7da419466203773307767124fa20e84068d9dd06ee34caa9"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3006,9 +3006,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b913840b90fcccce6afbdb146acf39aa3243b8510e255a70572e53a964fc96a"
+checksum = "00be3e4459aae391b88805e9f735c7cf9cf4ed6aad02bc0e92b224b590af39ab"
 dependencies = [
  "anyhow",
  "camino",
@@ -12625,6 +12625,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "daft",
  "iddqd",
  "nexus-sled-agent-shared",
  "omicron-common",
@@ -14489,6 +14490,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha3",
+ "sled-agent-types",
  "slog",
  "slog-error-chain",
  "static_assertions",
