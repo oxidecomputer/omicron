@@ -40,7 +40,7 @@ pub struct SiloGroup {
 }
 
 impl SiloGroup {
-    pub fn new_api_only_group(
+    pub fn new_api_only(
         id: SiloGroupUuid,
         silo_id: Uuid,
         external_id: String,
@@ -55,7 +55,7 @@ impl SiloGroup {
         }
     }
 
-    pub fn new_jit_group(
+    pub fn new_jit(
         id: SiloGroupUuid,
         silo_id: Uuid,
         external_id: String,
@@ -70,7 +70,7 @@ impl SiloGroup {
         }
     }
 
-    pub fn new_scim_group(
+    pub fn new_scim(
         id: SiloGroupUuid,
         silo_id: Uuid,
         display_name: String,

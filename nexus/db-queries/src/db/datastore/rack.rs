@@ -472,7 +472,7 @@ impl DataStore {
         let silo_user_id = SiloUserUuid::new_v4();
 
         let silo_user = match &db_silo.user_provision_type {
-            UserProvisionType::ApiOnly => SiloUser::new_api_only_user(
+            UserProvisionType::ApiOnly => SiloUser::new_api_only(
                 db_silo.id(),
                 silo_user_id,
                 recovery_user_id.as_ref().to_owned(),

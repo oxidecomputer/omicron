@@ -195,7 +195,7 @@ impl DataStore {
             let maybe_silo_admin_group =
                 match new_silo_params.identity_mode.user_provision_type() {
                     shared::UserProvisionType::ApiOnly => {
-                        Some(db::model::SiloGroup::new_api_only_group(
+                        Some(db::model::SiloGroup::new_api_only(
                             silo_group_id,
                             silo_id,
                             admin_group_name.clone(),
@@ -203,7 +203,7 @@ impl DataStore {
                     }
 
                     shared::UserProvisionType::Jit => {
-                        Some(db::model::SiloGroup::new_jit_group(
+                        Some(db::model::SiloGroup::new_jit(
                             silo_group_id,
                             silo_id,
                             admin_group_name.clone(),

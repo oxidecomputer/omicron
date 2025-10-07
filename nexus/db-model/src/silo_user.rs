@@ -39,7 +39,7 @@ pub struct SiloUser {
 }
 
 impl SiloUser {
-    pub fn new_api_only_user(
+    pub fn new_api_only(
         silo_id: Uuid,
         user_id: SiloUserUuid,
         external_id: String,
@@ -55,7 +55,7 @@ impl SiloUser {
         }
     }
 
-    pub fn new_jit_user(
+    pub fn new_jit(
         silo_id: Uuid,
         user_id: SiloUserUuid,
         external_id: String,
@@ -71,7 +71,7 @@ impl SiloUser {
         }
     }
 
-    pub fn new_scim_user(
+    pub fn new_scim(
         silo_id: Uuid,
         user_id: SiloUserUuid,
         user_name: String,
