@@ -516,14 +516,17 @@ impl super::Nexus {
         self.db_datastore.silo_user_delete(opctx, &authz_silo_user).await
     }
 
-    /// Based on an authenticated subject, return a SiloUser based on an
-    /// AuthenticatedSubject. If the silo's provision type is JIT:
+    /// Based on an authenticated subject, return a `SiloUser` based on an
+    /// `AuthenticatedSubject`. If the silo's provision type is JIT:
     ///
-    /// - create a SiloUser from the AuthenticatedSubject
-    /// - create SiloGroups from the groups in AuthenticatedSubject
-    /// - create SiloGroupMemberships for the SiloUser and those SiloGroups
-    /// - if the SiloUser already existed, then update the group memberships
-    ///   based on what is in the authenticated subject.
+    /// - lookup a `SiloUser` from the `AuthenticatedSubject`. if one does not
+    ///   exist, create a new one.
+    ///
+    /// - lookup `SiloGroup`s from the groups in `AuthenticatedSubject`. if any
+    ///   do not exist, create them.
+    ///
+    /// - replace all `SiloGroupMembership`s for the `SiloUser` based on the
+    ///   SiloGroups
     ///
     /// Note groups created in this way (JIT) are never deleted
     pub async fn silo_user_from_authenticated_subject(
