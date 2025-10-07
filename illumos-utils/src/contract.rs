@@ -107,7 +107,7 @@ impl Drop for Watcher {
 
 impl Watcher {
     /// Return a Watcher for a specific type of contract event.  The watcher
-    /// will return all events of the requested type, and it is the callers
+    /// will return all events of the requested type, and it is the caller's
     /// responsibility to filter for the events relevent to them.
     pub fn new(typ: ContractType) -> Self {
         let path = path(typ, None, "pbundle");
@@ -312,10 +312,19 @@ impl Template {
             }
             ContractType::Device => {
                 // The only device contract we currently support is for the
-                // tfpkt device.  If we ever want to support something else
-                // then we will need to include a device
-                // type, path, and/or instance number as an additional argument
-                // to this template creation function.
+                // tfpkt device.  If we ever want to support something else then
+                // we will need to include a device type, path, and/or instance
+                // number as an additional argument to this template creation
+                // function.
+                //
+                // Note: what we are actually interested in is the removal of
+                // the "tofino" device.  However, illumos won't report the
+                // removal of that device while it is still assigned to a zone.
+                // Since our goal is to shut down the zone to allow the removal
+                // of the device, we have a chicken/egg problem. Instead, we
+                // watch here for the removal of "tfpkt", which is a child of
+                // the "tofino", and whose removal is a reliable indicator that
+                // the tofino is gone.
                 let cpath = match get_tfpkt_device_path() {
                     Some(c) => Ok(c),
                     None => Err(err("unable to find tfpkt in device tree")),

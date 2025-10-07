@@ -10,6 +10,7 @@ use slog_error_chain::InlineErrorChain;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub mod addrobj;
+#[cfg(target_os = "illumos")]
 pub mod contract;
 pub mod coreadm;
 pub mod destructor;
