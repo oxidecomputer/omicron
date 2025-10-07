@@ -12,7 +12,9 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::{Generation, TufRepoDescription, TufTrustRoot};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
-use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::{
+    Blueprint, BlueprintTarget, TargetReleaseDescription,
+};
 use nexus_types::external_api::shared::TufSignedRootRole;
 use nexus_types::external_api::views;
 use nexus_types::internal_api::views as internal_views;
@@ -26,10 +28,29 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use tokio::sync::watch;
 use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
 };
 use uuid::Uuid;
+
+/// Used to pull data out of the channels
+#[derive(Clone)]
+pub struct UpdateStatusHandle {
+    latest_blueprint:
+        watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+}
+
+impl UpdateStatusHandle {
+    pub fn new(
+        latest_blueprint: watch::Receiver<
+            Option<Arc<(BlueprintTarget, Blueprint)>>,
+        >,
+    ) -> Self {
+        Self { latest_blueprint }
+    }
+}
 
 impl super::Nexus {
     pub(crate) async fn updates_put_repository(
@@ -190,8 +211,11 @@ impl super::Nexus {
             .await?;
 
         let (blueprint_target, blueprint) = self
-            .quiesce
-            .latest_blueprint()
+            .update_status
+            .latest_blueprint
+            .borrow()
+            .clone() // drop read lock held by outstanding borrow
+            .as_ref()
             .ok_or_else(|| {
                 Error::internal_error("Tried to get update status before target blueprint is loaded")
             })?
