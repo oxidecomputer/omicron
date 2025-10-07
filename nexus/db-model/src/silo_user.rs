@@ -37,6 +37,10 @@ pub struct SiloUser {
 
     /// For SCIM users, active describes whether or not the user is allowed to
     /// have active sessions.
+    ///
+    /// Note this field isn't mandatory for SCIM provisioning clients to
+    /// support. Using an option here lets us determine if the client sent us
+    /// nothing, or of they sent us a value.
     pub active: Option<bool>,
 }
 
