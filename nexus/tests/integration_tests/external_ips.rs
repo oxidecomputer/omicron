@@ -1326,6 +1326,67 @@ async fn can_list_instance_snat_ip(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(*last_port, NUM_SOURCE_NAT_PORTS - 1);
 }
 
+#[nexus_test]
+async fn do_not_create_snat_ip_with_ephemeral(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let pool = create_default_ip_pool(&client).await;
+    let _project = create_project(client, PROJECT_NAME).await;
+
+    // Get the first address in the pool.
+    let range = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/ip-pools/{}/ranges", pool.identity.id),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap_or_else(|e| panic!("failed to get IP pool range: {e}"))
+    .parsed_body::<IpPoolRangeResultsPage>()
+    .unwrap_or_else(|e| panic!("failed to parse IP pool range: {e}"));
+    assert_eq!(range.items.len(), 1, "Should have 1 range in the pool");
+    let oxide_client::types::IpRange::V4(oxide_client::types::Ipv4Range {
+        first,
+        ..
+    }) = &range.items[0].range
+    else {
+        panic!("Expected IPv4 range, found {:?}", &range.items[0]);
+    };
+    let expected_ip = IpAddr::V4(*first);
+
+    // Create a running instance with an Ephemeral IP, which means the instance
+    // should not have an SNAT IP as well.
+    let instance_name = INSTANCE_NAMES[0];
+    let instance =
+        instance_for_external_ips(client, instance_name, true, true, &[]).await;
+    let url = format!("/v1/instances/{}/external-ips", instance.identity.id);
+    let page = NexusRequest::object_get(client, &url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        })
+        .parsed_body::<ExternalIpResultsPage>()
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"get\" request to {url}: {e}")
+        });
+    let ips = page.items;
+    assert_eq!(
+        ips.len(),
+        1,
+        "Instance should have been created with exactly 1 IP"
+    );
+    let oxide_client::types::ExternalIp::Ephemeral { ip, ip_pool_id } = &ips[0]
+    else {
+        panic!("Expected an SNAT external IP, found {:?}", &ips[0]);
+    };
+    assert_eq!(ip_pool_id, &pool.identity.id);
+    assert_eq!(ip, &expected_ip);
+}
+
 pub async fn floating_ip_get(
     client: &ClientTestContext,
     fip_url: &str,
