@@ -90,6 +90,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
+use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
 use support_bundle_viewer::LocalFileAccess;
@@ -97,6 +98,7 @@ use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
 use update_engine::EventBuffer;
 use update_engine::ExecutionStatus;
@@ -3655,9 +3657,13 @@ async fn cmd_nexus_fetch_omdb(
     client: &nexus_lockstep_client::Client,
     args: &FetchOmdbArgs,
 ) -> Result<(), anyhow::Error> {
-    let mut out = tokio::fs::File::create_new(&args.output)
+    // Create the output file.
+    let out = tokio::fs::File::create_new(&args.output)
         .await
         .with_context(|| format!("could not create `{}`", args.output))?;
+
+    // Stream the binary from Nexus.
+    let mut out = tokio::io::BufWriter::new(out);
     let body = client.fetch_omdb().await?;
     let mut stream = body.into_inner().into_inner();
     while let Some(maybe_chunk) = stream.next().await {
@@ -3666,6 +3672,24 @@ async fn cmd_nexus_fetch_omdb(
             .await
             .with_context(|| format!("failed writing to `{}`", args.output))?;
     }
+    out.flush().await.with_context(|| {
+        format!("failed flushing data written to `{}`", args.output)
+    })?;
+
+    // Make it executable.
+    let out = out.into_inner();
+    let mut perms = out
+        .metadata()
+        .await
+        .with_context(|| {
+            format!("failed to read metadata of new file `{}`", args.output)
+        })?
+        .permissions();
+    perms.set_mode(0o0700);
+    out.set_permissions(perms).await.with_context(|| {
+        format!("failed to change permissions of new file `{}`", args.output)
+    })?;
+
     Ok(())
 }
 
