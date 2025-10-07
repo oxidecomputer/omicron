@@ -791,10 +791,14 @@ fn monitor_tofino(
                     let rt = tokio::runtime::Runtime::new().unwrap();
                     rt.block_on(block_on_zone(&log));
                     info!(log, "Switch zone halted.");
-                    ctl.ack(ev.event_id);
+                    if let Err(e) = ctl.ack(ev.event_id) {
+                        error!(&log, "{e:?}");
+                    }
                 }
                 contract::CT_EV_NEGEND => {
-                    ctl.abandon();
+                    if let Err(e) = ctl.abandon() {
+                        error!(&log, "{e:?}");
+                    }
                     break;
                 }
                 x => warn!(&log, "unexpected device event: {x}"),

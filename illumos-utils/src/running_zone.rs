@@ -8,6 +8,7 @@ use crate::addrobj::{
     AddrObject, DHCP_ADDROBJ_NAME, IPV4_STATIC_ADDROBJ_NAME,
     IPV6_STATIC_ADDROBJ_NAME,
 };
+#[cfg(target_os = "illumos")]
 use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};

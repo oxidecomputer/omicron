@@ -1,3 +1,4 @@
+#[cfg(target_os = "illumos")]
 use libc::ctid_t;
 use slog::{Logger, debug, error};
 use std::ffi::CString;
@@ -32,6 +33,7 @@ unsafe extern "C" {
     fn ct_event_free(ev: ct_evthdl_t);
 }
 
+// Convert an error message into an ExecutionError::ContractFailure
 fn err(msg: impl ToString) -> crate::ExecutionError {
     return crate::ExecutionError::ContractFailure {
         msg: msg.to_string(),
@@ -39,6 +41,7 @@ fn err(msg: impl ToString) -> crate::ExecutionError {
     };
 }
 
+// Construct a path to a file in the contract filesystem
 fn path(typ: ContractType, id: Option<c_int>, file: &str) -> CString {
     let prefix = match typ {
         ContractType::Process => "/system/contract/process",
@@ -91,6 +94,7 @@ impl Drop for ContractEvent {
     }
 }
 
+/// A Watcher is used to wait for events related to contracts
 pub struct Watcher {
     fd: c_int,
 }
@@ -102,6 +106,9 @@ impl Drop for Watcher {
 }
 
 impl Watcher {
+    /// Return a Watcher for a specific type of contract event.  The watcher
+    /// will return all events of the requested type, and it is the callers
+    /// responsibility to filter for the events relevent to them.
     pub fn new(typ: ContractType) -> Self {
         let path = path(typ, None, "pbundle");
         let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY) };
@@ -115,6 +122,7 @@ impl Watcher {
         Watcher { fd }
     }
 
+    /// Block until a contract event occurs.
     pub fn watch(&self, log: &slog::Logger) -> ContractEvent {
         loop {
             let mut event: ct_evthdl_t = std::ptr::null_mut();
@@ -124,7 +132,6 @@ impl Watcher {
             // critical event is available on the channel.
             match unsafe { ct_event_read_critical(self.fd, evp) } {
                 0 => {
-                    slog::info!(&log, "got contract event");
                     let typ = unsafe { ct_event_get_type(event) };
                     let event_id = unsafe { ct_event_get_evid(event) };
                     let ctid = unsafe { ct_event_get_ctid(event) };
@@ -150,7 +157,11 @@ impl Watcher {
     }
 }
 
+/// A Control is used to communicate a response to the contract system in
+/// response to an event.  In practice this is limited to acknowledging an event
+/// and cancelling a contract.
 pub struct Control {
+    ctid: ctid_t,
     fd: c_int,
 }
 
@@ -161,13 +172,14 @@ impl Drop for Control {
 }
 
 impl Control {
+    /// Construct a new Control for the specified contract
     pub fn new(
         typ: ContractType,
         ctid: ctid_t,
     ) -> Result<Self, crate::ExecutionError> {
         let path = path(typ, Some(ctid), "ctl");
         match unsafe { libc::open(path.as_ptr(), libc::O_WRONLY) } {
-            fd if fd >= 0 => Ok(Control { fd }),
+            fd if fd >= 0 => Ok(Control { ctid, fd }),
             _ => Err(err(format!(
                 "opening control path {}",
                 path.into_string().unwrap()
@@ -175,15 +187,22 @@ impl Control {
         }
     }
 
-    pub fn ack(&self, event_id: ct_evid_t) {
-        unsafe {
-            ct_ctl_ack(self.fd, event_id);
+    /// Acknowledge an event on the contract
+    pub fn ack(
+        &self,
+        event_id: ct_evid_t,
+    ) -> Result<(), crate::ExecutionError> {
+        match unsafe { ct_ctl_ack(self.fd, event_id) } {
+            0 => Ok(()),
+            _ => Err(err(format!("failed to acknowledge event {}", event_id))),
         }
     }
 
-    pub fn abandon(self) {
-        unsafe {
-            ct_ctl_abandon(self.fd);
+    /// Abandon the contract
+    pub fn abandon(self) -> Result<(), crate::ExecutionError> {
+        match unsafe { ct_ctl_abandon(self.fd) } {
+            0 => Ok(()),
+            _ => Err(err(format!("failed to abandon contract {}", self.ctid))),
         }
     }
 }
@@ -198,60 +217,24 @@ pub fn process_contract_reaper(log: Logger) {
     let watcher = Watcher::new(ContractType::Process);
     loop {
         let event = watcher.watch(&log);
-        if event.typ == CT_PR_EV_EMPTY {
-            match abandon_contract(ContractType::Process, event.ctid) {
-                Err(e) => error!(
-                    &log,
-                    "Failed to abandon contract {}: {}", event.ctid, e
-                ),
-                Ok(_) => {
-                    debug!(&log, "Abandoned contract {}", event.ctid)
-                }
+        if event.typ != CT_PR_EV_EMPTY {
+            continue;
+        }
+
+        let ctl = match Control::new(ContractType::Process, event.ctid) {
+            Ok(c) => c,
+            Err(e) => {
+                error!(&log, "Failed to open contract control: {e:?}");
+                continue;
             }
+        };
+
+        if let Err(e) = ctl.abandon() {
+            error!(log, "{e:?}");
+        } else {
+            debug!(&log, "Abandoned contract {}", event.ctid)
         }
     }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum AbandonContractError {
-    #[error("Error opening file {file}: {error}")]
-    Open { file: String, error: std::io::Error },
-
-    #[error("Error abandoning contract {ctid}: {error}")]
-    Abandon { ctid: ctid_t, error: std::io::Error },
-
-    #[error("Error closing file {file}: {error}")]
-    Close { file: String, error: std::io::Error },
-}
-
-pub fn abandon_contract(
-    typ: ContractType,
-    ctid: ctid_t,
-) -> Result<(), AbandonContractError> {
-    let path = path(typ, Some(ctid), "ctl");
-    let fd = unsafe { libc::open(path.as_ptr(), libc::O_WRONLY) };
-    if fd < 0 {
-        return Err(AbandonContractError::Open {
-            file: path.into_string().unwrap(),
-            error: std::io::Error::last_os_error(),
-        });
-    }
-    let ret = unsafe { ct_ctl_abandon(fd) };
-    if ret != 0 {
-        unsafe { libc::close(fd) };
-        return Err(AbandonContractError::Abandon {
-            ctid,
-            error: std::io::Error::from_raw_os_error(ret),
-        });
-    }
-    if unsafe { libc::close(fd) } != 0 {
-        return Err(AbandonContractError::Close {
-            file: path.into_string().unwrap(),
-            error: std::io::Error::last_os_error(),
-        });
-    }
-
-    Ok(())
 }
 
 // A Rust wrapper around the process contract template.
