@@ -87,6 +87,7 @@ mod quiesce;
 mod quota;
 mod rack;
 pub(crate) mod saga;
+mod scim;
 mod session;
 mod silo;
 mod sled;
@@ -866,6 +867,17 @@ impl Nexus {
             self.log.new(o!("component" => "InternalApi")),
             Arc::clone(&self.authz),
             authn::Context::internal_api(),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
+        )
+    }
+
+    /// Returns an [`OpContext`] used for authenticating SCIM requests
+    pub fn opctx_external_scim(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "ExternalScim")),
+            Arc::clone(&self.authz),
+            authn::Context::external_scim(),
             Arc::clone(&self.db_datastore)
                 as Arc<dyn nexus_auth::storage::Storage>,
         )

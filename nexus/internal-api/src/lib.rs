@@ -72,20 +72,6 @@ pub trait NexusInternalApi {
         sled_info: TypedBody<SledAgentInfo>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// Request a new set of firewall rules for a sled.
-    ///
-    /// This causes Nexus to read the latest set of rules for the sled,
-    /// and call a Sled endpoint which applies the rules to all OPTE ports
-    /// that happen to exist.
-    #[endpoint {
-        method = POST,
-        path = "/sled-agents/{sled_id}/firewall-rules-update",
-    }]
-    async fn sled_firewall_rules_request(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<SledAgentPathParam>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     #[endpoint {
         method = PUT,
         path = "/switch/{switch_id}",

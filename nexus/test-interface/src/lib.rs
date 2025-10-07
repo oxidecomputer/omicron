@@ -45,6 +45,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
+use tokio::sync::watch;
 
 #[async_trait]
 pub trait NexusServer: Send + Sync + 'static {
@@ -84,6 +85,8 @@ pub trait NexusServer: Send + Sync + 'static {
     ) -> Self;
 
     fn datastore(&self) -> &Arc<db::DataStore>;
+
+    fn inventory_load_rx(&self) -> watch::Receiver<Option<Arc<Collection>>>;
 
     async fn get_http_server_external_address(&self) -> SocketAddr;
     async fn get_http_server_techport_address(&self) -> SocketAddr;
