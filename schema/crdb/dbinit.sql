@@ -906,6 +906,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     -- if the user provision type is 'scim' then this field must contain a value
     user_name TEXT,
 
+    -- if user provision type is 'scim', this field _may_ contain a value: it
+    -- is not mandatory that the SCIM provisioning client support this field.
     active BOOL,
 
     CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
