@@ -2713,51 +2713,16 @@ pub struct AuditLog {
 // SCIM
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ScimV2GetTokenPathParam {
+pub struct ScimV2TokenPathParam {
     pub token_id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ScimV2DeleteTokenPathParam {
-    pub token_id: Uuid,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ScimV2GetUserPathParam {
+pub struct ScimV2UserPathParam {
     pub user_id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct ScimV2PutUserPathParam {
-    pub user_id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ScimV2PatchUserPathParam {
-    pub user_id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ScimV2DeleteUserPathParam {
-    pub user_id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ScimV2GetGroupPathParam {
-    pub group_id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ScimV2PutGroupPathParam {
-    pub group_id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ScimV2PatchGroupPathParam {
-    pub group_id: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ScimV2DeleteGroupPathParam {
+pub struct ScimV2GroupPathParam {
     pub group_id: String,
 }

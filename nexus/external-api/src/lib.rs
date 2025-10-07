@@ -624,7 +624,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_idp_get_token_by_id(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2GetTokenPathParam>,
+        path_params: Path<params::ScimV2TokenPathParam>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<views::ScimClientBearerToken>, HttpError>;
 
@@ -635,7 +635,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_idp_delete_token_by_id(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2DeleteTokenPathParam>,
+        path_params: Path<params::ScimV2TokenPathParam>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
@@ -671,7 +671,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_v2_get_user(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2GetUserPathParam>,
+        path_params: Path<params::ScimV2UserPathParam>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError>;
 
@@ -694,7 +694,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_v2_put_user(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2PutUserPathParam>,
+        path_params: Path<params::ScimV2UserPathParam>,
         body: TypedBody<scim2_rs::CreateUserRequest>,
     ) -> Result<Response<Body>, HttpError>;
 
@@ -706,7 +706,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_v2_patch_user(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2PatchUserPathParam>,
+        path_params: Path<params::ScimV2UserPathParam>,
         body: TypedBody<scim2_rs::PatchRequest>,
     ) -> Result<Response<Body>, HttpError>;
 
@@ -718,7 +718,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_v2_delete_user(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2DeleteUserPathParam>,
+        path_params: Path<params::ScimV2UserPathParam>,
     ) -> Result<Response<Body>, HttpError>;
 
     // SCIM group endpoints
@@ -742,7 +742,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_v2_get_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2GetGroupPathParam>,
+        path_params: Path<params::ScimV2GroupPathParam>,
         query_params: Query<scim2_rs::QueryParams>,
     ) -> Result<Response<Body>, HttpError>;
 
@@ -765,7 +765,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_v2_put_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2PutGroupPathParam>,
+        path_params: Path<params::ScimV2GroupPathParam>,
         body: TypedBody<scim2_rs::CreateGroupRequest>,
     ) -> Result<Response<Body>, HttpError>;
 
@@ -777,7 +777,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_v2_patch_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2PatchGroupPathParam>,
+        path_params: Path<params::ScimV2GroupPathParam>,
         body: TypedBody<scim2_rs::PatchRequest>,
     ) -> Result<Response<Body>, HttpError>;
 
@@ -789,7 +789,7 @@ pub trait NexusExternalApi {
     }]
     async fn scim_v2_delete_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::ScimV2DeleteGroupPathParam>,
+        path_params: Path<params::ScimV2GroupPathParam>,
     ) -> Result<Response<Body>, HttpError>;
 
     // Projects
