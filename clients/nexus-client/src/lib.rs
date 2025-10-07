@@ -24,6 +24,7 @@ progenitor::generate_api!(
     }),
     crates = {
         "iddqd" = "*",
+        "omicron-uuid-kinds" = "*",
         "oxnet" = "0.1.0",
     },
     replace = {
@@ -51,17 +52,6 @@ progenitor::generate_api!(
         PlannerConfig = nexus_types::deployment::PlannerConfig,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
         Srv = nexus_types::internal_api::params::Srv,
-        TypedUuidForBlueprintKind = omicron_uuid_kinds::BlueprintUuid,
-        TypedUuidForDatasetKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DatasetKind>,
-        TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
-        TypedUuidForPhysicalDiskKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::PhysicalDiskKind>,
-        TypedUuidForPropolisKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::PropolisKind>,
-        TypedUuidForSledKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::SledKind>,
-        TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
-        TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
-        TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
-        TypedUuidForVolumeKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::VolumeKind>,
-        TypedUuidForZpoolKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::ZpoolKind>,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
     },
     patch = {
