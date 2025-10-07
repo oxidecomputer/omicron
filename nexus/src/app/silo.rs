@@ -673,7 +673,14 @@ impl super::Nexus {
             db::model::UserProvisionType::ApiOnly
             | db::model::UserProvisionType::Scim => {
                 // Do not update group membership, that isn't done here for
-                // these provision types.
+                // these provision types:
+                //
+                // - for ApiOnly, there currently isn't a way in the API to
+                //   manage these memberships.
+                //
+                // - for SCIM, these memberships are maintained by the
+                //   provisioning client in the form of PUT or PATCH calls to
+                //   the relevant group endpoints.
             }
         }
 
