@@ -156,7 +156,7 @@
           "description": "The UUID of the dataset being requested",
           "allOf": [
             {
-              "$ref": "#/definitions/TypedUuidForDatasetKind"
+              "$ref": "#/definitions/DatasetUuid"
             }
           ]
         },
@@ -211,6 +211,15 @@
         }
       }
     },
+    "DatasetUuid": {
+      "type": "string",
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::DatasetUuid",
+        "version": "*"
+      }
+    },
     "Generation": {
       "description": "Generation numbers stored in the database, used for optimistic concurrency control",
       "type": "integer",
@@ -221,10 +230,6 @@
       "type": "integer",
       "format": "uint8",
       "minimum": 0.0
-    },
-    "TypedUuidForDatasetKind": {
-      "type": "string",
-      "format": "uuid"
     },
     "ZpoolName": {
       "title": "The name of a Zpool",

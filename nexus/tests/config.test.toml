@@ -56,6 +56,10 @@ default_request_body_max_bytes = 1048576
 bind_address = "127.0.0.1:0"
 default_request_body_max_bytes = 1048576
 
+[deployment.dropshot_lockstep]
+bind_address = "127.0.0.1:0"
+default_request_body_max_bytes = 1048576
+
 #
 # NOTE: for the test suite, the internal DNS address will be replaced with one
 # that's started by the test runner.
@@ -165,6 +169,15 @@ region_snapshot_replacement_finish.period_secs = 999999
 tuf_artifact_replication.period_secs = 3600
 # Update integration tests are started with 4 sled agents.
 tuf_artifact_replication.min_sled_replication = 3
+tuf_repo_pruner.period_secs = 300
+# How many extra recent target releases to keep
+# The system always keeps two: the current release and the previous one.
+# This number is in addition to that.
+tuf_repo_pruner.nkeep_extra_target_releases = 1
+# How many extra recently uploaded repos to keep
+# The system always keeps one, assuming that the operator may be about to
+# update to it.  This number is in addition to that.
+tuf_repo_pruner.nkeep_extra_newly_uploaded = 1
 # In general, the webhook dispatcher will be activated when events are queued,
 # so we don't need to periodically activate it *that* frequently.
 alert_dispatcher.period_secs = 60

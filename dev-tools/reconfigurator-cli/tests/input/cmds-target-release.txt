@@ -7,6 +7,42 @@ show
 # Create a TUF repository from a fake manifest. (The output TUF repo is
 # written to a temporary directory that this invocation of `reconfigurator-cli`
 # is running out of as its working directory.)
+#
+# This is used to simulate the initial version of the system.
+tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+
+# Load the target release from the assembled TUF repository.
+set target-release repo-0.0.1.zip
+
+# Print the default target release.
+show
+
+# Update the install dataset on all sleds to the target release.
+# This will cause zones to be noop converted over to Artifact,
+# unblocking upgrades.
+sled-update-install-dataset serial0 --to-target-release
+sled-update-install-dataset serial1 --to-target-release
+sled-update-install-dataset serial2 --to-target-release
+
+# Generate inventory, then do a planning run to ensure that all zones
+# are set to Artifact.
+inventory-generate
+blueprint-plan latest latest
+blueprint-diff latest
+# The above blueprint includes a pending MGS update, which we should delete
+# (we want to start from a fresh state).
+blueprint-edit latest delete-sp-update serial0
+# Also set the Omicron config for all sleds to reflect the
+# corresponding image sources.
+sled-set serial0 omicron-config latest
+sled-set serial1 omicron-config latest
+sled-set serial2 omicron-config latest
+# Generate inventory once more to reflect the omicron config changes.
+inventory-generate
+inventory-show latest
+
+# Setup is now done -- create another TUF repository which will act as the
+# target release being updated to.
 tuf-assemble ../../update-common/manifests/fake.toml
 
 # Load the target release from the assembled TUF repository.
@@ -17,13 +53,12 @@ show
 
 # Test that this state survives a save/load operation.
 save saved.out
-wipe all
+wipe system
 # This should NOT show the target release.
 show
-load saved.out
+load saved.out 61f451b3-2121-4ed6-91c7-a550054f6c21
 # This should show the target release.
 show
-
 
 # Great.  Now, let's run through an upgrade!
 # First, print out what we've got.
@@ -73,7 +108,7 @@ blueprint-diff latest
 
 # Update only the simulated host phase 2; this is a prerequisite for updating
 # the phase 1, and must be done first.
-sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
+sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 inventory-generate
 
 # Planning after only phase 2 has changed should make no changes. We're still
@@ -82,7 +117,7 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now update the simulated SP to reflect that the phase 1 update is done.
-sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 inventory-generate
 
 # Planning _still_ shouldn't make any new changes; the OS update as a whole
@@ -159,8 +194,8 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now simulate the update completing successfully.
-sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
-sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 inventory-generate
 
 # Another planning step should try to update the last sled, starting with the
@@ -219,8 +254,8 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Finish updating the last sled's host OS.
-sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b f3dd0c7a1bd4500ea0d8bcf67581f576d47752b2f1998a4cb0f0c3155c483008
-sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b 2053f8594971bbf0a7326c833e2ffc12b065b9d823b9c0b967d275fa595e4e89
+sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 inventory-generate
 
 # Do another planning run. This should start updating zones (one at a time).
@@ -408,10 +443,64 @@ inventory-generate
 blueprint-plan latest latest
 blueprint-diff latest
 
-# The previous step updated the last non-Nexus zone on the final sled. We should
-# now see a blueprint where every in-service zone (other than Nexus) has an
-# image source set to an artifact from our TUF repo.
-blueprint-show latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
 
-# We ought to update the inventory for the final sled and then step through
-# the Nexus handoff process, but that work is still in progress.
+# Start the Nexus handoff process: A planning step here should place three new
+# Nexus zones, each running from the new TUF repo artifact.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update inventory to reflect the three Nexus zones starting.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+
+# Planning now should bump the top-level `nexus_generation` to 2, indicating
+# that we want handoff to begin.
+# Note that `blueprint-diff` will show the DNS changes as though the handoff has
+# happened already because that command does not take into account simulated
+# state.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Planning again should make no changes: we haven't yet performed a handoff,
+# so the old Nexus zones are still in charge.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# If we expunge one of the OLD nexuses, we should observe
+# that it is re-created.
+blueprint-edit latest expunge-zones 0c71b3b2-6ceb-4e8f-b020-b08675e83038
+blueprint-plan latest latest
+blueprint-diff latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+
+# Bump the set of active Nexus zones; this simulates Nexus handoff.
+set active-nexus-gen 2
+
+# Planning should now expunge one of the old Nexus zones.
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Two more planning iterations should expunge the remaining two old 0.0.1
+# version Nexus zones.
+blueprint-plan latest latest
+blueprint-diff latest
+blueprint-plan latest latest
+blueprint-diff latest
+
+# Update sled configs and inventory to reflect the expunged Nexus zones.
+sled-set 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron-config latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+sled-set d81c6a84-79b8-4958-ae41-ea46c9b19763 omicron-config latest
+inventory-generate
+
+# Planning now should note that the old zones are gone, but do nothing else:
+# the update is complete. All in-service zones have image sources from the new
+# TUF repo, and all zones using old images are expunged.
+blueprint-plan latest latest
+blueprint-diff latest
+blueprint-show latest

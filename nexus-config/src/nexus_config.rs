@@ -174,6 +174,9 @@ pub struct DeploymentConfig {
     /// Dropshot configuration for internal API server.
     #[schemars(skip)] // TODO we're protected against dropshot changes
     pub dropshot_internal: ConfigDropshot,
+    /// Dropshot configuration for lockstep API server.
+    #[schemars(skip)] // TODO we're protected against dropshot changes
+    pub dropshot_lockstep: ConfigDropshot,
     /// Describes how Nexus should find internal DNS servers
     /// for bootstrapping.
     pub internal_dns: InternalDns,
@@ -427,6 +430,8 @@ pub struct BackgroundTaskConfig {
         RegionSnapshotReplacementFinishConfig,
     /// configuration for TUF artifact replication task
     pub tuf_artifact_replication: TufArtifactReplicationConfig,
+    /// configuration for TUF repo pruner task
+    pub tuf_repo_pruner: TufRepoPrunerConfig,
     /// configuration for read-only region replacement start task
     pub read_only_region_replacement_start:
         ReadOnlyRegionReplacementStartConfig,
@@ -764,6 +769,26 @@ pub struct TufArtifactReplicationConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TufRepoPrunerConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// number of extra recent target releases to keep
+    ///
+    /// The system always keeps two: the current release and the previous one.
+    /// This number is in addition to that.
+    pub nkeep_extra_target_releases: u8,
+
+    /// number of extra recently uploaded repos to keep
+    ///
+    /// The system always keeps one, assuming that the operator may be about to
+    /// update to it.  This number is in addition to that.
+    pub nkeep_extra_newly_uploaded: u8,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ReadOnlyRegionReplacementStartConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -1056,6 +1081,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4569"
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1113,6 +1141,9 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            tuf_repo_pruner.period_secs = 299
+            tuf_repo_pruner.nkeep_extra_target_releases = 51
+            tuf_repo_pruner.nkeep_extra_newly_uploaded = 52
             read_only_region_replacement_start.period_secs = 30
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
@@ -1148,6 +1179,12 @@ mod test {
                     },
                     dropshot_internal: ConfigDropshot {
                         bind_address: "10.1.2.3:4568"
+                            .parse::<SocketAddr>()
+                            .unwrap(),
+                        ..Default::default()
+                    },
+                    dropshot_lockstep: ConfigDropshot {
+                        bind_address: "10.1.2.3:4569"
                             .parse::<SocketAddr>()
                             .unwrap(),
                         ..Default::default()
@@ -1330,6 +1367,11 @@ mod test {
                                 period_secs: Duration::from_secs(300),
                                 min_sled_replication: 3,
                             },
+                        tuf_repo_pruner: TufRepoPrunerConfig {
+                            period_secs: Duration::from_secs(299),
+                            nkeep_extra_target_releases: 51,
+                            nkeep_extra_newly_uploaded: 52,
+                        },
                         read_only_region_replacement_start:
                             ReadOnlyRegionReplacementStartConfig {
                                 period_secs: Duration::from_secs(30),
@@ -1383,6 +1425,9 @@ mod test {
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4569"
+            default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
             subnet.net = "::/56"
@@ -1434,6 +1479,9 @@ mod test {
             region_snapshot_replacement_finish.period_secs = 30
             tuf_artifact_replication.period_secs = 300
             tuf_artifact_replication.min_sled_replication = 3
+            tuf_repo_pruner.period_secs = 299
+            tuf_repo_pruner.nkeep_extra_target_releases = 51
+            tuf_repo_pruner.nkeep_extra_newly_uploaded = 52
             read_only_region_replacement_start.period_secs = 30
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
@@ -1479,6 +1527,9 @@ mod test {
             default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
             bind_address = "10.1.2.3:4568"
+            default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
+            bind_address = "10.1.2.3:4569"
             default_request_body_max_bytes = 1024
             [deployment.internal_dns]
             type = "from_subnet"
@@ -1532,6 +1583,9 @@ mod test {
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024
             [deployment.dropshot_internal]
+            bind_address = "10.1.2.3:4568"
+            default_request_body_max_bytes = 1024
+            [deployment.dropshot_lockstep]
             bind_address = "10.1.2.3:4568"
             default_request_body_max_bytes = 1024
             [deployment.internal_dns]

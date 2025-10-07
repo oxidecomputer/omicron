@@ -1103,7 +1103,7 @@ pub struct OmicronZoneConfig {
     pub zone_type: OmicronZoneType,
     // Use `InstallDataset` if this field is not present in a deserialized
     // blueprint or ledger.
-    #[serde(default = "deserialize_image_source_default")]
+    #[serde(default = "OmicronZoneImageSource::deserialize_default")]
     pub image_source: OmicronZoneImageSource,
 }
 
@@ -1235,6 +1235,10 @@ pub enum OmicronZoneType {
     Nexus {
         /// The address at which the internal nexus server is reachable.
         internal_address: SocketAddrV6,
+        /// The port at which the internal lockstep server is reachable. This
+        /// shares the same IP address with `internal_address`.
+        #[serde(default = "default_nexus_lockstep_port")]
+        lockstep_port: u16,
         /// The address at which the external nexus server is reachable.
         external_ip: IpAddr,
         /// The service vNIC providing external connectivity using OPTE.
@@ -1462,6 +1466,10 @@ impl OmicronZoneType {
     }
 }
 
+fn default_nexus_lockstep_port() -> u16 {
+    omicron_common::address::NEXUS_LOCKSTEP_PORT
+}
+
 /// Like [`OmicronZoneType`], but without any associated data.
 ///
 /// This enum is meant to correspond exactly 1:1 with `OmicronZoneType`.
@@ -1492,8 +1500,22 @@ impl OmicronZoneType {
 /// please add it here rather than doing something ad-hoc in the calling code
 /// so it's more legible.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, EnumIter,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Diffable,
+    EnumIter,
+    Deserialize,
+    Serialize,
+    JsonSchema,
 )]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(any(test, feature = "testing"), derive(test_strategy::Arbitrary))]
 pub enum ZoneKind {
     BoundaryNtp,
     Clickhouse,
@@ -1735,12 +1757,13 @@ impl OmicronZoneImageSource {
             None
         }
     }
-}
 
-// See `OmicronZoneConfig`. This is a separate function instead of being `impl
-// Default` because we don't want to accidentally use this default in Rust code.
-fn deserialize_image_source_default() -> OmicronZoneImageSource {
-    OmicronZoneImageSource::InstallDataset
+    // See `OmicronZoneConfig`. This is a separate function instead of being
+    // `impl Default` because we don't want to accidentally use this default
+    // outside of `serde(default)`.
+    pub fn deserialize_default() -> Self {
+        OmicronZoneImageSource::InstallDataset
+    }
 }
 
 #[cfg(test)]

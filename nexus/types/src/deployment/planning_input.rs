@@ -41,6 +41,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
 use std::error;
 use std::fmt;
@@ -123,6 +124,19 @@ pub struct PlanningInput {
     /// mark under the assumption that they may appear to be impossible because
     /// they're currently in progress.
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
+
+    /// IDs of the currently running Nexus zones
+    ///
+    /// This is used to determine which Nexus instances are currently in
+    /// control, which is needed for safe shutdown decisions during handoff.
+    active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+
+    /// IDs of the about-to-be-running Nexus zones
+    ///
+    /// This is used to identify when it is safe to bump the top-level Nexus
+    /// Generation number in the blueprint, which triggers active Nexuses to
+    /// quiesce.
+    not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInput {
@@ -240,6 +254,16 @@ impl PlanningInput {
         self.policy.oximeter_read_policy.mode.single_node_enabled()
     }
 
+    /// ID of the currently running Nexus zones
+    pub fn active_nexus_zones(&self) -> &BTreeSet<OmicronZoneUuid> {
+        &self.active_nexus_zones
+    }
+
+    /// ID of the soon-to-be-running Nexus zones
+    pub fn not_yet_nexus_zones(&self) -> &BTreeSet<OmicronZoneUuid> {
+        &self.not_yet_nexus_zones
+    }
+
     pub fn all_sleds(
         &self,
         filter: SledFilter,
@@ -318,6 +342,8 @@ impl PlanningInput {
             network_resources: self.network_resources,
             ignore_impossible_mgs_updates_since: self
                 .ignore_impossible_mgs_updates_since,
+            active_nexus_zones: self.active_nexus_zones,
+            not_yet_nexus_zones: self.not_yet_nexus_zones,
         }
     }
 }
@@ -454,6 +480,7 @@ impl CockroachDbSettings {
     JsonSchema,
     Diffable,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CockroachDbClusterVersion {
     #[display("22.1")]
     V22_1,
@@ -496,6 +523,7 @@ impl CockroachDbClusterVersion {
     Diffable,
 )]
 #[serde(tag = "action", content = "data", rename_all = "snake_case")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum CockroachDbPreserveDowngrade {
     /// Do not modify the setting.
     DoNotModify,
@@ -1260,6 +1288,8 @@ pub struct PlanningInputBuilder {
     sleds: BTreeMap<SledUuid, SledDetails>,
     network_resources: OmicronZoneNetworkResources,
     ignore_impossible_mgs_updates_since: DateTime<Utc>,
+    active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
 }
 
 impl PlanningInputBuilder {
@@ -1288,6 +1318,8 @@ impl PlanningInputBuilder {
             sleds: BTreeMap::new(),
             network_resources: OmicronZoneNetworkResources::new(),
             ignore_impossible_mgs_updates_since: Utc::now(),
+            active_nexus_zones: BTreeSet::new(),
+            not_yet_nexus_zones: BTreeSet::new(),
         }
     }
 
@@ -1306,6 +1338,8 @@ impl PlanningInputBuilder {
             network_resources: OmicronZoneNetworkResources::new(),
             ignore_impossible_mgs_updates_since: Utc::now()
                 - MGS_UPDATE_SETTLE_TIMEOUT,
+            active_nexus_zones: BTreeSet::new(),
+            not_yet_nexus_zones: BTreeSet::new(),
         }
     }
 
@@ -1401,6 +1435,20 @@ impl PlanningInputBuilder {
         self.cockroachdb_settings = cockroachdb_settings;
     }
 
+    pub fn set_active_nexus_zones(
+        &mut self,
+        active_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    ) {
+        self.active_nexus_zones = active_nexus_zones;
+    }
+
+    pub fn set_not_yet_nexus_zones(
+        &mut self,
+        not_yet_nexus_zones: BTreeSet<OmicronZoneUuid>,
+    ) {
+        self.not_yet_nexus_zones = not_yet_nexus_zones;
+    }
+
     pub fn build(self) -> PlanningInput {
         PlanningInput {
             policy: self.policy,
@@ -1411,6 +1459,8 @@ impl PlanningInputBuilder {
             network_resources: self.network_resources,
             ignore_impossible_mgs_updates_since: self
                 .ignore_impossible_mgs_updates_since,
+            active_nexus_zones: self.active_nexus_zones,
+            not_yet_nexus_zones: self.not_yet_nexus_zones,
         }
     }
 }

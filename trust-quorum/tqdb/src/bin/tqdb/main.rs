@@ -24,7 +24,7 @@ use std::fmt::Write;
 use std::fs;
 use std::io::IsTerminal;
 use tabled::Tabled;
-use trust_quorum::PlatformId;
+use trust_quorum::BaseboardId;
 use trust_quorum_test_utils::{Event, TqState};
 
 fn main() -> Result<(), anyhow::Error> {
@@ -603,7 +603,10 @@ fn cmd_node_show(
     tqdb: &mut Tqdb,
     serial: usize,
 ) -> anyhow::Result<Option<String>> {
-    let id = PlatformId::new("test".into(), serial.to_string());
+    let id = BaseboardId {
+        part_number: "test".into(),
+        serial_number: serial.to_string(),
+    };
     let Some((node, ctx)) = tqdb.current_state.sut.nodes.get(&id) else {
         bail!("failed to load node: {id}");
     };
@@ -691,7 +694,7 @@ fn cmd_summary(tqdb: &mut Tqdb) -> anyhow::Result<Option<String>> {
         writeln!(
             &mut s,
             "    coordinator: {}",
-            latest_config.coordinator.serial_number()
+            latest_config.coordinator.serial_number
         )?;
         writeln!(&mut s, "    total members: {}", latest_config.members.len())?;
         writeln!(

@@ -193,6 +193,7 @@ impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     Deserialize,
     JsonSchema,
 )]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlannerConfig {
     /// Whether to add zones even if a mupdate override is present.
     ///

@@ -1,3 +1,26 @@
+EXECUTING COMMAND: omdb ["db", "db-metadata", "ls-nexus"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Target Blueprint ......<REDACTED_BLUEPRINT_ID>....... @ nexus_generation: 1
+ID                                   |LAST_DRAINED_BLUEPRINT |STATE  |TRANSITIONING_TO 
+-------------------------------------+-----------------------+-------+-----------------
+..........<REDACTED_UUID>........... |                       |active |                 
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+=============================================
+EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "..........<REDACTED_UUID>..........."]
+termination: Exited(1)
+---------------------------------------------
+stdout:
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
+Error: Nexus ..........<REDACTED_UUID>........... not ready to quiesce (nexus generation 1 >= blueprint gen 1)
+=============================================
 EXECUTING COMMAND: omdb ["db", "disks", "list"]
 termination: Exited(0)
 ---------------------------------------------
@@ -411,6 +434,10 @@ task: "tuf_artifact_replication"
     replicate update repo artifacts across sleds
 
 
+task: "tuf_repo_pruner"
+    determine which TUF repos' artifacts can be pruned
+
+
 task: "v2p_manager"
     manages opte v2p mappings for vpc networking
 
@@ -746,14 +773,12 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-/!\ errors:                  1
-      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-    total ereports received:      0
-      new ereports ingested:      0
-    total HTTP requests sent:     0
-      total collection errors:    0
-    reporters with ereports:      0
-    reporters with collection errors:   0
+    total ereports received:             <TOTAL_EREPORTS_RECEIVED_REDACTED>
+      new ereports ingested:             <NEW_EREPORTS_INGESTED_REDACTED>
+    total HTTP requests sent:            <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
+      total collection errors:           <TOTAL_COLLECTION_ERRORS_REDACTED>
+    reporters with ereports:             <REPORTERS_WITH_EREPORTS_REDACTED>
+    reporters with collection errors:    <REPORTERS_WITH_COLLECTION_ERRORS_REDACTED>
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -797,6 +822,18 @@ task: "tuf_artifact_replication"
       copy ok:          0
       copy err:         0
     local repos: 0
+
+task: "tuf_repo_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    configuration:
+        nkeep_recent_releases: 3
+        nkeep_recent_uploads:  3
+    repo pruned: none
+    repos kept because they're recent target releases: none
+    repos kept because they're recent uploads: none
+    other repos eligible for pruning: none
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1264,14 +1301,12 @@ task: "sp_ereport_ingester"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-/!\ errors:                  1
-      - failed to resolve MGS addresses: proto error: no records found for Query { name: Name("_mgs._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
-    total ereports received:      0
-      new ereports ingested:      0
-    total HTTP requests sent:     0
-      total collection errors:    0
-    reporters with ereports:      0
-    reporters with collection errors:   0
+    total ereports received:             <TOTAL_EREPORTS_RECEIVED_REDACTED>
+      new ereports ingested:             <NEW_EREPORTS_INGESTED_REDACTED>
+    total HTTP requests sent:            <TOTAL_HTTP_REQUESTS_SENT_REDACTED>
+      total collection errors:           <TOTAL_COLLECTION_ERRORS_REDACTED>
+    reporters with ereports:             <REPORTERS_WITH_EREPORTS_REDACTED>
+    reporters with collection errors:    <REPORTERS_WITH_COLLECTION_ERRORS_REDACTED>
 
 task: "support_bundle_collector"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1315,6 +1350,18 @@ task: "tuf_artifact_replication"
       copy ok:          0
       copy err:         0
     local repos: 0
+
+task: "tuf_repo_pruner"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    configuration:
+        nkeep_recent_releases: 3
+        nkeep_recent_uploads:  3
+    repo pruned: none
+    repos kept because they're recent target releases: none
+    repos kept because they're recent uploads: none
+    other repos eligible for pruning: none
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
@@ -1514,7 +1561,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------
@@ -1638,7 +1685,7 @@ parent:    <none>
 
  PENDING MGS-MANAGED UPDATES: 0
 
-empty planning report for blueprint ......<REDACTED_BLUEPRINT_ID>........
+blueprint source: constructed by an automated test
 
 
 ---------------------------------------------
@@ -1742,4 +1789,14 @@ note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=d
 note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
 wrote <TMP_PATH_REDACTED>
+=============================================
+EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "--skip-blueprint-validation", "..........<REDACTED_UUID>..........."]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Marked ..........<REDACTED_UUID>........... quiesced
+---------------------------------------------
+stderr:
+note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
+note: database schema version matches expected (<redacted database version>)
 =============================================

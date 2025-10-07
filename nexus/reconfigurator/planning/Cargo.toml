@@ -8,6 +8,9 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
+camino-tempfile.workspace = true
+clap.workspace = true
 clickhouse-admin-types.workspace = true
 cockroach-admin-types.workspace = true
 chrono.workspace = true
@@ -41,8 +44,12 @@ static_assertions.workspace = true
 strum.workspace = true
 swrite.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
+tufaceous.workspace = true
 tufaceous-artifact.workspace = true
+tufaceous-lib.workspace = true
 typed-rng.workspace = true
+update-common.workspace = true
 uuid.workspace = true
 
 omicron-workspace-hack.workspace = true
@@ -50,6 +57,7 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 dropshot.workspace = true
 expectorate.workspace = true
+hex-literal.workspace = true
 maplit.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true

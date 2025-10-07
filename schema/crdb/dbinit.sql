@@ -189,8 +189,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_state AS ENUM (
 
 -- The model of CPU installed in a particular sled, discovered by sled-agent
 -- and reported to Nexus. This determines what VMs can run on a sled: instances
--- that require a specific minimum CPU platform can only run on sleds whose
--- CPUs support all the features of that platform.
+-- that require a specific CPU platform can only run on sleds whose CPUs support
+-- all the features of that platform.
 CREATE TYPE IF NOT EXISTS omicron.public.sled_cpu_family AS ENUM (
     -- Sled-agent didn't recognize the sled's CPU.
     'unknown',
@@ -895,15 +895,36 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     time_deleted TIMESTAMPTZ,
 
     silo_id UUID NOT NULL,
-    external_id TEXT NOT NULL
+
+    -- if the user provision type is 'api_only' or 'jit', then this field must
+    -- contain a value
+    external_id TEXT,
+
+    user_provision_type omicron.public.user_provision_type,
+
+    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
+      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
+      OR (time_deleted IS NOT NULL)
+    ),
+
+    CONSTRAINT external_id_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'api_only' THEN external_id IS NOT NULL
+          WHEN 'jit' THEN external_id IS NOT NULL
+        END
+    )
 );
 
-/* This index lets us quickly find users for a given silo. */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_user_by_silo ON omicron.public.silo_user (
-    silo_id,
-    external_id
-) WHERE
-    time_deleted IS NULL;
+/* This index lets us quickly find users for a given silo, and prevents
+   multiple users from having the same external id (for certain provision
+   types). */
+CREATE UNIQUE INDEX IF NOT EXISTS
+ lookup_silo_user_by_silo
+ON
+ omicron.public.silo_user (silo_id, external_id)
+WHERE
+ time_deleted IS NULL AND
+ (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 CREATE TABLE IF NOT EXISTS omicron.public.silo_user_password_hash (
     silo_user_id UUID NOT NULL,
@@ -924,14 +945,33 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_group (
     time_deleted TIMESTAMPTZ,
 
     silo_id UUID NOT NULL,
-    external_id TEXT NOT NULL
+
+    -- if the user provision type is 'api_only' or 'jit', then this field must
+    -- contain a value
+    external_id TEXT,
+
+    user_provision_type omicron.public.user_provision_type,
+
+    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
+      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
+      OR (time_deleted IS NOT NULL)
+    ),
+
+    CONSTRAINT external_id_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'api_only' THEN external_id IS NOT NULL
+          WHEN 'jit' THEN external_id IS NOT NULL
+        END
+    )
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_group_by_silo ON omicron.public.silo_group (
-    silo_id,
-    external_id
-) WHERE
-    time_deleted IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS
+ lookup_silo_group_by_silo
+ON
+ omicron.public.silo_group (silo_id, external_id)
+WHERE
+ time_deleted IS NULL and
+ (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 /*
  * Silo group membership
@@ -1200,9 +1240,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
      'best_effort'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.instance_cpu_platform AS ENUM (
+  'amd_milan',
+  'amd_turin'
+);
+
 /*
  * Represents the *desired* state of an instance, as requested by the user.
-*/
+ */
 CREATE TYPE IF NOT EXISTS omicron.public.instance_intended_state AS ENUM (
     /* The instance should be running. */
     'running',
@@ -1311,6 +1356,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * action should be taken when the instance's VMM state changes.
      */
     intended_state omicron.public.instance_intended_state NOT NULL,
+
+    /*
+     * The required CPU platform for this instance. If set, the instance's VMs
+     * may see additional features present in that platform, but in exchange
+     * they may only run on sleds whose CPUs support all of those features.
+     *
+     * If this is NULL, the control plane ignores CPU constraints when selecting
+     * a sled for this instance. Then, once it has selected a sled, it supplies
+     * a "lowest common denominator" CPU platform that is compatible with that
+     * sled to maximize the number of sleds the VM can migrate to.
+     */
+    cpu_platform omicron.public.instance_cpu_platform,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -2531,9 +2588,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
     -- Filename provided by the user.
     file_name TEXT NOT NULL,
 
+    -- Set when the repository's artifacts can be deleted from replication.
+    time_pruned TIMESTAMPTZ,
+
     CONSTRAINT unique_checksum UNIQUE (sha256),
     CONSTRAINT unique_system_version UNIQUE (system_version)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS tuf_repo_not_pruned
+    ON omicron.public.tuf_repo (id)
+    WHERE time_pruned IS NULL;
 
 -- Describes an individual artifact from an uploaded TUF repo.
 --
@@ -4312,12 +4376,22 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_sled_config_zone (
     image_source omicron.public.inv_zone_image_source NOT NULL,
     image_artifact_sha256 STRING(64),
 
+    -- Nexus lockstep service port, used only by Nexus zones
+    nexus_lockstep_port INT4
+        CHECK (nexus_lockstep_port IS NULL OR nexus_lockstep_port BETWEEN 0 AND 65535),
+
     CONSTRAINT zone_image_source_artifact_hash_present CHECK (
         (image_source = 'artifact'
             AND image_artifact_sha256 IS NOT NULL)
         OR
         (image_source != 'artifact'
             AND image_artifact_sha256 IS NULL)
+    ),
+
+    CONSTRAINT nexus_lockstep_port_for_nexus_zones CHECK (
+        (zone_type = 'nexus' AND nexus_lockstep_port IS NOT NULL)
+        OR
+        (zone_type != 'nexus' AND nexus_lockstep_port IS NULL)
     ),
 
     PRIMARY KEY (inv_collection_id, sled_config_id, id)
@@ -4489,6 +4563,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.bp_physical_disk_disposition AS ENUM (
     'expunged'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.bp_source AS ENUM (
+    'rss',
+    'planner',
+    'reconfigurator_cli_edit',
+    'test'
+);
+
 -- list of all blueprints
 CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     id UUID PRIMARY KEY,
@@ -4542,7 +4623,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     target_release_minimum_generation INT8 NOT NULL,
 
     -- The generation of the active group of Nexus instances
-    nexus_generation INT8 NOT NULL
+    nexus_generation INT8 NOT NULL,
+
+    -- The source of this blueprint
+    source omicron.public.bp_source NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -4755,6 +4839,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Generation for Nexus zones
     nexus_generation INT8,
 
+    -- Nexus lockstep service port, used only by Nexus zones
+    nexus_lockstep_port INT4
+        CHECK (nexus_lockstep_port IS NULL OR nexus_lockstep_port BETWEEN 0 AND 65535),
+
     PRIMARY KEY (blueprint_id, id),
 
     CONSTRAINT expunged_disposition_properties CHECK (
@@ -4778,6 +4866,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
         (zone_type = 'nexus' AND nexus_generation IS NOT NULL)
         OR
         (zone_type != 'nexus' AND nexus_generation IS NULL)
+    ),
+
+    CONSTRAINT nexus_lockstep_port_for_nexus_zones CHECK (
+        (zone_type = 'nexus' AND nexus_lockstep_port IS NOT NULL)
+        OR
+        (zone_type != 'nexus' AND nexus_lockstep_port IS NULL)
     )
 );
 
@@ -4971,6 +5065,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.cockroachdb_zone_id_to_node_id (
     PRIMARY KEY (omicron_zone_id, crdb_node_id)
 );
 
+-- Debug logging of blueprint planner reports
+--
+-- When the blueprint planner inside Nexus runs, it generates a report
+-- describing what it did and why. Once the blueprint is generated, this report
+-- is only intended for humans for debugging.  Because no shipping software ever
+-- never needs to read this and because we want to prioritize ease of evolving
+-- these structures, we we punt on a SQL representation entirely. This table
+-- stores a JSON blob containing the planning reports for blueprints, but we _do
+-- not_ provide any way to parse this data in Nexus or other shipping software.
+-- (JSON in the database has all the normal problems of versioning, etc., and we
+-- punt on that entirely by saying "do not parse this".) omdb and other dev
+-- tooling is free to (attempt to) parse and interpret these JSON blobs.
+CREATE TABLE IF NOT EXISTS omicron.public.debug_log_blueprint_planning (
+    blueprint_id UUID NOT NULL PRIMARY KEY,
+    debug_blob JSONB NOT NULL
+);
+
 /*
  * List of debug datasets available for use (e.g., by support bundles).
  *
@@ -5139,6 +5250,12 @@ CREATE INDEX IF NOT EXISTS lookup_anti_affinity_group_instance_membership_by_ins
     instance_id
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.vmm_cpu_platform AS ENUM (
+  'sled_default',
+  'amd_milan',
+  'amd_turin'
+);
+
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -5150,7 +5267,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     sled_id UUID NOT NULL,
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
-    state omicron.public.vmm_state NOT NULL
+    state omicron.public.vmm_state NOT NULL,
+    cpu_platform omicron.public.vmm_cpu_platform
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
@@ -6617,7 +6735,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '189.0.0', NULL)
+    (TRUE, NOW(), NOW(), '196.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

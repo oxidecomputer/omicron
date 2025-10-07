@@ -4419,7 +4419,6 @@ mod test {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::QueryDsl;
-    use gateway_client::types::SpType;
     use nexus_db_schema::schema;
     use nexus_inventory::examples::Representative;
     use nexus_inventory::examples::representative;
@@ -4436,9 +4435,9 @@ mod test {
         ConfigReconcilerInventoryStatus, OmicronZoneImageSource,
     };
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
-    use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPageWhich;
+    use nexus_types::inventory::{BaseboardId, SpType};
     use omicron_common::api::external::Error;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;

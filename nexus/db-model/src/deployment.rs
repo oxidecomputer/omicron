@@ -25,10 +25,9 @@ use nexus_db_schema::schema::{
     bp_oximeter_read_policy, bp_pending_mgs_update_host_phase_1,
     bp_pending_mgs_update_rot, bp_pending_mgs_update_rot_bootloader,
     bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
+    debug_log_blueprint_planning,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
-use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -49,6 +48,10 @@ use nexus_types::deployment::{BlueprintDatasetDisposition, ExpectedVersion};
 use nexus_types::deployment::{
     BlueprintHostPhase2DesiredContents, PendingMgsUpdateHostPhase1Details,
 };
+use nexus_types::deployment::{
+    BlueprintHostPhase2DesiredSlots, PlanningReport,
+};
+use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintSource};
 use nexus_types::deployment::{BlueprintZoneImageSource, blueprint_zone_type};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
@@ -82,6 +85,7 @@ pub struct Blueprint {
     pub comment: String,
     pub target_release_minimum_generation: Generation,
     pub nexus_generation: Generation,
+    pub source: DbBpSource,
 }
 
 impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
@@ -102,6 +106,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
                 bp.target_release_minimum_generation,
             ),
             nexus_generation: Generation(bp.nexus_generation),
+            source: DbBpSource::from(&bp.source),
         }
     }
 }
@@ -125,6 +130,47 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,
+            source: value.source.into(),
+        }
+    }
+}
+
+impl_enum_type!(
+    BpSourceEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum DbBpSource;
+
+    // Enum values
+    Rss => b"rss"
+    Planner => b"planner"
+    ReconfiguratorCliEdit => b"reconfigurator_cli_edit"
+    Test => b"test"
+);
+
+impl From<&'_ BlueprintSource> for DbBpSource {
+    fn from(value: &'_ BlueprintSource) -> Self {
+        match value {
+            BlueprintSource::Rss => Self::Rss,
+            // We don't store planning reports, so both of these variants squish
+            // to `Planner`.
+            BlueprintSource::Planner(_)
+            | BlueprintSource::PlannerLoadedFromDatabase => Self::Planner,
+            BlueprintSource::ReconfiguratorCliEdit => {
+                Self::ReconfiguratorCliEdit
+            }
+            BlueprintSource::Test => Self::Test,
+        }
+    }
+}
+
+impl From<DbBpSource> for BlueprintSource {
+    fn from(value: DbBpSource) -> Self {
+        match value {
+            DbBpSource::Rss => Self::Rss,
+            DbBpSource::Planner => Self::PlannerLoadedFromDatabase,
+            DbBpSource::ReconfiguratorCliEdit => Self::ReconfiguratorCliEdit,
+            DbBpSource::Test => Self::Test,
         }
     }
 }
@@ -528,6 +574,7 @@ pub struct BpOmicronZone {
     pub image_source: DbBpZoneImageSource,
     pub image_artifact_sha256: Option<ArtifactHash>,
     pub nexus_generation: Option<Generation>,
+    pub nexus_lockstep_port: Option<SqlU16>,
 }
 
 impl BpOmicronZone {
@@ -590,6 +637,7 @@ impl BpOmicronZone {
             snat_first_port: None,
             snat_last_port: None,
             nexus_generation: None,
+            nexus_lockstep_port: None,
         };
 
         match &blueprint_zone.zone_type {
@@ -717,6 +765,7 @@ impl BpOmicronZone {
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
+                lockstep_port,
                 external_ip,
                 nic,
                 external_tls,
@@ -731,6 +780,8 @@ impl BpOmicronZone {
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
                 bp_omicron_zone.second_service_ip =
                     Some(IpNetwork::from(external_ip.ip));
+                bp_omicron_zone.nexus_lockstep_port =
+                    Some(SqlU16::from(*lockstep_port));
                 bp_omicron_zone.nexus_external_tls = Some(*external_tls);
                 bp_omicron_zone.nexus_external_dns_servers = Some(
                     external_dns_servers
@@ -925,6 +976,9 @@ impl BpOmicronZone {
             ZoneType::Nexus => {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                     internal_address: primary_address,
+                    lockstep_port: *self.nexus_lockstep_port.ok_or_else(
+                        || anyhow!("expected 'nexus_lockstep_port'"),
+                    )?,
                     external_ip: OmicronZoneExternalFloatingIp {
                         id: external_ip_id?,
                         ip: self
@@ -1517,5 +1571,38 @@ impl BpPendingMgsUpdateComponent for BpPendingMgsUpdateHostPhase1 {
                 },
             ),
         }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = debug_log_blueprint_planning)]
+pub struct DebugLogBlueprintPlanning {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub debug_blob: serde_json::Value,
+}
+
+impl DebugLogBlueprintPlanning {
+    pub fn new(
+        blueprint_id: BlueprintUuid,
+        report: Arc<PlanningReport>,
+    ) -> Result<Self, serde_json::Error> {
+        let report = serde_json::to_value(report)?;
+
+        // We explicitly _don't_ define a struct describing the format of
+        // `debug_blob`, because we don't want anyone to attempt to parse it. It
+        // should only be useful to humans, potentially via omdb, and they (and
+        // omdb) can duplicate these fields to understand it.
+        let git_commit = if env!("VERGEN_GIT_DIRTY") == "true" {
+            concat!(env!("VERGEN_GIT_SHA"), "-dirty")
+        } else {
+            env!("VERGEN_GIT_SHA")
+        };
+
+        let debug_blob = serde_json::json!({
+            "git-commit": git_commit,
+            "report": report,
+        });
+
+        Ok(Self { blueprint_id: blueprint_id.into(), debug_blob })
     }
 }

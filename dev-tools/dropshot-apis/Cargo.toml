@@ -1,0 +1,34 @@
+[package]
+name = "omicron-dropshot-apis"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+bootstrap-agent-api.workspace = true
+camino.workspace = true
+clap.workspace = true
+clickhouse-admin-api.workspace = true
+cockroach-admin-api.workspace = true
+dns-server-api.workspace = true
+dropshot-api-manager-types.workspace = true
+dropshot-api-manager.workspace = true
+gateway-api.workspace = true
+installinator-api.workspace = true
+nexus-external-api.workspace = true
+nexus-internal-api.workspace = true
+nexus-lockstep-api.workspace = true
+ntp-admin-api.workspace = true
+omicron-workspace-hack.workspace = true
+openapi-lint.workspace = true
+openapiv3.workspace = true
+oximeter-api.workspace = true
+repo-depot-api.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sled-agent-api.workspace = true
+wicketd-api.workspace = true
+
+[lints]
+workspace = true

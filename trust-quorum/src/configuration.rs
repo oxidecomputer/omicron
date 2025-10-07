@@ -5,8 +5,7 @@
 //! A configuration of a trust quroum at a given epoch
 
 use crate::crypto::{EncryptedRackSecrets, RackSecret, Sha3_256Digest};
-use crate::validators::ValidatedReconfigureMsg;
-use crate::{Epoch, PlatformId, Threshold};
+use crate::{BaseboardId, Epoch, Threshold};
 use daft::Diffable;
 use gfss::shamir::{Share, SplitError};
 use iddqd::{IdOrdItem, id_upcast};
@@ -15,7 +14,7 @@ use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use slog_error_chain::SlogInlineError;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq, SlogInlineError)]
 pub enum ConfigurationError {
@@ -52,11 +51,11 @@ pub struct Configuration {
     pub epoch: Epoch,
 
     /// Who was the coordinator of this reconfiguration?
-    pub coordinator: PlatformId,
+    pub coordinator: BaseboardId,
 
     // All members of the current configuration and the hash of their key shares
     #[serde_as(as = "Vec<(_, _)>")]
-    pub members: BTreeMap<PlatformId, Sha3_256Digest>,
+    pub members: BTreeMap<BaseboardId, Sha3_256Digest>,
 
     /// The number of sleds required to reconstruct the rack secret
     pub threshold: Threshold,
@@ -75,6 +74,14 @@ impl IdOrdItem for Configuration {
     id_upcast!();
 }
 
+pub struct NewConfigParams<'a> {
+    pub rack_id: RackUuid,
+    pub epoch: Epoch,
+    pub members: &'a BTreeSet<BaseboardId>,
+    pub threshold: Threshold,
+    pub coordinator_id: &'a BaseboardId,
+}
+
 impl Configuration {
     /// Create a new configuration for the trust quorum
     ///
@@ -82,15 +89,15 @@ impl Configuration {
     /// coordinator will fill this in as necessary after retrieving shares for
     /// the last committed epoch.
     pub fn new(
-        reconfigure_msg: &ValidatedReconfigureMsg,
-    ) -> Result<(Configuration, BTreeMap<PlatformId, Share>), ConfigurationError>
+        params: NewConfigParams<'_>,
+    ) -> Result<(Configuration, BTreeMap<BaseboardId, Share>), ConfigurationError>
     {
-        let coordinator = reconfigure_msg.coordinator_id().clone();
+        let coordinator = params.coordinator_id.clone();
         let rack_secret = RackSecret::new();
         let shares = rack_secret.split(
-            reconfigure_msg.threshold(),
-            reconfigure_msg
-                .members()
+            params.threshold,
+            params
+                .members
                 .len()
                 .try_into()
                 .map_err(|_| ConfigurationError::TooManyMembers)?,
@@ -103,10 +110,11 @@ impl Configuration {
                 (s.clone(), digest)
             });
 
-        let mut members: BTreeMap<PlatformId, Sha3_256Digest> = BTreeMap::new();
-        let mut shares: BTreeMap<PlatformId, Share> = BTreeMap::new();
+        let mut members: BTreeMap<BaseboardId, Sha3_256Digest> =
+            BTreeMap::new();
+        let mut shares: BTreeMap<BaseboardId, Share> = BTreeMap::new();
         for (platform_id, (share, digest)) in
-            reconfigure_msg.members().iter().cloned().zip(shares_and_digests)
+            params.members.iter().cloned().zip(shares_and_digests)
         {
             members.insert(platform_id.clone(), digest);
             shares.insert(platform_id, share);
@@ -114,11 +122,11 @@ impl Configuration {
 
         Ok((
             Configuration {
-                rack_id: reconfigure_msg.rack_id(),
-                epoch: reconfigure_msg.epoch(),
+                rack_id: params.rack_id,
+                epoch: params.epoch,
                 coordinator,
                 members,
-                threshold: reconfigure_msg.threshold(),
+                threshold: params.threshold,
                 encrypted_rack_secrets: None,
             },
             shares,

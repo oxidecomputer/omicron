@@ -4,12 +4,13 @@
 
 use anyhow::{Context, anyhow};
 use nexus_auth::context::OpContext;
-use nexus_client::types::QuiesceState;
+use nexus_lockstep_client::types::QuiesceState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::PlannerConfig;
 use omicron_common::api::external::Error;
@@ -28,12 +29,12 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-    let nexus_internal_url = format!(
+    let nexus_lockstep_url = format!(
         "http://{}",
-        cptestctx.server.get_http_server_internal_address().await
+        cptestctx.server.get_http_server_lockstep_address().await
     );
     let nexus_client =
-        nexus_client::Client::new(&nexus_internal_url, log.clone());
+        nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
 
     // Collect what we need to modify the blueprint.
     let collection = wait_for_condition(
@@ -83,7 +84,7 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
     )
     .expect("creating BlueprintBuilder");
     builder.set_nexus_generation(blueprint1.nexus_generation.next());
-    let blueprint2 = builder.build();
+    let blueprint2 = builder.build(BlueprintSource::Test);
     nexus
         .blueprint_import(&opctx, blueprint2.clone())
         .await

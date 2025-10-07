@@ -12,10 +12,8 @@ Clickhouse Single-Node Cluster Admin (client: clickhouse-admin-single-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
 
 CockroachDB Cluster Admin (client: cockroach-admin-client)
-    consumed by: dpd (dendrite/dpd) via 1 path
     consumed by: omicron-nexus (omicron/nexus) via 3 paths
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
-    consumed by: tfportd (dendrite/tfportd) via 1 path
 
 Crucible Agent (client: crucible-agent-client)
     consumed by: omicron-nexus (omicron/nexus) via 1 path
@@ -69,6 +67,8 @@ Nexus Internal API (client: nexus-client)
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
     consumed by: oximeter-collector (omicron/oximeter/collector) via 1 path
     consumed by: propolis-server (propolis/bin/propolis-server) via 3 paths
+
+Nexus Internal Lockstep API (client: nexus-lockstep-client)
 
 NTP Admin (client: ntp-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths
