@@ -4,15 +4,18 @@
 
 //! A runnable async trust quorum node that wraps the sans-io [`crate::Node`]
 
+use crate::connection_manager::ConnMgr;
 use crate::{BaseboardId, Node, NodeCtx};
 use camino::Utf8PathBuf;
 use slog::{Logger, error, info, o, warn};
 use sprockets_tls::Stream;
 use sprockets_tls::client::Client;
 use sprockets_tls::keys::SprocketsConfig;
-use sprockets_tls::server::Server;
+use sprockets_tls::server::{Server, SprocketsAcceptor};
 use std::collections::BTreeSet;
 use std::net::{SocketAddr, SocketAddrV6};
+use thiserror::Error;
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -23,12 +26,50 @@ pub struct Config {
     pub sprockets: SprocketsConfig,
 }
 
-pub struct AsyncNode {
+/// A request sent to the `NodeTask` from the `NodeTaskHandle`
+pub enum NodeApiRequest {
+    /// Inform the `Node` of currently known IP addresses on the bootstrap network
+    ///
+    /// These are generated from DDM prefixes learned by the bootstrap agent.
+    BootstrapAddresses(BTreeSet<SocketAddrV6>),
+}
+
+/// An error response from a `NodeApiRequest`
+#[derive(Error, Debug, PartialEq)]
+pub enum NodeApiError {
+    #[error("failed to send request to node task")]
+    Send,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeTaskHandle {
+    tx: mpsc::Sender<NodeApiRequest>,
+}
+
+impl NodeTaskHandle {
+    /// Inform the node of currently known IP addresses on the bootstrap network
+    ///
+    /// These are generated from DDM prefixes learned by the bootstrap agent.
+    pub async fn load_peer_addresses(
+        &self,
+        addrs: BTreeSet<SocketAddrV6>,
+    ) -> Result<(), NodeApiError> {
+        self.tx
+            .send(NodeApiRequest::BootstrapAddresses(addrs))
+            .await
+            .map_err(|_| NodeApiError::Send)?;
+        Ok(())
+    }
+}
+
+pub struct NodeTask {
     log: Logger,
     config: Config,
     node: Node,
     ctx: NodeCtx,
-    bootstrap_addrs: BTreeSet<SocketAddrV6>,
+
+    // Handle requests received from `PeerHandle`
+    rx: mpsc::Receiver<NodeApiRequest>,
 }
 
 fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
@@ -38,19 +79,37 @@ fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
     BaseboardId { part_number, serial_number }
 }
 
-impl AsyncNode {
-    pub fn new(config: Config, log: &Logger) -> AsyncNode {
+impl NodeTask {
+    pub fn new(config: Config, log: &Logger) -> (NodeTask, NodeTaskHandle) {
         let log = log.new(o!(
             "component" => "trust-quorum",
             "platform_id" => config.baseboard_id.to_string()
         ));
+        // We only expect one outstanding request at a time for `Init_` or
+        // `LoadRackSecret` requests, We can have one of those requests in
+        // flight while allowing `PeerAddresses` updates. We also allow status
+        // requests in parallel. Just leave some room.
+        let (tx, rx) = mpsc::channel(10);
 
         // TODO: Load persistent state from ledger
         let mut ctx = NodeCtx::new(config.baseboard_id.clone());
         let node = Node::new(&log, &mut ctx);
-        AsyncNode { log, config, node, ctx, bootstrap_addrs: BTreeSet::new() }
+        (
+            NodeTask {
+                log,
+                config,
+                node,
+                ctx,
+                bootstrap_addrs: BTreeSet::new(),
+                rx,
+            },
+            NodeTaskHandle { tx },
+        )
     }
 
+    /// Run the main loop of the node
+    ///
+    /// This should be spawned into its own tokio task
     pub async fn run(&mut self) {
         let listener = Server::new(
             self.config.sprockets.clone(),
@@ -61,44 +120,82 @@ impl AsyncNode {
         .expect("sprockets server can listen");
         info!(self.log, "Started listening"; "local_addr" => %self.config.listen_addr);
         loop {
-            // TODO: Plumb through corpus update
-            let acceptor = match listener.accept(vec![]).await {
-                Ok(acceptor) => acceptor,
-                Err(err) => {
-                    error!(self.log, "Failed to accept connection: {err}");
-                    continue;
+            tokio::select! {
+                // TODO: Plumb through corpus update in `listener.accept`
+                res = listener.accept(vec![]) => {
+                    match res {
+                        Ok(acceptor) => {
+                            self.on_accept(acceptor).await
+                        }
+                        Err(err) => {
+                            error!(self.log, "Failed to accept connection: {err}");
+                            continue;
+                        }
+                    }
                 }
-            };
-            let log = self.log.clone();
-            tokio::spawn(async move {
-                match acceptor.handshake().await {
-                    Ok((stream, addr)) => {
-                        let platform_id =
-                            stream.peer_platform_id().as_str().unwrap();
-                        let baseboard_id =
-                            platform_id_to_baseboard_id(platform_id);
+                Some(request) = self.rx.recv() => {
+                    //self.on_api_request(request).await;
+                }
+            }
+        }
+    }
 
-                        // TODO: Conversion between `PlatformId` and `BaseboardId` should
-                        // happen in `sled-agent-types`. This is waiting on an update
-                        // to the `dice-mfg-msgs` crate.
-                        let log = log.new(
-                            o!("baseboard_id" => baseboard_id.to_string()),
+    async fn on_accept(&mut self, acceptor: SprocketsAcceptor) {
+        let log = self.log.clone();
+        tokio::spawn(async move {
+            match acceptor.handshake().await {
+                Ok((stream, addr)) => {
+                    let platform_id =
+                        stream.peer_platform_id().as_str().unwrap();
+                    let baseboard_id = platform_id_to_baseboard_id(platform_id);
+
+                    // TODO: Conversion between `PlatformId` and `BaseboardId` should
+                    // happen in `sled-agent-types`. This is waiting on an update
+                    // to the `dice-mfg-msgs` crate.
+                    let log =
+                        log.new(o!("baseboard_id" => baseboard_id.to_string()));
+                    let SocketAddr::V6(addr) = addr else {
+                        warn!(
+                            log,
+                            "Got connection from IPv4 address";
+                            "addr" => addr
                         );
-                        let SocketAddr::V6(addr) = addr else {
-                            warn!(
-                                log,
-                                "Got connection from IPv4 address";
-                                "addr" => addr
-                            );
-                            return;
-                        };
-                        info!(log, "Accepted sprockets connection"; "addr" => %addr);
-                    }
-                    Err(err) => {
-                        error!(log, "Failed to accept a connection: {err:?}");
-                    }
+                        return;
+                    };
+                    info!(log, "Accepted sprockets connection"; "addr" => %addr);
                 }
-            });
+                Err(err) => {
+                    error!(log, "Failed to accept a connection: {err:?}");
+                }
+            }
+        });
+    }
+
+    async fn on_api_request(&mut self, request: NodeApiRequest) {
+        match request {
+            NodeApiRequest::BootstrapAddresses(addrs) => {
+                info!(self.log, "Updated Peer Addresses: {addrs:?}");
+                self.manage_connections(addrs).await;
+            }
+        }
+    }
+
+    async fn manage_connections(&mut self, addrs: BTreeSet<SocketAddrV6>) {
+        if self.bootstrap_addrs == addrs {
+            return;
+        }
+
+        let to_remove: BTreeSet<_> =
+            self.bootstrap_addrs.difference(&addrs).cloned().collect();
+        let to_add: BTreeSet<_> =
+            addrs.difference(&self.bootstrap_addrs).cloned().collect();
+
+        self.bootstrap_addrs = addrs;
+
+        // Start a new client for each node that has an addr < self.config.listen_addr
+        // This is analagous to a "downhill rule" for connection management
+        for addr in to_add {
+            if addr < self.config.listen_addr {}
         }
     }
 }
@@ -198,8 +295,8 @@ mod tests {
 
         let configs = pki_doc_to_node_configs(dir, num_nodes);
 
-        let mut server = AsyncNode::new(configs[0].clone(), &logctx.log);
-        tokio::spawn(async move { server.run().await });
+        let (mut task, handle) = NodeTask::new(configs[0].clone(), &logctx.log);
+        tokio::spawn(async move { task.run().await });
 
         loop {
             if let Err(e) = Client::connect(
