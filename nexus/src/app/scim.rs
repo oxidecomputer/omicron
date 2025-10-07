@@ -46,7 +46,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-    ) -> CreateResult<views::ScimClientBearerTokenCreateResponse> {
+    ) -> CreateResult<views::ScimClientBearerTokenValue> {
         let (.., _authz_silo, _) =
             silo_lookup.fetch_for(authz::Action::Modify).await?;
 

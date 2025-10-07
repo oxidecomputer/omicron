@@ -10414,7 +10414,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ScimClientBearerTokenCreateResponse"
+                  "$ref": "#/components/schemas/ScimClientBearerTokenValue"
                 }
               }
             }
@@ -23854,7 +23854,7 @@
           "time_created"
         ]
       },
-      "ScimClientBearerTokenCreateResponse": {
+      "ScimClientBearerTokenValue": {
         "description": "The POST response is the only time the generated bearer token is returned to the client.",
         "type": "object",
         "properties": {

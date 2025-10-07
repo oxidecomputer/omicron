@@ -921,7 +921,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<
-        HttpResponseCreated<views::ScimClientBearerTokenCreateResponse>,
+        HttpResponseCreated<views::ScimClientBearerTokenValue>,
         HttpError,
     > {
         let apictx = rqctx.context();

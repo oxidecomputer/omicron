@@ -613,7 +613,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<
-        HttpResponseCreated<views::ScimClientBearerTokenCreateResponse>,
+        HttpResponseCreated<views::ScimClientBearerTokenValue>,
         HttpError,
     >;
 
