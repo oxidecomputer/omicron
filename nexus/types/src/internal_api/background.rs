@@ -617,6 +617,12 @@ pub enum BlueprintPlannerStatus {
     /// by the config file.
     Disabled,
 
+    /// The blueprint limit was reached, so automatic blueprint planning was
+    /// disabled.
+    ///
+    /// `report` contains what was planned.
+    LimitReached { limit: u64, report: Arc<PlanningReport> },
+
     /// An error occurred during planning or blueprint insertion.
     Error(String),
 
@@ -625,6 +631,8 @@ pub enum BlueprintPlannerStatus {
     Unchanged {
         parent_blueprint_id: BlueprintUuid,
         report: Arc<PlanningReport>,
+        blueprint_count: u64,
+        limit: u64,
     },
 
     /// Planning produced a new blueprint, but we failed to make it
@@ -633,6 +641,8 @@ pub enum BlueprintPlannerStatus {
         parent_blueprint_id: BlueprintUuid,
         error: String,
         report: Arc<PlanningReport>,
+        blueprint_count: u64,
+        limit: u64,
     },
 
     /// Planing succeeded, and we saved and made the new blueprint the
@@ -641,6 +651,8 @@ pub enum BlueprintPlannerStatus {
         parent_blueprint_id: BlueprintUuid,
         blueprint_id: BlueprintUuid,
         report: Arc<PlanningReport>,
+        blueprint_count: u64,
+        limit: u64,
     },
 }
 

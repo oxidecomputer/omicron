@@ -1300,28 +1300,62 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Disabled => {
             println!("    blueprint planning explicitly disabled by config!");
         }
+        BlueprintPlannerStatus::LimitReached { limit, report } => {
+            println!(
+                "    blueprint auto-planning disabled because \
+                 current blueprint count >= limit ({limit}); planning report \
+                 contains what would have been stored had the limit not been \
+                 reached",
+            );
+            println!("{report}");
+        }
         BlueprintPlannerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
-        BlueprintPlannerStatus::Unchanged { parent_blueprint_id, report } => {
+        BlueprintPlannerStatus::Unchanged {
+            parent_blueprint_id,
+            report,
+            blueprint_count,
+            limit,
+        } => {
             println!("    plan unchanged from parent {parent_blueprint_id}");
+            println!(
+                "    note: {}/{} blueprints in database",
+                blueprint_count, limit
+            );
             println!("{report}");
         }
         BlueprintPlannerStatus::Planned {
             parent_blueprint_id,
             error,
             report,
+            blueprint_count,
+            limit,
         } => {
             println!(
                 "    planned new blueprint from parent {parent_blueprint_id}, \
                      but could not make it the target: {error}"
             );
+            println!(
+                "    note: {}/{} blueprints in database",
+                blueprint_count, limit
+            );
             println!("{report}");
         }
-        BlueprintPlannerStatus::Targeted { blueprint_id, report, .. } => {
+        BlueprintPlannerStatus::Targeted {
+            parent_blueprint_id: _,
+            blueprint_id,
+            report,
+            blueprint_count,
+            limit,
+        } => {
             println!(
                 "    planned new blueprint {blueprint_id}, \
                      and made it the current target"
+            );
+            println!(
+                "    note: {}/{} blueprints in database",
+                blueprint_count, limit,
             );
             println!("{report}");
         }
