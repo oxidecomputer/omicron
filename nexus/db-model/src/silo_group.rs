@@ -26,7 +26,7 @@ pub struct SiloGroup {
 
     /// If the user provision type is ApiOnly or JIT, then the external id is
     /// the identity provider's ID for this group. There is a database
-    /// constraint (`lookup_silo_group_by_silo`) that ensures this field must be
+    /// constraint (`external_id_consistency`) that ensures this field must be
     /// non-null for those provision types.
     ///
     /// For SCIM, this may be null, which would trigger the uniqueness
@@ -35,7 +35,9 @@ pub struct SiloGroup {
 
     pub user_provision_type: UserProvisionType,
 
-    /// For SCIM groups, display name must be Some.
+    /// For SCIM groups, display name must be Some. There is a database
+    /// constraint (`display_name_consistency`) that ensures this field is
+    /// non-null for that provision type.
     pub display_name: Option<String>,
 }
 
