@@ -84,6 +84,14 @@ impl SiloUser {
             SiloUser::Scim(u) => &u.user_name,
         }
     }
+
+    pub fn user_provision_type(&self) -> UserProvisionType {
+        match &self {
+            SiloUser::ApiOnly(_) => UserProvisionType::ApiOnly,
+            SiloUser::Jit(_) => UserProvisionType::Jit,
+            SiloUser::Scim(_) => UserProvisionType::Scim,
+        }
+    }
 }
 
 impl From<model::SiloUser> for SiloUser {

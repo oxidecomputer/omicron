@@ -1270,7 +1270,7 @@ mod test {
         assert_eq!(silo_users.len(), 1);
 
         let db::datastore::SiloUser::ApiOnly(silo_user) = &silo_users[0] else {
-            panic!("wrong user type");
+            panic!("wrong user type {:?}", silo_users[0].user_provision_type());
         };
 
         assert_eq!(silo_user.external_id, rack_init.recovery_user_id.as_ref());
