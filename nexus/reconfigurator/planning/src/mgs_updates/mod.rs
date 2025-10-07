@@ -108,34 +108,32 @@ impl PlannedMgsUpdates {
 #[derive(Debug)]
 pub(crate) struct MgsUpdatePlanner<'a> {
     pub(crate) log: &'a slog::Logger,
+    /// the latest inventory
     pub(crate) inventory: &'a Collection,
+    /// a set of baseboards to consider updating (it is possible to have
+    /// baseboards in inventory that would never be updated because they're not
+    /// considered part of the current system)
     pub(crate) current_boards: &'a BTreeSet<Arc<BaseboardId>>,
+    /// boards containing zones that are unsafe to shut down
     pub(crate) unsafe_zone_boards: &'a BTreeMap<
         Arc<BaseboardId>,
         BTreeMap<TypedUuid<OmicronZoneKind>, ZoneUnsafeToShutdown>,
     >,
+    /// the most recent set of configured `PendingMgsUpdates`
     pub(crate) current_updates: &'a PendingMgsUpdates,
+    /// information about artifacts from the current target release (if any)
     pub(crate) current_artifacts: &'a TargetReleaseDescription,
+    /// the maximum number of updates allowed at once. By current policy,
+    /// `nmax_updates` is always 1, but the implementation here supports more
+    /// than one update per invocation
     pub(crate) nmax_updates: usize,
+    /// what to do if we detect an update has become impossible due to
+    /// unsatisfied preconditions
     pub(crate) impossible_update_policy: ImpossibleUpdatePolicy,
 }
 
 impl<'a> MgsUpdatePlanner<'a> {
-    /// Generates a new set of `PendingMgsUpdates` based on:
-    ///
-    /// * `inventory`: the latest inventory
-    /// * `current_boards`: a set of baseboards to consider updating
-    ///   (it is possible to have baseboards in inventory that would never be
-    ///   updated because they're not considered part of the current system)
-    /// * `current_updates`: the most recent set of configured `PendingMgsUpdates`
-    /// * `current_artifacts`: information about artifacts from the current target
-    ///   release (if any)
-    /// * `nmax_updates`: the maximum number of updates allowed at once
-    /// * `impossible_update_policy`: what to do if we detect an update has become
-    ///   impossible due to unsatisfied preconditions
-    ///
-    /// By current policy, `nmax_updates` is always 1, but the implementation here
-    /// supports more than one update per invocation.
+    /// Generates a new set of `PlannedMgsUpdates`
     pub(crate) fn plan(self) -> PlannedMgsUpdates {
         let mut pending_updates = PendingMgsUpdates::new();
         let mut pending_host_phase_2_changes =
