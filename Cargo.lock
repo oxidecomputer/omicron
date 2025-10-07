@@ -14764,6 +14764,7 @@ dependencies = [
  "daft",
  "derive_more 0.99.20",
  "dropshot",
+ "futures",
  "gfss",
  "hex",
  "hkdf",
