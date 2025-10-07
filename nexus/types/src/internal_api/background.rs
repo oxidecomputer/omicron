@@ -593,6 +593,23 @@ impl slog::KV for DebugDatasetsRendezvousStats {
     }
 }
 
+/// The status of an `inventory_load` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum InventoryLoadStatus {
+    /// An error occurred.
+    Error(String),
+
+    /// We have no collections.
+    NoCollections,
+
+    /// We've loaded the most recent collection as of `time_loaded`.
+    Loaded {
+        collection_id: CollectionUuid,
+        time_started: DateTime<Utc>,
+        time_loaded: DateTime<Utc>,
+    },
+}
+
 /// The status of a `blueprint_planner` background task activation.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum BlueprintPlannerStatus {
@@ -614,6 +631,8 @@ pub enum BlueprintPlannerStatus {
     Unchanged {
         parent_blueprint_id: BlueprintUuid,
         report: Arc<PlanningReport>,
+        blueprint_count: u64,
+        limit: u64,
     },
 
     /// Planning produced a new blueprint, but we failed to make it
@@ -622,6 +641,8 @@ pub enum BlueprintPlannerStatus {
         parent_blueprint_id: BlueprintUuid,
         error: String,
         report: Arc<PlanningReport>,
+        blueprint_count: u64,
+        limit: u64,
     },
 
     /// Planing succeeded, and we saved and made the new blueprint the
@@ -630,6 +651,8 @@ pub enum BlueprintPlannerStatus {
         parent_blueprint_id: BlueprintUuid,
         blueprint_id: BlueprintUuid,
         report: Arc<PlanningReport>,
+        blueprint_count: u64,
+        limit: u64,
     },
 }
 

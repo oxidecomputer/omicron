@@ -229,11 +229,13 @@ impl BlueprintPlanner {
         // want to return this error even if the blueprint is unchanged (the
         // next time there's a change we'll return an error anyway -- the limit
         // being reached is bad whether we'd store the next blueprint or not).
-        if let Some(status) =
-            self.check_blueprint_limit_reached(opctx, &report).await
-        {
-            return status;
-        }
+        let blueprint_count =
+            match self.check_blueprint_limit_reached(opctx, &report).await {
+                Ok(count) => count,
+                Err(status) => {
+                    return status;
+                }
+            };
 
         // Compare the new blueprint to its parent.
         {
@@ -248,6 +250,8 @@ impl BlueprintPlanner {
                 return BlueprintPlannerStatus::Unchanged {
                     parent_blueprint_id,
                     report,
+                    blueprint_count,
+                    limit: self.blueprint_limit,
                 };
             }
         }
@@ -316,6 +320,8 @@ impl BlueprintPlanner {
                     parent_blueprint_id,
                     error: format!("{error}"),
                     report,
+                    blueprint_count,
+                    limit: self.blueprint_limit,
                 };
             }
         }
@@ -327,6 +333,9 @@ impl BlueprintPlanner {
             parent_blueprint_id,
             blueprint_id,
             report,
+            // A new blueprint was added, so increment the count by 1.
+            blueprint_count: blueprint_count + 1,
+            limit: self.blueprint_limit,
         }
     }
 
@@ -334,7 +343,7 @@ impl BlueprintPlanner {
         &self,
         opctx: &OpContext,
         report: &Arc<PlanningReport>,
-    ) -> Option<BlueprintPlannerStatus> {
+    ) -> Result<u64, BlueprintPlannerStatus> {
         let blueprint_count = match self
             .datastore
             .check_blueprint_limit_reached(opctx, self.blueprint_limit)
@@ -343,10 +352,11 @@ impl BlueprintPlanner {
             Ok(BlueprintLimitReachedOutput::Yes) => {
                 error!(
                     &opctx.log,
-                    "blueprint count at or over limit, not running auto-planner";
+                    "blueprint count at or over limit, not running \
+                     auto-planner";
                     "limit" => self.blueprint_limit,
                 );
-                return Some(BlueprintPlannerStatus::LimitReached {
+                return Err(BlueprintPlannerStatus::LimitReached {
                     limit: self.blueprint_limit,
                     report: report.clone(),
                 });
@@ -358,7 +368,7 @@ impl BlueprintPlanner {
                     "can't load blueprint count";
                     "error" => InlineErrorChain::new(&error),
                 );
-                return Some(BlueprintPlannerStatus::Error(format!(
+                return Err(BlueprintPlannerStatus::Error(format!(
                     "can't load blueprint count: {}",
                     InlineErrorChain::new(&error)
                 )));
@@ -400,7 +410,7 @@ impl BlueprintPlanner {
             }
         }
 
-        None
+        Ok(blueprint_count)
     }
 }
 
@@ -515,6 +525,8 @@ mod test {
                 parent_blueprint_id,
                 blueprint_id,
                 report: _,
+                blueprint_count: _,
+                limit: _,
             } if parent_blueprint_id == initial_blueprint.id
                 && blueprint_id != initial_blueprint.id =>
             {
@@ -545,6 +557,8 @@ mod test {
             BlueprintPlannerStatus::Unchanged {
                 parent_blueprint_id,
                 report: _,
+                blueprint_count: _,
+                limit: _,
             } if parent_blueprint_id == parent_blueprint_id
         );
 
@@ -614,6 +628,8 @@ mod test {
             BlueprintPlannerStatus::Unchanged {
                 parent_blueprint_id,
                 report: _,
+                blueprint_count: _,
+                limit: _,
             } if parent_blueprint_id == blueprint_id
         );
     }
@@ -680,15 +696,10 @@ mod test {
         // This should work since there are 49 blueprints, which is one less
         // than the limit (50).
         let report = Arc::new(PlanningReport::new());
-        if let Some(status) =
-            planner.check_blueprint_limit_reached(opctx, &report).await
-        {
-            panic!(
-                "check_blueprint_limit_reached should have returned None, \
-                 but returned Some({:?})",
-                status
-            );
-        }
+        assert_eq!(
+            planner.check_blueprint_limit_reached(opctx, &report).await,
+            Ok(49),
+        );
 
         // Insert one more blueprint, pushing the number of blueprints to the
         // limit (50).
@@ -706,18 +717,13 @@ mod test {
         );
 
         // Since blueprint 50 was created, check_blueprint_limit_reached should
-        // fail with LimitExceeded.
-        let status = planner
-            .check_blueprint_limit_reached(&opctx, &report)
-            .await
-            .expect("check_blueprint_limit_reached should return LimitReached");
-        eprintln!("status after second check: {:?}", status);
+        // return Err(LimitReached).
         assert_eq!(
-            status,
-            BlueprintPlannerStatus::LimitReached {
+            planner.check_blueprint_limit_reached(&opctx, &report).await,
+            Err(BlueprintPlannerStatus::LimitReached {
                 limit: 50,
                 report: report.clone(),
-            }
+            }),
         );
 
         // But manual planning should continue to work.
@@ -734,17 +740,12 @@ mod test {
                 );
             },
         );
-        let status = planner
-            .check_blueprint_limit_reached(&opctx, &report)
-            .await
-            .expect("check_blueprint_limit_reached should return LimitReached");
-        eprintln!("status after third check: {:?}", status);
         assert_eq!(
-            status,
-            BlueprintPlannerStatus::LimitReached {
+            planner.check_blueprint_limit_reached(&opctx, &report).await,
+            Err(BlueprintPlannerStatus::LimitReached {
                 limit: 50,
                 report: report.clone(),
-            }
+            }),
         );
 
         db.terminate().await;

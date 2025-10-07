@@ -10,6 +10,9 @@ use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::authz::{self};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::SiloGroupLookup;
+use nexus_db_queries::db::datastore::SiloUserJit;
+use nexus_db_queries::db::datastore::SiloUserLookup;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Asset;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -27,7 +30,7 @@ use nexus_types::external_api::{params, shared};
 use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_common::api::external::{
-    IdentityMetadataCreateParams, LookupType, Name,
+    DataPageParams, IdentityMetadataCreateParams, LookupType, Name,
 };
 use omicron_common::api::external::{ObjectIdentity, UserId};
 use omicron_test_utils::certificates::CertificateChain;
@@ -312,7 +315,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
             .silo_group_optional_lookup(
                 &authn_opctx,
                 &authz_silo,
-                "administrator".into(),
+                &SiloGroupLookup::Jit { external_id: "administrator" },
             )
             .await
             .unwrap()
@@ -879,10 +882,10 @@ async fn test_silo_user_fetch_by_external_id(
     // Fetching by external id that's not in the db should be Ok(None)
     let result = nexus
         .datastore()
-        .silo_user_fetch_by_external_id(
+        .silo_user_fetch(
             &opctx_external_authn,
             &authz_silo,
-            "123",
+            &SiloUserLookup::ApiOnly { external_id: "123" },
         )
         .await;
     assert!(result.is_ok());
@@ -891,10 +894,12 @@ async fn test_silo_user_fetch_by_external_id(
     // Fetching by external id that is should be Ok(Some)
     let result = nexus
         .datastore()
-        .silo_user_fetch_by_external_id(
+        .silo_user_fetch(
             &opctx_external_authn,
             &authz_silo,
-            "f5513e049dac9468de5bdff36ab17d04f",
+            &SiloUserLookup::ApiOnly {
+                external_id: "f5513e049dac9468de5bdff36ab17d04f",
+            },
         )
         .await;
     assert!(result.is_ok());
@@ -918,12 +923,15 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
         vec![
             views::User {
                 id: USER_TEST_PRIVILEGED.id(),
-                display_name: USER_TEST_PRIVILEGED.external_id.clone(),
+                display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
                 silo_id: DEFAULT_SILO_ID,
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
-                display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
+                display_name: USER_TEST_UNPRIVILEGED
+                    .external_id
+                    .clone()
+                    .unwrap(),
                 silo_id: DEFAULT_SILO_ID,
             },
         ]
@@ -957,12 +965,15 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             },
             views::User {
                 id: USER_TEST_PRIVILEGED.id(),
-                display_name: USER_TEST_PRIVILEGED.external_id.clone(),
+                display_name: USER_TEST_PRIVILEGED.external_id.clone().unwrap(),
                 silo_id: DEFAULT_SILO_ID,
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
-                display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
+                display_name: USER_TEST_UNPRIVILEGED
+                    .external_id
+                    .clone()
+                    .unwrap(),
                 silo_id: DEFAULT_SILO_ID,
             },
         ]
@@ -1085,7 +1096,8 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
             .await
             .unwrap();
 
-        group_names.push(db_group.external_id);
+        // expect groups to have non-None external ids for JIT silos
+        group_names.push(db_group.external_id.unwrap());
     }
 
     assert!(group_names.contains(&"a-group".to_string()));
@@ -1214,7 +1226,8 @@ async fn test_silo_groups_remove_from_one_group(
             .await
             .unwrap();
 
-        group_names.push(db_group.external_id);
+        // expect groups to have non-None external ids for JIT silos
+        group_names.push(db_group.external_id.unwrap());
     }
 
     assert!(group_names.contains(&"a-group".to_string()));
@@ -1255,7 +1268,8 @@ async fn test_silo_groups_remove_from_one_group(
             .await
             .unwrap();
 
-        group_names.push(db_group.external_id);
+        // expect groups to have non-None external ids for JIT silos
+        group_names.push(db_group.external_id.unwrap());
     }
 
     assert!(group_names.contains(&"b-group".to_string()));
@@ -1325,7 +1339,8 @@ async fn test_silo_groups_remove_from_both_groups(
             .await
             .unwrap();
 
-        group_names.push(db_group.external_id);
+        // expect groups to have non-None external ids for JIT silos
+        group_names.push(db_group.external_id.unwrap());
     }
 
     assert!(group_names.contains(&"a-group".to_string()));
@@ -1366,7 +1381,8 @@ async fn test_silo_groups_remove_from_both_groups(
             .await
             .unwrap();
 
-        group_names.push(db_group.external_id);
+        // expect groups to have non-None external ids for JIT silos
+        group_names.push(db_group.external_id.unwrap());
     }
 
     assert!(group_names.contains(&"c-group".to_string()));
@@ -1427,7 +1443,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
             .silo_group_optional_lookup(
                 &opctx_external_authn,
                 &authz_silo,
-                "a-group".into(),
+                &SiloGroupLookup::Jit { external_id: "a-group" },
             )
             .await
             .expect("silo_group_optional_lookup")
@@ -1475,6 +1491,17 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
         nexus.datastore().clone(),
     );
 
+    // Grant this user admin privileges on the new silo
+
+    grant_iam(
+        client,
+        "/v1/system/silos/test-silo",
+        SiloRole::Admin,
+        opctx.authn.actor().unwrap().silo_user_id().unwrap(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
     let (authz_silo, db_silo) = LookupPath::new(&opctx, nexus.datastore())
         .silo_name(&silo.identity.name.into())
         .fetch()
@@ -1495,7 +1522,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("silo_user_from_authenticated_subject 1");
 
-    // Add the first user with a group membership
+    // Add the second user with the same group membership
     let _silo_user_2 = nexus
         .silo_user_from_authenticated_subject(
             &nexus.opctx_external_authn(),
@@ -1509,7 +1536,42 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
         .await
         .expect("silo_user_from_authenticated_subject 2");
 
-    // TODO-coverage were we intending to verify something here?
+    // Validate only one group was created
+
+    let page = nexus
+        .datastore()
+        .silo_groups_list_by_id(
+            &opctx,
+            &authz_silo,
+            &DataPageParams::max_page(),
+        )
+        .await
+        .expect("silo_groups_list_by_id");
+
+    assert_eq!(page.len(), 1);
+
+    // Validate that the "sre" group was created
+
+    let sre_group = nexus
+        .datastore()
+        .silo_group_optional_lookup(
+            &opctx,
+            &authz_silo,
+            &SiloGroupLookup::Jit { external_id: "sre" },
+        )
+        .await
+        .expect("silo_group_optional_lookup")
+        .expect("sre group exists");
+
+    // Validate that the "sre" group has two members
+
+    let members = nexus
+        .datastore()
+        .silo_group_membership_for_group(&opctx, &authz_silo, sre_group.id())
+        .await
+        .expect("silo_group_membership_for_group");
+
+    assert_eq!(members.len(), 2);
 }
 
 /// Tests the behavior of the per-Silo "list users" and "fetch user" endpoints.
@@ -1724,9 +1786,9 @@ async fn create_jit_user(
     let authz_silo =
         authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
     let silo_user =
-        db::model::SiloUser::new(silo_id, silo_user_id, external_id.to_owned());
+        SiloUserJit::new(silo_id, silo_user_id, external_id.to_owned());
     datastore
-        .silo_user_create(&authz_silo, silo_user)
+        .silo_user_create(&authz_silo, silo_user.into())
         .await
         .expect("failed to create user in SamlJit Silo")
         .1

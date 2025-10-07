@@ -14,6 +14,10 @@ mod coverage;
 mod resource_builder;
 mod resources;
 
+use crate::db::DataStore;
+use crate::db::datastore::DnsVersionUpdateBuilder;
+use crate::db::model::DnsGroup;
+use crate::db::model::InitialDnsGroup;
 use crate::db::pub_test_utils::TestDatabase;
 use coverage::Coverage;
 use futures::StreamExt;
@@ -22,11 +26,14 @@ use nexus_auth::authn::SiloAuthnPolicy;
 use nexus_auth::authn::USER_TEST_PRIVILEGED;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
+use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Asset;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
 use omicron_test_utils::dev;
 use resource_builder::DynAuthorizedResource;
@@ -35,11 +42,89 @@ use resource_builder::ResourceSet;
 use slog::{o, trace};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::io::Cursor;
 use std::io::Write;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
+
+struct TestPrepOutput {
+    main_silo_id: Uuid,
+    main_silo: authz::Silo,
+}
+
+async fn test_iam_prep(
+    opctx: &OpContext,
+    datastore: &DataStore,
+) -> TestPrepOutput {
+    // Before we can create the resources, users, and role assignments that we
+    // need, we must grant the "test-privileged" user privileges to fetch and
+    // modify policies inside the "main" Silo (the one we create users in).
+
+    let initial = InitialDnsGroup::new(
+        DnsGroup::External,
+        "dummy.oxide.test",
+        "test suite",
+        "test suite",
+        HashMap::new(),
+    );
+
+    {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        DataStore::load_dns_data(&conn, initial)
+            .await
+            .expect("failed to load initial DNS zone");
+    }
+
+    let silo = datastore
+        .silo_create(
+            &opctx,
+            &opctx,
+            params::SiloCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "main-silo".parse().unwrap(),
+                    description: "".into(),
+                },
+                quotas: params::SiloQuotasCreate::empty(),
+                discoverable: true,
+                identity_mode: shared::SiloIdentityMode::LocalOnly,
+                admin_group_name: None,
+                tls_certificates: vec![],
+                mapped_fleet_roles: Default::default(),
+            },
+            &[],
+            DnsVersionUpdateBuilder::new(
+                DnsGroup::External,
+                String::from("test suite"),
+                String::from("test suite"),
+            ),
+        )
+        .await
+        .expect("silo_create");
+
+    let main_silo_id = silo.id();
+
+    let main_silo = authz::Silo::new(
+        authz::FLEET,
+        main_silo_id,
+        LookupType::ById(main_silo_id),
+    );
+
+    datastore
+        .role_assignment_replace_visible(
+            &opctx,
+            &main_silo,
+            &[shared::RoleAssignment::for_silo_user(
+                USER_TEST_PRIVILEGED.id(),
+                SiloRole::Admin,
+            )],
+        )
+        .await
+        .unwrap();
+
+    TestPrepOutput { main_silo_id, main_silo }
+}
 
 /// Verifies that all roles grant precisely the privileges that we expect them
 /// to
@@ -64,26 +149,8 @@ async fn test_iam_roles_behavior() {
     let db = TestDatabase::new_with_datastore(&logctx.log).await;
     let (opctx, datastore) = (db.opctx(), db.datastore());
 
-    // Before we can create the resources, users, and role assignments that we
-    // need, we must grant the "test-privileged" user privileges to fetch and
-    // modify policies inside the "main" Silo (the one we create users in).
-    let main_silo_id = Uuid::new_v4();
-    let main_silo = authz::Silo::new(
-        authz::FLEET,
-        main_silo_id,
-        LookupType::ById(main_silo_id),
-    );
-    datastore
-        .role_assignment_replace_visible(
-            &opctx,
-            &main_silo,
-            &[shared::RoleAssignment::for_silo_user(
-                USER_TEST_PRIVILEGED.id(),
-                SiloRole::Admin,
-            )],
-        )
-        .await
-        .unwrap();
+    let TestPrepOutput { main_silo_id, main_silo: _ } =
+        test_iam_prep(&opctx, &datastore).await;
 
     // Assemble the list of resources that we'll use for testing.  As we create
     // these resources, create the users and role assignments needed for the
@@ -329,26 +396,8 @@ async fn test_conferred_roles() {
     let db = TestDatabase::new_with_datastore(&logctx.log).await;
     let (opctx, datastore) = (db.opctx(), db.datastore());
 
-    // Before we can create the resources, users, and role assignments that we
-    // need, we must grant the "test-privileged" user privileges to fetch and
-    // modify policies inside the "main" Silo (the one we create users in).
-    let main_silo_id = Uuid::new_v4();
-    let main_silo = authz::Silo::new(
-        authz::FLEET,
-        main_silo_id,
-        LookupType::ById(main_silo_id),
-    );
-    datastore
-        .role_assignment_replace_visible(
-            &opctx,
-            &main_silo,
-            &[shared::RoleAssignment::for_silo_user(
-                USER_TEST_PRIVILEGED.id(),
-                SiloRole::Admin,
-            )],
-        )
-        .await
-        .unwrap();
+    let TestPrepOutput { main_silo_id, main_silo } =
+        test_iam_prep(&opctx, &datastore).await;
 
     let exemptions = resources::exempted_authz_classes();
     let mut coverage = Coverage::new(&logctx.log, exemptions);

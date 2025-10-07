@@ -720,7 +720,13 @@ fn write_log_to_zip<W: Write + Seek>(
         zip_path,
         FullFileOptions::default()
             .compression_method(zip::CompressionMethod::Zstd)
-            .compression_level(Some(3)),
+            .compression_level(Some(3))
+            // NB: From the docs
+            // If set to false and the file exceeds the
+            // limit, an I/O error is thrown and the file is aborted. If set to
+            // true, readers will require ZIP64 support and if the file does not
+            // exceed the limit, 20 B are wasted.
+            .large_file(true),
     )?;
     if let Err(e) = std::io::copy(&mut src, zip) {
         // If we fail here the `ZipWriter` is an unknown state and we are forced
