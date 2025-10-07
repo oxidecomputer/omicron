@@ -188,10 +188,7 @@ async fn test_no_jit_for_saml_scim_silos(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(
             client,
             Method::POST,
-            &format!(
-                "/login/{}/saml/some-totally-real-saml-provider",
-                SILO_NAME
-            ),
+            &format!("/login/{SILO_NAME}/saml/some-totally-real-saml-provider"),
         )
         .raw_body(Some(
             serde_urlencoded::to_string(SamlLoginPost {
