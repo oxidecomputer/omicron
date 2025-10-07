@@ -3661,8 +3661,7 @@ async fn cmd_nexus_fetch_omdb(
     let body = client.fetch_omdb().await?;
     let mut stream = body.into_inner().into_inner();
     while let Some(maybe_chunk) = stream.next().await {
-        let chunk =
-            maybe_chunk.context("failed reading chunk from Nexus")?;
+        let chunk = maybe_chunk.context("failed reading chunk from Nexus")?;
         tokio::io::copy(&mut std::io::Cursor::new(chunk), &mut out)
             .await
             .with_context(|| format!("failed writing to `{}`", args.output))?;
