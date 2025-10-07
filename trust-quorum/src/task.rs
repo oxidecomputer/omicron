@@ -94,17 +94,7 @@ impl NodeTask {
         // TODO: Load persistent state from ledger
         let mut ctx = NodeCtx::new(config.baseboard_id.clone());
         let node = Node::new(&log, &mut ctx);
-        (
-            NodeTask {
-                log,
-                config,
-                node,
-                ctx,
-                bootstrap_addrs: BTreeSet::new(),
-                rx,
-            },
-            NodeTaskHandle { tx },
-        )
+        (NodeTask { log, config, node, ctx, rx }, NodeTaskHandle { tx })
     }
 
     /// Run the main loop of the node
@@ -122,16 +112,9 @@ impl NodeTask {
         loop {
             tokio::select! {
                 // TODO: Plumb through corpus update in `listener.accept`
-                res = listener.accept(vec![]) => {
-                    match res {
-                        Ok(acceptor) => {
-                            self.on_accept(acceptor).await
-                        }
-                        Err(err) => {
-                            error!(self.log, "Failed to accept connection: {err}");
-                            continue;
-                        }
-                    }
+                Err(err) = listener.accept(vec![]) => {
+                    error!(self.log, "Failed to accept connection: {err}");
+                    continue;
                 }
                 Some(request) = self.rx.recv() => {
                     //self.on_api_request(request).await;
