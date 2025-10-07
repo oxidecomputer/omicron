@@ -1994,9 +1994,11 @@ fn print_task_inventory_load(details: &serde_json::Value) {
                 time_loaded,
             } => {
                 println!(
-                    "    loaded latest inventory collection as of {}: \
-                         collection {collection_id}, taken at {}",
-                    humantime::format_rfc3339_millis(time_loaded.into()),
+                    "    loaded latest inventory collection as of {}:",
+                    humantime::format_rfc3339_millis(time_loaded.into())
+                );
+                println!(
+                    "        collection {collection_id}, taken at {}",
                     humantime::format_rfc3339_millis(time_started.into()),
                 );
             }
