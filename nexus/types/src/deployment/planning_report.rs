@@ -31,6 +31,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -504,16 +505,16 @@ impl PlanningMupdateOverrideStepReport {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum FailedMgsUpdateReason {
     /// There was a failed attempt to plan a Host OS update
-    #[error("failed to plan a Host OS update: {0}")]
+    #[error("failed to plan a Host OS update")]
     HostOs(#[from] FailedHostOsUpdateReason),
     /// There was a failed attempt to plan an RoT update
-    #[error("failed to plan an RoT update: {0}")]
+    #[error("failed to plan an RoT update")]
     Rot(#[from] FailedRotUpdateReason),
     /// There was a failed attempt to plan an RoT bootloader update
-    #[error("failed to plan an RoT bootloader update: {0}")]
+    #[error("failed to plan an RoT bootloader update")]
     RotBootloader(#[from] FailedRotBootloaderUpdateReason),
     /// There was a failed attempt to plan an SP update
-    #[error("failed to plan an SP update: {0}")]
+    #[error("failed to plan an SP update")]
     Sp(#[from] FailedSpUpdateReason),
 }
 
@@ -760,7 +761,12 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             let s = plural(n);
             writeln!(f, "* {n} blocked MGS update{s}:")?;
             for update in blocked_mgs_updates {
-                writeln!(f, "  * {}: {}", update.baseboard_id, update.reason)?;
+                writeln!(
+                    f,
+                    "  * {}: {}",
+                    update.baseboard_id,
+                    InlineErrorChain::new(&update.reason)
+                )?;
             }
         }
         Ok(())

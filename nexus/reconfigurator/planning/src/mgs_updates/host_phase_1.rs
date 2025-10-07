@@ -434,6 +434,7 @@ pub(super) fn try_make_update(
             Some(board) => {
                 let mut s = String::new();
                 for (zone_id, zone) in board {
+                    // TODO-K: Fix multiline here
                     s.push_str(&format!("* {}: {}", zone_id, zone));
                 }
                 s
