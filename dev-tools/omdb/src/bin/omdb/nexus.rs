@@ -1296,10 +1296,10 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Disabled => {
             println!("    blueprint planning explicitly disabled by config!");
         }
-        BlueprintPlannerStatus::LimitExceeded { limit, count } => {
+        BlueprintPlannerStatus::LimitReached { limit } => {
             println!(
                 "    blueprint auto-planning disabled because \
-                 current blueprint count ({count}) exceeded limit ({limit})",
+                 current blueprint count >= limit ({limit})",
             );
         }
         BlueprintPlannerStatus::Error(error) => {

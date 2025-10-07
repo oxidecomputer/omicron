@@ -43,6 +43,14 @@ pub struct SimConfig {
     /// The Nexus generation to treat as the active set for the purposes of
     /// simulating handoff between updates.
     active_nexus_zone_generation: Generation,
+
+    /// Explicit override for active nexus zones.
+    /// When set, overrides generation-based inference.
+    explicit_active_nexus_zones: Option<BTreeSet<OmicronZoneUuid>>,
+
+    /// Explicit override for not-yet nexus zones.
+    /// When set, overrides generation-based inference.
+    explicit_not_yet_nexus_zones: Option<BTreeSet<OmicronZoneUuid>>,
 }
 
 impl SimConfig {
@@ -55,6 +63,8 @@ impl SimConfig {
             external_dns_zone_name: String::from("oxide.example"),
             num_nexus: None,
             active_nexus_zone_generation: Generation::new(),
+            explicit_active_nexus_zones: None,
+            explicit_not_yet_nexus_zones: None,
         }
     }
 
@@ -76,6 +86,20 @@ impl SimConfig {
     #[inline]
     pub fn active_nexus_zone_generation(&self) -> Generation {
         self.active_nexus_zone_generation
+    }
+
+    #[inline]
+    pub fn explicit_active_nexus_zones(
+        &self,
+    ) -> Option<&BTreeSet<OmicronZoneUuid>> {
+        self.explicit_active_nexus_zones.as_ref()
+    }
+
+    #[inline]
+    pub fn explicit_not_yet_nexus_zones(
+        &self,
+    ) -> Option<&BTreeSet<OmicronZoneUuid>> {
+        self.explicit_not_yet_nexus_zones.as_ref()
     }
 
     pub(crate) fn to_mut(&self) -> SimConfigBuilder {
@@ -115,6 +139,25 @@ impl SimConfigBuilder {
     #[inline]
     pub fn num_nexus(&self) -> Option<u16> {
         self.inner.config.num_nexus()
+    }
+
+    #[inline]
+    pub fn active_nexus_zone_generation(&self) -> Generation {
+        self.inner.config.active_nexus_zone_generation()
+    }
+
+    #[inline]
+    pub fn explicit_active_nexus_zones(
+        &self,
+    ) -> Option<&BTreeSet<OmicronZoneUuid>> {
+        self.inner.config.explicit_active_nexus_zones()
+    }
+
+    #[inline]
+    pub fn explicit_not_yet_nexus_zones(
+        &self,
+    ) -> Option<&BTreeSet<OmicronZoneUuid>> {
+        self.inner.config.explicit_not_yet_nexus_zones()
     }
 
     /// Load a serialized configuration state.
@@ -164,6 +207,22 @@ impl SimConfigBuilder {
         self.log.push(SimConfigLogEntry::SetActiveNexusZoneGeneration(gen));
     }
 
+    pub fn set_explicit_active_nexus_zones(
+        &mut self,
+        zones: Option<BTreeSet<OmicronZoneUuid>>,
+    ) {
+        self.inner.set_explicit_active_nexus_zones(zones.clone());
+        self.log.push(SimConfigLogEntry::SetExplicitActiveNexusZones(zones));
+    }
+
+    pub fn set_explicit_not_yet_nexus_zones(
+        &mut self,
+        zones: Option<BTreeSet<OmicronZoneUuid>>,
+    ) {
+        self.inner.set_explicit_not_yet_nexus_zones(zones.clone());
+        self.log.push(SimConfigLogEntry::SetExplicitNotYetNexusZones(zones));
+    }
+
     pub fn wipe(&mut self) {
         self.inner.wipe_inner();
         self.log.push(SimConfigLogEntry::Wipe);
@@ -183,6 +242,8 @@ pub enum SimConfigLogEntry {
     SetExternalDnsZoneName(String),
     SetNumNexus(u16),
     SetActiveNexusZoneGeneration(Generation),
+    SetExplicitActiveNexusZones(Option<BTreeSet<OmicronZoneUuid>>),
+    SetExplicitNotYetNexusZones(Option<BTreeSet<OmicronZoneUuid>>),
     Wipe,
 }
 
@@ -318,6 +379,20 @@ impl SimConfigBuilderInner {
 
     fn set_active_nexus_zone_generation(&mut self, gen: Generation) {
         self.config.active_nexus_zone_generation = gen;
+    }
+
+    fn set_explicit_active_nexus_zones(
+        &mut self,
+        zones: Option<BTreeSet<OmicronZoneUuid>>,
+    ) {
+        self.config.explicit_active_nexus_zones = zones;
+    }
+
+    fn set_explicit_not_yet_nexus_zones(
+        &mut self,
+        zones: Option<BTreeSet<OmicronZoneUuid>>,
+    ) {
+        self.config.explicit_not_yet_nexus_zones = zones;
     }
 
     fn wipe_inner(&mut self) {

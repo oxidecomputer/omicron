@@ -11,6 +11,7 @@ use futures::future::BoxFuture;
 use nexus_auth::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::BlueprintLimitReachedOutput;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -98,69 +99,10 @@ impl BlueprintPlanner {
             return BlueprintPlannerStatus::Disabled;
         }
 
-        let blueprint_count = match self.datastore.blueprint_count(opctx).await
-        {
-            Ok(count) => count,
-            Err(error) => {
-                error!(
-                    &opctx.log,
-                    "can't load blueprint count";
-                    "error" => InlineErrorChain::new(&error),
-                );
-                return BlueprintPlannerStatus::Error(format!(
-                    "can't load blueprint count: {}",
-                    InlineErrorChain::new(&error)
-                ));
-            }
-        };
-
-        let usage_percent =
-            blueprint_count.saturating_mul(100) / self.blueprint_limit;
-
-        match usage_percent {
-            0..=59 => {
-                debug!(
-                    &opctx.log,
-                    "blueprint count under limit, proceeding with planning";
-                    "limit" => self.blueprint_limit,
-                    "count" => blueprint_count,
-                    "usage_percent" => usage_percent,
-                );
-            }
-            60..=79 => {
-                info!(
-                    &opctx.log,
-                    "blueprint count above 60% of limit, proceeding with planning \
-                     (will stop autoplanning if limit is reached)";
-                    "limit" => self.blueprint_limit,
-                    "count" => blueprint_count,
-                    "usage_percent" => usage_percent,
-                );
-            }
-            80..=99 => {
-                warn!(
-                    &opctx.log,
-                    "blueprint count above 80% of limit, proceeding with planning \
-                     (will stop autoplanning if limit is reached)";
-                    "limit" => self.blueprint_limit,
-                    "count" => blueprint_count,
-                    "usage_percent" => usage_percent,
-                );
-            }
-            100.. => {
-                error!(
-                    &opctx.log,
-                    "blueprint count at or over limit, not running auto-planner";
-                    "limit" => self.blueprint_limit,
-                    "count" => blueprint_count,
-                    "usage_percent" => usage_percent,
-                );
-                return BlueprintPlannerStatus::LimitExceeded {
-                    limit: self.blueprint_limit,
-                    count: blueprint_count,
-                };
-            }
+        if let Some(status) = self.check_blueprint_limit_reached(opctx).await {
+            return status;
         }
+
         // Get the current target blueprint to use as a parent.
         // Cloned so that we don't block the channel.
         let Some(loaded) = self.rx_blueprint.borrow_and_update().clone() else {
@@ -376,6 +318,77 @@ impl BlueprintPlanner {
             report,
         }
     }
+
+    async fn check_blueprint_limit_reached(
+        &self,
+        opctx: &OpContext,
+    ) -> Option<BlueprintPlannerStatus> {
+        let blueprint_count = match self
+            .datastore
+            .check_blueprint_limit_reached(opctx, self.blueprint_limit)
+            .await
+        {
+            Ok(BlueprintLimitReachedOutput::Yes) => {
+                error!(
+                    &opctx.log,
+                    "blueprint count at or over limit, not running auto-planner";
+                    "limit" => self.blueprint_limit,
+                );
+                return Some(BlueprintPlannerStatus::LimitReached {
+                    limit: self.blueprint_limit,
+                });
+            }
+            Ok(BlueprintLimitReachedOutput::No { count }) => count,
+            Err(error) => {
+                error!(
+                    &opctx.log,
+                    "can't load blueprint count";
+                    "error" => InlineErrorChain::new(&error),
+                );
+                return Some(BlueprintPlannerStatus::Error(format!(
+                    "can't load blueprint count: {}",
+                    InlineErrorChain::new(&error)
+                )));
+            }
+        };
+
+        let usage_percent =
+            blueprint_count.saturating_mul(100) / self.blueprint_limit;
+
+        match usage_percent {
+            0..=59 => {
+                debug!(
+                    &opctx.log,
+                    "blueprint count under limit, proceeding with planning";
+                    "limit" => self.blueprint_limit,
+                    "count" => blueprint_count,
+                    "usage_percent" => usage_percent,
+                );
+            }
+            60..=79 => {
+                info!(
+                    &opctx.log,
+                    "blueprint count above 60% of limit, proceeding with planning \
+                     (will stop autoplanning if limit is reached)";
+                    "limit" => self.blueprint_limit,
+                    "count" => blueprint_count,
+                    "usage_percent" => usage_percent,
+                );
+            }
+            80.. => {
+                warn!(
+                    &opctx.log,
+                    "blueprint count above 80% of limit, proceeding with planning \
+                     (will stop autoplanning if limit is reached)";
+                    "limit" => self.blueprint_limit,
+                    "count" => blueprint_count,
+                    "usage_percent" => usage_percent,
+                );
+            }
+        }
+
+        None
+    }
 }
 
 impl BackgroundTask for BlueprintPlanner {
@@ -405,11 +418,14 @@ mod test {
     use crate::app::{background::Activator, quiesce::NexusQuiesceHandle};
     use assert_matches::assert_matches;
     use nexus_inventory::now_db_precision;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_test_utils::db::TestDatabase;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         PendingMgsUpdates, PlannerConfig, ReconfiguratorConfig,
         ReconfiguratorConfigView,
     };
+    use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeMap;
 
@@ -591,64 +607,36 @@ mod test {
 
     /// Test that the blueprint autoplanner verifies that the blueprint limit is
     /// not exceeded.
-    #[nexus_test(server = crate::Server)]
-    async fn test_blueprint_planner_limit(cptestctx: &ControlPlaneTestContext) {
-        // Set up the test context.
-        let log = &cptestctx.logctx.log;
-        let nexus = &cptestctx.server.server_context().nexus;
-        let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
+    ///
+    /// This is a tokio::test rather than a nexus_test to avoid background tasks
+    /// interfering with the test.
+    #[tokio::test]
+    async fn test_blueprint_planner_limit() {
+        // Setup
+        let logctx = dev::test_setup_log("test_blueprint_planner_limit");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let opctx = db.opctx();
+        let datastore = db.datastore();
 
-        // Create a large number of blueprints (48), which we'll use to test the
+        // Create a large number of blueprints (49), which we'll use to test the
         // limit (see below).
-        //
-        // There's also an initial blueprint for the system, so the total number
-        // of blueprints will be 49 after this step.
-        for i in 0..48 {
-            nexus.blueprint_create_regenerate(&opctx).await.unwrap_or_else(
-                |e| {
+        for i in 0..49 {
+            let blueprint = BlueprintBuilder::build_empty_with_sleds(
+                std::iter::empty(),
+                &format!("test_blueprint_planner_limit blueprint {}", i),
+            );
+            datastore
+                .blueprint_insert(&opctx, &blueprint)
+                .await
+                .unwrap_or_else(|e| {
                     panic!(
-                        "failed to regenerate blueprint at iteration {i}: {}",
+                        "failed to insert blueprint at iteration {i}: {}",
                         InlineErrorChain::new(&e)
                     );
-                },
-            );
+                });
         }
 
-        // Spin up the blueprint loader background task (note that this won't
-        // actually be used because the blueprint planner should bail out
-        // early).
-        let (tx_loader, _) = watch::channel(None);
-        let mut loader =
-            TargetBlueprintLoader::new(datastore.clone(), tx_loader);
-        let mut rx_loader = loader.watcher();
-        loader.activate(&opctx).await;
-        let (_initial_target, _initial_blueprint) = &*rx_loader
-            .borrow_and_update()
-            .clone()
-            .expect("no initial blueprint");
-
-        // Spin up the inventory collector background task.
-        let resolver = internal_dns_resolver::Resolver::new_from_addrs(
-            log.clone(),
-            &[cptestctx.internal_dns.dns_server.local_address()],
-        )
-        .expect("can't start resolver");
-        let mut collector = InventoryCollector::new(
-            &opctx,
-            datastore.clone(),
-            resolver.clone(),
-            "test_planner",
-            1,
-            false,
-        );
-        let rx_collector = collector.watcher();
-        collector.activate(&opctx).await;
-
-        // Enable the planner
+        // Enable the planner.
         let (_tx, rx_config_loader) = watch::channel(
             ReconfiguratorConfigLoaderState::Loaded(ReconfiguratorConfigView {
                 version: 1,
@@ -659,57 +647,79 @@ mod test {
                 time_modified: now_db_precision(),
             }),
         );
+        // The inventory and blueprint channels don't need to be Some because we
+        // don't run through the whole planner, instead bailing early.
+        let (_tx_inventory, rx_inventory) = watch::channel(None);
+        let (_tx_blueprint, rx_blueprint) = watch::channel(None);
 
-        // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
             rx_config_loader,
-            rx_collector,
-            rx_loader.clone(),
+            rx_inventory,
+            rx_blueprint,
         );
+
         // This limit matches the loop above.
         planner.blueprint_limit = 50;
         let _rx_planner = planner.watcher();
 
-        // On activation, the planner should succeed. The current target
-        // blueprint is the initial one, so this should create a new blueprint
-        // (even though a bunch of equivalent blueprints have been created
-        // above).
-        let status = serde_json::from_value::<BlueprintPlannerStatus>(
-            planner.activate(&opctx).await,
-        )
-        .expect("can't activate planner");
-        eprintln!("status after first activation: {:?}", status);
-        assert_matches!(status, BlueprintPlannerStatus::Targeted { .. });
+        // This should work since there are 49 blueprints, which is one less
+        // than the limit (50).
+        if let Some(status) = planner.check_blueprint_limit_reached(opctx).await
+        {
+            panic!(
+                "check_blueprint_limit_reached should have returned None, \
+                 but returned Some({:?})",
+                status
+            );
+        }
 
-        // Since blueprint 50 was created, doing another activation should fail
-        // with LimitExceeded.
+        // Insert one more blueprint, pushing the number of blueprints to the
+        // limit (50).
+        let blueprint = BlueprintBuilder::build_empty_with_sleds(
+            std::iter::empty(),
+            "test_blueprint_planner_limit 50th blueprint",
+        );
+        datastore.blueprint_insert(&opctx, &blueprint).await.unwrap_or_else(
+            |e| {
+                panic!(
+                    "failed to insert 50th blueprint: {}",
+                    InlineErrorChain::new(&e)
+                );
+            },
+        );
+
+        // Since blueprint 50 was created, doing an activation should fail with
+        // LimitExceeded.
         let status = serde_json::from_value::<BlueprintPlannerStatus>(
             planner.activate(&opctx).await,
         )
         .expect("can't activate planner");
         eprintln!("status after second activation: {:?}", status);
-        assert_eq!(
-            status,
-            BlueprintPlannerStatus::LimitExceeded { limit: 50, count: 50 },
-        );
+        assert_eq!(status, BlueprintPlannerStatus::LimitReached { limit: 50 });
 
         // But manual planning should continue to work.
-        nexus.blueprint_create_regenerate(&opctx).await.unwrap_or_else(|e| {
-            panic!(
-                "manual planning should continue to work even \
-                 though the limit was exceeded, but it failed: {}",
-                InlineErrorChain::new(&e)
-            );
-        });
+        let blueprint = BlueprintBuilder::build_empty_with_sleds(
+            std::iter::empty(),
+            "test_blueprint_planner_limit 51st blueprint",
+        );
+        datastore.blueprint_insert(&opctx, &blueprint).await.unwrap_or_else(
+            |e| {
+                panic!(
+                    "manual planning should continue to work even \
+                     though the limit was exceeded, but it failed: {}",
+                    InlineErrorChain::new(&e)
+                );
+            },
+        );
         let status = serde_json::from_value::<BlueprintPlannerStatus>(
             planner.activate(&opctx).await,
         )
         .expect("can't activate planner");
         eprintln!("status after second activation: {:?}", status);
-        assert_eq!(
-            status,
-            BlueprintPlannerStatus::LimitExceeded { limit: 50, count: 51 },
-        );
+        assert_eq!(status, BlueprintPlannerStatus::LimitReached { limit: 50 });
+
+        db.terminate().await;
+        logctx.cleanup_successful();
     }
 }

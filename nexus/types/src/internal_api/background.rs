@@ -600,9 +600,9 @@ pub enum BlueprintPlannerStatus {
     /// by the config file.
     Disabled,
 
-    /// The blueprint limit was exceeded, so automatic blueprint planning was
+    /// The blueprint limit was reached, so automatic blueprint planning was
     /// disabled.
-    LimitExceeded { limit: u64, count: u64 },
+    LimitReached { limit: u64 },
 
     /// An error occurred during planning or blueprint insertion.
     Error(String),

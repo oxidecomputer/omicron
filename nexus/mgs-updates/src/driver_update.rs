@@ -194,34 +194,18 @@ pub enum ApplyUpdateError {
     WaitError(#[source] PrecheckError),
 }
 
-/// Construct an MGS client.
-//
-// We split this into a prod version and a test version to work around timeout
-// issues in tests. In practice we expect basically all requests to MGS to be
-// fulfilled very quickly, even in tests, but our test infrastructure allows us
-// to _pause_ an update for extended periods of time. If we start an update then
-// happen to pause it as its making an MGS request, leave it paused for more
-// than 15 seconds (the default progenitor client timeout), then try to resume
-// it, we'll immediately fail with a timeout (even though MGS is perfectly
-// responsive!).
-#[cfg(not(test))]
+/// Construct a set of MGS clients.
 fn make_mgs_clients(backends: &AllBackends, log: &slog::Logger) -> MgsClients {
     MgsClients::from_clients(backends.iter().map(|(backend_name, backend)| {
-        gateway_client::Client::new(
-            &format!("http://{}", backend.address),
-            log.new(o!(
-                "mgs_backend_name" => backend_name.0.to_string(),
-                "mgs_backend_addr" => backend.address.to_string(),
-            )),
-        )
-    }))
-}
-#[cfg(test)]
-fn make_mgs_clients(backends: &AllBackends, log: &slog::Logger) -> MgsClients {
-    MgsClients::from_clients(backends.iter().map(|(backend_name, backend)| {
+        // MGS has its own timeouts it applies to communications on our behalf
+        // to SPs. The longest of these timeouts is currently set to 60 seconds
+        // (specifically: MGS will wait up to 60 seconds for devices to reset,
+        // because we've seen sidecars take 20+ seconds to reset). We should
+        // therefore wait at least as long as its timeouts; we'll add a buffer
+        // here to leave plenty of time for minor weather between us and MGS.
         let client = reqwest::ClientBuilder::new()
-            .connect_timeout(Duration::from_secs(60))
-            .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(75))
+            .timeout(Duration::from_secs(75))
             .build()
             .unwrap();
 
