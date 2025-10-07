@@ -2044,7 +2044,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(
         error.message,
-        "cannot create saml identity providers in api-only silos"
+        "cannot create SAML identity providers in ApiOnly silos"
     );
 
     // The SAML login endpoints should not work, either.

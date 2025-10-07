@@ -987,7 +987,7 @@ impl super::Nexus {
 
             UserProvisionType::ApiOnly => {
                 return Err(Error::invalid_request(
-                    "cannot create saml identity providers in api-only silos",
+                    "cannot create SAML identity providers in ApiOnly silos",
                 ));
             }
         }
