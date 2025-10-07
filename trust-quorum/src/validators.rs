@@ -7,7 +7,7 @@
 use crate::configuration::{ConfigurationError, NewConfigParams};
 use crate::messages::ReconfigureMsg;
 use crate::{
-    Epoch, LrtqUpgradeMsg, NodeHandlerCtx, PersistentStateSummary, PlatformId,
+    BaseboardId, Epoch, LrtqUpgradeMsg, NodeHandlerCtx, PersistentStateSummary,
     Threshold,
 };
 use daft::{BTreeSetDiff, Diffable, Leaf};
@@ -52,7 +52,7 @@ fn check_in_service(
     "sled was decommissioned on msg from {from:?} at epoch {epoch:?}: last prepared epoch = {last_prepared_epoch:?}"
 )]
 pub struct SledExpungedError {
-    from: PlatformId,
+    from: BaseboardId,
     epoch: Epoch,
     last_prepared_epoch: Option<Epoch>,
 }
@@ -142,7 +142,7 @@ pub enum LrtqUpgradeError {
     ),
 
     #[error("cannot commit: expunged at epoch {epoch} by {from}")]
-    Expunged { epoch: Epoch, from: PlatformId },
+    Expunged { epoch: Epoch, from: BaseboardId },
 
     #[error("not an lrtq node - no lrtq key share")]
     NoLrtqShare,
@@ -202,12 +202,12 @@ pub struct ValidatedReconfigureMsg {
     rack_id: RackUuid,
     epoch: Epoch,
     last_committed_epoch: Option<Epoch>,
-    members: BTreeSet<PlatformId>,
+    members: BTreeSet<BaseboardId>,
     threshold: Threshold,
 
     // This is not included in the original `ReconfigureMsg`. It's implicit
     // in the node that Nexus sends the request to.
-    coordinator_id: PlatformId,
+    coordinator_id: BaseboardId,
 }
 
 // For diffs we want to allow access to all fields, but not make them public in
@@ -225,7 +225,7 @@ impl<'daft> ValidatedReconfigureMsgDiff<'daft> {
         self.last_committed_epoch
     }
 
-    pub fn members(&self) -> &BTreeSetDiff<'daft, PlatformId> {
+    pub fn members(&self) -> &BTreeSetDiff<'daft, BaseboardId> {
         &self.members
     }
 
@@ -233,7 +233,7 @@ impl<'daft> ValidatedReconfigureMsgDiff<'daft> {
         self.threshold
     }
 
-    pub fn coordinator_id(&self) -> Leaf<&PlatformId> {
+    pub fn coordinator_id(&self) -> Leaf<&BaseboardId> {
         self.coordinator_id
     }
 }
@@ -281,7 +281,7 @@ impl ValidatedReconfigureMsg {
     /// that the ongoing coordination can continue.
     pub fn new(
         log: &Logger,
-        coordinator_id: &PlatformId,
+        coordinator_id: &BaseboardId,
         msg: ReconfigureMsg,
         persistent_state: PersistentStateSummary,
         last_reconfig_msg: Option<&ValidatedReconfigureMsg>,
@@ -337,7 +337,7 @@ impl ValidatedReconfigureMsg {
         self.last_committed_epoch
     }
 
-    pub fn members(&self) -> &BTreeSet<PlatformId> {
+    pub fn members(&self) -> &BTreeSet<BaseboardId> {
         &self.members
     }
 
@@ -345,7 +345,7 @@ impl ValidatedReconfigureMsg {
         self.threshold
     }
 
-    pub fn coordinator_id(&self) -> &PlatformId {
+    pub fn coordinator_id(&self) -> &BaseboardId {
         &self.coordinator_id
     }
 
@@ -477,12 +477,12 @@ impl<'a> From<&'a ValidatedLrtqUpgradeMsg> for NewConfigParams<'a> {
 pub struct ValidatedLrtqUpgradeMsg {
     rack_id: RackUuid,
     epoch: Epoch,
-    members: BTreeSet<PlatformId>,
+    members: BTreeSet<BaseboardId>,
     threshold: Threshold,
 
     // This is not included in the original `LrtqUpgradeMsg`. It's implicit in
     // the node that Nexus sends the request to.
-    coordinator_id: PlatformId,
+    coordinator_id: BaseboardId,
 }
 
 impl ValidatedLrtqUpgradeMsg {
@@ -567,7 +567,7 @@ impl ValidatedLrtqUpgradeMsg {
         self.epoch
     }
 
-    pub fn coordinator_id(&self) -> &PlatformId {
+    pub fn coordinator_id(&self) -> &BaseboardId {
         &self.coordinator_id
     }
 
@@ -633,7 +633,7 @@ impl<'daft> ValidatedLrtqUpgradeMsgDiff<'daft> {
         self.epoch
     }
 
-    pub fn members(&self) -> &BTreeSetDiff<'daft, PlatformId> {
+    pub fn members(&self) -> &BTreeSetDiff<'daft, BaseboardId> {
         &self.members
     }
 
@@ -641,7 +641,7 @@ impl<'daft> ValidatedLrtqUpgradeMsgDiff<'daft> {
         self.threshold
     }
 
-    pub fn coordinator_id(&self) -> Leaf<&PlatformId> {
+    pub fn coordinator_id(&self) -> Leaf<&BaseboardId> {
         self.coordinator_id
     }
 }
@@ -656,13 +656,14 @@ mod tests {
     use test_strategy::{Arbitrary, proptest};
     use uuid::Uuid;
 
-    fn arb_member() -> impl Strategy<Value = PlatformId> {
-        (0..255u8).prop_map(|serial| {
-            PlatformId::new("test".into(), serial.to_string())
+    fn arb_member() -> impl Strategy<Value = BaseboardId> {
+        (0..255u8).prop_map(|serial| BaseboardId {
+            part_number: "test".into(),
+            serial_number: serial.to_string(),
         })
     }
 
-    fn arb_members() -> impl Strategy<Value = BTreeSet<PlatformId>> {
+    fn arb_members() -> impl Strategy<Value = BTreeSet<BaseboardId>> {
         proptest::collection::btree_set(arb_member(), 3..10)
     }
 
@@ -686,7 +687,7 @@ mod tests {
         #[strategy(arb_rack_id())]
         rack_id: RackUuid,
         #[strategy(arb_members())]
-        members: BTreeSet<PlatformId>,
+        members: BTreeSet<BaseboardId>,
         #[strategy((1..10u64).prop_map(|x| Epoch(x)))]
         epoch: Epoch,
         new_config: bool,
@@ -732,8 +733,10 @@ mod tests {
                 expunged: None,
             };
             let mut members = input.members.clone();
-            members
-                .insert(PlatformId::new("test".into(), "removed_node".into()));
+            members.insert(BaseboardId {
+                part_number: "test".into(),
+                serial_number: "removed_node".into(),
+            });
             let last_reconfig_msg = ValidatedReconfigureMsg {
                 rack_id: input.rack_id,
                 epoch: msg.last_committed_epoch.unwrap(),
@@ -802,8 +805,10 @@ mod tests {
                 expunged: None,
             };
             let mut members = input.members.clone();
-            members
-                .insert(PlatformId::new("test".into(), "removed_node".into()));
+            members.insert(BaseboardId {
+                part_number: "test".into(),
+                serial_number: "removed_node".into(),
+            });
             let last_reconfig_msg = ValidatedReconfigureMsg {
                 rack_id: input.rack_id,
                 epoch: msg.last_committed_epoch.unwrap(),
@@ -838,7 +843,10 @@ mod tests {
 
         // Coordinator must be a member of the new group
         let msg = original_msg.clone();
-        let bad_platform_id = PlatformId::new("bad".into(), "bad".into());
+        let bad_platform_id = BaseboardId {
+            part_number: "bad".into(),
+            serial_number: "bad".into(),
+        };
         let err = ValidatedReconfigureMsg::new(
             &logctx.log,
             &bad_platform_id,

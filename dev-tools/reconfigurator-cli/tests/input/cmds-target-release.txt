@@ -108,7 +108,7 @@ blueprint-diff latest
 
 # Update only the simulated host phase 2; this is a prerequisite for updating
 # the phase 1, and must be done first.
-sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
+sled-update-host-phase2 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
 inventory-generate
 
 # Planning after only phase 2 has changed should make no changes. We're still
@@ -117,7 +117,7 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now update the simulated SP to reflect that the phase 1 update is done.
-sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+sled-update-host-phase1 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 inventory-generate
 
 # Planning _still_ shouldn't make any new changes; the OS update as a whole
@@ -194,8 +194,8 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Now simulate the update completing successfully.
-sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
-sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+sled-update-host-phase2 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase1 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 inventory-generate
 
 # Another planning step should try to update the last sled, starting with the
@@ -254,8 +254,8 @@ blueprint-plan latest latest
 blueprint-diff latest
 
 # Finish updating the last sled's host OS.
-sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47 
-sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b 
+sled-update-host-phase2 d81c6a84-79b8-4958-ae41-ea46c9b19763 --boot-disk B --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+sled-update-host-phase1 d81c6a84-79b8-4958-ae41-ea46c9b19763 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
 inventory-generate
 
 # Do another planning run. This should start updating zones (one at a time).
@@ -470,6 +470,14 @@ blueprint-diff latest
 blueprint-plan latest latest
 blueprint-diff latest
 
+# If we expunge one of the OLD nexuses, we should observe
+# that it is re-created.
+blueprint-edit latest expunge-zones 0c71b3b2-6ceb-4e8f-b020-b08675e83038
+blueprint-plan latest latest
+blueprint-diff latest
+sled-set 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron-config latest
+inventory-generate
+
 # Bump the set of active Nexus zones; this simulates Nexus handoff.
 set active-nexus-gen 2
 
@@ -477,8 +485,8 @@ set active-nexus-gen 2
 blueprint-plan latest latest
 blueprint-diff latest
 
-# Two more planning iterations should expunge the remaining two old install
-# dataset Nexus zones.
+# Two more planning iterations should expunge the remaining two old 0.0.1
+# version Nexus zones.
 blueprint-plan latest latest
 blueprint-diff latest
 blueprint-plan latest latest

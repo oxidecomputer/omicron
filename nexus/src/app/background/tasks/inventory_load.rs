@@ -18,6 +18,10 @@ use tokio::sync::watch;
 
 pub struct InventoryLoader {
     datastore: Arc<DataStore>,
+    // We store an `Arc<Collection>` in this channel instead of just a
+    // `Collection` so that cloning it is cheap: we want callers to just grab a
+    // snapshot of the collection to do whatever they're going to do without
+    // holding the lock on the channel.
     tx: watch::Sender<Option<Arc<Collection>>>,
 }
 

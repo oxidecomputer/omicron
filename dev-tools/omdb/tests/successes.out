@@ -657,7 +657,8 @@ task: "inventory_loader"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    loaded latest inventory collection as of <REDACTED_TIMESTAMP>: collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
+    loaded latest inventory collection as of <REDACTED_TIMESTAMP>:
+        collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
@@ -1191,7 +1192,8 @@ task: "inventory_loader"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    loaded latest inventory collection as of <REDACTED_TIMESTAMP>: collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
+    loaded latest inventory collection as of <REDACTED_TIMESTAMP>:
+        collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
