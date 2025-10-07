@@ -959,8 +959,9 @@ mod test {
             cptestctx.server.server_context().nexus.datastore().clone();
 
         // Create uplinks
-        // We only eagerly populate NAT entries on switches that have uplinks configured, so we need to
-        // do some switch configuration before starting the instance in order to test that section of logic
+        // We only eagerly populate NAT entries on switches that have
+        // uplinks configured, so we need to do some switch configuration
+        // before starting the instance in order to test that section of logic
         let mut uplink0_params = params::SwitchPortSettingsCreate::new(
             IdentityMetadataCreateParams {
                 name: "test-uplink0".parse().unwrap(),
@@ -1127,6 +1128,8 @@ mod test {
             client_state.clone(),
         );
 
+        let log = opctx.log;
+
         // Check to ensure that the nat entry for the address has made it onto switch1 dendrite
         let nat_entries = dpd_client
             .nat_ipv4_list(&std::net::Ipv4Addr::new(10, 0, 0, 0), None, None)
@@ -1167,32 +1170,28 @@ mod test {
         let poll_max = Duration::from_secs(60);
 
         poll::wait_for_condition(
-            move || {
-                let dpd_client = dpd_client::Client::new(
-                    &format!("http://[{addr}]:{port}"),
-                    client_state.clone(),
-                );
+            async || {
+                let result = dpd_client
+                    .nat_ipv4_list(
+                        &std::net::Ipv4Addr::new(10, 0, 0, 0),
+                        None,
+                        None,
+                    )
+                    .await;
 
-                async move {
-                    let result = match dpd_client
-                        .nat_ipv4_list(
-                            &std::net::Ipv4Addr::new(10, 0, 0, 0),
-                            None,
-                            None,
-                        )
-                        .await
-                    {
-                        Ok(v) => Ok(v),
-                        // sometimes we reach this point before the dendrite API is available
-                        Err(_) => Err(poll::CondCheckError::<()>::NotYet),
-                    }?;
+                info!(log, "nat_ipv4_list"; "result" => ?result);
 
-                    match result.items.is_empty() {
-                        // if the nat entries are empty the dendrite NAT RPW hasn't
-                        // successfully reconciled yet
-                        true => Err(poll::CondCheckError::<()>::NotYet),
-                        false => Ok(()),
-                    }
+                let data =
+                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+
+                if data.items.is_empty() {
+                    error!(
+                        log,
+                        "we are expecting nat entries but none were found"
+                    );
+                    Err(poll::CondCheckError::<()>::NotYet)
+                } else {
+                    Ok(())
                 }
             },
             &poll_interval,

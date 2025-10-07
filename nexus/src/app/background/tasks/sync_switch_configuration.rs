@@ -7,9 +7,9 @@
 
 use crate::app::{
     background::tasks::networking::{
-        api_to_dpd_port_settings, build_dpd_clients, build_mgd_clients,
+        api_to_dpd_port_settings, build_mgd_clients,
     },
-    switch_zone_address_mappings,
+    dpd_clients, switch_zone_address_mappings,
 };
 use oxnet::Ipv4Net;
 use slog::o;
@@ -328,7 +328,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     Err(e) => {
                         error!(
                             log,
-                            "failed to resolve addresses for Dendrite services";
+                            "failed to resolve addresses for switch services";
                             "error" => %e);
                         continue;
                     },
@@ -339,8 +339,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let scrimlet_sled_agent_clients = build_sled_agent_clients(&mappings, &log);
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
-                // build dpd clients
-                let dpd_clients = build_dpd_clients(&mappings, &log);
+                let dpd_clients = match
+                    dpd_clients(&self.resolver, &log).await
+                {
+                    Ok(mappings) => mappings,
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to resolve addresses for Dendrite";
+                            "error" => %e);
+                        continue;
+                    },
+                };
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build mgd clients

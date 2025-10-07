@@ -5,9 +5,8 @@
 //! Background task for detecting changes to service zone locations and
 //! updating the NAT rpw table accordingly
 
-use crate::app::switch_zone_address_mappings;
+use crate::app::dpd_clients;
 
-use super::networking::build_dpd_clients;
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
 use futures::FutureExt;
@@ -279,9 +278,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
             // notify dpd if we've added any new records
             if result > 0 {
 
-                let mappings = match
-                    switch_zone_address_mappings(&self.resolver, log).await
-                {
+                let dpd_clients = match dpd_clients(&self.resolver, log).await {
                     Ok(mappings) => mappings,
                     Err(e) => {
                         error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
@@ -294,8 +291,6 @@ impl BackgroundTask for ServiceZoneNatTracker {
                         });
                     },
                 };
-
-                let dpd_clients = build_dpd_clients(&mappings, log);
 
                 for (_location, client) in dpd_clients {
                     if let Err(e) = client.ipv4_nat_trigger_update().await {
