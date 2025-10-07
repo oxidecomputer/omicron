@@ -224,10 +224,10 @@ impl super::Nexus {
 
         let time_last_blueprint = blueprint_target.time_made_target;
 
-        // Update activity is paused if the current target release generation
-        // is less than or equal to the blueprint's minimum generation
+        // Update activity is paused if the current target release generation is
+        // less than the blueprint's minimum generation
         let paused = *db_target_release.generation
-            <= blueprint.target_release_minimum_generation;
+            < blueprint.target_release_minimum_generation;
 
         Ok(views::UpdateStatus {
             target_release: Nullable(target_release),
@@ -237,7 +237,7 @@ impl super::Nexus {
         })
     }
 
-    /// Get component status using read-only queries to avoid batch operations
+    /// Build a map of version strings to the number of components on that version
     async fn component_version_counts(
         &self,
         opctx: &OpContext,

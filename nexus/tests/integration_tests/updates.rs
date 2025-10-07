@@ -716,10 +716,11 @@ async fn test_update_status() -> Result<()> {
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
     assert_eq!(status.target_release.0, None);
-    assert!(
-        status.paused,
-        "should be paused initially when no target release is set"
-    );
+    // does not start paused because the DB migration initialized the
+    // target_release table with a row with gen 1, and the initial target
+    // blueprint also has gen 1
+    assert!(!status.paused);
+
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &15);

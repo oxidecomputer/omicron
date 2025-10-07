@@ -200,6 +200,11 @@ impl DataStore {
             .await
             .map(|v| v.0)
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            // looking up a non-existent ID will 500, but it doesn't
+            // automatically include the bad ID
+            .with_internal_context(|| {
+                format!("tuf_repo_get_version {tuf_repo_id}")
+            })
     }
 
     /// Returns the list of all TUF repo artifacts known to the system.
