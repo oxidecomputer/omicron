@@ -596,7 +596,7 @@ pub trait NexusExternalApi {
 
     #[endpoint {
         method = GET,
-        path = "/v1/system/identity-providers/scim/tokens",
+        path = "/v1/system/scim/tokens",
         tags = ["system/silos"],
     }]
     async fn scim_idp_get_tokens(
@@ -606,7 +606,7 @@ pub trait NexusExternalApi {
 
     #[endpoint {
         method = POST,
-        path = "/v1/system/identity-providers/scim/tokens",
+        path = "/v1/system/scim/tokens",
         tags = ["system/silos"],
     }]
     async fn scim_idp_create_token(
@@ -619,7 +619,7 @@ pub trait NexusExternalApi {
 
     #[endpoint {
         method = GET,
-        path = "/v1/system/identity-providers/scim/tokens/{token_id}",
+        path = "/v1/system/scim/tokens/{token_id}",
         tags = ["system/silos"],
     }]
     async fn scim_idp_get_token_by_id(
@@ -630,7 +630,7 @@ pub trait NexusExternalApi {
 
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/identity-providers/scim/tokens/{token_id}",
+        path = "/v1/system/scim/tokens/{token_id}",
         tags = ["system/silos"],
     }]
     async fn scim_idp_delete_token_by_id(
@@ -641,7 +641,7 @@ pub trait NexusExternalApi {
 
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/identity-providers/scim/tokens",
+        path = "/v1/system/scim/tokens",
         tags = ["system/silos"],
     }]
     async fn scim_idp_delete_all_tokens(
