@@ -612,10 +612,7 @@ pub trait NexusExternalApi {
     async fn scim_idp_create_token(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
-    ) -> Result<
-        HttpResponseCreated<views::ScimClientBearerTokenValue>,
-        HttpError,
-    >;
+    ) -> Result<HttpResponseCreated<views::ScimClientBearerTokenValue>, HttpError>;
 
     #[endpoint {
         method = GET,
