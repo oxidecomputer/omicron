@@ -19,8 +19,8 @@ use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
+use nexus_types::inventory::Collection;
 use omicron_common::api::external::LookupType;
-use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid as _;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -31,7 +31,7 @@ use tokio::sync::watch::{self, Receiver, Sender};
 pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
     rx_config: Receiver<ReconfiguratorConfigLoaderState>,
-    rx_inventory: Receiver<Option<CollectionUuid>>,
+    rx_inventory: Receiver<Option<Arc<Collection>>>,
     rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     blueprint_limit: u64,
@@ -57,7 +57,7 @@ impl BlueprintPlanner {
     pub fn new(
         datastore: Arc<DataStore>,
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
-        rx_inventory: Receiver<Option<CollectionUuid>>,
+        rx_inventory: Receiver<Option<Arc<Collection>>>,
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     ) -> Self {
         let (tx_blueprint, _) = watch::channel(None);
@@ -114,10 +114,12 @@ impl BlueprintPlanner {
         let (target, parent) = &*loaded;
         let parent_blueprint_id = parent.id;
 
-        // Get the inventory most recently seen by the collection
-        // background task. The value is `Copy`, so with the deref
-        // we don't block the channel.
-        let Some(collection_id) = *self.rx_inventory.borrow_and_update() else {
+        // Get the inventory most recently seen by the inventory loader
+        // background task. We clone the Arc to avoid keeping the channel locked
+        // for the rest of our execution.
+        let Some(collection) =
+            self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
+        else {
             warn!(
                 &opctx.log,
                 "blueprint planning skipped";
@@ -126,25 +128,6 @@ impl BlueprintPlanner {
             return BlueprintPlannerStatus::Error(String::from(
                 "no inventory collection available",
             ));
-        };
-        let collection = match self
-            .datastore
-            .inventory_collection_read(opctx, collection_id)
-            .await
-        {
-            Ok(collection) => collection,
-            Err(error) => {
-                error!(
-                    &opctx.log,
-                    "can't read inventory collection";
-                    "collection_id" => %collection_id,
-                    "error" => %error,
-                );
-                return BlueprintPlannerStatus::Error(format!(
-                    "can't read inventory collection {}: {}",
-                    collection_id, error
-                ));
-            }
         };
 
         // Assemble the planning context.
@@ -438,6 +421,7 @@ mod test {
     use crate::app::background::tasks::blueprint_execution::BlueprintExecutor;
     use crate::app::background::tasks::blueprint_load::TargetBlueprintLoader;
     use crate::app::background::tasks::inventory_collection::InventoryCollector;
+    use crate::app::background::tasks::inventory_load::InventoryLoader;
     use crate::app::{background::Activator, quiesce::NexusQuiesceHandle};
     use assert_matches::assert_matches;
     use nexus_inventory::now_db_precision;
@@ -467,10 +451,10 @@ mod test {
 
         // Spin up the blueprint loader background task.
         let (tx_loader, _) = watch::channel(None);
-        let mut loader =
+        let mut bp_loader =
             TargetBlueprintLoader::new(datastore.clone(), tx_loader);
-        let mut rx_loader = loader.watcher();
-        loader.activate(&opctx).await;
+        let mut rx_loader = bp_loader.watcher();
+        bp_loader.activate(&opctx).await;
         let (_initial_target, initial_blueprint) = &*rx_loader
             .borrow_and_update()
             .clone()
@@ -490,8 +474,13 @@ mod test {
             1,
             false,
         );
-        let rx_collector = collector.watcher();
         collector.activate(&opctx).await;
+
+        // Spin up the inventory loader background task.
+        let mut inv_loader =
+            InventoryLoader::new(datastore.clone(), watch::Sender::new(None));
+        let rx_inventory = inv_loader.watcher();
+        inv_loader.activate(&opctx).await;
 
         // Enable the planner
         let (_tx, rx_config_loader) = watch::channel(
@@ -509,10 +498,9 @@ mod test {
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
             rx_config_loader,
-            rx_collector,
+            rx_inventory,
             rx_loader.clone(),
         );
-        let _rx_planner = planner.watcher();
 
         // On activation, the planner should run successfully and generate
         // a new target blueprint.
@@ -536,7 +524,7 @@ mod test {
         };
 
         // Load and check the new target blueprint.
-        loader.activate(&opctx).await;
+        bp_loader.activate(&opctx).await;
         let (target, blueprint) = &*rx_loader
             .borrow_and_update()
             .clone()
@@ -571,7 +559,7 @@ mod test {
             .expect("can't enable execution");
 
         // Ping the loader again so it gets the updated target.
-        loader.activate(&opctx).await;
+        bp_loader.activate(&opctx).await;
         let (target, blueprint) = &*rx_loader
             .borrow_and_update()
             .clone()
@@ -584,6 +572,7 @@ mod test {
 
         // Trigger an inventory collection.
         collector.activate(&opctx).await;
+        inv_loader.activate(&opctx).await;
 
         // Execute the plan.
         let (dummy_tx, _dummy_rx) = watch::channel(PendingMgsUpdates::new());

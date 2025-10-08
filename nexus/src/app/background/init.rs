@@ -512,13 +512,14 @@ impl BackgroundTasksInitializer {
             datastore.clone(),
             self.inventory_load_tx,
         );
+        let inventory_load_watcher = inventory_loader.watcher();
         driver.register(TaskDefinition {
             name: "inventory_loader",
             description: "loads the latest inventory collection from the DB",
             period: config.inventory.period_secs_load,
             task_impl: Box::new(inventory_loader),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_collect_watcher.clone())],
+            watchers: vec![Box::new(inventory_collect_watcher)],
             activator: task_inventory_loader,
         });
 
@@ -544,7 +545,7 @@ impl BackgroundTasksInitializer {
         let blueprint_planner = blueprint_planner::BlueprintPlanner::new(
             datastore.clone(),
             reconfigurator_config_watcher.clone(),
-            inventory_collect_watcher.clone(),
+            inventory_load_watcher.clone(),
             rx_blueprint.clone(),
         );
         let rx_planner = blueprint_planner.watcher();
@@ -555,7 +556,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(blueprint_planner),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![
-                Box::new(inventory_collect_watcher.clone()),
+                Box::new(inventory_load_watcher.clone()),
                 Box::new(rx_blueprint.clone()),
                 Box::new(reconfigurator_config_watcher),
             ],
@@ -620,13 +621,13 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(
                 physical_disk_adoption::PhysicalDiskAdoption::new(
                     datastore.clone(),
-                    inventory_collect_watcher.clone(),
+                    inventory_load_watcher.clone(),
                     config.physical_disk_adoption.disable,
                     rack_id,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_collect_watcher.clone())],
+            watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_physical_disk_adoption,
         });
 
@@ -641,10 +642,11 @@ impl BackgroundTasksInitializer {
                 blueprint_rendezvous::BlueprintRendezvous::new(
                     datastore.clone(),
                     rx_blueprint.clone(),
+                    inventory_load_watcher.clone(),
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_collect_watcher.clone())],
+            watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_blueprint_rendezvous,
         });
 
@@ -674,6 +676,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(ServiceZoneNatTracker::new(
                 datastore.clone(),
                 resolver.clone(),
+                inventory_load_watcher.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
