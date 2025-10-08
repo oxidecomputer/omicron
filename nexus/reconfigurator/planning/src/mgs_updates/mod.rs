@@ -868,7 +868,7 @@ mod test {
         // each of the sled boards, and report no pending updates
         let mut expected_blocked_updates = Vec::new();
         for baseboard_id in &collection.baseboards {
-            if baseboard_id.part_number == "dummy_sled" {
+            if baseboard_id.part_number == "913-0000019" {
                 expected_blocked_updates.push(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
                     reason: FailedMgsUpdateReason::HostOs(

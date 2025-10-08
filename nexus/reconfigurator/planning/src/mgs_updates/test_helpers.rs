@@ -964,7 +964,11 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             };
 
             let sp_state = SpState {
-                model: format!("dummy_{}", sp_id.type_),
+                // We assume a valid model ID for sleds
+                model: match sp_id.type_ {
+                    SpType::Sled => "913-0000019".to_string(),
+                    _ => format!("dummy_{}", sp_id.type_),
+                },
                 serial_number: serial.to_string(),
                 ..dummy_sp_state.clone()
             };
