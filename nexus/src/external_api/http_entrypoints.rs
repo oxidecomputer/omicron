@@ -883,7 +883,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn scim_idp_get_tokens(
+    async fn scim_token_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<Vec<views::ScimClientBearerToken>>, HttpError>
@@ -917,7 +917,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn scim_idp_create_token(
+    async fn scim_token_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseCreated<views::ScimClientBearerTokenValue>, HttpError>
@@ -951,7 +951,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn scim_idp_get_token_by_id(
+    async fn scim_token_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ScimV2TokenPathParam>,
         query_params: Query<params::SiloSelector>,
@@ -991,7 +991,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn scim_idp_delete_token_by_id(
+    async fn scim_token_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ScimV2TokenPathParam>,
         query_params: Query<params::SiloSelector>,
@@ -1031,7 +1031,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn scim_idp_delete_all_tokens(
+    async fn scim_token_delete_all(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {

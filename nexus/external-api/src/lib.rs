@@ -594,54 +594,71 @@ pub trait NexusExternalApi {
 
     // SAML+SCIM Identity Provider
 
+    /// List SCIM tokens
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = GET,
         path = "/v1/system/scim/tokens",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_get_tokens(
+    async fn scim_token_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<Vec<views::ScimClientBearerToken>>, HttpError>;
 
+    /// Create SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter. Be sure
+    /// to save the bearer token in the response. It will not be retrievable
+    /// later through the token view and list endpoints.
     #[endpoint {
         method = POST,
         path = "/v1/system/scim/tokens",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_create_token(
+    async fn scim_token_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseCreated<views::ScimClientBearerTokenValue>, HttpError>;
 
+    /// Fetch SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = GET,
         path = "/v1/system/scim/tokens/{token_id}",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_get_token_by_id(
+    async fn scim_token_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ScimV2TokenPathParam>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<views::ScimClientBearerToken>, HttpError>;
 
+    /// Delete SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/scim/tokens/{token_id}",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_delete_token_by_id(
+    async fn scim_token_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ScimV2TokenPathParam>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Delete all SCIM tokens
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/scim/tokens",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_delete_all_tokens(
+    async fn scim_token_delete_all(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;

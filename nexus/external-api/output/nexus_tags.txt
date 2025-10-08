@@ -272,11 +272,11 @@ local_idp_user_delete                    DELETE   /v1/system/identity-providers/
 local_idp_user_set_password              POST     /v1/system/identity-providers/local/users/{user_id}/set-password
 saml_identity_provider_create            POST     /v1/system/identity-providers/saml
 saml_identity_provider_view              GET      /v1/system/identity-providers/saml/{provider}
-scim_idp_create_token                    POST     /v1/system/scim/tokens
-scim_idp_delete_all_tokens               DELETE   /v1/system/scim/tokens
-scim_idp_delete_token_by_id              DELETE   /v1/system/scim/tokens/{token_id}
-scim_idp_get_token_by_id                 GET      /v1/system/scim/tokens/{token_id}
-scim_idp_get_tokens                      GET      /v1/system/scim/tokens
+scim_token_create                        POST     /v1/system/scim/tokens
+scim_token_delete                        DELETE   /v1/system/scim/tokens/{token_id}
+scim_token_delete_all                    DELETE   /v1/system/scim/tokens
+scim_token_list                          GET      /v1/system/scim/tokens
+scim_token_view                          GET      /v1/system/scim/tokens/{token_id}
 silo_create                              POST     /v1/system/silos
 silo_delete                              DELETE   /v1/system/silos/{silo}
 silo_identity_provider_list              GET      /v1/system/identity-providers
