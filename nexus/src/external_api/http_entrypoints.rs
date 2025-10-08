@@ -7157,13 +7157,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
                             .into_iter()
                             .map(Into::into)
                             .collect(),
-                        query_summaries: include_summaries.then_some(
+                        query_summaries: include_summaries.then(|| {
                             result
                                 .query_summaries
                                 .into_iter()
                                 .map(Into::into)
-                                .collect(),
-                        ),
+                                .collect()
+                        }),
                     })
                 })
                 .map_err(HttpError::from)
@@ -7201,13 +7201,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
                             .into_iter()
                             .map(Into::into)
                             .collect(),
-                        query_summaries: include_summaries.then_some(
+                        query_summaries: include_summaries.then(|| {
                             result
                                 .query_summaries
                                 .into_iter()
                                 .map(Into::into)
-                                .collect(),
-                        ),
+                                .collect()
+                        }),
                     })
                 })
                 .map_err(HttpError::from)
