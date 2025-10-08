@@ -92,6 +92,9 @@ target release (generation 2): 0.0.1 (system-update-v0.0.1.zip)
     artifact: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c switch_rot_image_b (fake-switch-rot version 0.0.1)
     artifact: 0686443d50db2247077dc70b6543cea9a90a9792de00e06c06cff4c91fa5a4a8 switch_rot_bootloader (fake-switch-rot-bootloader version 0.0.1)
     artifact: 657aaebc9c2f451446af0411a67a4bd057f39fa1b8a7fdc429ca4a2facd9344c installinator_document (installinator_document version 0.0.1)
+active nexus zone generation: 1
+active nexus zones: inferred from generation
+not-yet nexus zones: inferred from generation
 planner config:
     add zones with mupdate override:   false
 
