@@ -895,15 +895,36 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     time_deleted TIMESTAMPTZ,
 
     silo_id UUID NOT NULL,
-    external_id TEXT NOT NULL
+
+    -- if the user provision type is 'api_only' or 'jit', then this field must
+    -- contain a value
+    external_id TEXT,
+
+    user_provision_type omicron.public.user_provision_type,
+
+    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
+      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
+      OR (time_deleted IS NOT NULL)
+    ),
+
+    CONSTRAINT external_id_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'api_only' THEN external_id IS NOT NULL
+          WHEN 'jit' THEN external_id IS NOT NULL
+        END
+    )
 );
 
-/* This index lets us quickly find users for a given silo. */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_user_by_silo ON omicron.public.silo_user (
-    silo_id,
-    external_id
-) WHERE
-    time_deleted IS NULL;
+/* This index lets us quickly find users for a given silo, and prevents
+   multiple users from having the same external id (for certain provision
+   types). */
+CREATE UNIQUE INDEX IF NOT EXISTS
+ lookup_silo_user_by_silo
+ON
+ omicron.public.silo_user (silo_id, external_id)
+WHERE
+ time_deleted IS NULL AND
+ (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 CREATE TABLE IF NOT EXISTS omicron.public.silo_user_password_hash (
     silo_user_id UUID NOT NULL,
@@ -924,14 +945,33 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_group (
     time_deleted TIMESTAMPTZ,
 
     silo_id UUID NOT NULL,
-    external_id TEXT NOT NULL
+
+    -- if the user provision type is 'api_only' or 'jit', then this field must
+    -- contain a value
+    external_id TEXT,
+
+    user_provision_type omicron.public.user_provision_type,
+
+    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
+      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
+      OR (time_deleted IS NOT NULL)
+    ),
+
+    CONSTRAINT external_id_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'api_only' THEN external_id IS NOT NULL
+          WHEN 'jit' THEN external_id IS NOT NULL
+        END
+    )
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_group_by_silo ON omicron.public.silo_group (
-    silo_id,
-    external_id
-) WHERE
-    time_deleted IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS
+ lookup_silo_group_by_silo
+ON
+ omicron.public.silo_group (silo_id, external_id)
+WHERE
+ time_deleted IS NULL and
+ (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 /*
  * Silo group membership
@@ -6694,7 +6734,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '196.0.0', NULL)
+    (TRUE, NOW(), NOW(), '197.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

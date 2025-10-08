@@ -4,6 +4,7 @@
 
 //! Tools for managing Dendrite during development
 
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -36,16 +37,31 @@ pub struct DendriteInstance {
 }
 
 impl DendriteInstance {
-    pub async fn start(port: u16) -> Result<Self, anyhow::Error> {
+    pub async fn start(
+        port: u16,
+        nexus_address: Option<SocketAddr>,
+        mgs_address: Option<SocketAddr>,
+    ) -> Result<Self, anyhow::Error> {
         let mut port = port;
         let temp_dir = TempDir::new()?;
         let address_one = format!("[::1]:{port}");
 
-        let args = vec![
+        let mut args = vec![
             "run".to_string(),
             "--listen-addresses".to_string(),
             address_one,
+            "--enable-rpw".to_string(),
         ];
+
+        if let Some(socket_addr) = nexus_address {
+            args.push("--nexus-address".to_string());
+            args.push(socket_addr.to_string());
+        }
+
+        if let Some(socket_addr) = mgs_address {
+            args.push("--mgs-address".to_string());
+            args.push(socket_addr.to_string());
+        }
 
         let child = tokio::process::Command::new("dpd")
             .args(&args)
