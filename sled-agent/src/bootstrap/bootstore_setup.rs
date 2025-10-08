@@ -34,7 +34,7 @@ pub fn new_bootstore_config(
         addr: SocketAddrV6::new(global_zone_bootstrap_ip, BOOTSTORE_PORT, 0, 0),
         time_per_tick: Duration::from_millis(250),
         learn_timeout: Duration::from_secs(5),
-        rack_init_timeout: Duration::from_secs(300),
+        rack_init_timeout: Duration::from_secs(10 * 60),
         rack_secret_request_timeout: Duration::from_secs(5),
         fsm_state_ledger_paths: bootstore_fsm_state_paths(
             cluster_dataset_paths,
