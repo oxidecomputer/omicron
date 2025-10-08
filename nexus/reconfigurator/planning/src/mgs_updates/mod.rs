@@ -630,6 +630,22 @@ fn try_make_update(
                 current_artifacts,
             )
             .map_err(|e| e.into()),
+            // TODO: Today we pass `unsafe_zone_boards` here, and check within
+            // each of the SP and Host OS's `try_make_update` function whether
+            // we are trying to update a board that is in that list. If that is
+            // the case, we return an error and below it is set as a blocked
+            // update. This isn't ideal because we actually could do an update,
+            // but want to block it because of some higher-level thing entirely
+            // unrelated to MGS-driven updates (i.e., zone safety checks).
+            // For now we are keeping these checks here as we don't want to set
+            // an MGS-driven update as both "pending" and "blocked" since we
+            // want to be able to differentiate between them for the
+            // `PlanningZoneUpdatesStepReport` which can be set to either
+            // `ZoneUpdatesWaitingOn::PendingMgsUpdates` or
+            // `ZoneUpdatesWaitingOn::BlockedMgsUpdates`.
+            //
+            // Also see:
+            // https://github.com/oxidecomputer/omicron/pull/9044/files#r2411133382
             MgsUpdateComponent::Sp => sp::try_make_update(
                 log,
                 baseboard_id,

@@ -429,18 +429,21 @@ pub(super) fn try_make_update(
 
     // Make sure the board we're targetting doesn't contain any zones that are
     // unsafe to shut down
-    if unsafe_zone_boards.contains_key(baseboard_id) {
-        let mut unsafe_zones = Vec::new();
+    if let Some(unsafe_zone_board) = unsafe_zone_boards.get(baseboard_id) {
+        if unsafe_zone_board.is_empty() {
+            // This should never happen! If it does, we have a bug somewhere
+            // else: we added an entry to `unsafe_zone_boards` but didn't
+            // populate the details of why.
+            let err = "unsafe zone present, but no details found \
+                 (this is unexpected!)"
+                .to_string();
+            return Err(FailedHostOsUpdateReason::UnsafeZoneFound(err));
+        }
 
-        // All unsafe zones boards should contain which zones are unsafe. In the
-        // unlikely case that they don't, we just pass an empty string as this
-        // is meant for informational purposes only. There is no need to bail
-        // out with a different error because of this
-        if let Some(board) = unsafe_zone_boards.get(baseboard_id) {
-            for (zone_id, zone) in board {
-                unsafe_zones.push(format!("{}: {}", zone_id, zone));
-            }
-        };
+        let mut unsafe_zones = Vec::new();
+        for (zone_id, zone) in unsafe_zone_board {
+            unsafe_zones.push(format!("{}: {}", zone_id, zone));
+        }
         let zone_str = unsafe_zones.join(", ").to_string();
         return Err(FailedHostOsUpdateReason::UnsafeZoneFound(zone_str));
     }
