@@ -9,6 +9,7 @@ use self::saga::SagaExecutor;
 use crate::DropshotServer;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::SagaRecoveryHelpers;
+use crate::app::update::UpdateStatusHandle;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
 use crate::populate::populate_start;
@@ -285,6 +286,9 @@ pub struct Nexus {
     #[allow(dead_code)]
     repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
 
+    /// handle to pull update status data
+    update_status: UpdateStatusHandle,
+
     /// state of overall Nexus quiesce activity
     quiesce: NexusQuiesceHandle,
 }
@@ -351,7 +355,7 @@ impl Nexus {
         let quiesce = NexusQuiesceHandle::new(
             db_datastore.clone(),
             config.deployment.id,
-            blueprint_load_rx,
+            blueprint_load_rx.clone(),
             quiesce_opctx,
         );
 
@@ -534,6 +538,7 @@ impl Nexus {
             mgs_update_status_rx,
             mgs_resolver,
             repo_depot_resolver,
+            update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
         };
 

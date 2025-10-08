@@ -14,7 +14,9 @@ use nexus_db_model::TufRepoUploadStatus;
 use nexus_db_model::{Generation, TufTrustRoot};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
-use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::{
+    Blueprint, BlueprintTarget, TargetReleaseDescription,
+};
 use nexus_types::external_api::shared::TufSignedRootRole;
 use nexus_types::external_api::views;
 use nexus_types::internal_api::views as internal_views;
@@ -26,10 +28,29 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use tokio::sync::watch;
 use update_common::artifacts::{
     ArtifactsWithPlan, ControlPlaneZonesMode, VerificationMode,
 };
 use uuid::Uuid;
+
+/// Used to pull data out of the channels
+#[derive(Clone)]
+pub struct UpdateStatusHandle {
+    latest_blueprint:
+        watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+}
+
+impl UpdateStatusHandle {
+    pub fn new(
+        latest_blueprint: watch::Receiver<
+            Option<Arc<(BlueprintTarget, Blueprint)>>,
+        >,
+    ) -> Self {
+        Self { latest_blueprint }
+    }
+}
 
 impl super::Nexus {
     pub(crate) async fn updates_put_repository(
@@ -196,31 +217,33 @@ impl super::Nexus {
             )
             .await?;
 
-        let (blueprint_target, blueprint) = self
-            .quiesce
-            .latest_blueprint()
+        let bp_arc = self
+            .update_status
+            .latest_blueprint
+            .borrow()
+            .clone() // drop read lock held by outstanding borrow
             .ok_or_else(|| {
                 Error::internal_error("Tried to get update status before target blueprint is loaded")
-            })?
-            .as_ref()
-            .clone();
+            })?;
 
-        let time_last_blueprint = blueprint_target.time_made_target;
+        let (blueprint_target, blueprint) = &*bp_arc;
 
-        // Update activity is paused if the current target release generation
-        // is less than or equal to the blueprint's minimum generation
-        let paused = *db_target_release.generation
-            <= blueprint.target_release_minimum_generation;
+        let time_last_step_planned = blueprint_target.time_made_target;
+
+        // Update activity is suspended if the current target release generation
+        // is less than the blueprint's minimum generation
+        let suspended = *db_target_release.generation
+            < blueprint.target_release_minimum_generation;
 
         Ok(views::UpdateStatus {
             target_release: Nullable(target_release),
             components_by_release_version,
-            time_last_blueprint,
-            paused,
+            time_last_step_planned,
+            suspended,
         })
     }
 
-    /// Get component status using read-only queries to avoid batch operations
+    /// Build a map of version strings to the number of components on that version
     async fn component_version_counts(
         &self,
         opctx: &OpContext,

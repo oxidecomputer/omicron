@@ -26117,7 +26117,7 @@
         "type": "object",
         "properties": {
           "components_by_release_version": {
-            "description": "Count of components running each release version",
+            "description": "Count of components running each release version\n\nKeys will be either:\n\n* Semver-like release version strings * \"install dataset\", representing the initial rack software before any updates * \"unknown\", which means there is no TUF repo uploaded that matches the software running on the component)",
             "type": "object",
             "additionalProperties": {
               "type": "integer",
@@ -26125,8 +26125,8 @@
               "minimum": 0
             }
           },
-          "paused": {
-            "description": "Whether update activity is paused\n\nWhen true, the system has stopped attempting to make progress toward the target release. This happens after a MUPdate because the system wants to make sure of the operator's intent. To resume update, set a new target release.",
+          "suspended": {
+            "description": "Whether automatic update is suspended due to manual update activity\n\nAfter a manual support procedure that changes the system software, automatic update activity is suspended to avoid undoing the change. To resume automatic update, first upload the TUF repository matching the manually applied update, then set that as the target release.",
             "type": "boolean"
           },
           "target_release": {
@@ -26138,17 +26138,17 @@
               }
             ]
           },
-          "time_last_blueprint": {
-            "description": "Time of most recent update planning activity\n\nThis is intended as a rough indicator of the last time something happened in the update planner. A blueprint is the update system's plan for the next state of the system, so this timestamp indicates the last time the update system made a plan.",
+          "time_last_step_planned": {
+            "description": "Time of most recent update planning activity\n\nThis is intended as a rough indicator of the last time something happened in the update planner.",
             "type": "string",
             "format": "date-time"
           }
         },
         "required": [
           "components_by_release_version",
-          "paused",
+          "suspended",
           "target_release",
-          "time_last_blueprint"
+          "time_last_step_planned"
         ]
       },
       "UpdatesTrustRoot": {

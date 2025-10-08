@@ -92,12 +92,6 @@ impl NexusQuiesceHandle {
         self.state.borrow().clone()
     }
 
-    pub fn latest_blueprint(
-        &self,
-    ) -> Option<Arc<(BlueprintTarget, Blueprint)>> {
-        self.latest_blueprint.borrow().clone()
-    }
-
     pub fn set_quiescing(&self, quiescing: bool) {
         let new_state = if quiescing {
             let time_requested = Utc::now();

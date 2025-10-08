@@ -717,16 +717,17 @@ async fn test_update_status() -> Result<()> {
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
     assert_eq!(status.target_release.0, None);
-    assert!(
-        status.paused,
-        "should be paused initially when no target release is set"
-    );
+    // does not start suspended because the DB migration initialized the
+    // target_release table with a row with gen 1, and the initial target
+    // blueprint also has gen 1
+    assert!(!status.suspended);
+
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
     assert_eq!(counts.get("unknown").unwrap(), &15);
 
     // hold onto this to compare it to later values
-    let time_last_blueprint = status.time_last_blueprint;
+    let time_last_step_planned = status.time_last_step_planned;
 
     // Upload a fake TUF repo and set it as the target release
     let trust_root = TestTrustRoot::generate().await?;
@@ -743,10 +744,10 @@ async fn test_update_status() -> Result<()> {
     let status: views::UpdateStatus =
         object_get(client, "/v1/system/update/status").await;
     assert_eq!(status.target_release.0.unwrap().version, v1);
-    assert!(!status.paused, "should not be paused after setting v1");
+    assert!(!status.suspended, "should not be suspended after setting v1");
 
     // blueprint time doesn't change
-    assert_eq!(time_last_blueprint, status.time_last_blueprint);
+    assert_eq!(time_last_step_planned, status.time_last_step_planned);
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
@@ -775,10 +776,10 @@ async fn test_update_status() -> Result<()> {
         object_get(client, "/v1/system/update/status").await;
 
     assert_eq!(status.target_release.0.unwrap().version, v2);
-    assert!(!status.paused, "should not be paused after setting v2");
+    assert!(!status.suspended, "should not be suspended after setting v2");
 
     // blueprint time doesn't change
-    assert_eq!(time_last_blueprint, status.time_last_blueprint);
+    assert_eq!(time_last_step_planned, status.time_last_step_planned);
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);

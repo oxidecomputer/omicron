@@ -1572,23 +1572,29 @@ pub struct UpdateStatus {
     pub target_release: Nullable<TargetRelease>,
 
     /// Count of components running each release version
+    ///
+    /// Keys will be either:
+    ///
+    /// * Semver-like release version strings
+    /// * "install dataset", representing the initial rack software before
+    ///   any updates
+    /// * "unknown", which means there is no TUF repo uploaded that matches
+    ///   the software running on the component)
     pub components_by_release_version: BTreeMap<String, usize>,
 
     /// Time of most recent update planning activity
     ///
     /// This is intended as a rough indicator of the last time something
-    /// happened in the update planner. A blueprint is the update system's plan
-    /// for the next state of the system, so this timestamp indicates the last
-    /// time the update system made a plan.
-    pub time_last_blueprint: DateTime<Utc>,
+    /// happened in the update planner.
+    pub time_last_step_planned: DateTime<Utc>,
 
-    /// Whether update activity is paused
+    /// Whether automatic update is suspended due to manual update activity
     ///
-    /// When true, the system has stopped attempting to make progress toward the
-    /// target release. This happens after a MUPdate because the system wants to
-    /// make sure of the operator's intent. To resume update, set a new target
-    /// release.
-    pub paused: bool,
+    /// After a manual support procedure that changes the system software,
+    /// automatic update activity is suspended to avoid undoing the change. To
+    /// resume automatic update, first upload the TUF repository matching the
+    /// manually applied update, then set that as the target release.
+    pub suspended: bool,
 }
 
 /// Metadata about a TUF repository

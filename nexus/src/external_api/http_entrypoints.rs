@@ -6860,8 +6860,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &system_version,
                 ) {
                     return Err(Error::invalid_request(format!(
-                        "The requested target release ({system_version}) must \
-                         be newer than the current target release ({version})."
+                        "Requested target release ({system_version}) must not \
+                         be older than current target release ({version})."
                     ))
                     .into());
                 }
