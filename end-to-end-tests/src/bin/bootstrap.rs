@@ -6,8 +6,8 @@ use end_to_end_tests::helpers::{
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
-    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, IpVersion, NameOrId,
-    SiloQuotasUpdate,
+    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo,
+    IpPoolReservationType, IpVersion, NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
     ClientConsoleAuthExt, ClientDisksExt, ClientProjectsExt,
@@ -48,16 +48,17 @@ async fn run_test() -> Result<()> {
     eprintln!("creating IP{} IP pool... {:?} - {:?}", ip_version, first, last);
     let pool_name = "default";
     client
-        .ip_pool_create()
+        .system_ip_pool_create()
         .body(IpPoolCreate {
             name: pool_name.parse().unwrap(),
             description: "Default IP pool".to_string(),
             ip_version,
+            reservation_type: IpPoolReservationType::ExternalSilos,
         })
         .send()
         .await?;
     client
-        .ip_pool_silo_link()
+        .system_ip_pool_silo_link()
         .pool(pool_name)
         .body(IpPoolLinkSilo {
             silo: NameOrId::Name(params.silo_name().parse().unwrap()),
@@ -66,7 +67,7 @@ async fn run_test() -> Result<()> {
         .send()
         .await?;
     client
-        .ip_pool_range_add()
+        .system_ip_pool_range_add()
         .pool(pool_name)
         .body(try_create_ip_range(first, last)?)
         .send()

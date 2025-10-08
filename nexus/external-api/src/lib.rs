@@ -440,7 +440,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::SiloPath>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError>;
 
     /// Delete a silo
     ///
@@ -883,10 +883,10 @@ pub trait NexusExternalApi {
         path = "/v1/ip-pools",
         tags = ["projects"],
     }]
-    async fn project_ip_pool_list(
+    async fn ip_pool_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError>;
 
     /// Fetch IP pool
     #[endpoint {
@@ -894,10 +894,10 @@ pub trait NexusExternalApi {
         path = "/v1/ip-pools/{pool}",
         tags = ["projects"],
     }]
-    async fn project_ip_pool_view(
+    async fn ip_pool_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
-    ) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError>;
+    ) -> Result<HttpResponseOk<views::IpPool>, HttpError>;
 
     /// List IP pools
     #[endpoint {
@@ -905,10 +905,13 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_list(
+    async fn system_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError>;
+        // TODO-completeness: We should add filters for IP version and
+        // delegation state here.
+        // See https://github.com/oxidecomputer/omicron/issues/9147.
+    ) -> Result<HttpResponseOk<ResultsPage<views::SystemIpPool>>, HttpError>;
 
     /// Create IP pool
     #[endpoint {
@@ -916,10 +919,10 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_create(
+    async fn system_ip_pool_create(
         rqctx: RequestContext<Self::Context>,
         pool_params: TypedBody<params::IpPoolCreate>,
-    ) -> Result<HttpResponseCreated<views::IpPool>, HttpError>;
+    ) -> Result<HttpResponseCreated<views::SystemIpPool>, HttpError>;
 
     /// Fetch IP pool
     #[endpoint {
@@ -927,10 +930,10 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_view(
+    async fn system_ip_pool_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
-    ) -> Result<HttpResponseOk<views::IpPool>, HttpError>;
+    ) -> Result<HttpResponseOk<views::SystemIpPool>, HttpError>;
 
     /// Delete IP pool
     #[endpoint {
@@ -938,7 +941,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_delete(
+    async fn system_ip_pool_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
@@ -949,11 +952,11 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_update(
+    async fn system_ip_pool_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
         updates: TypedBody<params::IpPoolUpdate>,
-    ) -> Result<HttpResponseOk<views::IpPool>, HttpError>;
+    ) -> Result<HttpResponseOk<views::SystemIpPool>, HttpError>;
 
     /// Fetch IP pool utilization
     #[endpoint {
@@ -961,7 +964,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}/utilization",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_utilization_view(
+    async fn system_ip_pool_utilization_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseOk<views::IpPoolUtilization>, HttpError>;
@@ -972,20 +975,13 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}/silos",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_silo_list(
+    async fn system_ip_pool_silo_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
         // paginating by resource_id because they're unique per pool. most robust
         // option would be to paginate by a composite key representing the (pool,
         // resource_type, resource)
         query_params: Query<PaginatedById>,
-        // TODO: this could just list views::Silo -- it's not like knowing silo_id
-        // and nothing else is particularly useful -- except we also want to say
-        // whether the pool is marked default on each silo. So one option would
-        // be  to do the same as we did with SiloIpPool -- include is_default on
-        // whatever the thing is. Still... all we'd have to do to make this usable
-        // in both places would be to make it { ...IpPool, silo_id, silo_name,
-        // is_default }
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSiloLink>>, HttpError>;
 
     /// Link IP pool to silo
@@ -998,7 +994,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}/silos",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_silo_link(
+    async fn system_ip_pool_silo_link(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
         resource_assoc: TypedBody<params::IpPoolLinkSilo>,
@@ -1012,7 +1008,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}/silos/{silo}",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_silo_unlink(
+    async fn system_ip_pool_silo_unlink(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolSiloPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
@@ -1029,21 +1025,23 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}/silos/{silo}",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_silo_update(
+    async fn system_ip_pool_silo_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolSiloPath>,
         update: TypedBody<params::IpPoolSiloUpdate>,
     ) -> Result<HttpResponseOk<views::IpPoolSiloLink>, HttpError>;
 
-    /// Fetch Oxide service IP pool
+    /// Reserve an IP Pool for use by specific resources.
     #[endpoint {
-        method = GET,
-        path = "/v1/system/ip-pools-service",
+        method = POST,
+        path = "/v1/system/ip-pools/{pool}/reserve",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_service_view(
+    async fn system_ip_pool_reserve(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<views::IpPool>, HttpError>;
+        path_params: Path<params::IpPoolPath>,
+        body: TypedBody<params::IpPoolReservationUpdate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// List ranges for IP pool
     ///
@@ -1053,7 +1051,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}/ranges",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_range_list(
+    async fn system_ip_pool_range_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
         query_params: Query<IpPoolRangePaginationParams>,
@@ -1067,7 +1065,7 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}/ranges/add",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_range_add(
+    async fn system_ip_pool_range_add(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
         range_params: TypedBody<shared::IpRange>,
@@ -1079,46 +1077,9 @@ pub trait NexusExternalApi {
         path = "/v1/system/ip-pools/{pool}/ranges/remove",
         tags = ["system/ip-pools"],
     }]
-    async fn ip_pool_range_remove(
+    async fn system_ip_pool_range_remove(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
-        range_params: TypedBody<shared::IpRange>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// List IP ranges for the Oxide service pool
-    ///
-    /// Ranges are ordered by their first address.
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/ip-pools-service/ranges",
-        tags = ["system/ip-pools"],
-    }]
-    async fn ip_pool_service_range_list(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<IpPoolRangePaginationParams>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolRange>>, HttpError>;
-
-    /// Add IP range to Oxide service pool
-    ///
-    /// IPv6 ranges are not allowed yet.
-    #[endpoint {
-        method = POST,
-        path = "/v1/system/ip-pools-service/ranges/add",
-        tags = ["system/ip-pools"],
-    }]
-    async fn ip_pool_service_range_add(
-        rqctx: RequestContext<Self::Context>,
-        range_params: TypedBody<shared::IpRange>,
-    ) -> Result<HttpResponseCreated<views::IpPoolRange>, HttpError>;
-
-    /// Remove IP range from Oxide service pool
-    #[endpoint {
-        method = POST,
-        path = "/v1/system/ip-pools-service/ranges/remove",
-        tags = ["system/ip-pools"],
-    }]
-    async fn ip_pool_service_range_remove(
-        rqctx: RequestContext<Self::Context>,
         range_params: TypedBody<shared::IpRange>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 

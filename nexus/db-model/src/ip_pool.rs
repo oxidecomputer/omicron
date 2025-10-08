@@ -55,6 +55,24 @@ impl ::std::fmt::Display for IpPoolReservationType {
     }
 }
 
+impl From<views::IpPoolReservationType> for IpPoolReservationType {
+    fn from(value: views::IpPoolReservationType) -> Self {
+        match value {
+            views::IpPoolReservationType::ExternalSilos => Self::ExternalSilos,
+            views::IpPoolReservationType::OxideInternal => Self::OxideInternal,
+        }
+    }
+}
+
+impl From<IpPoolReservationType> for views::IpPoolReservationType {
+    fn from(value: IpPoolReservationType) -> Self {
+        match value {
+            IpPoolReservationType::ExternalSilos => Self::ExternalSilos,
+            IpPoolReservationType::OxideInternal => Self::OxideInternal,
+        }
+    }
+}
+
 impl_enum_type!(
     IpVersionEnum:
 
@@ -168,9 +186,13 @@ impl IpPool {
     }
 }
 
-impl From<IpPool> for views::IpPool {
+impl From<IpPool> for views::SystemIpPool {
     fn from(pool: IpPool) -> Self {
-        Self { identity: pool.identity(), ip_version: pool.ip_version.into() }
+        Self {
+            identity: pool.identity(),
+            ip_version: pool.ip_version.into(),
+            reservation_type: pool.reservation_type.into(),
+        }
     }
 }
 

@@ -6,6 +6,7 @@
 //! resources.
 
 use crate::external_api::shared;
+use crate::external_api::views::IpPoolReservationType;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
@@ -1007,6 +1008,9 @@ pub struct IpPoolCreate {
     /// The default is IPv4.
     #[serde(default = "IpVersion::v4")]
     pub ip_version: IpVersion,
+    /// Which resources the IP Pool is reserved for.
+    #[serde(default = "IpPoolReservationType::external_silos")]
+    pub reservation_type: IpPoolReservationType,
 }
 
 /// Parameters for updating an IP Pool
@@ -1014,6 +1018,13 @@ pub struct IpPoolCreate {
 pub struct IpPoolUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Parameters for modifying the reservation type of an IP Pool.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct IpPoolReservationUpdate {
+    /// What resources an IP Pool is reserved for.
+    pub reservation_type: IpPoolReservationType,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

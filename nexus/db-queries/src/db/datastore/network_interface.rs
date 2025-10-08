@@ -31,7 +31,6 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::IpVersion;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
@@ -185,19 +184,13 @@ impl DataStore {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ServiceNetworkInterface> {
         use nexus_db_schema::schema::service_network_interface::dsl;
-
-        // See the comment in `service_create_network_interface`. There's no
-        // obvious parent for a service network interface (as opposed to
-        // instance network interfaces, which require ListChildren on the
-        // instance to list). As a logical proxy, we check for listing children
-        // of the service IP pool.
-        //
-        // Note that the IP version doesn't matter here, both pools have the
-        // same permissions.
-        let (authz_pool, _pool) =
-            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
-        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
-
+        let _ = self
+            .fetch_first_oxide_internal_ip_pool(
+                opctx,
+                authz::Action::ListChildren,
+                None,
+            )
+            .await?;
         paginated(dsl::service_network_interface, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(ServiceNetworkInterface::as_select())
@@ -258,12 +251,12 @@ impl DataStore {
         //
         // Note that the IP version here doesn't matter, both IPv4 and IPv6
         // service pools have the same permissions.
-        let (authz_service_ip_pool, _) = self
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
-            .await
-            .map_err(network_interface::InsertError::External)?;
-        opctx
-            .authorize(authz::Action::CreateChild, &authz_service_ip_pool)
+        let _ = self
+            .fetch_first_oxide_internal_ip_pool(
+                opctx,
+                authz::Action::CreateChild,
+                None,
+            )
             .await
             .map_err(network_interface::InsertError::External)?;
         self.service_create_network_interface_raw(opctx, interface).await
@@ -442,12 +435,12 @@ impl DataStore {
         //
         // Note that the IP version here doesn't matter, both pools have the
         // same permissions.
-        let (authz_service_ip_pool, _) = self
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
-            .await
-            .map_err(network_interface::DeleteError::External)?;
-        opctx
-            .authorize(authz::Action::Delete, &authz_service_ip_pool)
+        let _ = self
+            .fetch_first_oxide_internal_ip_pool(
+                opctx,
+                authz::Action::Delete,
+                None,
+            )
             .await
             .map_err(network_interface::DeleteError::External)?;
 
@@ -907,11 +900,15 @@ impl DataStore {
         // listing _instance_ NICs. That seems to be authorizing against the
         // wrong resource.
         //
-        // But assuming this check is correct, both service pools have the same
+        // But assuming this check is correct, all service pools have the same
         // permissions, so the actual IP version here doesn't matter.
-        let (authz_pool, _pool) =
-            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
-        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+        let _ = self
+            .fetch_first_oxide_internal_ip_pool(
+                opctx,
+                authz::Action::ListChildren,
+                None,
+            )
+            .await?;
 
         paginated(dsl::instance_network_interface, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())

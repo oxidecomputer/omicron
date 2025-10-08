@@ -24,6 +24,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::IpVersion;
 use nexus_types::external_api::shared::Ipv4Range;
+use nexus_types::external_api::views::IpPoolReservationType;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::AffinityPolicy;
@@ -934,6 +935,7 @@ pub static DEMO_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
             description: String::from("an IP pool"),
         },
         ip_version: IpVersion::V4,
+        reservation_type: IpPoolReservationType::ExternalSilos,
     });
 pub static DEMO_IP_POOL_PROJ_URL: LazyLock<String> = LazyLock::new(|| {
     format!(

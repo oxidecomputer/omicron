@@ -29,8 +29,8 @@ use nexus_types::external_api::views::FloatingIp;
 use nexus_types::external_api::views::InternetGateway;
 use nexus_types::external_api::views::InternetGatewayIpAddress;
 use nexus_types::external_api::views::InternetGatewayIpPool;
-use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
+use nexus_types::external_api::views::SystemIpPool;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
@@ -249,7 +249,7 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-) -> (IpPool, IpPoolRange) {
+) -> (SystemIpPool, IpPoolRange) {
     let pool = object_create(
         client,
         "/v1/system/ip-pools",
@@ -261,6 +261,7 @@ pub async fn create_ip_pool(
             ip_version: ip_range
                 .map(|r| r.version())
                 .unwrap_or_else(views::IpVersion::v4),
+            reservation_type: views::IpPoolReservationType::ExternalSilos,
         },
     )
     .await;
@@ -296,7 +297,7 @@ pub async fn link_ip_pool(
 /// What you want for any test that is not testing IP logic specifically
 pub async fn create_default_ip_pool(
     client: &ClientTestContext,
-) -> views::IpPool {
+) -> views::SystemIpPool {
     let (pool, ..) = create_ip_pool(&client, "default", None).await;
     link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
     pool
