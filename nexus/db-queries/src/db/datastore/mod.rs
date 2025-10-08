@@ -152,6 +152,7 @@ pub use silo_user::SiloUser;
 pub use silo_user::SiloUserApiOnly;
 pub use silo_user::SiloUserJit;
 pub use silo_user::SiloUserLookup;
+pub use silo_user::SiloUserScim;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use support_bundle::SupportBundleExpungementReport;

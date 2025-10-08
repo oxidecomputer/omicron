@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 // not automatically at Nexus startup.  See omicron#2305.
 pub static USER_TEST_PRIVILEGED: LazyLock<model::SiloUser> =
     LazyLock::new(|| {
-        model::SiloUser::new_api_only_user(
+        model::SiloUser::new_api_only(
             DEFAULT_SILO_ID,
             // "4007" looks a bit like "root".
             "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
@@ -51,7 +51,7 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: LazyLock<Vec<model::RoleAssignment>> =
 // not automatically at Nexus startup.  See omicron#2305.
 pub static USER_TEST_UNPRIVILEGED: LazyLock<model::SiloUser> =
     LazyLock::new(|| {
-        model::SiloUser::new_api_only_user(
+        model::SiloUser::new_api_only(
             DEFAULT_SILO_ID,
             // 60001 is the decimal uid for "nobody" on Helios.
             "001de000-05e4-4000-8000-000000060001".parse().unwrap(),

@@ -26,7 +26,7 @@ pub struct SiloGroup {
 
     /// If the user provision type is ApiOnly or JIT, then the external id is
     /// the identity provider's ID for this group. There is a database
-    /// constraint (`lookup_silo_group_by_silo`) that ensures this field must be
+    /// constraint (`external_id_consistency`) that ensures this field must be
     /// non-null for those provision types.
     ///
     /// For SCIM, this may be null, which would trigger the uniqueness
@@ -34,10 +34,15 @@ pub struct SiloGroup {
     pub external_id: Option<String>,
 
     pub user_provision_type: UserProvisionType,
+
+    /// For SCIM groups, display name must be Some. There is a database
+    /// constraint (`display_name_consistency`) that ensures this field is
+    /// non-null for that provision type.
+    pub display_name: Option<String>,
 }
 
 impl SiloGroup {
-    pub fn new_api_only_group(
+    pub fn new_api_only(
         id: SiloGroupUuid,
         silo_id: Uuid,
         external_id: String,
@@ -48,10 +53,11 @@ impl SiloGroup {
             silo_id,
             user_provision_type: UserProvisionType::ApiOnly,
             external_id: Some(external_id),
+            display_name: None,
         }
     }
 
-    pub fn new_jit_group(
+    pub fn new_jit(
         id: SiloGroupUuid,
         silo_id: Uuid,
         external_id: String,
@@ -62,6 +68,23 @@ impl SiloGroup {
             silo_id,
             user_provision_type: UserProvisionType::Jit,
             external_id: Some(external_id),
+            display_name: None,
+        }
+    }
+
+    pub fn new_scim(
+        id: SiloGroupUuid,
+        silo_id: Uuid,
+        display_name: String,
+        external_id: Option<String>,
+    ) -> Self {
+        Self {
+            identity: SiloGroupIdentity::new(id),
+            time_deleted: None,
+            silo_id,
+            user_provision_type: UserProvisionType::Scim,
+            external_id,
+            display_name: Some(display_name),
         }
     }
 }
