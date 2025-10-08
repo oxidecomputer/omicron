@@ -22,7 +22,7 @@ use nexus_test_utils::test_setup;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::{TufRepoUpload, TufRepoUploadStatus};
-use omicron_common::api::external::{DataPageParams, TufArtifactMeta};
+use omicron_common::api::external::TufArtifactMeta;
 use pretty_assertions::assert_eq;
 use semver::Version;
 use serde::Deserialize;
@@ -37,7 +37,6 @@ use tufaceous_lib::assemble::{ArtifactManifest, OmicronRepoAssembler};
 use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 
 use crate::integration_tests::target_release::set_target_release;
-use uuid::Uuid;
 
 const TRUST_ROOTS_URL: &str = "/v1/system/update/trust-roots";
 
@@ -55,10 +54,14 @@ async fn get_repo_artifacts(
     let system_version = SemverVersion::from(
         version.parse::<Version>().expect("version should parse"),
     );
-    let pagparams = DataPageParams::<Uuid>::max_page();
+
+    let repo = datastore
+        .tuf_repo_get_by_version(&opctx, system_version)
+        .await
+        .expect("should get repo by version");
 
     let artifacts = datastore
-        .tuf_repo_artifacts_list_by_version(&opctx, system_version, &pagparams)
+        .tuf_list_repo_artifacts(&opctx, repo.id.into())
         .await
         .expect("should get artifacts");
 
@@ -843,6 +846,7 @@ async fn test_repo_list() -> Result<()> {
     // Initially, list should be empty
     let initial_list: ResultsPage<views::TufRepo> =
         objects_list_page_authz(client, "/v1/system/update/repositories").await;
+
     assert_eq!(initial_list.items.len(), 0);
     assert!(initial_list.next_page.is_none());
 

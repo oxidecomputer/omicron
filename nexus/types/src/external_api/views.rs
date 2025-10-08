@@ -1600,11 +1600,10 @@ pub struct UpdateStatus {
 /// Metadata about a TUF repository
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepo {
-    /// The hash of the repository.
-    ///
-    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
-    /// individual artifacts within the repository. However, we use it here for
-    /// convenience.
+    /// The hash of the repository
+    // This is a slight abuse of `ArtifactHash`, since that's the hash of
+    // individual artifacts within the repository. However, we use it here for
+    // convenience.
     pub hash: ArtifactHash,
 
     /// The system version in artifacts.json
@@ -1612,9 +1611,9 @@ pub struct TufRepo {
 
     /// The file name of the repository
     ///
-    /// This is purely used for debugging and may not always be correct (e.g.,
-    /// with wicket, we read the file contents from stdin so we don't know the
-    /// correct file name).
+    /// This is intended for debugging and may not always be correct.
+    // (e.g., with wicket, we read the file contents from stdin so we don't know
+    // the correct file name).
     pub file_name: String,
 
     /// Time the repository was uploaded

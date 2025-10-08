@@ -25868,11 +25868,11 @@
         "type": "object",
         "properties": {
           "file_name": {
-            "description": "The file name of the repository\n\nThis is purely used for debugging and may not always be correct (e.g., with wicket, we read the file contents from stdin so we don't know the correct file name).",
+            "description": "The file name of the repository\n\nThis is intended for debugging and may not always be correct.",
             "type": "string"
           },
           "hash": {
-            "description": "The hash of the repository.\n\nThis is a slight abuse of `ArtifactHash`, since that's the hash of individual artifacts within the repository. However, we use it here for convenience.",
+            "description": "The hash of the repository",
             "type": "string",
             "format": "hex string (32 bytes)"
           },

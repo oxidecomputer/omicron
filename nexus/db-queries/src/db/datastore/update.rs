@@ -443,7 +443,8 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// List all TUF repositories (without artifacts) ordered by system version (newest first by default).
+    /// List all TUF repositories (without artifacts) ordered by system version
+    /// (newest first by default).
     pub async fn tuf_repo_list(
         &self,
         opctx: &OpContext,
@@ -465,34 +466,11 @@ impl DataStore {
         };
 
         paginated(tuf_repo::table, tuf_repo::system_version, &db_pagparams)
+            .filter(tuf_repo::time_pruned.is_null())
             .select(TufRepo::as_select())
             .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// List artifacts for a specific TUF repository by system version.
-    pub async fn tuf_repo_artifacts_list_by_version(
-        &self,
-        opctx: &OpContext,
-        system_version: SemverVersion,
-        _pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<TufArtifact> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        // First get the repo by version
-        let repo = self.tuf_repo_get_by_version(opctx, system_version).await?;
-
-        // Get all artifacts for this repo and apply simple pagination
-        let all_artifacts = artifacts_for_repo(repo.id.into(), &conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        // For now, return all artifacts since each repo should only have a few (under 20)
-        // The existing artifacts_for_repo comment mentions this limitation
-        Ok(all_artifacts)
     }
 
     /// List the trusted TUF root roles in the trust store.
