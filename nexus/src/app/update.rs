@@ -222,7 +222,7 @@ impl super::Nexus {
             .as_ref()
             .clone();
 
-        let time_last_blueprint = blueprint_target.time_made_target;
+        let time_last_step_planned = blueprint_target.time_made_target;
 
         // Update activity is paused if the current target release generation is
         // less than the blueprint's minimum generation
@@ -232,7 +232,7 @@ impl super::Nexus {
         Ok(views::UpdateStatus {
             target_release: Nullable(target_release),
             components_by_release_version,
-            time_last_blueprint,
+            time_last_step_planned,
             paused,
         })
     }

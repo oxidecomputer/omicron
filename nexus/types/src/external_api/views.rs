@@ -1576,10 +1576,8 @@ pub struct UpdateStatus {
     /// Time of most recent update planning activity
     ///
     /// This is intended as a rough indicator of the last time something
-    /// happened in the update planner. A blueprint is the update system's plan
-    /// for the next state of the system, so this timestamp indicates the last
-    /// time the update system made a plan.
-    pub time_last_blueprint: DateTime<Utc>,
+    /// happened in the update planner.
+    pub time_last_step_planned: DateTime<Utc>,
 
     /// Whether update activity is paused
     ///

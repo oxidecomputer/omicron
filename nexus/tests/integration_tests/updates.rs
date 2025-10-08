@@ -726,7 +726,7 @@ async fn test_update_status() -> Result<()> {
     assert_eq!(counts.get("unknown").unwrap(), &15);
 
     // hold onto this to compare it to later values
-    let time_last_blueprint = status.time_last_blueprint;
+    let time_last_step_planned = status.time_last_step_planned;
 
     // Upload a fake TUF repo and set it as the target release
     let trust_root = TestTrustRoot::generate().await?;
@@ -746,7 +746,7 @@ async fn test_update_status() -> Result<()> {
     assert!(!status.paused, "should not be paused after setting v1");
 
     // blueprint time doesn't change
-    assert_eq!(time_last_blueprint, status.time_last_blueprint);
+    assert_eq!(time_last_step_planned, status.time_last_step_planned);
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
@@ -778,7 +778,7 @@ async fn test_update_status() -> Result<()> {
     assert!(!status.paused, "should not be paused after setting v2");
 
     // blueprint time doesn't change
-    assert_eq!(time_last_blueprint, status.time_last_blueprint);
+    assert_eq!(time_last_step_planned, status.time_last_step_planned);
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
