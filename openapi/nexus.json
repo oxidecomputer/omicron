@@ -26166,7 +26166,7 @@
         "type": "object",
         "properties": {
           "components_by_release_version": {
-            "description": "Count of components running each release version",
+            "description": "Count of components running each release version\n\nKeys will be either:\n\n* Semver-like release version strings * \"install dataset\", representing the initial rack software before any updates * \"unknown\", which means there is no TUF repo uploaded that matches the software running on the component)",
             "type": "object",
             "additionalProperties": {
               "type": "integer",

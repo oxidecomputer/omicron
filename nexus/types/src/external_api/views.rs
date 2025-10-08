@@ -1571,6 +1571,14 @@ pub struct UpdateStatus {
     pub target_release: Nullable<TargetRelease>,
 
     /// Count of components running each release version
+    ///
+    /// Keys will be either:
+    ///
+    /// * Semver-like release version strings
+    /// * "install dataset", representing the initial rack software before
+    ///   any updates
+    /// * "unknown", which means there is no TUF repo uploaded that matches
+    ///   the software running on the component)
     pub components_by_release_version: BTreeMap<String, usize>,
 
     /// Time of most recent update planning activity

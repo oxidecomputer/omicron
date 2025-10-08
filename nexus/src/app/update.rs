@@ -210,17 +210,16 @@ impl super::Nexus {
             )
             .await?;
 
-        let (blueprint_target, blueprint) = self
+        let bp_arc = self
             .update_status
             .latest_blueprint
             .borrow()
             .clone() // drop read lock held by outstanding borrow
-            .as_ref()
             .ok_or_else(|| {
                 Error::internal_error("Tried to get update status before target blueprint is loaded")
-            })?
-            .as_ref()
-            .clone();
+            })?;
+
+        let (blueprint_target, blueprint) = &*bp_arc;
 
         let time_last_step_planned = blueprint_target.time_made_target;
 
