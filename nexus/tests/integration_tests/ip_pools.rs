@@ -985,6 +985,7 @@ async fn test_ipv6_ip_pool_utilization_total(
             nexus_db_model::IpPool::new(
                 &identity,
                 nexus_db_model::IpVersion::V6,
+                nexus_db_model::IpPoolReservationType::ExternalSilos,
             ),
         )
         .await

@@ -134,6 +134,7 @@ impl IpPool {
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
+        reservation_type: IpPoolReservationType,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
@@ -142,23 +143,7 @@ impl IpPool {
             ),
             ip_version,
             rcgen: 0,
-            reservation_type: IpPoolReservationType::ExternalSilos,
-        }
-    }
-
-    /// Create a new pool reserved for Oxide's internal use.
-    pub fn new_oxide_internal(
-        pool_identity: &external::IdentityMetadataCreateParams,
-        ip_version: IpVersion,
-    ) -> Self {
-        Self {
-            identity: IpPoolIdentity::new(
-                Uuid::new_v4(),
-                pool_identity.clone(),
-            ),
-            ip_version,
-            rcgen: 0,
-            reservation_type: IpPoolReservationType::OxideInternal,
+            reservation_type,
         }
     }
 
@@ -167,8 +152,9 @@ impl IpPool {
     /// The pool is reserved for external customer Silos.
     pub fn new_v4(
         pool_identity: &external::IdentityMetadataCreateParams,
+        reservation_type: IpPoolReservationType,
     ) -> Self {
-        Self::new(pool_identity, IpVersion::V4)
+        Self::new(pool_identity, IpVersion::V4, reservation_type)
     }
 
     /// Create a new IPv6 IP Pool.
@@ -176,8 +162,9 @@ impl IpPool {
     /// The pool is reserved for external customer Silos.
     pub fn new_v6(
         pool_identity: &external::IdentityMetadataCreateParams,
+        reservation_type: IpPoolReservationType,
     ) -> Self {
-        Self::new(pool_identity, IpVersion::V6)
+        Self::new(pool_identity, IpVersion::V6, reservation_type)
     }
 }
 

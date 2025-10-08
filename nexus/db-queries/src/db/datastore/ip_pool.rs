@@ -1836,7 +1836,14 @@ mod test {
             description: "".to_string(),
         };
         let pool1_for_silo = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity, IpVersion::V4))
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
             .await
             .expect("Failed to create IP pool");
 
@@ -1922,7 +1929,14 @@ mod test {
             description: "".to_string(),
         };
         let second_silo_default = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity, IpVersion::V4))
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
             .await
             .expect("Failed to create pool");
         let err = datastore
@@ -2019,7 +2033,14 @@ mod test {
                 description: "".to_string(),
             };
             let other_pool = datastore
-                .ip_pool_create(&opctx, IpPool::new(&identity, version))
+                .ip_pool_create(
+                    &opctx,
+                    IpPool::new(
+                        &identity,
+                        version,
+                        IpPoolReservationType::ExternalSilos,
+                    ),
+                )
                 .await
                 .expect("Failed to create IP pool");
             assert_eq!(other_pool.ip_version, version);
@@ -2085,7 +2106,14 @@ mod test {
             description: "".to_string(),
         };
         let pool = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity, IpVersion::V4))
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
             .await
             .expect("Failed to create IP pool");
         let authz_pool = authz::IpPool::new(
@@ -2189,7 +2217,14 @@ mod test {
             description: "".to_string(),
         };
         let pool = datastore
-            .ip_pool_create(&opctx, IpPool::new(&identity, IpVersion::V6))
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V6,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
             .await
             .expect("Failed to create IP pool");
         let authz_pool = authz::IpPool::new(
@@ -2323,7 +2358,14 @@ mod test {
                 description: "".to_string(),
             };
             let pool = datastore
-                .ip_pool_create(&opctx, IpPool::new(&identity, version))
+                .ip_pool_create(
+                    &opctx,
+                    IpPool::new(
+                        &identity,
+                        version,
+                        IpPoolReservationType::ExternalSilos,
+                    ),
+                )
                 .await
                 .expect("Failed to create IP pool");
             let authz_pool = authz::IpPool::new(
@@ -2366,7 +2408,14 @@ mod test {
                 description: "".to_string(),
             };
             let pool = datastore
-                .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+                .ip_pool_create(
+                    opctx,
+                    IpPool::new(
+                        &identity,
+                        IpVersion::V4,
+                        IpPoolReservationType::ExternalSilos,
+                    ),
+                )
                 .await
                 .expect("Failed to create IP pool");
             customer_pools.push(pool);
@@ -2384,7 +2433,11 @@ mod test {
             let pool = datastore
                 .ip_pool_create(
                     opctx,
-                    IpPool::new_oxide_internal(&identity, IpVersion::V4),
+                    IpPool::new(
+                        &identity,
+                        IpVersion::V4,
+                        IpPoolReservationType::OxideInternal,
+                    ),
                 )
                 .await
                 .expect("Failed to create reserved IP pool");
@@ -2501,7 +2554,11 @@ mod test {
         let ip_pool = datastore
             .ip_pool_create(
                 opctx,
-                IpPool::new_oxide_internal(&identity, IpVersion::V4),
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::OxideInternal,
+                ),
             )
             .await
             .expect("Failed to create IP pool");
@@ -2540,7 +2597,14 @@ mod test {
             description: "".to_string(),
         };
         let ip_pool = datastore
-            .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+            .ip_pool_create(
+                opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
             .await
             .expect("Failed to create IP pool");
 
@@ -2595,7 +2659,14 @@ mod test {
             description: "".to_string(),
         };
         let ip_pool = datastore
-            .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+            .ip_pool_create(
+                opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
             .await
             .expect("Failed to create IP pool");
 
@@ -2644,7 +2715,14 @@ mod test {
             description: "".to_string(),
         };
         let ip_pool = datastore
-            .ip_pool_create(opctx, IpPool::new(&identity, IpVersion::V4))
+            .ip_pool_create(
+                opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
             .await
             .expect("Failed to create IP pool");
 

@@ -992,7 +992,7 @@ impl DataStore {
             (IpVersion::V4, SERVICE_IPV4_POOL_NAME),
             (IpVersion::V6, SERVICE_IPV6_POOL_NAME),
         ] {
-            let internal_pool = db::model::IpPool::new_oxide_internal(
+            let internal_pool = db::model::IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: name.parse::<Name>().unwrap(),
                     description: format!(
@@ -1000,6 +1000,7 @@ impl DataStore {
                     ),
                 },
                 version,
+                nexus_db_model::IpPoolReservationType::OxideInternal,
             );
             match self.ip_pool_create(opctx, internal_pool).await {
                 Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => {}
