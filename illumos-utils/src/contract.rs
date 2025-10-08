@@ -327,7 +327,10 @@ impl Template {
                 // the tofino is gone.
                 let cpath = match get_tfpkt_device_path() {
                     Some(c) => Ok(c),
-                    None => Err(err("unable to find tfpkt in device tree")),
+                    None => {
+                        unsafe { libc::close(fd) };
+                        Err(err("unable to find tfpkt in device tree"))
+                    }
                 }?;
 
                 // We want to be notified when the device goes offline
@@ -343,7 +346,7 @@ impl Template {
                         str::from_utf8(&cpath[..]).unwrap()
                     )))
                 } else if unsafe { ct_tmpl_activate(fd) } != 0 {
-                    Err(err("activation device template"))
+                    Err(err("activating device template"))
                 } else {
                     Ok(Self { fd })
                 }

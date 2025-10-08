@@ -98,7 +98,6 @@ impl HardwareMonitor {
             oneshot::channel();
         let baseboard = hardware_manager.baseboard();
         let hardware_rx = hardware_manager.monitor();
-        info!(log, "tofino: hardware monitor task");
         let log = log.new(o!("component" => "HardwareMonitor"));
         let (switch_zone_policy_tx, switch_zone_policy_rx) =
             watch::channel(OperatorSwitchZonePolicy::StartIfSwitchPresent);
@@ -134,6 +133,7 @@ impl HardwareMonitor {
                 Ok(sled_agent) = &mut self.sled_agent_started_rx,
                     if self.sled_agent.is_none() =>
                 {
+                    info!(self.log, "Sled Agent Started");
                     self.sled_agent = Some(sled_agent);
                     self.check_latest_hardware_snapshot().await;
                 }
@@ -150,8 +150,14 @@ impl HardwareMonitor {
                         policy,
                     ).await;
                 }
-                update = self.hardware_rx.recv() =>
-                    self.handle_hardware_update(update.clone()).await,
+                update = self.hardware_rx.recv() => {
+                    info!(
+                        self.log,
+                        "Received hardware update message";
+                        "update" => ?update,
+                    );
+                    self.handle_hardware_update(update.clone()).await
+            },
                 Ok(()) = self.switch_zone_policy_rx.changed() => {
                     let policy = self.current_switch_zone_policy();
                     info!(

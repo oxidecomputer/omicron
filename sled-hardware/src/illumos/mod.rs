@@ -264,17 +264,12 @@ impl HardwareView {
     // Updates our view of the Tofino switch against a snapshot.
     fn update_tofino(
         &mut self,
-        log: &slog::Logger,
         polled_hw: &HardwareSnapshot,
         updates: &mut Vec<HardwareUpdate>,
     ) {
         match self.tofino {
             TofinoView::Real(TofinoSnapshot { available, exists }) => {
                 use HardwareUpdate::*;
-                info!(
-                    log,
-                    "tofino available: {}  exists: {}", available, exists
-                );
                 // Identify if the Tofino device changed power states.
                 if exists != polled_hw.tofino.exists {
                     updates.push(TofinoDeviceChange);
@@ -698,7 +693,7 @@ fn poll_device_tree(
     let mut updates = vec![];
     {
         let mut inner = inner.lock().unwrap();
-        inner.update_tofino(log, &polled_hw, &mut updates);
+        inner.update_tofino(&polled_hw, &mut updates);
         inner.update_blkdev(&polled_hw, &mut updates);
         inner.baseboard = Some(polled_hw.baseboard);
     };
@@ -715,12 +710,12 @@ fn poll_device_tree(
     Ok(())
 }
 
-async fn block_on_zone(log: &slog::Logger) {
+// Block until the switch zone is gone
+async fn block_on_switch_zone() {
     let zone_api = zone::Zones::real_api();
 
     loop {
         if let Ok(Some(_zone)) = zone_api.find("oxz_switch").await {
-            info!(&log, "tick");
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         } else {
             return;
@@ -734,9 +729,8 @@ fn monitor_tofino(
     tx: broadcast::Sender<HardwareUpdate>,
 ) {
     let log = log.new(o!("component" => "SledAgent-tofino_contractor"));
-    info!(&log, "tofino monitoring thread alive");
+    info!(&log, "tofino monitoring thread started");
     loop {
-        info!(log, "waiting for tofino to appear");
         std::thread::sleep(std::time::Duration::from_secs(1));
         {
             if !inner.lock().unwrap().tofino_exists() {
@@ -745,7 +739,6 @@ fn monitor_tofino(
         }
 
         let ctid = {
-            info!(log, "opening template");
             let template = match Template::new(ContractType::Device) {
                 Ok(t) => t,
                 Err(e) => {
@@ -756,7 +749,6 @@ fn monitor_tofino(
                     continue;
                 }
             };
-            info!(log, "creating contract");
             match template.create() {
                 Ok(c) => c,
                 Err(e) => {
@@ -765,7 +757,6 @@ fn monitor_tofino(
                 }
             }
         };
-        info!(log, "creating control for contract {ctid}");
         let ctl = match Control::new(ContractType::Device, ctid) {
             Ok(c) => c,
             Err(e) => {
@@ -776,7 +767,6 @@ fn monitor_tofino(
 
         let watcher = Watcher::new(ContractType::Device);
         loop {
-            info!(log, "waiting for device contract events");
             let ev = watcher.watch(&log);
             match ev.typ {
                 contract::CT_DEV_EV_OFFLINE => {
@@ -787,9 +777,18 @@ fn monitor_tofino(
                     }
                     let _ = tx.send(HardwareUpdate::TofinoUnavailable);
 
+                    // The device detach mechanism in the kernel will block for
+                    // up to a minute, waiting for us to acknowledge this event.
+                    // Illumos will not detach the device driver while the
+                    // device is still in use.  If a device is assigned to a
+                    // zone, that counts as "in use".  By halting the zone and
+                    // deferring that "ack" until the zone is gone, we enable
+                    // the device to be detached cleanly, which will
+                    // subsequently allow the device to be re-attached cleanly
+                    // if/when the sidecar is powered back on.
                     info!(&log, "Waiting for switch zone to halt");
                     let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(block_on_zone(&log));
+                    rt.block_on(block_on_switch_zone());
                     info!(log, "Switch zone halted.");
                     if let Err(e) = ctl.ack(ev.event_id) {
                         error!(&log, "{e:?}");
@@ -914,17 +913,11 @@ impl HardwareManager {
         // polling also detects devices that have gone away, but we need to
         // respond to a tofino disappearance more quickly than a regular polling
         // interval will allow.  To that end, we fire off a task that maintains a
-        // device contract with the kernel to handle those disappearances.  One
-        // tricky bit is that we can't actually establish that contract until/unless
-        // a tofino is present.  Thus, we will notify that task if the polling
-        // detects a new tofino, so we don't have two tasks both watching for a new
-        // asic to appear.
+        // device contract with the kernel to handle those disappearances.
         let log2 = log.clone();
         let inner2 = inner.clone();
         let tx2 = tx.clone();
-        info!(&log, "spawning tofino thread");
         tokio::task::spawn_blocking(move || monitor_tofino(log2, inner2, tx2));
-        info!(&log, "spawned tofino thread");
 
         let log2 = log.clone();
         let inner2 = inner.clone();
