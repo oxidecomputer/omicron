@@ -3489,6 +3489,25 @@
               "type",
               "value"
             ]
+          },
+          {
+            "description": "The component's corresponding sled contains zones that are unsafe to shut down",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsafe_zone_found"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -3877,6 +3896,25 @@
             },
             "required": [
               "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding sled contains zones that are unsafe to shut down",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsafe_zone_found"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           }
         ]
