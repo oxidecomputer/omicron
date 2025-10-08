@@ -10357,7 +10357,7 @@
         "tags": [
           "system/silos"
         ],
-        "operationId": "scim_idp_get_tokens",
+        "operationId": "scim_token_list",
         "parameters": [
           {
             "in": "query",
@@ -10396,7 +10396,7 @@
         "tags": [
           "system/silos"
         ],
-        "operationId": "scim_idp_create_token",
+        "operationId": "scim_token_create",
         "parameters": [
           {
             "in": "query",
@@ -10431,7 +10431,7 @@
         "tags": [
           "system/silos"
         ],
-        "operationId": "scim_idp_delete_all_tokens",
+        "operationId": "scim_token_delete_all",
         "parameters": [
           {
             "in": "query",
@@ -10461,7 +10461,7 @@
         "tags": [
           "system/silos"
         ],
-        "operationId": "scim_idp_get_token_by_id",
+        "operationId": "scim_token_view",
         "parameters": [
           {
             "in": "path",
@@ -10505,7 +10505,7 @@
         "tags": [
           "system/silos"
         ],
-        "operationId": "scim_idp_delete_token_by_id",
+        "operationId": "scim_token_delete",
         "parameters": [
           {
             "in": "path",
