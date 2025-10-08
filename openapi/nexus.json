@@ -10357,6 +10357,8 @@
         "tags": [
           "system/silos"
         ],
+        "summary": "List SCIM tokens",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
         "operationId": "scim_token_list",
         "parameters": [
           {
@@ -10396,6 +10398,8 @@
         "tags": [
           "system/silos"
         ],
+        "summary": "Create SCIM token",
+        "description": "Specify the silo by name or ID using the `silo` query parameter. Be sure to save the bearer token in the response. It will not be retrievable later through the token view and list endpoints.",
         "operationId": "scim_token_create",
         "parameters": [
           {
@@ -10431,6 +10435,8 @@
         "tags": [
           "system/silos"
         ],
+        "summary": "Delete all SCIM tokens",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
         "operationId": "scim_token_delete_all",
         "parameters": [
           {
@@ -10461,6 +10467,8 @@
         "tags": [
           "system/silos"
         ],
+        "summary": "Fetch SCIM token",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
         "operationId": "scim_token_view",
         "parameters": [
           {
@@ -10505,6 +10513,8 @@
         "tags": [
           "system/silos"
         ],
+        "summary": "Delete SCIM token",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
         "operationId": "scim_token_delete",
         "parameters": [
           {

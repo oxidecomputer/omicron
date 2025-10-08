@@ -594,6 +594,9 @@ pub trait NexusExternalApi {
 
     // SAML+SCIM Identity Provider
 
+    /// List SCIM tokens
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = GET,
         path = "/v1/system/scim/tokens",
@@ -604,6 +607,11 @@ pub trait NexusExternalApi {
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<Vec<views::ScimClientBearerToken>>, HttpError>;
 
+    /// Create SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter. Be sure
+    /// to save the bearer token in the response. It will not be retrievable
+    /// later through the token view and list endpoints.
     #[endpoint {
         method = POST,
         path = "/v1/system/scim/tokens",
@@ -614,6 +622,9 @@ pub trait NexusExternalApi {
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseCreated<views::ScimClientBearerTokenValue>, HttpError>;
 
+    /// Fetch SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = GET,
         path = "/v1/system/scim/tokens/{token_id}",
@@ -625,6 +636,9 @@ pub trait NexusExternalApi {
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<views::ScimClientBearerToken>, HttpError>;
 
+    /// Delete SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/scim/tokens/{token_id}",
@@ -636,6 +650,9 @@ pub trait NexusExternalApi {
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Delete all SCIM tokens
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/scim/tokens",
