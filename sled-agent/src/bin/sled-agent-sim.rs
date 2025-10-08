@@ -53,6 +53,9 @@ struct Args {
     #[clap(name = "NEXUS_IP:PORT", action)]
     nexus_addr: SocketAddr,
 
+    #[clap(action)]
+    nexus_lockstep_port: u16,
+
     #[clap(long, name = "NEXUS_EXTERNAL_IP:PORT", action)]
     /// If specified, when the simulated sled agent initializes the rack, it
     /// will record the Nexus service running with the specified external IP
@@ -154,7 +157,12 @@ async fn do_run() -> Result<(), CmdError> {
 
     let config_logging =
         ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info };
-    run_standalone_server(&config, &config_logging, &rss_args)
-        .await
-        .map_err(CmdError::Failure)
+    run_standalone_server(
+        &config,
+        args.nexus_lockstep_port,
+        &config_logging,
+        &rss_args,
+    )
+    .await
+    .map_err(CmdError::Failure)
 }

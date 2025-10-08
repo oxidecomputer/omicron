@@ -86,7 +86,7 @@ use id_map::IdMap;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
-use nexus_client::{
+use nexus_lockstep_client::{
     Client as NexusClient, Error as NexusError, types as NexusTypes,
 };
 use nexus_sled_agent_shared::inventory::{
@@ -774,7 +774,7 @@ impl ServiceInner {
         sled_plan: &SledPlan,
         service_plan: &ServicePlan,
         port_discovery_mode: ExternalPortDiscovery,
-        nexus_address: SocketAddrV6,
+        nexus_lockstep_address: SocketAddrV6,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
@@ -789,7 +789,11 @@ impl ServiceInner {
         )
         .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
-        info!(self.log, "Nexus address: {}", nexus_address.to_string());
+        info!(
+            self.log,
+            "Nexus lockstep address: {}",
+            nexus_lockstep_address.to_string()
+        );
 
         const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
         let client = reqwest::Client::builder()
@@ -799,7 +803,7 @@ impl ServiceInner {
             .map_err(SetupServiceError::HttpClient)?;
 
         let nexus_client = NexusClient::new_with_client(
-            &format!("http://{}", nexus_address),
+            &format!("http://{}", nexus_lockstep_address),
             client,
             self.log.new(o!("component" => "NexusClient")),
         );
@@ -975,10 +979,10 @@ impl ServiceInner {
                     local: spec.local,
                     mode: match spec.mode {
                         omicron_common::api::external::BfdMode::SingleHop => {
-                            nexus_client::types::BfdMode::SingleHop
+                            NexusTypes::BfdMode::SingleHop
                         }
                         omicron_common::api::external::BfdMode::MultiHop => {
-                            nexus_client::types::BfdMode::MultiHop
+                            NexusTypes::BfdMode::MultiHop
                         }
                     },
                     remote: spec.remote,
@@ -1442,8 +1446,8 @@ impl ServiceInner {
 
         info!(self.log, "Finished setting up services");
 
-        let nexus_address =
-            resolver.lookup_socket_v6(ServiceName::Nexus).await?;
+        let nexus_lockstep_address =
+            resolver.lookup_socket_v6(ServiceName::NexusLockstep).await?;
 
         rss_step.update(RssStep::NexusHandoff);
         // At this point, even if we reboot, we must not try to manage sleds,
@@ -1453,7 +1457,7 @@ impl ServiceInner {
             &sled_plan,
             &service_plan,
             ExternalPortDiscovery::Auto(switch_mgmt_addrs),
-            nexus_address,
+            nexus_lockstep_address,
         )
         .await?;
 

@@ -16,8 +16,7 @@ use nexus_types::{
     },
     internal_api::{
         params::{
-            OximeterInfo, RackInitializationRequest, SledAgentInfo,
-            SwitchPutRequest, SwitchPutResponse,
+            OximeterInfo, SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
         },
         views::NatEntryView,
     },
@@ -34,8 +33,6 @@ use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
 
 #[dropshot::api_description]
 pub trait NexusInternalApi {
@@ -73,20 +70,6 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SledAgentPathParam>,
         sled_info: TypedBody<SledAgentInfo>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Report that the Rack Setup Service initialization is complete
-    ///
-    /// See RFD 278 for more details.
-    #[endpoint {
-        method = PUT,
-        path = "/racks/{rack_id}/initialization-complete",
-        request_body_max_bytes = RACK_INITIALIZATION_REQUEST_MAX_BYTES,
-    }]
-    async fn rack_initialization_complete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<RackPathParam>,
-        info: TypedBody<RackInitializationRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -303,12 +286,6 @@ pub struct DiskPathParam {
 #[derive(Deserialize, JsonSchema)]
 pub struct VolumePathParam {
     pub volume_id: VolumeUuid,
-}
-
-/// Path parameters for Rack requests.
-#[derive(Deserialize, JsonSchema)]
-pub struct RackPathParam {
-    pub rack_id: Uuid,
 }
 
 /// Path parameters for Switch requests.

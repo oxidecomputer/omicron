@@ -1732,20 +1732,20 @@ impl StorageInner {
 
     pub fn get_all_physical_disks(
         &self,
-    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+    ) -> Vec<nexus_lockstep_client::types::PhysicalDiskPutRequest> {
         self.physical_disks
             .iter()
             .map(|(id, disk)| {
                 let variant = match disk.variant {
                     DiskVariant::U2 => {
-                        nexus_client::types::PhysicalDiskKind::U2
+                        nexus_lockstep_client::types::PhysicalDiskKind::U2
                     }
                     DiskVariant::M2 => {
-                        nexus_client::types::PhysicalDiskKind::M2
+                        nexus_lockstep_client::types::PhysicalDiskKind::M2
                     }
                 };
 
-                nexus_client::types::PhysicalDiskPutRequest {
+                nexus_lockstep_client::types::PhysicalDiskPutRequest {
                     id: *id,
                     vendor: disk.identity.vendor.clone(),
                     serial: disk.identity.serial.clone(),
@@ -1757,10 +1757,12 @@ impl StorageInner {
             .collect()
     }
 
-    pub fn get_all_zpools(&self) -> Vec<nexus_client::types::ZpoolPutRequest> {
+    pub fn get_all_zpools(
+        &self,
+    ) -> Vec<nexus_lockstep_client::types::ZpoolPutRequest> {
         self.zpools
             .values()
-            .map(|pool| nexus_client::types::ZpoolPutRequest {
+            .map(|pool| nexus_lockstep_client::types::ZpoolPutRequest {
                 id: pool.id.into_untyped_uuid(),
                 sled_id: self.sled_id,
                 physical_disk_id: pool.physical_disk_id,
