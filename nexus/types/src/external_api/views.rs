@@ -1579,13 +1579,13 @@ pub struct UpdateStatus {
     /// happened in the update planner.
     pub time_last_step_planned: DateTime<Utc>,
 
-    /// Whether update activity is paused
+    /// Whether automatic update is suspended due to manual update activity
     ///
-    /// When true, the system has stopped attempting to make progress toward the
-    /// target release. This happens after a MUPdate because the system wants to
-    /// make sure of the operator's intent. To resume update, set a new target
-    /// release.
-    pub paused: bool,
+    /// After a manual support procedure that changes the system software,
+    /// automatic update activity is suspended to avoid undoing the change. To
+    /// resume automatic update, first upload the TUF repository matching the
+    /// manually applied update, then set that as the target release.
+    pub suspended: bool,
 }
 
 fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {

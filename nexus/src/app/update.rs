@@ -224,16 +224,16 @@ impl super::Nexus {
 
         let time_last_step_planned = blueprint_target.time_made_target;
 
-        // Update activity is paused if the current target release generation is
-        // less than the blueprint's minimum generation
-        let paused = *db_target_release.generation
+        // Update activity is suspended if the current target release generation
+        // is less than the blueprint's minimum generation
+        let suspended = *db_target_release.generation
             < blueprint.target_release_minimum_generation;
 
         Ok(views::UpdateStatus {
             target_release: Nullable(target_release),
             components_by_release_version,
             time_last_step_planned,
-            paused,
+            suspended,
         })
     }
 
