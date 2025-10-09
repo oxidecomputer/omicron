@@ -958,6 +958,42 @@ async fn test_repo_list() -> Result<()> {
     assert_eq!(next_page.items.len(), 1);
     assert_eq!(next_page.items[0].system_version.to_string(), "1.0.0");
 
+    // Test filtering out pruned repos
+
+    // Mark the 1.0.0 repo as pruned (use datastore methods since there's no API
+    // for it)
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
+
+    let v1 = "1.0.0".parse::<Version>().unwrap();
+    let repo_to_prune =
+        datastore.tuf_repo_get_by_version(&opctx, v1.into()).await?;
+
+    let generation = datastore.tuf_get_generation(&opctx).await?;
+    let recent_releases =
+        datastore.target_release_fetch_recent_distinct(&opctx, 3).await?;
+
+    datastore
+        .tuf_repo_mark_pruned(
+            &opctx,
+            generation,
+            &recent_releases,
+            repo_to_prune.id(),
+        )
+        .await?;
+
+    // List repositories again - the pruned repo should not appear
+    let list_after_prune: ResultsPage<views::TufRepo> =
+        objects_list_page_authz(client, "/v1/system/update/repositories").await;
+
+    assert_eq!(list_after_prune.items.len(), 2);
+    let versions_after_prune: Vec<String> = list_after_prune
+        .items
+        .iter()
+        .map(|item| item.system_version.to_string())
+        .collect();
+    assert_eq!(versions_after_prune, vec!["3.0.0", "2.0.0"]);
+
     cptestctx.teardown().await;
     Ok(())
 }

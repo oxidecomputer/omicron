@@ -185,26 +185,6 @@ impl DataStore {
             })
     }
 
-    /// Returns the list of all TUF repo artifacts known to the system.
-    pub async fn tuf_list_repos(
-        &self,
-        opctx: &OpContext,
-        generation: Generation,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<TufArtifact> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        use nexus_db_schema::schema::tuf_artifact::dsl;
-
-        let generation = nexus_db_model::Generation(generation);
-        paginated(dsl::tuf_artifact, dsl::id, pagparams)
-            .filter(dsl::generation_added.le(generation))
-            .select(TufArtifact::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
     /// Pages through the list of all not-yet-pruned TUF repos in the system
     pub async fn tuf_list_repos_unpruned(
         &self,
