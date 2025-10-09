@@ -2301,10 +2301,7 @@ mod test {
         let ipv4_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &ipv4_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&ipv4_identity, IpVersion::V4),
             )
             .await
             .expect("Failed to create IPv4 multicast IP pool");
@@ -2341,10 +2338,7 @@ mod test {
         let ipv6_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &ipv6_identity,
-                    IpVersion::V6,
-                ),
+                IpPool::new_multicast(&ipv6_identity, IpVersion::V6),
             )
             .await
             .expect("Failed to create IPv6 multicast IP pool");

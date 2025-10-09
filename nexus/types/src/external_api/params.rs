@@ -1018,11 +1018,7 @@ impl IpPoolCreate {
         identity: IdentityMetadataCreateParams,
         ip_version: IpVersion,
     ) -> Self {
-        Self {
-            identity,
-            ip_version,
-            pool_type: shared::IpPoolType::Unicast,
-        }
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Unicast }
     }
 
     /// Create parameters for a multicast IP pool
@@ -1030,11 +1026,7 @@ impl IpPoolCreate {
         identity: IdentityMetadataCreateParams,
         ip_version: IpVersion,
     ) -> Self {
-        Self {
-            identity,
-            ip_version,
-            pool_type: shared::IpPoolType::Multicast,
-        }
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Multicast }
     }
 }
 
