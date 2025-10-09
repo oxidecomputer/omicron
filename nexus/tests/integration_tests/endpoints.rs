@@ -3051,7 +3051,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Post(serde_json::Value::Null),
-                    AllowedMethod::Delete,
                 ],
             },
             VerifyEndpoint {
