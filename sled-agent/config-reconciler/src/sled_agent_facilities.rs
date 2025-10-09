@@ -11,7 +11,6 @@ use illumos_utils::zpool::PathInPool;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_uuid_kinds::MupdateOverrideUuid;
-use sled_agent_types::zone_bundle::ZoneBundleCause;
 use sled_agent_types::zone_images::PreparedOmicronZone;
 use sled_agent_types::zone_images::RemoveMupdateOverrideResult;
 use sled_agent_types::zone_images::ResolverStatus;
@@ -61,13 +60,6 @@ pub trait SledAgentFacilities: Send + Sync + 'static {
 
     /// Instruct DDM to stop advertising a prefix.
     fn ddm_remove_internal_dns_prefix(&self, prefix: Ipv6Subnet<SLED_PREFIX>);
-
-    /// Create a zone bundle.
-    fn zone_bundle_create(
-        &self,
-        zone: &RunningZone,
-        cause: ZoneBundleCause,
-    ) -> impl Future<Output = anyhow::Result<()>> + Send;
 }
 
 pub trait SledAgentArtifactStore: Send + Sync + 'static {

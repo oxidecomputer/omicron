@@ -671,34 +671,6 @@
         }
       }
     },
-    "/sled-agents/{sled_id}/firewall-rules-update": {
-      "post": {
-        "summary": "Request a new set of firewall rules for a sled.",
-        "description": "This causes Nexus to read the latest set of rules for the sled, and call a Sled endpoint which applies the rules to all OPTE ports that happen to exist.",
-        "operationId": "sled_firewall_rules_request",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "sled_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SledUuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/switch/{switch_id}": {
       "put": {
         "operationId": "switch_put",
@@ -3517,6 +3489,25 @@
               "type",
               "value"
             ]
+          },
+          {
+            "description": "The component's corresponding sled contains zones that are unsafe to shut down",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsafe_zone_found"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
           }
         ]
       },
@@ -3905,6 +3896,25 @@
             },
             "required": [
               "type"
+            ]
+          },
+          {
+            "description": "The component's corresponding sled contains zones that are unsafe to shut down",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unsafe_zone_found"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           }
         ]

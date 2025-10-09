@@ -9,15 +9,17 @@ use dropshot::HttpError;
 use futures::Stream;
 use nexus_auth::authz;
 use nexus_db_lookup::LookupPath;
+use nexus_db_model::Generation;
 use nexus_db_model::TufRepoUpload;
-use nexus_db_model::{Generation, TufTrustRoot};
+use nexus_db_model::TufTrustRoot;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
 use nexus_types::deployment::{
     Blueprint, BlueprintTarget, TargetReleaseDescription,
 };
 use nexus_types::external_api::shared::TufSignedRootRole;
-use nexus_types::external_api::views::{self, TufRepoUploadStatus};
+use nexus_types::external_api::views;
+use nexus_types::external_api::views::TufRepoUploadStatus;
 use nexus_types::internal_api::views as internal_views;
 use nexus_types::inventory::RotSlot;
 use omicron_common::api::external::InternalContext;

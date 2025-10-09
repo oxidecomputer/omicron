@@ -10352,6 +10352,203 @@
         }
       }
     },
+    "/v1/system/scim/tokens": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "List SCIM tokens",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
+        "operationId": "scim_token_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ScimClientBearerToken",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScimClientBearerToken"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Create SCIM token",
+        "description": "Specify the silo by name or ID using the `silo` query parameter. Be sure to save the bearer token in the response. It will not be retrievable later through the token view and list endpoints.",
+        "operationId": "scim_token_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScimClientBearerTokenValue"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Delete all SCIM tokens",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
+        "operationId": "scim_token_delete_all",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/scim/tokens/{token_id}": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Fetch SCIM token",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
+        "operationId": "scim_token_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScimClientBearerToken"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Delete SCIM token",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
+        "operationId": "scim_token_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/silo-quotas": {
       "get": {
         "tags": [
@@ -23675,6 +23872,55 @@
           "technical_contact_email"
         ]
       },
+      "ScimClientBearerToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
+      "ScimClientBearerTokenValue": {
+        "description": "The POST response is the only time the generated bearer token is returned to the client.",
+        "type": "object",
+        "properties": {
+          "bearer_token": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bearer_token",
+          "id",
+          "time_created"
+        ]
+      },
       "ServiceIcmpConfig": {
         "description": "Configuration of inbound ICMP allowed by API services.",
         "type": "object",
@@ -23894,6 +24140,13 @@
             "type": "string",
             "enum": [
               "local_only"
+            ]
+          },
+          {
+            "description": "Users are authenticated with SAML using an external authentication provider. Users and groups are managed with SCIM API calls, likely from the same authentication provider.",
+            "type": "string",
+            "enum": [
+              "saml_scim"
             ]
           }
         ]
@@ -25868,7 +26121,7 @@
         "type": "object",
         "properties": {
           "file_name": {
-            "description": "The file name of the repository\n\nThis is intended for debugging and may not always be correct.",
+            "description": "The file name of the repository, as reported by the client that uploaded it\n\nThis is intended for debugging. The file name may not match any particular pattern, and even if it does, it may not be accurate since it's just what the client reported.",
             "type": "string"
           },
           "hash": {
@@ -25877,7 +26130,7 @@
             "format": "hex string (32 bytes)"
           },
           "system_version": {
-            "description": "The system version in artifacts.json",
+            "description": "The system version for this repository\n\nThe system version is a top-level version number applied to all the software in the repository.",
             "type": "string",
             "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
           },

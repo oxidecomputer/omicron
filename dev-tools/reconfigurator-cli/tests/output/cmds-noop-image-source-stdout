@@ -510,7 +510,7 @@ to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
 
 internal DNS:
   DNS zone: "control-plane.oxide.internal" (unchanged)
-    unchanged names: 53 (records: 76)
+    unchanged names: 53 (records: 75)
 
 external DNS:
   DNS zone: "oxide.example" (unchanged)

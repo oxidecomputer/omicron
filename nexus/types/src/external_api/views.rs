@@ -1606,12 +1606,18 @@ pub struct TufRepo {
     // convenience.
     pub hash: ArtifactHash,
 
-    /// The system version in artifacts.json
+    /// The system version for this repository
+    ///
+    /// The system version is a top-level version number applied to all the
+    /// software in the repository.
     pub system_version: Version,
 
-    /// The file name of the repository
+    /// The file name of the repository, as reported by the client that uploaded
+    /// it
     ///
-    /// This is intended for debugging and may not always be correct.
+    /// This is intended for debugging. The file name may not match any
+    /// particular pattern, and even if it does, it may not be accurate since
+    /// it's just what the client reported.
     // (e.g., with wicket, we read the file contents from stdin so we don't know
     // the correct file name).
     pub file_name: String,
@@ -1652,6 +1658,25 @@ fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
         }
     }
     msg
+}
+
+// SCIM
+
+/// The POST response is the only time the generated bearer token is returned to
+/// the client.
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct ScimClientBearerTokenValue {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
+    pub bearer_token: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct ScimClientBearerToken {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]
