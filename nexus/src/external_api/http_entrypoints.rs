@@ -7424,28 +7424,39 @@ impl NexusExternalApi for NexusExternalApiImpl {
             // system version X.Y.Z won't designate different repos over time.
             let current_target_release =
                 nexus.datastore().target_release_get_current(&opctx).await?;
-
-            // Disallow downgrades.
-            if let views::TargetReleaseSource::SystemVersion { version } = nexus
+            let current_target_release_source = nexus
                 .datastore()
                 .target_release_view(&opctx, &current_target_release)
                 .await?
-                .release_source
+                .release_source;
+
+            // Disallow downgrades.
+            if let views::TargetReleaseSource::SystemVersion { version } =
+                &current_target_release_source
             {
                 if !is_new_target_release_version_allowed(
-                    &version,
+                    version,
                     &system_version,
                 ) {
                     return Err(HttpError::for_bad_request(
                         None,
                         format!(
-                            "The requested target system release ({system_version}) \
-                             is older than the current target system release ({version}). \
+                            "The requested target system release \
+                             ({system_version}) is older than the current \
+                             target system release ({version}). \
                              This is not supported."
                         ),
                     ));
                 }
             }
+
+            // Ensure we don't change the target release mid-update.
+            nexus
+                .validate_target_release_change_allowed(
+                    &opctx,
+                    &current_target_release_source,
+                )
+                .await?;
 
             // Fetch the TUF repo metadata and update the target release.
             let tuf_repo_id = nexus

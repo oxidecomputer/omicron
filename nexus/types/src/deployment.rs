@@ -395,6 +395,16 @@ impl Blueprint {
         self.sleds.keys().copied()
     }
 
+    /// Iterate over the sled configs of all active (not decommissioned) sleds.
+    pub fn active_sled_configs(
+        &self,
+    ) -> impl Iterator<Item = &BlueprintSledConfig> {
+        self.sleds.values().filter(|sled_config| match sled_config.state {
+            SledState::Active => true,
+            SledState::Decommissioned => false,
+        })
+    }
+
     /// Summarize the difference between two blueprints.
     ///
     /// The argument provided is the "before" side, and `self` is the "after"
