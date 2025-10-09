@@ -1341,6 +1341,14 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
                 blueprint_count, limit
             );
             println!("{report}");
+
+            let operator_notes = report.operator_notes().into_notes();
+            if !operator_notes.is_empty() {
+                println!("\nnotes for customer operator:");
+                for note in operator_notes {
+                    println!("  * {note}");
+                }
+            }
         }
         BlueprintPlannerStatus::Targeted {
             parent_blueprint_id: _,

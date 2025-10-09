@@ -259,7 +259,7 @@ impl<'a> Planner<'a> {
         {
             self.do_plan_add(&mgs_updates)?
         } else {
-            PlanningAddStepReport::waiting_on(ZoneAddWaitingOn::Blockers)
+            PlanningAddStepReport::waiting_on(ZoneAddWaitingOn::MupdateBlockers)
         };
         add.add_update_blocked_reasons = add_update_blocked_reasons;
         add.add_zones_with_mupdate_override = add_zones_with_mupdate_override;
@@ -536,7 +536,11 @@ impl<'a> Planner<'a> {
                             // have been added and then expunged since our
                             // parent blueprint was created). We don't want to
                             // fail in this case, but will report it.
-                            report.orphan_disks.insert(sled_id, disk.disk_id);
+                            report
+                                .orphan_disks
+                                .entry(sled_id)
+                                .or_default()
+                                .push(disk.disk_id);
                         }
                         Err(err) => return Err(err),
                     }
