@@ -98,8 +98,12 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
                 "could not open {path}: {}",
                 InlineErrorChain::new(&err)
             );
+            // Build an explicit HttpError instead of using
+            // `for_internal_error()` because the latter sends a generic error
+            // message to the client. We want to tell our client more details
+            // about what went wrong.
             HttpError {
-                status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
+                status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
                 error_code: None,
                 external_message: err.clone(),
                 internal_message: err,
