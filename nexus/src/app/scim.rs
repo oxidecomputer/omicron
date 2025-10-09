@@ -88,21 +88,6 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub(crate) async fn scim_idp_delete_tokens_for_silo(
-        &self,
-        opctx: &OpContext,
-        silo_lookup: &lookup::Silo<'_>,
-    ) -> DeleteResult {
-        let (.., authz_silo, _) =
-            silo_lookup.fetch_for(authz::Action::ListChildren).await?;
-
-        self.datastore()
-            .scim_idp_delete_tokens_for_silo(opctx, &authz_silo)
-            .await?;
-
-        Ok(())
-    }
-
     // SCIM client authentication
 
     /// Authenticate a SCIM client based on a bearer token, and return a SCIM

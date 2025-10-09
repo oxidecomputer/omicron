@@ -128,27 +128,6 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn scim_idp_delete_tokens_for_silo(
-        &self,
-        opctx: &OpContext,
-        authz_silo: &authz::Silo,
-    ) -> DeleteResult {
-        opctx.authorize(authz::Action::Modify, authz_silo).await?;
-
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        use nexus_db_schema::schema::scim_client_bearer_token::dsl;
-        diesel::update(dsl::scim_client_bearer_token)
-            .filter(dsl::silo_id.eq(authz_silo.id()))
-            .filter(dsl::time_deleted.is_null())
-            .set(dsl::time_deleted.eq(Utc::now()))
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(())
-    }
-
     /// SCIM clients should _not_ authenticate to an Actor in the traditional
     /// sense: they shouldn't have permission on any resources under a Silo,
     /// only enough to CRUD Silo users and groups.

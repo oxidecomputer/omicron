@@ -335,17 +335,6 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(tokens.len(), 2);
     assert!(tokens.iter().any(|token| token.id == created_token_2.id));
     assert!(tokens.iter().any(|token| token.id == created_token_3.id));
-
-    // Delete them all
-
-    object_delete(client, &format!("/v1/system/scim/tokens?silo={SILO_NAME}"))
-        .await;
-
-    let tokens: Vec<views::ScimClientBearerToken> =
-        object_get(client, &format!("/v1/system/scim/tokens?silo={SILO_NAME}"))
-            .await;
-
-    assert_eq!(tokens.len(), 0);
 }
 
 #[nexus_test]
@@ -431,22 +420,6 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     assert!(tokens.is_empty());
-
-    // Delete all tokens in Silo 2 - this should not affect Silo 1
-
-    object_delete(
-        client,
-        &format!("/v1/system/scim/tokens?silo={SILO_2_NAME}"),
-    )
-    .await;
-
-    let tokens: Vec<views::ScimClientBearerToken> = object_get(
-        client,
-        &format!("/v1/system/scim/tokens?silo={SILO_1_NAME}"),
-    )
-    .await;
-
-    assert!(!tokens.is_empty());
 }
 
 #[nexus_test]
