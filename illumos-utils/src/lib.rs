@@ -72,9 +72,6 @@ pub enum ExecutionError {
     #[error("Failed to parse command output")]
     ParseFailure(String),
 
-    #[error("Tofino not found")]
-    NoTofino,
-
     #[error("Zone is not running")]
     NotRunning,
 }

@@ -261,6 +261,10 @@ fn get_tfpkt_device_path() -> Option<Vec<i8>> {
     if sz < 0 {
         None
     } else {
+        // readlink returns "/devices/pseudo/..." but the contract
+        // filesystem only wants to know about the "/pseudo/..." part,
+        // so we strip off the first path element before returning it.
+        // We also need to drop any bytes after the terminating NULL.
         let left = 10;
         let right = path_buf.iter().position(|a| *a == 0).unwrap();
         Some(path_buf[left..right + 1].to_vec())

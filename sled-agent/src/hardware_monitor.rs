@@ -161,7 +161,7 @@ impl HardwareMonitor {
                 Ok(()) = self.switch_zone_policy_rx.changed() => {
                     let policy = self.current_switch_zone_policy();
                     info!(
-                        self.log, "NNN Switch zone policy changed; reevaluating";
+                        self.log, "Switch zone policy changed; reevaluating";
                         "policy" => ?policy,
                     );
                     self.ensure_switch_zone_activated_or_deactivated(

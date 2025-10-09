@@ -738,23 +738,17 @@ fn monitor_tofino(
             }
         }
 
-        let ctid = {
-            let template = match Template::new(ContractType::Device) {
-                Ok(t) => t,
-                Err(e) => {
-                    error!(
-                        log,
-                        "unable to open tofino contract template: {e:?}"
-                    );
-                    continue;
-                }
-            };
-            match template.create() {
+        let ctid = match Template::new(ContractType::Device) {
+            Ok(template) => match template.create() {
                 Ok(c) => c,
                 Err(e) => {
                     error!(log, "unable to create tofino contract: {e:?}");
                     continue;
                 }
+            },
+            Err(e) => {
+                error!(log, "unable to open tofino contract template: {e:?}");
+                continue;
             }
         };
         let ctl = match Control::new(ContractType::Device, ctid) {
