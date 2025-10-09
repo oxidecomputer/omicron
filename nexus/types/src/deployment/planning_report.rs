@@ -10,7 +10,6 @@ use super::BlueprintZoneImageSource;
 use super::CockroachDbPreserveDowngrade;
 use super::PendingMgsUpdates;
 use super::PlannerConfig;
-use crate::deployment::MgsUpdateComponent;
 use crate::inventory::BaseboardId;
 use crate::inventory::CabooseWhich;
 
@@ -21,7 +20,9 @@ use indent_write::fmt::IndentWriter;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::M2Slot;
+use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -30,6 +31,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -80,7 +82,7 @@ impl PlanningReport {
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
-            mgs_updates: PlanningMgsUpdatesStepReport::empty(),
+            mgs_updates: PlanningMgsUpdatesStepReport::new(),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
             nexus_generation_bump: PlanningNexusGenerationBumpReport::new(),
@@ -501,11 +503,148 @@ impl PlanningMupdateOverrideStepReport {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "type", content = "value")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
-// TODO-K: Separate into enums for each component as suggested in
-// https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372863166
-// and including more detailed information as suggested in
-// https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372842378
 pub enum FailedMgsUpdateReason {
+    /// There was a failed attempt to plan a Host OS update
+    #[error("failed to plan a Host OS update")]
+    HostOs(#[from] FailedHostOsUpdateReason),
+    /// There was a failed attempt to plan an RoT update
+    #[error("failed to plan an RoT update")]
+    Rot(#[from] FailedRotUpdateReason),
+    /// There was a failed attempt to plan an RoT bootloader update
+    #[error("failed to plan an RoT bootloader update")]
+    RotBootloader(#[from] FailedRotBootloaderUpdateReason),
+    /// There was a failed attempt to plan an SP update
+    #[error("failed to plan an SP update")]
+    Sp(#[from] FailedSpUpdateReason),
+}
+
+/// Describes the reason why an RoT bootloader failed to update
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum FailedRotBootloaderUpdateReason {
+    /// The component's caboose was missing a value for "sign"
+    #[error("caboose for {0:?} is missing sign")]
+    CabooseMissingSign(CabooseWhich),
+    /// The component's caboose was not found in the inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    CabooseNotInInventory(CabooseWhich),
+    /// The version in the caboose or artifact was not able to be parsed
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    FailedVersionParse { caboose: CabooseWhich, err: String },
+    /// No artifact with the required conditions for the component was found
+    #[error("no matching artifact was found")]
+    NoMatchingArtifactFound,
+    /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
+    SpNotInInventory,
+}
+
+/// Describes the reason why an RoT failed to update
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum FailedRotUpdateReason {
+    /// The component's caboose was missing a value for "sign"
+    #[error("caboose for {0:?} is missing sign")]
+    CabooseMissingSign(CabooseWhich),
+    /// The component's caboose was not found in the inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    CabooseNotInInventory(CabooseWhich),
+    /// The version in the caboose or artifact was not able to be parsed
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    FailedVersionParse { caboose: CabooseWhich, err: String },
+    /// No artifact with the required conditions for the component was found
+    #[error("no matching artifact was found")]
+    NoMatchingArtifactFound,
+    /// RoT state was not found in inventory
+    #[error("rot state is not in inventory")]
+    RotStateNotInInventory,
+    /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
+    SpNotInInventory,
+}
+
+/// Describes the reason why an SP failed to update
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum FailedSpUpdateReason {
+    /// The component's caboose was not found in the inventory
+    #[error("caboose for {0:?} is not in inventory")]
+    CabooseNotInInventory(CabooseWhich),
+    /// The version in the caboose or artifact was not able to be parsed
+    #[error("version from caboose {caboose:?} could not be parsed: {err}")]
+    FailedVersionParse { caboose: CabooseWhich, err: String },
+    /// No artifact with the required conditions for the component was found
+    #[error("no matching artifact was found")]
+    NoMatchingArtifactFound,
+    /// The component's corresponding SP was not found in the inventory
+    #[error("corresponding SP is not in inventory")]
+    SpNotInInventory,
+    /// The component's corresponding sled contains zones that are unsafe to
+    /// shut down
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
+}
+
+/// Describes the reason why a Host OS failed to update
+#[derive(
+    Error,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    Diffable,
+    PartialOrd,
+    JsonSchema,
+    Ord,
+    Clone,
+)]
+#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", content = "value")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum FailedHostOsUpdateReason {
     /// The active host phase 1 slot does not match the boot disk
     #[error("active phase 1 slot {0:?} does not match boot disk")]
     ActiveHostPhase1SlotBootDiskMismatch(M2Slot),
@@ -515,9 +654,6 @@ pub enum FailedMgsUpdateReason {
     /// The active host phase 1 slot was not found in inventory
     #[error("active host phase 1 slot is not in inventory")]
     ActiveHostPhase1SlotNotInInventory,
-    /// The component's caboose was missing a value for "sign"
-    #[error("caboose for {0:?} is missing sign")]
-    CabooseMissingSign(CabooseWhich),
     /// The component's caboose was not found in the inventory
     #[error("caboose for {0:?} is not in inventory")]
     CabooseNotInInventory(CabooseWhich),
@@ -530,12 +666,15 @@ pub enum FailedMgsUpdateReason {
     /// Last reconciliation details were not found in inventory
     #[error("sled agent last reconciliation is not in inventory")]
     LastReconciliationNotInInventory,
-    /// No artifact with the required conditions for the component was found
-    #[error("no matching artifact was found")]
-    NoMatchingArtifactFound,
-    /// RoT state was not found in inventory
-    #[error("rot state is not in inventory")]
-    RotStateNotInInventory,
+    /// No artifacts with the required conditions for the component were found
+    #[error("no matching artifacts for phase 1 or 2 were found")]
+    NoMatchingArtifactsFound,
+    /// No artifact with the required conditions for phase 1 was found
+    #[error("no matching artifact for phase 1 was found")]
+    NoMatchingPhase1ArtifactFound,
+    /// No artifact with the required conditions for phase 2 was found
+    #[error("no matching artifact for phase 2 was found")]
+    NoMatchingPhase2ArtifactFound,
     /// Sled agent info was not found in inventory
     #[error("sled agent info is not in inventory")]
     SledAgentInfoNotInInventory,
@@ -553,6 +692,10 @@ pub enum FailedMgsUpdateReason {
     /// details
     #[error("sled agent was unable to retrieve boot disk phase 2 image: {0:?}")]
     UnableToRetrieveBootDiskPhase2Image(String),
+    /// The component's corresponding sled contains zones that are unsafe to
+    /// shut down
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
 }
 
 #[derive(
@@ -562,8 +705,6 @@ pub enum FailedMgsUpdateReason {
 pub struct BlockedMgsUpdate {
     /// id of the baseboard that we attempted to update
     pub baseboard_id: Arc<BaseboardId>,
-    /// type of SP component that we attempted to update
-    pub component: MgsUpdateComponent,
     /// reason why the update failed
     pub reason: FailedMgsUpdateReason,
 }
@@ -581,22 +722,15 @@ impl IdOrdItem for BlockedMgsUpdate {
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlanningMgsUpdatesStepReport {
-    pub pending_mgs_updates: PendingMgsUpdates,
     pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
+    pub pending_mgs_updates: PendingMgsUpdates,
 }
 
 impl PlanningMgsUpdatesStepReport {
-    pub fn new(
-        pending_mgs_updates: PendingMgsUpdates,
-        blocked_mgs_updates: Vec<BlockedMgsUpdate>,
-    ) -> Self {
-        Self { pending_mgs_updates, blocked_mgs_updates }
-    }
-
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self {
-            pending_mgs_updates: PendingMgsUpdates::new(),
             blocked_mgs_updates: Vec::new(),
+            pending_mgs_updates: PendingMgsUpdates::new(),
         }
     }
 
@@ -608,7 +742,7 @@ impl PlanningMgsUpdatesStepReport {
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { pending_mgs_updates, blocked_mgs_updates } = self;
+        let Self { blocked_mgs_updates, pending_mgs_updates } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -621,6 +755,7 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                 )?;
             }
         }
+
         if !blocked_mgs_updates.is_empty() {
             let n = blocked_mgs_updates.len();
             let s = plural(n);
@@ -628,8 +763,9 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
             for update in blocked_mgs_updates {
                 writeln!(
                     f,
-                    "  * {} {}: {}",
-                    update.baseboard_id, update.component, update.reason
+                    "  * {}: {}",
+                    update.baseboard_id,
+                    InlineErrorChain::new(&update.reason)
                 )?;
             }
         }
@@ -1298,11 +1434,19 @@ impl fmt::Display for ZoneUnsafeToShutdown {
             Self::BoundaryNtp {
                 total_boundary_ntp_zones: t,
                 synchronized_count: s,
-            } => write!(f, "only {s}/{t} boundary NTP zones are synchronized"),
+            } => write!(
+                f,
+                "only {s}/{t} boundary NTP zones are synchronized; require at least {}",
+                BOUNDARY_NTP_REDUNDANCY
+            ),
             Self::InternalDns {
                 total_internal_dns_zones: t,
                 synchronized_count: s,
-            } => write!(f, "only {s}/{t} internal DNS zones are synchronized"),
+            } => write!(
+                f,
+                "only {s}/{t} internal DNS zones are synchronized; require at least {}",
+                INTERNAL_DNS_REDUNDANCY
+            ),
         }
     }
 }

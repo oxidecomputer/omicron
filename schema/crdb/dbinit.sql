@@ -856,7 +856,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.authentication_mode AS ENUM (
 
 CREATE TYPE IF NOT EXISTS omicron.public.user_provision_type AS ENUM (
   'api_only',
-  'jit'
+  'jit',
+  'scim'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.silo (
@@ -895,15 +896,55 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     time_deleted TIMESTAMPTZ,
 
     silo_id UUID NOT NULL,
-    external_id TEXT NOT NULL
+
+    -- if the user provision type is 'api_only' or 'jit', then this field must
+    -- contain a value
+    external_id TEXT,
+
+    user_provision_type omicron.public.user_provision_type,
+
+    -- if the user provision type is 'scim' then this field must contain a value
+    user_name TEXT,
+
+    -- if user provision type is 'scim', this field _may_ contain a value: it
+    -- is not mandatory that the SCIM provisioning client support this field.
+    active BOOL,
+
+    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
+      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
+      OR (time_deleted IS NOT NULL)
+    ),
+
+    CONSTRAINT external_id_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'api_only' THEN external_id IS NOT NULL
+          WHEN 'jit' THEN external_id IS NOT NULL
+        END
+    ),
+
+    CONSTRAINT user_name_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'scim' THEN user_name IS NOT NULL
+        END
+    )
 );
 
-/* This index lets us quickly find users for a given silo. */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_user_by_silo ON omicron.public.silo_user (
-    silo_id,
-    external_id
-) WHERE
-    time_deleted IS NULL;
+/* These indexes let us quickly find users for a given silo, and prevents
+   multiple users from having the same provision specific unique identifier. */
+CREATE UNIQUE INDEX IF NOT EXISTS
+  lookup_silo_user_by_silo_and_external_id
+ON
+  omicron.public.silo_user (silo_id, external_id)
+WHERE
+  time_deleted IS NULL AND
+  (user_provision_type = 'api_only' OR user_provision_type = 'jit');
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+  lookup_silo_user_by_silo_and_user_name
+ON
+  omicron.public.silo_user (silo_id, user_name)
+WHERE
+  time_deleted IS NULL AND user_provision_type = 'scim';
 
 CREATE TABLE IF NOT EXISTS omicron.public.silo_user_password_hash (
     silo_user_id UUID NOT NULL,
@@ -924,14 +965,49 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_group (
     time_deleted TIMESTAMPTZ,
 
     silo_id UUID NOT NULL,
-    external_id TEXT NOT NULL
+
+    -- if the user provision type is 'api_only' or 'jit', then this field must
+    -- contain a value
+    external_id TEXT,
+
+    user_provision_type omicron.public.user_provision_type,
+
+    -- if the user provision type is 'scim' then this field must contain a value
+    display_name TEXT,
+
+    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
+      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
+      OR (time_deleted IS NOT NULL)
+    ),
+
+    CONSTRAINT external_id_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'api_only' THEN external_id IS NOT NULL
+          WHEN 'jit' THEN external_id IS NOT NULL
+        END
+    ),
+
+    CONSTRAINT display_name_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'scim' THEN display_name IS NOT NULL
+        END
+    )
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_group_by_silo ON omicron.public.silo_group (
-    silo_id,
-    external_id
-) WHERE
-    time_deleted IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS
+  lookup_silo_group_by_silo_and_external_id
+ON
+  omicron.public.silo_group (silo_id, external_id)
+WHERE
+  time_deleted IS NULL and
+  (user_provision_type = 'api_only' OR user_provision_type = 'jit');
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+  lookup_silo_group_by_silo_and_display_name
+ON
+  omicron.public.silo_group (silo_id, display_name)
+WHERE
+  time_deleted IS NULL AND user_provision_type = 'scim';
 
 /*
  * Silo group membership
@@ -6723,7 +6799,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '196.0.0', NULL)
+    (TRUE, NOW(), NOW(), '198.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

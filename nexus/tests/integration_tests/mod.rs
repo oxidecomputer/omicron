@@ -42,6 +42,7 @@ mod role_assignments;
 mod router_routes;
 mod saml;
 mod schema;
+mod scim;
 mod silo_users;
 mod silos;
 mod sleds;

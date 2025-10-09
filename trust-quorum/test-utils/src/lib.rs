@@ -13,11 +13,14 @@ pub use event::Event;
 pub use event_log::EventLog;
 pub use state::TqState;
 
-use trust_quorum::PlatformId;
+use trust_quorum::BaseboardId;
 
 /// All possible members used in a test
-pub fn member_universe(size: usize) -> Vec<PlatformId> {
+pub fn member_universe(size: usize) -> Vec<BaseboardId> {
     (0..size)
-        .map(|serial| PlatformId::new("test".into(), serial.to_string()))
+        .map(|serial| BaseboardId {
+            part_number: "test".into(),
+            serial_number: serial.to_string(),
+        })
         .collect()
 }

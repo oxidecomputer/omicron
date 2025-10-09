@@ -6,23 +6,26 @@
 
 use super::MgsUpdateStatus;
 use super::MgsUpdateStatusError;
+use crate::mgs_updates::MgsUpdateOutcome;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+use nexus_types::deployment::ZoneUnsafeToShutdown;
+use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::TypedUuid;
 use slog::Logger;
 use slog::debug;
 use slog::error;
-use slog::warn;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
@@ -273,39 +276,40 @@ pub(super) fn try_make_update(
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    // TODO-K: Instead of this convoluted return type use an enum as suggested in
-    // https://github.com/oxidecomputer/omicron/pull/9001#discussion_r2372837627
-) -> Result<
-    Option<(PendingMgsUpdate, PendingHostPhase2Changes)>,
-    FailedMgsUpdateReason,
-> {
+    unsafe_zone_boards: &BTreeMap<
+        Arc<BaseboardId>,
+        BTreeMap<TypedUuid<OmicronZoneKind>, ZoneUnsafeToShutdown>,
+    >,
+) -> Result<MgsUpdateOutcome, FailedHostOsUpdateReason> {
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
-        return Err(FailedMgsUpdateReason::SpNotInInventory);
+        return Err(FailedHostOsUpdateReason::SpNotInInventory);
     };
 
     // Only configure host OS updates for sleds.
     //
-    // We don't bother logging a return value of `None` for non-sleds, because
-    // we will never attempt to configure an update for them (nor should we).
-    // For the same reason, we do not return an error.
+    // We don't bother logging a return value of `NoUpdateNeeded` for non-sleds,
+    // because we will never attempt to configure an update for them (nor should
+    // we). For the same reason, we do not return an error.
     match sp_info.sp_type {
         SpType::Sled => (),
-        SpType::Power | SpType::Switch => return Ok(None),
+        SpType::Power | SpType::Switch => {
+            return Ok(MgsUpdateOutcome::NoUpdateNeeded);
+        }
     }
 
     let Some(sled_agent) = inventory.sled_agents.iter().find(|sled_agent| {
         sled_agent.baseboard_id.as_ref() == Some(baseboard_id)
     }) else {
-        return Err(FailedMgsUpdateReason::SledAgentInfoNotInInventory);
+        return Err(FailedHostOsUpdateReason::SledAgentInfoNotInInventory);
     };
     let Some(last_reconciliation) = sled_agent.last_reconciliation.as_ref()
     else {
-        return Err(FailedMgsUpdateReason::LastReconciliationNotInInventory);
+        return Err(FailedHostOsUpdateReason::LastReconciliationNotInInventory);
     };
     let boot_disk = match &last_reconciliation.boot_partitions.boot_disk {
         Ok(boot_disk) => *boot_disk,
         Err(err) => {
-            return Err(FailedMgsUpdateReason::UnableToDetermineBootDisk(
+            return Err(FailedHostOsUpdateReason::UnableToDetermineBootDisk(
                 err.to_string(),
             ));
         }
@@ -315,17 +319,19 @@ pub(super) fn try_make_update(
             Ok(details) => details.artifact_hash,
             Err(err) => {
                 return Err(
-                    FailedMgsUpdateReason::UnableToRetrieveBootDiskPhase2Image(
-                        err.to_string(),
-                    ),
-                );
+                FailedHostOsUpdateReason::UnableToRetrieveBootDiskPhase2Image(
+                    err.to_string(),
+                ),
+            );
             }
         };
 
     let Some(active_phase_1_slot) =
         inventory.host_phase_1_active_slot_for(baseboard_id).map(|s| s.slot)
     else {
-        return Err(FailedMgsUpdateReason::ActiveHostPhase1SlotNotInInventory);
+        return Err(
+            FailedHostOsUpdateReason::ActiveHostPhase1SlotNotInInventory,
+        );
     };
 
     // TODO-correctness What should we do if the active phase 1 slot doesn't
@@ -341,7 +347,7 @@ pub(super) fn try_make_update(
     // this current implementation. As far as we know they shouldn't happen.
     if active_phase_1_slot != boot_disk {
         return Err(
-            FailedMgsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch(
+            FailedHostOsUpdateReason::ActiveHostPhase1SlotBootDiskMismatch(
                 active_phase_1_slot,
             ),
         );
@@ -351,9 +357,11 @@ pub(super) fn try_make_update(
         .host_phase_1_flash_hash_for(active_phase_1_slot, baseboard_id)
         .map(|h| h.hash)
     else {
-        return Err(FailedMgsUpdateReason::ActiveHostPhase1HashNotInInventory(
-            active_phase_1_slot,
-        ));
+        return Err(
+            FailedHostOsUpdateReason::ActiveHostPhase1HashNotInInventory(
+                active_phase_1_slot,
+            ),
+        );
     };
 
     let Some(inactive_phase_1_hash) = inventory
@@ -363,15 +371,8 @@ pub(super) fn try_make_update(
         )
         .map(|h| h.hash)
     else {
-        warn!(
-            log,
-            "cannot configure host OS update for board \
-             (missing inactive phase 1 hash from inventory)";
-            baseboard_id,
-            "slot" => ?active_phase_1_slot.toggled(),
-        );
         return Err(
-            FailedMgsUpdateReason::InactiveHostPhase1HashNotInInventory(
+            FailedHostOsUpdateReason::InactiveHostPhase1HashNotInInventory(
                 active_phase_1_slot.toggled(),
             ),
         );
@@ -392,19 +393,26 @@ pub(super) fn try_make_update(
         match (phase_1_artifacts.as_slice(), phase_2_artifacts.as_slice()) {
             // Common case: Exactly 1 of each artifact.
             ([p1], [p2]) => (p1, p2),
-            // "TUF is broken" cases: missing one or the other.
+            // "TUF is broken" cases: missing both, one or the other.
+            ([], []) => {
+                return Err(FailedHostOsUpdateReason::NoMatchingArtifactsFound);
+            }
             ([], _) => {
-                return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
+                return Err(
+                    FailedHostOsUpdateReason::NoMatchingPhase1ArtifactFound,
+                );
             }
             (_, []) => {
-                return Err(FailedMgsUpdateReason::NoMatchingArtifactFound);
+                return Err(
+                    FailedHostOsUpdateReason::NoMatchingPhase2ArtifactFound,
+                );
             }
             // "TUF is broken" cases: have multiple of one or the other. This
             // should be impossible unless we shipped a TUF repo with multiple
             // host OS images. We can't proceed, because we don't know how to
             // pair up which phase 1 matches which phase 2.
             (_, _) => {
-                return Err(FailedMgsUpdateReason::TooManyMatchingArtifacts);
+                return Err(FailedHostOsUpdateReason::TooManyMatchingArtifacts);
             }
         };
 
@@ -416,7 +424,28 @@ pub(super) fn try_make_update(
     // this sled will fail to boot if it were rebooted now.)
     if active_phase_2_hash == phase_2_artifact.hash {
         debug!(log, "no host OS update needed for board"; baseboard_id);
-        return Ok(None);
+        return Ok(MgsUpdateOutcome::NoUpdateNeeded);
+    }
+
+    // Make sure the board we're targetting doesn't contain any zones that are
+    // unsafe to shut down
+    if let Some(unsafe_zone_board) = unsafe_zone_boards.get(baseboard_id) {
+        if unsafe_zone_board.is_empty() {
+            // This should never happen! If it does, we have a bug somewhere
+            // else: we added an entry to `unsafe_zone_boards` but didn't
+            // populate the details of why.
+            let err = "unsafe zone present, but no details found \
+                 (this is unexpected!)"
+                .to_string();
+            return Err(FailedHostOsUpdateReason::UnsafeZoneFound(err));
+        }
+
+        let mut unsafe_zones = Vec::new();
+        for (zone_id, zone) in unsafe_zone_board {
+            unsafe_zones.push(format!("{}: {}", zone_id, zone));
+        }
+        let zone_str = unsafe_zones.join(", ").to_string();
+        return Err(FailedHostOsUpdateReason::UnsafeZoneFound(zone_str));
     }
 
     // Before we can proceed with the phase 1 update, we need sled-agent to
@@ -432,7 +461,7 @@ pub(super) fn try_make_update(
         phase_2_artifact,
     );
 
-    Ok(Some((
+    Ok(MgsUpdateOutcome::Pending(
         PendingMgsUpdate {
             baseboard_id: baseboard_id.clone(),
             sp_type: sp_info.sp_type,
@@ -452,13 +481,13 @@ pub(super) fn try_make_update(
             artifact_version: phase_1_artifact.id.version.clone(),
         },
         pending_host_phase_2_changes,
-    )))
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use crate::mgs_updates::ImpossibleUpdatePolicy;
-    use crate::mgs_updates::plan_mgs_updates;
+    use crate::mgs_updates::MgsUpdatePlanner;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1_5;
@@ -477,6 +506,7 @@ mod tests {
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
     use omicron_common::disk::M2Slot;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
 
     // Short hand-rolled update sequence that exercises some basic behavior for
@@ -507,30 +537,34 @@ mod tests {
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let planned = plan_mgs_updates(
+        let planned = MgsUpdatePlanner {
             log,
-            &collection,
+            inventory: &collection,
             current_boards,
-            &initial_updates,
-            &TargetReleaseDescription::Initial,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &initial_updates,
+            current_artifacts: &TargetReleaseDescription::Initial,
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert!(planned.pending_updates.is_empty());
         assert!(planned.pending_host_phase_2_changes.is_empty());
 
         // Test that when a TUF repo is specified and one host OS is outdated,
         // then it's configured with an update (and the update looks correct).
         let repo = test_boards.tuf_repo();
-        let planned = plan_mgs_updates(
+        let planned = MgsUpdatePlanner {
             log,
-            &collection,
+            inventory: &collection,
             current_boards,
-            &initial_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &initial_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert_eq!(planned.pending_updates.len(), 1);
         let first_update =
             planned.pending_updates.iter().next().expect("at least one update");
@@ -557,15 +591,17 @@ mod tests {
         // Test that when an update is already pending, and nothing changes
         // about the state of the world (i.e., the inventory), then the planner
         // makes no changes.
-        let later_planned = plan_mgs_updates(
+        let later_planned = MgsUpdatePlanner {
             log,
-            &collection,
+            inventory: &collection,
             current_boards,
-            &planned.pending_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &planned.pending_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         // We should keep the pending MGS update, but not return any new phase 2
         // changes. (Those had already been applied to the sled configs.)
         assert_eq!(planned.pending_updates, later_planned.pending_updates);
@@ -587,15 +623,17 @@ mod tests {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let later_planned = plan_mgs_updates(
+        let later_planned = MgsUpdatePlanner {
             log,
-            &later_collection,
+            inventory: &later_collection,
             current_boards,
-            &planned.pending_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &planned.pending_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert_eq!(planned.pending_updates, later_planned.pending_updates);
         assert!(later_planned.pending_host_phase_2_changes.is_empty());
 
@@ -611,15 +649,17 @@ mod tests {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let later_planned = plan_mgs_updates(
+        let later_planned = MgsUpdatePlanner {
             log,
-            &later_collection,
+            inventory: &later_collection,
             current_boards,
-            &planned.pending_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &planned.pending_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert_eq!(later_planned.pending_updates.len(), 1);
         let first_update = later_planned
             .pending_updates
@@ -649,15 +689,17 @@ mod tests {
         // Finally, test that when all OSs are in spec, then no updates are
         // configured.
         let updated_collection = test_boards.collection_builder().build();
-        let later_planned = plan_mgs_updates(
+        let later_planned = MgsUpdatePlanner {
             log,
-            &updated_collection,
+            inventory: &updated_collection,
             current_boards,
-            &later_planned.pending_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &later_planned.pending_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert!(later_planned.pending_updates.is_empty());
         assert!(later_planned.pending_host_phase_2_changes.is_empty());
 
@@ -671,26 +713,30 @@ mod tests {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let planned = plan_mgs_updates(
+        let planned = MgsUpdatePlanner {
             log,
-            &collection,
-            &BTreeSet::new(),
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &BTreeSet::new(),
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert!(planned.pending_updates.is_empty());
         assert!(planned.pending_host_phase_2_changes.is_empty());
-        let planned = plan_mgs_updates(
+        let planned = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         // We verified most of the details above.  Here we're just double
         // checking that the baseboard being missing is the only reason that no
         // update was generated.
@@ -748,15 +794,17 @@ mod tests {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let new_planned = plan_mgs_updates(
+        let new_planned = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &planned.pending_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &planned.pending_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert_ne!(planned.pending_updates, new_planned.pending_updates);
         assert_eq!(new_planned.pending_updates.len(), 1);
         let new_update = new_planned
@@ -810,15 +858,17 @@ mod tests {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let new_planned = plan_mgs_updates(
+        let new_planned = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &planned.pending_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &planned.pending_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert_ne!(planned.pending_updates, new_planned.pending_updates);
         assert_eq!(new_planned.pending_updates.len(), 1);
         let new_update = new_planned
@@ -888,15 +938,17 @@ mod tests {
             .build();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
-        let planned = plan_mgs_updates(
+        let planned = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &collection.baseboards.clone(),
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert!(!planned.pending_updates.is_empty());
         assert!(!planned.pending_host_phase_2_changes.is_empty());
         let update = planned
@@ -916,15 +968,17 @@ mod tests {
 
         // Plan again.  The configured update should be updated to reflect the
         // new location.
-        let new_planned = plan_mgs_updates(
+        let new_planned = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &planned.pending_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &planned.pending_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert!(!new_planned.pending_updates.is_empty());
         assert!(!new_planned.pending_host_phase_2_changes.is_empty());
         let new_update = new_planned

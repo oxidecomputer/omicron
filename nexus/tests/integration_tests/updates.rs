@@ -428,7 +428,7 @@ async fn test_repo_upload() -> Result<()> {
 
     // Upload a new repository with a different system version but no other
     // changes. This should be accepted.
-    {
+    let initial_installinator_doc = {
         let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
         let response = trust_root
             .assemble_repo(&logctx.log, tweaks)
@@ -509,7 +509,9 @@ async fn test_repo_upload() -> Result<()> {
             description, get_description,
             "initial description matches fetched description"
         );
-    }
+
+        installinator_doc_1
+    };
     // The installinator document changed, so the generation number is bumped to
     // 3.
     assert_eq!(
@@ -525,6 +527,75 @@ async fn test_repo_upload() -> Result<()> {
     assert_eq!(status.last_run_counters.put_ok, 3);
     assert_eq!(status.last_run_counters.copy_ok, 1);
     assert_eq!(status.local_repos, 1);
+    // Run the replication background task again; the local repos should be
+    // dropped.
+    let status =
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
+    assert_eq!(status.last_run_counters.list_ok, 4);
+    assert_eq!(status.last_run_counters.sum(), 8);
+    assert_eq!(status.local_repos, 0);
+
+    // Verify the initial installinator document is present on all sled-agents.
+    let installinator_doc_hash = initial_installinator_doc.hash.to_string();
+    for sled_agent in &cptestctx.sled_agents {
+        for dir in sled_agent.sled_agent().artifact_store().storage_paths() {
+            let path = dir.join(&installinator_doc_hash);
+            assert!(path.exists(), "{path} does not exist");
+        }
+    }
+    // Collect watchers for all of the sled-agent artifact delete reconcilers.
+    let mut delete_watchers = cptestctx
+        .sled_agents
+        .iter()
+        .map(|sled_agent| {
+            sled_agent.sled_agent().artifact_store().subscribe_delete_done()
+        })
+        .collect::<Vec<_>>();
+    // Manually prune the first repo.
+    let initial_repo = datastore
+        .tuf_repo_get_by_version(
+            &opctx,
+            "1.0.0".parse::<Version>().unwrap().into(),
+        )
+        .await?;
+    let recent_releases =
+        datastore.target_release_fetch_recent_distinct(&opctx, 3).await?;
+    datastore
+        .tuf_repo_mark_pruned(
+            &opctx,
+            status.generation,
+            &recent_releases,
+            initial_repo.repo.id(),
+        )
+        .await
+        .unwrap();
+    // Marking a repository as pruned bumps the generation number.
+    assert_eq!(
+        datastore.tuf_get_generation(&opctx).await.unwrap(),
+        4u32.into()
+    );
+    // Run the replication background task; we should see new configs be put.
+    let status =
+        run_tuf_artifact_replication_step(&cptestctx.lockstep_client).await;
+    eprintln!("{status:?}");
+    assert_eq!(status.last_run_counters.put_config_ok, 4);
+    assert_eq!(status.last_run_counters.list_ok, 4);
+    assert_eq!(status.last_run_counters.sum(), 8);
+    assert_eq!(status.generation, 4u32.into());
+    // Wait for the delete reconciler to finish on all sled agents.
+    futures::future::join_all(
+        delete_watchers.iter_mut().map(|watcher| watcher.changed()),
+    )
+    .await;
+    // Verify the installinator document from the initial repo is deleted.
+    for sled_agent in &cptestctx.sled_agents {
+        for dir in sled_agent.sled_agent().artifact_store().storage_paths() {
+            let path = dir.join(&installinator_doc_hash);
+            assert!(!path.exists(), "{path} was not deleted");
+        }
+    }
 
     cptestctx.teardown().await;
     Ok(())

@@ -22,6 +22,7 @@ pub mod instance_reincarnation;
 pub mod instance_updater;
 pub mod instance_watcher;
 pub mod inventory_collection;
+pub mod inventory_load;
 pub mod lookup_region_port;
 pub mod metrics_producer_gc;
 pub mod nat_cleanup;

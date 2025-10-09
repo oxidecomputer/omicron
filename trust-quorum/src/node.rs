@@ -26,8 +26,8 @@ use crate::validators::{
     ValidatedLrtqUpgradeMsg, ValidatedReconfigureMsg,
 };
 use crate::{
-    Alarm, Configuration, CoordinatorState, Epoch, ExpungedMetadata,
-    NodeHandlerCtx, PlatformId, messages::*,
+    Alarm, BaseboardId, Configuration, CoordinatorState, Epoch,
+    ExpungedMetadata, NodeHandlerCtx, messages::*,
 };
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
@@ -368,7 +368,7 @@ impl Node {
     pub fn on_connect(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        peer: PlatformId,
+        peer: BaseboardId,
     ) {
         ctx.add_connection(peer.clone());
         self.send_coordinator_msgs_to(ctx, peer.clone());
@@ -382,7 +382,7 @@ impl Node {
     pub fn on_disconnect(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        peer: PlatformId,
+        peer: BaseboardId,
     ) {
         ctx.remove_connection(&peer);
     }
@@ -391,7 +391,7 @@ impl Node {
     pub fn handle(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         msg: PeerMsg,
     ) {
         if ctx.persistent_state().is_expunged() {
@@ -451,7 +451,7 @@ impl Node {
         self.coordinator_state.as_ref()
     }
 
-    fn handle_prepare_ack(&mut self, from: PlatformId, epoch: Epoch) {
+    fn handle_prepare_ack(&mut self, from: BaseboardId, epoch: Epoch) {
         // Are we coordinating for this epoch?
         if let Some(cs) = &mut self.coordinator_state {
             let current_epoch = cs.msg().epoch();
@@ -482,7 +482,7 @@ impl Node {
     fn handle_expunged(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         epoch: Epoch,
     ) {
         if let Some(config) = ctx.persistent_state().latest_config() {
@@ -730,7 +730,7 @@ impl Node {
     fn handle_get_share(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         epoch: Epoch,
     ) {
         if let Some(latest_committed_config) =
@@ -822,7 +822,7 @@ impl Node {
     fn handle_share(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         epoch: Epoch,
         share: Share,
     ) {
@@ -843,7 +843,7 @@ impl Node {
     fn handle_prepare(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         config: Configuration,
         share: Share,
     ) {
@@ -928,7 +928,7 @@ impl Node {
     fn handle_get_lrtq_share(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
     ) {
         // Have we already committed a TQ config?
         if let Some(latest_committed_config) =
@@ -992,7 +992,7 @@ impl Node {
     fn handle_lrtq_share(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        from: PlatformId,
+        from: BaseboardId,
         share: LrtqShare,
     ) {
         if let Some(cs) = &mut self.coordinator_state {
@@ -1014,7 +1014,7 @@ impl Node {
     fn send_coordinator_msgs_to(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
-        platform_id: PlatformId,
+        platform_id: BaseboardId,
     ) {
         // This function is called unconditionally in callbacks. We may not
         // actually be a coordinator. We ignore the call in that case.
@@ -1074,7 +1074,7 @@ pub enum CommitError {
     #[error("cannot commit: not prepared for epoch {0}")]
     NotPrepared(Epoch),
     #[error("cannot commit: expunged at epoch {epoch} by {from}")]
-    Expunged { epoch: Epoch, from: PlatformId },
+    Expunged { epoch: Epoch, from: BaseboardId },
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -1086,7 +1086,7 @@ pub enum PrepareAndCommitError {
         MismatchedRackIdError,
     ),
     #[error("cannot commit: expunged at epoch {epoch} by {from}")]
-    Expunged { epoch: Epoch, from: PlatformId },
+    Expunged { epoch: Epoch, from: BaseboardId },
 }
 
 #[cfg(test)]
@@ -1099,9 +1099,10 @@ mod tests {
     use proptest::prelude::*;
     use test_strategy::{Arbitrary, proptest};
 
-    fn arb_member() -> impl Strategy<Value = PlatformId> {
-        (0..255u8).prop_map(|serial| {
-            PlatformId::new("test".into(), serial.to_string())
+    fn arb_member() -> impl Strategy<Value = BaseboardId> {
+        (0..255u8).prop_map(|serial| BaseboardId {
+            part_number: "test".into(),
+            serial_number: serial.to_string(),
         })
     }
 

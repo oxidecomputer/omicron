@@ -126,16 +126,6 @@ impl super::Nexus {
         Ok(prev_policy)
     }
 
-    pub(crate) async fn sled_request_firewall_rules(
-        &self,
-        opctx: &OpContext,
-        id: SledUuid,
-    ) -> Result<(), Error> {
-        info!(self.log, "requesting firewall rules"; "sled_uuid" => id.to_string());
-        self.plumb_service_firewall_rules(opctx, &[id]).await?;
-        Ok(())
-    }
-
     pub(crate) async fn sled_list(
         &self,
         opctx: &OpContext,

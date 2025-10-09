@@ -2816,3 +2816,20 @@ pub struct AuditLog {
     /// Exclusive
     pub end_time: Option<DateTime<Utc>>,
 }
+
+// SCIM
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2TokenPathParam {
+    pub token_id: Uuid,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2UserPathParam {
+    pub user_id: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2GroupPathParam {
+    pub group_id: String,
+}
