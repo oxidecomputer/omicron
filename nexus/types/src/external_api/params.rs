@@ -17,7 +17,6 @@ use omicron_common::api::external::{
     Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
-use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
@@ -1011,22 +1010,6 @@ pub struct IpPoolCreate {
     /// Type of IP pool (defaults to Unicast for backward compatibility)
     #[serde(default)]
     pub pool_type: shared::IpPoolType,
-    /// Rack switch uplinks that carry multicast traffic out of the rack to
-    /// external groups. Only applies to multicast pools; ignored for unicast
-    /// pools.
-    ///
-    /// Format: list of `<switch>.<port>` strings (for example, `switch0.qsfp0`),
-    /// or objects with `switch_location` and `port_name`.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::external_api::deserializers::parse_and_dedup_switch_port_uplinks"
-    )]
-    pub switch_port_uplinks: Option<Vec<SwitchPortUplink>>,
-    /// VLAN ID for multicast pools.
-    /// Only applies to multicast pools, ignored for unicast pools.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mvlan: Option<VlanID>,
 }
 
 impl IpPoolCreate {
@@ -1039,8 +1022,6 @@ impl IpPoolCreate {
             identity,
             ip_version,
             pool_type: shared::IpPoolType::Unicast,
-            switch_port_uplinks: None,
-            mvlan: None,
         }
     }
 
@@ -1048,15 +1029,11 @@ impl IpPoolCreate {
     pub fn new_multicast(
         identity: IdentityMetadataCreateParams,
         ip_version: IpVersion,
-        switch_port_uplinks: Option<Vec<SwitchPortUplink>>,
-        mvlan: Option<VlanID>,
     ) -> Self {
         Self {
             identity,
             ip_version,
             pool_type: shared::IpPoolType::Multicast,
-            switch_port_uplinks,
-            mvlan,
         }
     }
 }
@@ -1066,22 +1043,6 @@ impl IpPoolCreate {
 pub struct IpPoolUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
-    /// Rack switch uplinks that carry multicast traffic out of the rack to
-    /// external groups. Only applies to multicast pools; ignored for unicast
-    /// pools.
-    ///
-    /// Format: list of `<switch>.<port>` strings (for example, `switch0.qsfp0`),
-    /// or objects with `switch_location` and `port_name`.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::external_api::deserializers::parse_and_dedup_switch_port_uplinks"
-    )]
-    pub switch_port_uplinks: Option<Vec<SwitchPortUplink>>,
-    /// VLAN ID for multicast pools.
-    /// Only applies to multicast pools, ignored for unicast pools.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mvlan: Option<VlanID>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -2318,45 +2279,6 @@ pub struct SwitchPortSelector {
 pub struct SwitchPortPageSelector {
     /// An optional switch port id to use when listing switch ports.
     pub switch_port_id: Option<Uuid>,
-}
-
-/// Switch port uplink specification for multicast IP pools.
-/// Combines switch location and port name in "switchN.portM" format.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct SwitchPortUplink {
-    /// Switch location (e.g., "switch0")
-    pub switch_location: Name,
-    /// Port name (e.g., "qsfp0")
-    pub port_name: Name,
-}
-
-impl std::fmt::Display for SwitchPortUplink {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}", self.switch_location, self.port_name)
-    }
-}
-
-impl FromStr for SwitchPortUplink {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split('.').collect();
-        if parts.len() != 2 {
-            return Err(format!(
-                "Invalid switch port format '{}'. Expected '<switch>.<port>'",
-                s
-            ));
-        }
-
-        let switch_location = parts[0].parse::<Name>().map_err(|e| {
-            format!("Invalid switch location '{}': {}", parts[0], e)
-        })?;
-        let port_name = parts[1]
-            .parse::<Name>()
-            .map_err(|e| format!("Invalid port name '{}': {}", parts[1], e))?;
-
-        Ok(Self { switch_location, port_name })
-    }
 }
 
 /// Parameters for applying settings to switch ports.

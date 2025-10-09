@@ -953,8 +953,6 @@ pub static DEMO_IP_POOL_UPDATE: LazyLock<params::IpPoolUpdate> =
             name: None,
             description: Some(String::from("a new IP pool")),
         },
-        mvlan: None,
-        switch_port_uplinks: None,
     });
 pub static DEMO_IP_POOL_SILOS_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/silos", *DEMO_IP_POOL_URL));

@@ -21490,13 +21490,6 @@
               }
             ]
           },
-          "mvlan": {
-            "nullable": true,
-            "description": "MVLAN ID for multicast pools Only present for multicast pools.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -21512,14 +21505,6 @@
                 "$ref": "#/components/schemas/IpPoolType"
               }
             ]
-          },
-          "switch_port_uplinks": {
-            "nullable": true,
-            "description": "Switch port uplinks for multicast pools (format: \"switchN.portM\") Only present for multicast pools.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -21558,15 +21543,6 @@
               }
             ]
           },
-          "mvlan": {
-            "nullable": true,
-            "description": "VLAN ID for multicast pools. Only applies to multicast pools, ignored for unicast pools.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VlanId"
-              }
-            ]
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
@@ -21578,14 +21554,6 @@
                 "$ref": "#/components/schemas/IpPoolType"
               }
             ]
-          },
-          "switch_port_uplinks": {
-            "nullable": true,
-            "description": "Rack switch uplinks that carry multicast traffic out of the rack to external groups. Only applies to multicast pools; ignored for unicast pools.\n\nFormat: list of `<switch>.<port>` strings (for example, `switch0.qsfp0`), or objects with `switch_location` and `port_name`.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortUplink"
-            }
           }
         },
         "required": [
@@ -21760,15 +21728,6 @@
             "nullable": true,
             "type": "string"
           },
-          "mvlan": {
-            "nullable": true,
-            "description": "VLAN ID for multicast pools. Only applies to multicast pools, ignored for unicast pools.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VlanId"
-              }
-            ]
-          },
           "name": {
             "nullable": true,
             "allOf": [
@@ -21776,14 +21735,6 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
-          },
-          "switch_port_uplinks": {
-            "nullable": true,
-            "description": "Rack switch uplinks that carry multicast traffic out of the rack to external groups. Only applies to multicast pools; ignored for unicast pools.\n\nFormat: list of `<switch>.<port>` strings (for example, `switch0.qsfp0`), or objects with `switch_location` and `port_name`.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortUplink"
-            }
           }
         }
       },
@@ -25983,32 +25934,6 @@
           "items"
         ]
       },
-      "SwitchPortUplink": {
-        "description": "Switch port uplink specification for multicast IP pools. Combines switch location and port name in \"switchN.portM\" format.",
-        "type": "object",
-        "properties": {
-          "port_name": {
-            "description": "Port name (e.g., \"qsfp0\")",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "switch_location": {
-            "description": "Switch location (e.g., \"switch0\")",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        },
-        "required": [
-          "port_name",
-          "switch_location"
-        ]
-      },
       "SwitchResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -27051,12 +26976,6 @@
           "memory",
           "storage"
         ]
-      },
-      "VlanId": {
-        "description": "Wrapper around a VLAN ID, ensuring it is valid.",
-        "type": "integer",
-        "format": "uint16",
-        "minimum": 0
       },
       "Vni": {
         "description": "A Geneve Virtual Network Identifier",

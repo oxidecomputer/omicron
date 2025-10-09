@@ -2189,16 +2189,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     ip_version omicron.public.ip_version NOT NULL,
 
     /* Pool type for unicast (default) vs multicast pools. */
-    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast',
-
-    /* Rack switch uplinks that carry multicast traffic out of the rack to */
-    /* external groups. Only applies to multicast pools (operator-configured). */
-    /* Stored as switch port UUIDs. NULL for unicast pools. */
-    switch_port_uplinks UUID[],
-
-    /* MVLAN ID for multicast pools. */
-    /* Only applies to multicast pools, NULL for unicast pools. */
-    mvlan INT4
+    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast'
 );
 
 /*

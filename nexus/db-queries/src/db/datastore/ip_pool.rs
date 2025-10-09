@@ -1818,8 +1818,6 @@ mod test {
                 ip_version,
                 rcgen: 0,
                 pool_type: IpPoolType::Unicast,
-                mvlan: None,
-                switch_port_uplinks: None,
             };
             let pool = datastore
                 .ip_pool_create(&opctx, params)
@@ -2187,7 +2185,7 @@ mod test {
         let pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&identity, IpVersion::V4, None, None),
+                IpPool::new_multicast(&identity, IpVersion::V4),
             )
             .await
             .expect("Failed to create multicast IP pool");
@@ -2257,7 +2255,7 @@ mod test {
         let pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&identity, IpVersion::V4, None, None),
+                IpPool::new_multicast(&identity, IpVersion::V4),
             )
             .await
             .expect("Failed to create multicast IP pool");
@@ -2306,8 +2304,6 @@ mod test {
                 IpPool::new_multicast(
                     &ipv4_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -2348,8 +2344,6 @@ mod test {
                 IpPool::new_multicast(
                     &ipv6_identity,
                     IpVersion::V6,
-                    None,
-                    None,
                 ),
             )
             .await

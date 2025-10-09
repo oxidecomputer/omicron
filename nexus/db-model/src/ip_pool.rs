@@ -5,7 +5,6 @@
 //! Model types for IP Pools and the CIDR blocks therein.
 
 use crate::Name;
-use crate::SqlU16;
 use crate::collection::DatastoreCollectionConfig;
 use crate::impl_enum_type;
 use chrono::DateTime;
@@ -21,7 +20,6 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
-use omicron_common::vlan::VlanID;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -105,12 +103,6 @@ pub struct IpPool {
     pub ip_version: IpVersion,
     /// Pool type for unicast (default) vs multicast pools.
     pub pool_type: IpPoolType,
-    /// Switch port uplinks for multicast pools (array of switch port UUIDs).
-    /// Only applies to multicast pools, None for unicast pools.
-    pub switch_port_uplinks: Option<Vec<Uuid>>,
-    /// MVLAN ID for multicast pools.
-    /// Only applies to multicast pools, None for unicast pools.
-    pub mvlan: Option<SqlU16>,
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
@@ -129,8 +121,6 @@ impl IpPool {
             ),
             ip_version,
             pool_type: IpPoolType::Unicast,
-            switch_port_uplinks: None,
-            mvlan: None,
             rcgen: 0,
         }
     }
@@ -139,8 +129,6 @@ impl IpPool {
     pub fn new_multicast(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
-        switch_port_uplinks: Option<Vec<Uuid>>,
-        mvlan: Option<VlanID>,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
@@ -149,8 +137,6 @@ impl IpPool {
             ),
             ip_version,
             pool_type: IpPoolType::Multicast,
-            switch_port_uplinks,
-            mvlan: mvlan.map(|vid| u16::from(vid).into()),
             rcgen: 0,
         }
     }
@@ -173,23 +159,10 @@ impl From<IpPool> for views::IpPool {
         let identity = pool.identity();
         let pool_type = pool.pool_type;
 
-        // Note: UUIDs expected to be converted to "switch.port" format in app
-        // layer, upon retrieval.
-        let switch_port_uplinks = match pool.switch_port_uplinks {
-            Some(uuid_list) => Some(
-                uuid_list.into_iter().map(|uuid| uuid.to_string()).collect(),
-            ),
-            None => None,
-        };
-
-        let mvlan = pool.mvlan.map(|vlan| vlan.into());
-
         Self {
             identity,
             pool_type: pool_type.into(),
             ip_version: pool.ip_version.into(),
-            switch_port_uplinks,
-            mvlan,
         }
     }
 }
@@ -203,22 +176,14 @@ impl From<IpPool> for views::IpPool {
 pub struct IpPoolUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
-    /// Switch port uplinks for multicast pools (array of switch port UUIDs),
-    /// used for multicast traffic outbound from the rack to external networks.
-    pub switch_port_uplinks: Option<Vec<Uuid>>,
-    /// MVLAN ID for multicast pools.
-    pub mvlan: Option<SqlU16>,
     pub time_modified: DateTime<Utc>,
 }
 
-// Used for unicast updates.
 impl From<params::IpPoolUpdate> for IpPoolUpdate {
     fn from(params: params::IpPoolUpdate) -> Self {
         Self {
             name: params.identity.name.map(|n| n.into()),
             description: params.identity.description,
-            switch_port_uplinks: None, // no change
-            mvlan: None,               // no change
             time_modified: Utc::now(),
         }
     }

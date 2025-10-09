@@ -630,8 +630,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_version -> crate::enums::IpVersionEnum,
         pool_type -> crate::enums::IpPoolTypeEnum,
-        switch_port_uplinks -> Nullable<Array<Uuid>>,
-        mvlan -> Nullable<Int4>,
         rcgen -> Int8,
     }
 }

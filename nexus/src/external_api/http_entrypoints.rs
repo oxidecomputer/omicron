@@ -1775,8 +1775,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
-            let pool_view = nexus.ip_pool_to_view(&opctx, pool).await?;
-            Ok(HttpResponseCreated(pool_view))
+            Ok(HttpResponseCreated(pool.into()))
         };
         apictx
             .context
