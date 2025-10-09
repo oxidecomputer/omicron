@@ -8067,6 +8067,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
+ "gateway-types",
  "headers",
  "hex",
  "hickory-resolver 0.25.2",
