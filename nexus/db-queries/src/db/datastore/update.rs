@@ -144,6 +144,7 @@ impl DataStore {
 
         dsl::tuf_repo
             .filter(dsl::system_version.eq(system_version.clone()))
+            .filter(dsl::time_pruned.is_null())
             .select(TufRepo::as_select())
             .first_async::<TufRepo>(&*conn)
             .await
@@ -174,7 +175,6 @@ impl DataStore {
         tuf_repo::table
             .select(tuf_repo::system_version)
             .filter(tuf_repo::id.eq(tuf_repo_id.into_untyped_uuid()))
-            // TODO: filter out pruned
             .first_async::<SemverVersion>(&*conn)
             .await
             .map(|v| v.0)

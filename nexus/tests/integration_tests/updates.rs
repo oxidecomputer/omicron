@@ -960,6 +960,10 @@ async fn test_repo_list() -> Result<()> {
 
     // Test filtering out pruned repos
 
+    // Confirm that GET works for 1.0.0 before pruning
+    let _repo_before_prune: views::TufRepo =
+        object_get(client, "/v1/system/update/repositories/1.0.0").await;
+
     // Mark the 1.0.0 repo as pruned (use datastore methods since there's no API
     // for it)
     let datastore = cptestctx.server.server_context().nexus.datastore();
@@ -981,6 +985,14 @@ async fn test_repo_list() -> Result<()> {
             repo_to_prune.id(),
         )
         .await?;
+
+    // pruned repo now 404s
+    object_get_error(
+        client,
+        "/v1/system/update/repositories/1.0.0",
+        StatusCode::NOT_FOUND,
+    )
+    .await;
 
     // List repositories again - the pruned repo should not appear
     let list_after_prune: ResultsPage<views::TufRepo> =
