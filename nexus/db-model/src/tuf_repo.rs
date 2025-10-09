@@ -12,7 +12,7 @@ use nexus_db_schema::schema::{
     tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
 };
 use nexus_types::external_api::shared::TufSignedRootRole;
-use nexus_types::external_api::views;
+use nexus_types::external_api::views::{self, TufRepoUploadStatus};
 use omicron_common::{api::external, update::ArtifactId};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufArtifactKind;
@@ -419,31 +419,11 @@ impl FromSql<Jsonb, diesel::pg::Pg> for DbTufSignedRootRole {
     }
 }
 
-// The following aren't real models in the sense that they represent DB data,
-// but they are the return types of datastore functions
-
-/// Status of a TUF repo import
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TufRepoUploadStatus {
-    /// The repository already existed in the database
-    AlreadyExists,
-
-    /// The repository did not exist, and was inserted into the database
-    Inserted,
-}
-
-impl From<TufRepoUploadStatus> for views::TufRepoUploadStatus {
-    fn from(status: TufRepoUploadStatus) -> Self {
-        match status {
-            TufRepoUploadStatus::AlreadyExists => {
-                views::TufRepoUploadStatus::AlreadyExists
-            }
-            TufRepoUploadStatus::Inserted => {
-                views::TufRepoUploadStatus::Inserted
-            }
-        }
-    }
-}
+// The following isn't a real model in the sense that it represents DB data,
+// but it is the return type of a datastore function. The main reason we can't
+// just use the view for this like we do with TufRepoUploadStatus is that
+// TufRepoDescription has a bit more info in it that we rely on in code outside
+// of the external API, like tests and internal APIs
 
 /// The return value of the tuf repo insert function
 pub struct TufRepoUpload {
@@ -455,7 +435,7 @@ impl From<TufRepoUpload> for views::TufRepoUpload {
     fn from(upload: TufRepoUpload) -> Self {
         views::TufRepoUpload {
             repo: upload.recorded.repo.into(),
-            status: upload.status.into(),
+            status: upload.status,
         }
     }
 }

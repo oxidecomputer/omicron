@@ -22,9 +22,9 @@ use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
     ArtifactHash, DbTypedUuid, TargetRelease, TufArtifact, TufRepo,
-    TufRepoDescription, TufRepoUpload, TufRepoUploadStatus, TufTrustRoot,
-    to_db_typed_uuid,
+    TufRepoDescription, TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
 };
+use nexus_types::external_api::views::TufRepoUploadStatus;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Generation,
     ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
