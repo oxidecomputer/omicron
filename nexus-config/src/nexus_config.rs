@@ -880,14 +880,13 @@ pub struct PackageConfig {
     /// Authentication-related configuration
     pub authn: AuthnConfig,
     /// Timeseries database configuration.
-    #[serde(default)]
-    pub timeseries_db: TimeseriesDbConfig,
     /// Nexus-side support for `omdb`-based debugging.
     ///
     /// This is only meaningful on real, multi-sled systems where `omdb` is in
     /// use from the switch zone.
+    pub omdb: OmdbConfig,
     #[serde(default)]
-    pub omdb: Option<OmdbConfig>,
+    pub timeseries_db: TimeseriesDbConfig,
     /// Describes how to handle and perform schema changes.
     #[serde(default)]
     pub schema: Option<SchemaConfig>,
@@ -1244,9 +1243,9 @@ mod test {
                             0,
                         ))),
                     },
-                    omdb: Some(OmdbConfig {
+                    omdb: OmdbConfig {
                         bin_path: "/nonexistent/path/to/omdb".into(),
-                    }),
+                    },
                     schema: None,
                     tunables: Tunables {
                         max_vpc_ipv4_subnet_prefix: 27,
@@ -1515,6 +1514,9 @@ mod test {
 
             [default_region_allocation_strategy]
             type = "random"
+
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .unwrap();
@@ -1562,6 +1564,8 @@ mod test {
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .expect_err("expected failure");
@@ -1619,6 +1623,8 @@ mod test {
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .expect_err("Expected failure");

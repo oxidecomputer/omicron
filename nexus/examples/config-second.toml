@@ -182,6 +182,11 @@ type = "random_with_distinct_sleds"
 # same shuffling order for every region allocation.
 # seed = 0
 
+[omdb]
+# In production omdb is shipped alongside Nexus in its zone; this doesn't happen
+# (and isn't needed) in simulated environments.
+bin_path = "/cannot/fetch/omdb/in/simulated/environments"
+
 ################################################################################
 # INSTRUCTIONS: To run Nexus against an existing stack started with            #
 # `omicron-dev run-all`, you should only have to modify values in this 	       #

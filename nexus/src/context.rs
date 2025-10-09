@@ -109,7 +109,7 @@ pub struct ServerContext {
     /// tunable settings needed for the console at runtime
     pub(crate) console_config: ConsoleConfig,
     /// config supporting `omdb` system introspection
-    pub(crate) omdb_config: Option<OmdbConfig>,
+    pub(crate) omdb_config: OmdbConfig,
 }
 
 pub(crate) struct ConsoleConfig {

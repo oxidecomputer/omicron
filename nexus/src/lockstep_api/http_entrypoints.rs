@@ -81,18 +81,7 @@ impl NexusLockstepApi for NexusLockstepApiImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<Response<Body>, HttpError> {
         let apictx = &rqctx.context().context;
-        let omdb_config = apictx.omdb_config.as_ref().ok_or_else(|| {
-            let err =
-                "Nexus not configured with a local omdb to fetch".to_string();
-            HttpError {
-                status_code: ErrorStatusCode::SERVICE_UNAVAILABLE,
-                error_code: None,
-                external_message: err.clone(),
-                internal_message: err,
-                headers: None,
-            }
-        })?;
-        let path = &omdb_config.bin_path;
+        let path = &apictx.omdb_config.bin_path;
         let f = tokio::fs::File::open(path).await.map_err(|err| {
             let err = format!(
                 "could not open {path}: {}",
