@@ -103,3 +103,7 @@ sp_ereport_ingester.disable = true
 # by default, allocate across 3 distinct sleds
 # seed is omitted so a new seed will be chosen with every allocation.
 type = "random_with_distinct_sleds"
+
+[omdb]
+# Path to the omdb binary shipped in the Nexus zone.
+bin_path = "/opt/oxide/omdb/bin/omdb"

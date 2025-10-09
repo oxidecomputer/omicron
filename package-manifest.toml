@@ -107,6 +107,7 @@ only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
   "omicron-nexus.tar.gz",
+  "omicron-omdb.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz",
   "opte-interface-setup.tar.gz",
