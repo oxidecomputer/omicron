@@ -24,7 +24,7 @@ use nexus_types::{
 use omicron_common::api::external::{
     http_pagination::{
         PaginatedById, PaginatedByName, PaginatedByNameOrId,
-        PaginatedByTimeAndId,
+        PaginatedByTimeAndId, PaginatedByVersion,
     },
     *,
 };
@@ -3183,26 +3183,40 @@ pub trait NexusExternalApi {
     /// System release repositories are verified by the updates trust store.
     #[endpoint {
         method = PUT,
-        path = "/v1/system/update/repository",
+        path = "/v1/system/update/repositories",
         tags = ["system/update"],
         request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
     }]
-    async fn system_update_put_repository(
+    async fn system_update_repository_upload(
         rqctx: RequestContext<Self::Context>,
         query: Query<params::UpdatesPutRepositoryParams>,
         body: StreamingBody,
-    ) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError>;
+    ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError>;
 
     /// Fetch system release repository description by version
     #[endpoint {
         method = GET,
-        path = "/v1/system/update/repository/{system_version}",
+        path = "/v1/system/update/repositories/{system_version}",
         tags = ["system/update"],
     }]
-    async fn system_update_get_repository(
+    async fn system_update_repository_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
-    ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
+    ) -> Result<HttpResponseOk<views::TufRepo>, HttpError>;
+
+    /// List all TUF repositories
+    ///
+    /// Returns a paginated list of all TUF repositories ordered by system
+    /// version (newest first by default).
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/repositories",
+        tags = ["system/update"],
+    }]
+    async fn system_update_repository_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByVersion>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::TufRepo>>, HttpError>;
 
     /// List root roles in the updates trust store
     ///

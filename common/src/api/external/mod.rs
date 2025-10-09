@@ -3427,6 +3427,10 @@ pub struct ServiceIcmpConfig {
     pub enabled: bool,
 }
 
+// TODO: move these TUF repo structs out of this file. They're not external
+// anymore after refactors that use views::TufRepo in the external API. They are
+// still used extensively in internal services.
+
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
@@ -3499,40 +3503,6 @@ pub struct TufArtifactMeta {
     /// applicable to RoT image and bootloader artifacts, where it will
     /// be an LPC55 Root Key Table Hash (RKTH).
     pub sign: Option<Vec<u8>>,
-}
-
-/// Data about a successful TUF repo import into Nexus.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TufRepoInsertResponse {
-    /// The repository as present in the database.
-    pub recorded: TufRepoDescription,
-
-    /// Whether this repository already existed or is new.
-    pub status: TufRepoInsertStatus,
-}
-
-/// Status of a TUF repo import.
-///
-/// Part of `TufRepoInsertResponse`.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum TufRepoInsertStatus {
-    /// The repository already existed in the database.
-    AlreadyExists,
-
-    /// The repository did not exist, and was inserted into the database.
-    Inserted,
-}
-
-/// Data about a successful TUF repo get from Nexus.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct TufRepoGetResponse {
-    /// The description of the repository.
-    pub description: TufRepoDescription,
 }
 
 #[derive(
