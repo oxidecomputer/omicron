@@ -561,9 +561,27 @@ pub fn turin_v1() -> CpuIdDump {
 
     let mut cpuid = CpuId::with_cpuid_reader(baseline);
 
+    let mut leaf =
+        cpuid.get_feature_info().expect("baseline Milan defines leaf 1");
+
+    // Set up EAX: Family 1Ah model 2h stepping 1.
+    leaf.set_extended_family_id(0x0B);
+    leaf.set_base_family_id(0x0F);
+    leaf.set_base_model_id(0x02);
+    leaf.set_stepping_id(0x01);
+
+    // EBX, ECX, EDX are all unchanged from Milan (same cache line flush size,
+    // leaf 1 features are unchanged)
+
+    cpuid.set_feature_info(Some(leaf)).expect("can set leaf 1");
+
     let mut leaf = cpuid
         .get_extended_feature_info()
         .expect("baseline Milan defines leaf 7");
+
+    // Same as with initial Milan profiles, `rdseed` is not supported by the
+    // virt stack, so we should hide it from guests for now.
+    leaf.set_rdseed(false);
 
     // Turin supports the TSC_ADJUST MSR but guest plumbing is not present for
     // it and it's not clear what a guest would productively do with it anyway.
@@ -1036,11 +1054,11 @@ mod test {
     // guests.
     const TURIN_V1_CPUID: [CpuidEntry; 26] = [
         cpuid_leaf!(0x0, 0x0000000D, 0x68747541, 0x444D4163, 0x69746E65),
-        cpuid_leaf!(0x1, 0x00A00F11, 0x00000800, 0xF6D83203, 0x078BFBFF),
+        cpuid_leaf!(0x1, 0x00B00F21, 0x00000800, 0xF6D83203, 0x078BFBFF),
         cpuid_leaf!(0x5, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x6, 0x00000004, 0x00000000, 0x00000000, 0x00000000),
         cpuid_subleaf!(
-            0x7, 0x0, 0x00000001, 0xF1BF03A9, 0x00005F42, 0x00000110
+            0x7, 0x0, 0x00000001, 0xF1BB03A9, 0x00005F42, 0x00000110
         ),
         cpuid_subleaf!(
             0x7, 0x1, 0x00000030, 0x00000000, 0x00000000, 0x00000000
