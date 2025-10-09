@@ -2554,10 +2554,17 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
                     ),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/status",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
                 ],
             },
             /* Metrics */

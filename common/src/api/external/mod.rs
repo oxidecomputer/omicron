@@ -3572,7 +3572,7 @@ pub enum ImportExportPolicy {
 /// will fail to parse if the key is not present. The JSON Schema in the
 /// OpenAPI definition will also reflect that the field is required. See
 /// <https://github.com/serde-rs/serde/issues/2753>.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct Nullable<T>(pub Option<T>);
 
 impl<T> From<Option<T>> for Nullable<T> {

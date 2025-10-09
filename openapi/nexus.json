@@ -11189,21 +11189,21 @@
         }
       }
     },
-    "/v1/system/update/target-release": {
+    "/v1/system/update/status": {
       "get": {
         "tags": [
           "system/update"
         ],
-        "summary": "Get the current target release of the rack's system software",
-        "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
-        "operationId": "target_release_view",
+        "summary": "Fetch system update status",
+        "description": "Returns information about the current target release and the progress of system software updates.",
+        "operationId": "system_update_status",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TargetRelease"
+                  "$ref": "#/components/schemas/UpdateStatus"
                 }
               }
             }
@@ -11215,13 +11215,15 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/v1/system/update/target-release": {
       "put": {
         "tags": [
           "system/update"
         ],
-        "summary": "Set the current target release of the rack's system software",
-        "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
+        "summary": "Set target release",
+        "description": "Set the current target release of the rack's system software. The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release. Use the update status endpoint to view the current target release.",
         "operationId": "target_release_update",
         "requestBody": {
           "content": {
@@ -11234,15 +11236,8 @@
           "required": true
         },
         "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TargetRelease"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -25940,72 +25935,23 @@
         ]
       },
       "TargetRelease": {
-        "description": "View of a system software target release.",
+        "description": "View of a system software target release",
         "type": "object",
         "properties": {
-          "generation": {
-            "description": "The target-release generation number.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "release_source": {
-            "description": "The source of the target release.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TargetReleaseSource"
-              }
-            ]
-          },
           "time_requested": {
-            "description": "The time it was set as the target release.",
+            "description": "Time this was set as the target release",
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "description": "The specified release of the rack's system software",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
           }
         },
         "required": [
-          "generation",
-          "release_source",
-          "time_requested"
-        ]
-      },
-      "TargetReleaseSource": {
-        "description": "Source of a system software target release.",
-        "oneOf": [
-          {
-            "description": "Unspecified or unknown source (probably MUPdate).",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "unspecified"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "The specified release of the rack's system software.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "system_version"
-                ]
-              },
-              "version": {
-                "type": "string",
-                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-              }
-            },
-            "required": [
-              "type",
-              "version"
-            ]
-          }
+          "time_requested",
+          "version"
         ]
       },
       "Timeseries": {
@@ -26467,6 +26413,44 @@
               "rpm"
             ]
           }
+        ]
+      },
+      "UpdateStatus": {
+        "type": "object",
+        "properties": {
+          "components_by_release_version": {
+            "description": "Count of components running each release version\n\nKeys will be either:\n\n* Semver-like release version strings * \"install dataset\", representing the initial rack software before any updates * \"unknown\", which means there is no TUF repo uploaded that matches the software running on the component)",
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "suspended": {
+            "description": "Whether automatic update is suspended due to manual update activity\n\nAfter a manual support procedure that changes the system software, automatic update activity is suspended to avoid undoing the change. To resume automatic update, first upload the TUF repository matching the manually applied update, then set that as the target release.",
+            "type": "boolean"
+          },
+          "target_release": {
+            "nullable": true,
+            "description": "Current target release of the system software\n\nThis may not correspond to the actual system software running at the time of request; it is instead the release that the system should be moving towards as a goal state. The system asynchronously updates software to match this target release.\n\nWill only be null if a target release has never been set. In that case, the system is not automatically attempting to manage software versions.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetRelease"
+              }
+            ]
+          },
+          "time_last_step_planned": {
+            "description": "Time of most recent update planning activity\n\nThis is intended as a rough indicator of the last time something happened in the update planner.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "components_by_release_version",
+          "suspended",
+          "target_release",
+          "time_last_step_planned"
         ]
       },
       "UpdatesTrustRoot": {
