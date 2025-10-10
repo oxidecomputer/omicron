@@ -131,4 +131,10 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
         self.db_datastore.probe_delete(opctx, &authz_project, &name_or_id).await
     }
+
+    /// Activate the VPC route manager background task by request of a sled
+    /// agent's probe manager.
+    pub(crate) fn refresh_vpc_routes(&self) {
+        self.background_tasks.task_vpc_route_manager.activate();
+    }
 }
