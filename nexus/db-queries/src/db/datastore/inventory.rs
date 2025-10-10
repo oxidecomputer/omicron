@@ -4078,6 +4078,29 @@ impl DataStore {
             internal_dns_generation_status,
         })
     }
+
+    pub async fn inventory_collections_latest(
+        &self,
+        opctx: &OpContext,
+        count: u8,
+    ) -> anyhow::Result<Vec<InvCollection>> {
+        let limit: i64 = i64::from(count);
+        let conn = self
+            .pool_connection_authorized(opctx)
+            .await
+            .context("getting connection")?;
+
+        use nexus_db_schema::schema::inv_collection::dsl;
+        let collections = dsl::inv_collection
+            .select(InvCollection::as_select())
+            .order_by(dsl::time_started.desc())
+            .limit(limit)
+            .load_async(&*conn)
+            .await
+            .context("failed to list collections")?;
+
+        Ok(collections)
+    }
 }
 
 #[derive(Debug)]
