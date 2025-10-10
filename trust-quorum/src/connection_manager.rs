@@ -331,11 +331,17 @@ impl EstablishedConn {
         //
         // Continuously process messages until the connection closes
         loop {
+            let mut interest = Interest::READABLE;
             if !self.current_write.has_remaining()
                 && !self.write_queue.is_empty()
             {
                 self.current_write =
                     Cursor::new(self.write_queue.pop_front().unwrap());
+
+                // Only register write interest if there is something to
+                // write. Otherwise this task will just keep getting woken up
+                // unnecessarily.
+                interest |= Interest::WRITABLE;
             }
 
             tokio::select! {
@@ -345,13 +351,7 @@ impl EstablishedConn {
                 Some(msg) = self.rx.recv() => {
                     self.on_msg_from_main(msg).await;
                 }
-
-                res = self.stream
-                    .inner()
-                    .get_ref()
-                    .0
-                    .ready(Interest::READABLE | Interest::WRITABLE) =>
-                {
+                res = self.stream.inner().get_ref().0.ready(interest) => {
                     match res {
                         Ok(ready) => {
                             if let Err(_) = self.read_or_write_sock(ready).await {
@@ -373,6 +373,22 @@ impl EstablishedConn {
     }
 
     async fn read_or_write_sock(&mut self, ready: Ready) -> Result<(), ()> {
+        if ready.is_readable() {
+            self.try_read().await?;
+        }
+
+        if ready.is_writable() && self.current_write.has_remaining() {
+            self.try_write().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn try_read(&mut self) -> Result<(), ()> {
+        todo!()
+    }
+
+    async fn try_write(&mut self) -> Result<(), ()> {
         todo!()
     }
 
