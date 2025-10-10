@@ -14,6 +14,8 @@ NOTE: Much of this material originally came from <<rfd48>> and <<rfd61>>.  This 
 
 NOTE: The RFD references in this documentation may be Oxide-internal.  Where possible, we're trying to move relevant documentation from those RFDs into docs here.
 
+See also: link:../notes/multicast-architecture.adoc[Multicast Architecture: VLAN Scope]
+
 == What is the control plane
 
 In software systems the terms **data plane** and **control plane** are often used to refer to the parts of the system that directly provide resources to users (the data plane) and the parts that support the configuration, control, monitoring, and operation of the system (the control plane).  Within the Oxide system, we say that the data plane comprises those parts that provide CPU resources (including both the host CPU and hypervisor software), storage resources, and network resources.  The control plane provides the APIs through which users provision, configure, and monitor these resources and the mechanisms through which these APIs are implemented.  Also part of the control plane are the APIs and facilities through which operators manage the system itself, including fault management, alerting, software updates for various components of the system, and so on.

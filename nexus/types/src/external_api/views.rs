@@ -395,6 +395,8 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
     /// The IP version for the pool.
     pub ip_version: IpVersion,
+    /// Type of IP pool (unicast or multicast)
+    pub pool_type: shared::IpPoolType,
 }
 
 /// The utilization of IP addresses in a pool.

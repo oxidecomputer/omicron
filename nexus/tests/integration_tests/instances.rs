@@ -7163,7 +7163,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
     let error =
         object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
-    let msg = "not found: default IP pool for current silo".to_string();
+    let msg = "not found: default unicast IP pool for current silo".to_string();
     assert_eq!(error.message, msg);
 
     // same deal if you specify a pool that doesn't exist

@@ -21528,6 +21528,14 @@
               }
             ]
           },
+          "pool_type": {
+            "description": "Type of IP pool (unicast or multicast)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolType"
+              }
+            ]
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -21544,6 +21552,7 @@
           "id",
           "ip_version",
           "name",
+          "pool_type",
           "time_created",
           "time_modified"
         ]
@@ -21566,6 +21575,15 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "pool_type": {
+            "description": "Type of IP pool (defaults to Unicast for backward compatibility)",
+            "default": "unicast",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolType"
+              }
+            ]
           }
         },
         "required": [
@@ -21711,6 +21729,25 @@
         },
         "required": [
           "is_default"
+        ]
+      },
+      "IpPoolType": {
+        "description": "Type of IP pool",
+        "oneOf": [
+          {
+            "description": "Unicast IP pool for standard IP allocations",
+            "type": "string",
+            "enum": [
+              "unicast"
+            ]
+          },
+          {
+            "description": "Multicast IP pool for multicast group allocations",
+            "type": "string",
+            "enum": [
+              "multicast"
+            ]
+          }
         ]
       },
       "IpPoolUpdate": {

@@ -2163,6 +2163,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
 );
 
 /*
+ * IP pool types for unicast vs multicast pools
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_type AS ENUM (
+    'unicast',
+    'multicast'
+);
+
+/*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
@@ -2178,7 +2186,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     rcgen INT8 NOT NULL,
 
     /* The IP version of the ranges contained in this pool. */
-    ip_version omicron.public.ip_version NOT NULL
+    ip_version omicron.public.ip_version NOT NULL,
+
+    /* Pool type for unicast (default) vs multicast pools. */
+    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast'
 );
 
 /*
@@ -2186,6 +2197,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
  */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_by_name ON omicron.public.ip_pool (
     name
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index on pool type for efficient filtering of unicast vs multicast pools.
+ */
+CREATE INDEX IF NOT EXISTS lookup_ip_pool_by_type ON omicron.public.ip_pool (
+    pool_type
 ) WHERE
     time_deleted IS NULL;
 
@@ -6771,7 +6790,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '197.0.0', NULL)
+    (TRUE, NOW(), NOW(), '198.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -1007,6 +1007,27 @@ pub struct IpPoolCreate {
     /// The default is IPv4.
     #[serde(default = "IpVersion::v4")]
     pub ip_version: IpVersion,
+    /// Type of IP pool (defaults to Unicast for backward compatibility)
+    #[serde(default)]
+    pub pool_type: shared::IpPoolType,
+}
+
+impl IpPoolCreate {
+    /// Create parameters for a unicast IP pool (the default)
+    pub fn new(
+        identity: IdentityMetadataCreateParams,
+        ip_version: IpVersion,
+    ) -> Self {
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Unicast }
+    }
+
+    /// Create parameters for a multicast IP pool
+    pub fn new_multicast(
+        identity: IdentityMetadataCreateParams,
+        ip_version: IpVersion,
+    ) -> Self {
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Multicast }
+    }
 }
 
 /// Parameters for updating an IP Pool

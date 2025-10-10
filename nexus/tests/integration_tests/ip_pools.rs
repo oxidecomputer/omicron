@@ -43,6 +43,7 @@ use nexus_types::external_api::params::IpPoolCreate;
 use nexus_types::external_api::params::IpPoolLinkSilo;
 use nexus_types::external_api::params::IpPoolSiloUpdate;
 use nexus_types::external_api::params::IpPoolUpdate;
+use nexus_types::external_api::shared::IpPoolType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
@@ -101,13 +102,13 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Create the pool, verify we can get it back by either listing or fetching
     // directly
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
@@ -125,13 +126,13 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let error = object_create_error(
         client,
         ip_pools_url,
-        &params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
+        &params::IpPoolCreate::new(
+            IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: String::new(),
             },
-            ip_version: IpVersion::V4,
-        },
+            IpVersion::V4,
+        ),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -821,13 +822,13 @@ async fn create_pool(
     name: &str,
     ip_version: IpVersion,
 ) -> IpPool {
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
             name: Name::try_from(name.to_string()).unwrap(),
             description: "".to_string(),
         },
         ip_version,
-    };
+    );
     NexusRequest::objects_post(client, "/v1/system/ip-pools", &params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -948,13 +949,14 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
     // Create the pool, verify basic properties
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
+
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
@@ -1107,13 +1109,13 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
     // Create the pool, verify basic properties
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
@@ -1522,4 +1524,25 @@ fn assert_ranges_eq(first: &IpPoolRange, second: &IpPoolRange) {
     assert_eq!(first.time_created, second.time_created);
     assert_eq!(first.range.first_address(), second.range.first_address());
     assert_eq!(first.range.last_address(), second.range.last_address());
+}
+
+#[nexus_test]
+async fn test_ip_pool_unicast_defaults(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Test that regular IP pool creation uses unicast defaults
+    let pool = create_pool(client, "unicast-test", IpVersion::V4).await;
+    assert_eq!(pool.pool_type, IpPoolType::Unicast);
+
+    // Test that explicitly creating with default type still works
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: "explicit-unicast".parse().unwrap(),
+            description: "Explicit unicast pool".to_string(),
+        },
+        IpVersion::V4,
+    );
+    let pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &params).await;
+    assert_eq!(pool.pool_type, IpPoolType::Unicast);
 }
