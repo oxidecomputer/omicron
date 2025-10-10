@@ -20,7 +20,7 @@ const LIVE_TEST_BUNDLE_DIR: &str = "live-tests-bundle";
 const LIVE_TEST_BUNDLE_SCRIPT: &str = "run-live-tests";
 
 /// Top level directory in a4x2 package bundles
-const A4X2_PACKAGE_DIR_NAME: &str = "a4x2-package";
+const A4X2_PACKAGE_DIR_PATH: &str = "a4x2-package";
 
 /// Default location where a4x2-package places output and a4x2-deploy reads it.
 const DEFAULT_A4X2_PKG_PATH: &str = "out/a4x2-package.tar.gz";

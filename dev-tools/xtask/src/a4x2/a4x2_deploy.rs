@@ -82,6 +82,9 @@ struct Environment {
     /// Directory within which we will unpack the a4x2 package and launch a4x2
     work_dir: Utf8PathBuf,
 
+    /// Root of unpacked a4x2 package within `work_dir`
+    package_dir: Utf8PathBuf,
+
     /// Directory in `work_dir` containing a4x2
     a4x2_dir: Utf8PathBuf,
 
@@ -99,7 +102,8 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         let work_dir = pwd.join("target/a4x2/deploy");
 
         // a4x2 dir. will be created by the unpack step
-        let a4x2_dir = work_dir.join(super::A4X2_PACKAGE_DIR_NAME);
+        let package_dir = work_dir.join(super::A4X2_PACKAGE_DIR_PATH);
+        let a4x2_dir = package_dir.join("testbed/a4x2");
 
         // falcon dir. created by a4x2
         let falcon_dir = a4x2_dir.join(".falcon");
@@ -107,7 +111,7 @@ pub fn run_cmd(args: A4x2DeployArgs) -> Result<()> {
         // Output logs go here
         let out_dir = work_dir.join("output-logs");
 
-        Environment { work_dir, a4x2_dir, falcon_dir, out_dir }
+        Environment { work_dir, package_dir, a4x2_dir, falcon_dir, out_dir }
     };
 
     match args.command {
@@ -258,7 +262,7 @@ fn unpack_a4x2(
     // between the cargo bays. A file is deduplicated only if it is present and
     // the same in *all* bays, so we unconditonally extract to all bays here.
 
-    cmd!(sh, "tar -cf sled-common.tar -C {a4x2_dir}/cargo-bay/sled-common ./")
+    cmd!(sh, "tar -cEf sled-common.tar -C {a4x2_dir}/cargo-bay/sled-common .")
         .run()?;
     cmd!(sh, "tar -xf sled-common.tar -C {a4x2_dir}/cargo-bay/g0").run()?;
     cmd!(sh, "tar -xf sled-common.tar -C {a4x2_dir}/cargo-bay/g1").run()?;
@@ -486,7 +490,7 @@ fn run_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
         );
     }
 
-    let _popdir = sh.push_dir(&env.a4x2_dir);
+    let _popdir = sh.push_dir(&env.package_dir);
 
     // Bring various file path constants into scope for use below
     use super::{
@@ -666,9 +670,16 @@ fn collect_evidence(sh: &Shell, env: &Environment) -> Result<()> {
 
         // ignore the PID/PORT files, those are just tracking how to talk to the
         // currently running propolis processes.
-        if !fname.ends_with(".pid") && !fname.ends_with(".port") {
-            fs::copy(ent.path(), falcon_out.join(fname))?;
+        if fname.ends_with(".pid") || fname.ends_with(".port") {
+            continue;
         }
+
+        // only copy regular files
+        if !ent.file_type()?.is_file() {
+            continue;
+        }
+
+        fs::copy(ent.path(), falcon_out.join(fname))?;
     }
 
     // Each sled gets an output directory for its service logs
@@ -687,6 +698,8 @@ fn collect_evidence(sh: &Shell, env: &Environment) -> Result<()> {
             eprintln!("Errors collecting logs from sled {sled}: {e}");
         });
     }
+
+    println!("Evidence collected at {}", out_dir);
 
     Ok(())
 }

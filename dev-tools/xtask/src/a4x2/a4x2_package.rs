@@ -88,7 +88,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         sh.change_dir(&work_dir);
 
         // Output. Maybe in CI we want this to be /out
-        let out_dir = work_dir.join(super::A4X2_PACKAGE_DIR_NAME);
+        let out_dir = work_dir.join(super::A4X2_PACKAGE_DIR_PATH);
         fs::create_dir_all(&out_dir)?;
 
         // Clone of omicron that we can modify without causing trouble for anyone
@@ -241,7 +241,7 @@ fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
 
     use super::LIVE_TEST_BUNDLE_NAME;
     let _popdir = sh.push_dir(&env.work_dir);
-    cmd!(sh, "tar -czf {out_dir}/{LIVE_TEST_BUNDLE_NAME} {bundle_dir_name}/")
+    cmd!(sh, "tar -cEzvf {out_dir}/{LIVE_TEST_BUNDLE_NAME} {bundle_dir_name}")
         .run()?;
 
     Ok(())
@@ -254,21 +254,13 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
 
     let _popdir = sh.push_dir(&a4x2_dir);
 
-    // build a4x2
-    let cargo = &env.cargo;
-    cmd!(sh, "{cargo} build --release").run()?;
-
-    sh.copy_file("../target/release/a4x2", &env.out_dir)?;
-
     // This will modify some omicron configs, build omicron, and package things
     // up for the a4x2 cargo-bay
     cmd!(sh, "./config/build-packages.sh")
         .env("OMICRON", &env.omicron_dir)
         .run()?;
 
-    cmd!(sh, "./config/fetch-softnpu-artifacts.sh").run()?;
-
-    // Deduplicate cargo-bay output amongst g0-g3. They differ on a few
+    // Deduplicate cargo-bay output amongst g0-g3. They differ on only a few
     // files; deduping the rest is critical to keeping the final archive
     // size manageable for CI. To do this we will
     // - iterate files in g0
@@ -285,7 +277,7 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     for ent in WalkDir::new(&g0_dir) {
         let ent = ent?;
 
-        // deduplication only happens to files
+        // deduplication only happens to normal files
         if !ent.file_type().is_file() {
             continue;
         }
@@ -332,10 +324,17 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
         }
     }
 
-    // At this point, `cargo-bay` is ready for us
-    // We don't actually need all of config/ but it's a small dir
+    // build a4x2
+    let cargo = &env.cargo;
+    cmd!(sh, "{cargo} build").run()?;
+
+    // We bundle the entirety of testbed
+    //
+    // A previous attempt bundled only the cargo-bay and config folders.
+    // This proved fragile, as an additional directory was later added to
+    // testbed that was loadbearing.
     let out_dir = &env.out_dir;
-    cmd!(sh, "mv cargo-bay/ config/ {out_dir}/").run()?;
+    cmd!(sh, "mv {testbed_dir}/ {out_dir}/testbed").run()?;
 
     Ok(())
 }
@@ -349,7 +348,7 @@ fn create_output_artifact(
     cmd!(sh, "banner bundle").run()?;
     let _popdir = sh.push_dir(&env.work_dir);
     let pkg_dir_name = env.out_dir.file_name().unwrap();
-    cmd!(sh, "tar -czvf {out_path} {pkg_dir_name}/").run()?;
+    cmd!(sh, "tar -cEzvf {out_path} {pkg_dir_name}").run()?;
 
     Ok(())
 }
@@ -373,7 +372,7 @@ fn canonicalize_parent(path: &Utf8Path) -> Result<Utf8PathBuf> {
 
     let file = path
         .components()
-        .last()
+        .next_back()
         .with_context(|| {
             format!("extracting last component of path `{}`", path)
         })?
