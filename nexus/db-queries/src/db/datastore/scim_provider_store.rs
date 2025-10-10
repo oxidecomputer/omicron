@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! scim2-rs uses the patterm of implementing a SCIM "provider" over something
+//! scim2-rs uses the pattern of implementing a SCIM "provider" over something
 //! that implements a "provider store" trait that durably stores the SCIM
 //! related information. Nexus uses cockroachdb as the provider store.
 
