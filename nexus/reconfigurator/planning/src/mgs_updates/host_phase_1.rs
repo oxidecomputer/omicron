@@ -12,7 +12,6 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdateDetails;
 use nexus_types::deployment::PendingMgsUpdateHostPhase1Details;
-use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
@@ -20,9 +19,7 @@ use nexus_types::inventory::SpType;
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
-use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::TypedUuid;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -271,16 +268,21 @@ pub(super) fn update_status(
 /// Determine if the given baseboard needs a Host OS update and, if so,
 /// returns it. An error means an update is still necessary but cannot be
 /// completed.
-pub(super) fn try_make_update(
+///
+/// If an update is needed, before attempting to configure and return that
+/// update, will call `unsafe_zone_reason()` and return an error if it returns
+/// `Some(reason)` describing a reason this sled should not be shut down due to
+/// the zones it's running.
+pub(super) fn try_make_update<F>(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    unsafe_zone_boards: &BTreeMap<
-        Arc<BaseboardId>,
-        BTreeMap<TypedUuid<OmicronZoneKind>, ZoneUnsafeToShutdown>,
-    >,
-) -> Result<MgsUpdateOutcome, FailedHostOsUpdateReason> {
+    unsafe_zone_reason: F,
+) -> Result<MgsUpdateOutcome, FailedHostOsUpdateReason>
+where
+    F: FnOnce() -> Option<String>,
+{
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         return Err(FailedHostOsUpdateReason::SpNotInInventory);
     };
@@ -429,23 +431,8 @@ pub(super) fn try_make_update(
 
     // Make sure the board we're targetting doesn't contain any zones that are
     // unsafe to shut down
-    if let Some(unsafe_zone_board) = unsafe_zone_boards.get(baseboard_id) {
-        if unsafe_zone_board.is_empty() {
-            // This should never happen! If it does, we have a bug somewhere
-            // else: we added an entry to `unsafe_zone_boards` but didn't
-            // populate the details of why.
-            let err = "unsafe zone present, but no details found \
-                 (this is unexpected!)"
-                .to_string();
-            return Err(FailedHostOsUpdateReason::UnsafeZoneFound(err));
-        }
-
-        let mut unsafe_zones = Vec::new();
-        for (zone_id, zone) in unsafe_zone_board {
-            unsafe_zones.push(format!("{}: {}", zone_id, zone));
-        }
-        let zone_str = unsafe_zones.join(", ").to_string();
-        return Err(FailedHostOsUpdateReason::UnsafeZoneFound(zone_str));
+    if let Some(reason) = unsafe_zone_reason() {
+        return Err(FailedHostOsUpdateReason::UnsafeZoneFound(reason));
     }
 
     // Before we can proceed with the phase 1 update, we need sled-agent to
@@ -488,6 +475,7 @@ pub(super) fn try_make_update(
 mod tests {
     use crate::mgs_updates::ImpossibleUpdatePolicy;
     use crate::mgs_updates::MgsUpdatePlanner;
+    use crate::mgs_updates::UpdateableBoard;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1_5;
@@ -495,6 +483,7 @@ mod tests {
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_2_V1;
     use crate::mgs_updates::test_helpers::ARTIFACT_VERSION_2;
     use crate::mgs_updates::test_helpers::TestBoards;
+    use crate::planner::ZoneSafetyChecks;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
@@ -506,7 +495,6 @@ mod tests {
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
     use omicron_common::disk::M2Slot;
-    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
 
     // Short hand-rolled update sequence that exercises some basic behavior for
@@ -531,7 +519,8 @@ mod tests {
                 ARTIFACT_HASH_HOST_PHASE_2_V1,
             )
             .build();
-        let current_boards = &collection.baseboards;
+        let current_boards = UpdateableBoard::all_from_collection(&collection);
+        let current_boards = &current_boards;
         let sled_0_id = test_boards.sled_id(0).expect("have sled 0");
         let sled_1_id = test_boards.sled_id(1).expect("have sled 1");
         let initial_updates = PendingMgsUpdates::new();
@@ -541,7 +530,7 @@ mod tests {
             log,
             inventory: &collection,
             current_boards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &initial_updates,
             current_artifacts: &TargetReleaseDescription::Initial,
             nmax_updates,
@@ -558,7 +547,7 @@ mod tests {
             log,
             inventory: &collection,
             current_boards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &initial_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -595,7 +584,7 @@ mod tests {
             log,
             inventory: &collection,
             current_boards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -627,7 +616,7 @@ mod tests {
             log,
             inventory: &later_collection,
             current_boards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -653,7 +642,7 @@ mod tests {
             log,
             inventory: &later_collection,
             current_boards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -693,7 +682,7 @@ mod tests {
             log,
             inventory: &updated_collection,
             current_boards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &later_planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -717,7 +706,7 @@ mod tests {
             log,
             inventory: &collection,
             current_boards: &BTreeSet::new(),
-            unsafe_zone_boards: &BTreeMap::new(),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -729,8 +718,8 @@ mod tests {
         let planned = MgsUpdatePlanner {
             log,
             inventory: &collection,
-            current_boards: &collection.baseboards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            current_boards: &UpdateableBoard::all_from_collection(&collection),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -797,8 +786,8 @@ mod tests {
         let new_planned = MgsUpdatePlanner {
             log,
             inventory: &collection,
-            current_boards: &collection.baseboards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            current_boards: &UpdateableBoard::all_from_collection(&collection),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -861,8 +850,8 @@ mod tests {
         let new_planned = MgsUpdatePlanner {
             log,
             inventory: &collection,
-            current_boards: &collection.baseboards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            current_boards: &UpdateableBoard::all_from_collection(&collection),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -941,8 +930,8 @@ mod tests {
         let planned = MgsUpdatePlanner {
             log,
             inventory: &collection,
-            current_boards: &collection.baseboards.clone(),
-            unsafe_zone_boards: &BTreeMap::new(),
+            current_boards: &UpdateableBoard::all_from_collection(&collection),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &PendingMgsUpdates::new(),
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
@@ -971,8 +960,8 @@ mod tests {
         let new_planned = MgsUpdatePlanner {
             log,
             inventory: &collection,
-            current_boards: &collection.baseboards,
-            unsafe_zone_boards: &BTreeMap::new(),
+            current_boards: &UpdateableBoard::all_from_collection(&collection),
+            zone_safety_checks: &ZoneSafetyChecks::empty(),
             current_updates: &planned.pending_updates,
             current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
