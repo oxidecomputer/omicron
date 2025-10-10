@@ -98,7 +98,7 @@ pub async fn create_test_setup_with_range(
     let ip_pool = datastore
         .ip_pool_create(
             &opctx,
-            IpPool::new_multicast(&pool_identity, IpVersion::V4, None, None),
+            IpPool::new_multicast(&pool_identity, IpVersion::V4),
         )
         .await
         .expect("Should create multicast IP pool");

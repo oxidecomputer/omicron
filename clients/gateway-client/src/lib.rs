@@ -78,6 +78,10 @@ progenitor::generate_api!(
         SpUpdateStatus = { derives = [PartialEq, Hash, Eq] },
         UpdatePreparationProgress = { derives = [PartialEq, Hash, Eq] },
     },
+    crates = {
+        "omicron-uuid-kinds" = "*",
+    },
+
     replace = {
         RotSlot = gateway_types::rot::RotSlot,
         Ena = ereport_types::Ena,
@@ -85,8 +89,6 @@ progenitor::generate_api!(
         Ereports = ereport_types::Ereports,
         SpType = gateway_types::component::SpType,
         TaskDump = gateway_types::task_dump::TaskDump,
-        TypedUuidForEreporterRestartKind = omicron_uuid_kinds::EreporterRestartUuid,
-        TypedUuidForMupdateKind = omicron_uuid_kinds::MupdateUuid,
     },
 );
 

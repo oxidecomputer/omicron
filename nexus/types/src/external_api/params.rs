@@ -17,7 +17,6 @@ use omicron_common::api::external::{
     Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
-use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
@@ -1030,22 +1029,6 @@ pub struct IpPoolCreate {
     /// Type of IP pool (defaults to Unicast for backward compatibility)
     #[serde(default)]
     pub pool_type: shared::IpPoolType,
-    /// Rack switch uplinks that carry multicast traffic out of the rack to
-    /// external groups. Only applies to multicast pools; ignored for unicast
-    /// pools.
-    ///
-    /// Format: list of `<switch>.<port>` strings (for example, `switch0.qsfp0`),
-    /// or objects with `switch_location` and `port_name`.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::external_api::deserializers::parse_and_dedup_switch_port_uplinks"
-    )]
-    pub switch_port_uplinks: Option<Vec<SwitchPortUplink>>,
-    /// VLAN ID for multicast pools.
-    /// Only applies to multicast pools, ignored for unicast pools.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mvlan: Option<VlanID>,
 }
 
 impl IpPoolCreate {
@@ -1054,29 +1037,15 @@ impl IpPoolCreate {
         identity: IdentityMetadataCreateParams,
         ip_version: IpVersion,
     ) -> Self {
-        Self {
-            identity,
-            ip_version,
-            pool_type: shared::IpPoolType::Unicast,
-            switch_port_uplinks: None,
-            mvlan: None,
-        }
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Unicast }
     }
 
     /// Create parameters for a multicast IP pool
     pub fn new_multicast(
         identity: IdentityMetadataCreateParams,
         ip_version: IpVersion,
-        switch_port_uplinks: Option<Vec<SwitchPortUplink>>,
-        mvlan: Option<VlanID>,
     ) -> Self {
-        Self {
-            identity,
-            ip_version,
-            pool_type: shared::IpPoolType::Multicast,
-            switch_port_uplinks,
-            mvlan,
-        }
+        Self { identity, ip_version, pool_type: shared::IpPoolType::Multicast }
     }
 }
 
@@ -1085,22 +1054,6 @@ impl IpPoolCreate {
 pub struct IpPoolUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
-    /// Rack switch uplinks that carry multicast traffic out of the rack to
-    /// external groups. Only applies to multicast pools; ignored for unicast
-    /// pools.
-    ///
-    /// Format: list of `<switch>.<port>` strings (for example, `switch0.qsfp0`),
-    /// or objects with `switch_location` and `port_name`.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "crate::external_api::deserializers::parse_and_dedup_switch_port_uplinks"
-    )]
-    pub switch_port_uplinks: Option<Vec<SwitchPortUplink>>,
-    /// VLAN ID for multicast pools.
-    /// Only applies to multicast pools, ignored for unicast pools.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mvlan: Option<VlanID>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -2358,45 +2311,6 @@ pub struct SwitchPortPageSelector {
     pub switch_port_id: Option<Uuid>,
 }
 
-/// Switch port uplink specification for multicast IP pools.
-/// Combines switch location and port name in "switchN.portM" format.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct SwitchPortUplink {
-    /// Switch location (e.g., "switch0")
-    pub switch_location: Name,
-    /// Port name (e.g., "qsfp0")
-    pub port_name: Name,
-}
-
-impl std::fmt::Display for SwitchPortUplink {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}", self.switch_location, self.port_name)
-    }
-}
-
-impl FromStr for SwitchPortUplink {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split('.').collect();
-        if parts.len() != 2 {
-            return Err(format!(
-                "Invalid switch port format '{}'. Expected '<switch>.<port>'",
-                s
-            ));
-        }
-
-        let switch_location = parts[0].parse::<Name>().map_err(|e| {
-            format!("Invalid switch location '{}': {}", parts[0], e)
-        })?;
-        let port_name = parts[1]
-            .parse::<Name>()
-            .map_err(|e| format!("Invalid port name '{}': {}", parts[1], e))?;
-
-        Ok(Self { switch_location, port_name })
-    }
-}
-
 /// Parameters for applying settings to switch ports.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortApplySettings {
@@ -3260,80 +3174,21 @@ mod tests {
             .is_err()
         ); // Loopback
     }
+}
 
-    #[test]
-    fn test_switch_port_uplinks_deserializer() {
-        use serde_json;
+// SCIM
 
-        // Test basic deserialization with strings
-        let json =
-            r#"{"switch_port_uplinks": ["switch0.qsfp0", "switch1.qsfp1"]}"#;
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2TokenPathParam {
+    pub token_id: Uuid,
+}
 
-        #[derive(Debug, serde::Deserialize)]
-        struct TestStruct {
-            #[serde(
-                deserialize_with = "crate::external_api::deserializers::parse_and_dedup_switch_port_uplinks"
-            )]
-            switch_port_uplinks: Option<Vec<SwitchPortUplink>>,
-        }
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2UserPathParam {
+    pub user_id: String,
+}
 
-        let result: TestStruct = serde_json::from_str(json).unwrap();
-        let uplinks = result.switch_port_uplinks.unwrap();
-        assert_eq!(uplinks.len(), 2);
-        assert_eq!(uplinks[0].to_string(), "switch0.qsfp0");
-        assert_eq!(uplinks[1].to_string(), "switch1.qsfp1");
-
-        // Test deduplication
-        let json_with_dups = r#"{"switch_port_uplinks": ["switch0.qsfp0", "switch0.qsfp0", "switch1.qsfp1"]}"#;
-        let result: TestStruct = serde_json::from_str(json_with_dups).unwrap();
-        let uplinks = result.switch_port_uplinks.unwrap();
-        assert_eq!(uplinks.len(), 2); // Duplicate removed
-        assert_eq!(uplinks[0].to_string(), "switch0.qsfp0");
-        assert_eq!(uplinks[1].to_string(), "switch1.qsfp1");
-
-        // Test None/null
-        let json_null = r#"{"switch_port_uplinks": null}"#;
-        let result: TestStruct = serde_json::from_str(json_null).unwrap();
-        assert!(result.switch_port_uplinks.is_none());
-
-        // Test invalid format
-        let json_invalid = r#"{"switch_port_uplinks": ["invalid-format"]}"#;
-        let result: Result<TestStruct, _> = serde_json::from_str(json_invalid);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Expected '<switch>.<port>'")
-        );
-
-        // Test empty array
-        let json_empty = r#"{"switch_port_uplinks": []}"#;
-        let result: TestStruct = serde_json::from_str(json_empty).unwrap();
-        let uplinks = result.switch_port_uplinks.unwrap();
-        assert_eq!(uplinks.len(), 0);
-
-        // Test object format (test serialization format)
-        let json_objects = r#"{"switch_port_uplinks": [{"switch_location": "switch0", "port_name": "qsfp0"}, {"switch_location": "switch1", "port_name": "qsfp1"}]}"#;
-        let result: TestStruct = serde_json::from_str(json_objects).unwrap();
-        let uplinks = result.switch_port_uplinks.unwrap();
-        assert_eq!(uplinks.len(), 2);
-        assert_eq!(uplinks[0].to_string(), "switch0.qsfp0");
-        assert_eq!(uplinks[1].to_string(), "switch1.qsfp1");
-
-        // Test mixed format (both strings and objects)
-        let json_mixed = r#"{"switch_port_uplinks": ["switch0.qsfp0", {"switch_location": "switch1", "port_name": "qsfp1"}]}"#;
-        let result: TestStruct = serde_json::from_str(json_mixed).unwrap();
-        let uplinks = result.switch_port_uplinks.unwrap();
-        assert_eq!(uplinks.len(), 2);
-        assert_eq!(uplinks[0].to_string(), "switch0.qsfp0");
-        assert_eq!(uplinks[1].to_string(), "switch1.qsfp1");
-
-        // Test deduplication with objects
-        let json_object_dups = r#"{"switch_port_uplinks": [{"switch_location": "switch0", "port_name": "qsfp0"}, {"switch_location": "switch0", "port_name": "qsfp0"}]}"#;
-        let result: TestStruct =
-            serde_json::from_str(json_object_dups).unwrap();
-        let uplinks = result.switch_port_uplinks.unwrap();
-        assert_eq!(uplinks.len(), 1); // Duplicate removed
-    }
+#[derive(Deserialize, JsonSchema)]
+pub struct ScimV2GroupPathParam {
+    pub group_id: String,
 }

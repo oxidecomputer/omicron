@@ -1026,8 +1026,6 @@ pub static DEMO_IP_POOL_UPDATE: LazyLock<params::IpPoolUpdate> =
             name: None,
             description: Some(String::from("a new IP pool")),
         },
-        mvlan: None,
-        switch_port_uplinks: None,
     });
 
 // Multicast IP Pool
@@ -1041,8 +1039,6 @@ pub static DEMO_MULTICAST_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
                 description: String::from("a multicast IP pool"),
             },
             IpVersion::V4,
-            None, // switch_port_uplinks
-            None, // mvlan
         )
     });
 pub static DEMO_MULTICAST_IP_POOL_URL: LazyLock<String> = LazyLock::new(|| {

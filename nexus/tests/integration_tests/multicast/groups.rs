@@ -157,8 +157,6 @@ async fn test_multicast_group_with_default_pool(
             description: "Default multicast IP pool for testing".to_string(),
         },
         IpVersion::V4,
-        None,
-        None,
     );
 
     object_create::<_, IpPool>(&client, "/v1/system/ip-pools", &pool_params)

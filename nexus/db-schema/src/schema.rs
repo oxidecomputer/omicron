@@ -630,8 +630,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_version -> crate::enums::IpVersionEnum,
         pool_type -> crate::enums::IpPoolTypeEnum,
-        switch_port_uplinks -> Nullable<Array<Uuid>>,
-        mvlan -> Nullable<Int4>,
         rcgen -> Int8,
     }
 }
@@ -769,7 +767,10 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         silo_id -> Uuid,
-        external_id -> Text,
+        external_id -> Nullable<Text>,
+        user_provision_type -> crate::enums::UserProvisionTypeEnum,
+        user_name -> Nullable<Text>,
+        active -> Nullable<Bool>,
     }
 }
 
@@ -789,7 +790,10 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         silo_id -> Uuid,
-        external_id -> Text,
+        external_id -> Nullable<Text>,
+        user_provision_type -> crate::enums::UserProvisionTypeEnum,
+        display_name -> Nullable<Text>,
+        active -> Nullable<Bool>,
     }
 }
 
@@ -806,6 +810,8 @@ allow_tables_to_appear_in_same_query!(
     silo_group_membership,
     silo_user,
 );
+allow_tables_to_appear_in_same_query!(silo_group, silo);
+allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
 table! {

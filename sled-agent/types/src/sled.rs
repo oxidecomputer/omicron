@@ -7,6 +7,7 @@
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 
 use async_trait::async_trait;
+use daft::Diffable;
 use omicron_common::{
     address::{self, Ipv6Subnet, SLED_PREFIX},
     ledger::Ledgerable,
@@ -22,12 +23,31 @@ pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 /// A representation of a Baseboard ID as used in the inventory subsystem
 /// This type is essentially the same as a `Baseboard` except it doesn't have a
 /// revision or HW type (Gimlet, PC, Unknown).
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    JsonSchema,
+    Diffable,
+)]
+#[daft(leaf)]
 pub struct BaseboardId {
     /// Oxide Part Number
     pub part_number: String,
     /// Serial number (unique for a given part number)
     pub serial_number: String,
+}
+
+impl std::fmt::Display for BaseboardId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.part_number, self.serial_number)
+    }
 }
 
 /// A request to Add a given sled after rack initialization has occurred

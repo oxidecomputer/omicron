@@ -11,7 +11,7 @@ use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use trust_quorum::{
-    Epoch, LrtqUpgradeMsg, PlatformId, ReconfigureMsg, Threshold,
+    BaseboardId, Epoch, LrtqUpgradeMsg, ReconfigureMsg, Threshold,
 };
 
 // The operational state of nexus for a given configuration
@@ -29,8 +29,8 @@ pub struct NexusConfig {
     pub op: NexusOp,
     pub epoch: Epoch,
     pub last_committed_epoch: Option<Epoch>,
-    pub coordinator: PlatformId,
-    pub members: BTreeSet<PlatformId>,
+    pub coordinator: BaseboardId,
+    pub members: BTreeSet<BaseboardId>,
     // This is our `K` parameter
     pub threshold: Threshold,
 
@@ -42,16 +42,16 @@ pub struct NexusConfig {
     // commit may occur.
     pub commit_crash_tolerance: u8,
 
-    pub prepared_members: BTreeSet<PlatformId>,
-    pub committed_members: BTreeSet<PlatformId>,
+    pub prepared_members: BTreeSet<BaseboardId>,
+    pub committed_members: BTreeSet<BaseboardId>,
 }
 
 impl NexusConfig {
     pub fn new(
         epoch: Epoch,
         last_committed_epoch: Option<Epoch>,
-        coordinator: PlatformId,
-        members: BTreeSet<PlatformId>,
+        coordinator: BaseboardId,
+        members: BTreeSet<BaseboardId>,
         threshold: Threshold,
     ) -> NexusConfig {
         // We want a few extra nodes beyond `threshold` to ack before we commit.
@@ -81,8 +81,8 @@ impl NexusConfig {
     //
     // We create it so that we can test upgrading out of it.
     pub fn new_lrtq(
-        coordinator: PlatformId,
-        members: BTreeSet<PlatformId>,
+        coordinator: BaseboardId,
+        members: BTreeSet<BaseboardId>,
     ) -> NexusConfig {
         let threshold = Threshold((members.len() / 2 + 1) as u8);
         NexusConfig {
@@ -155,7 +155,7 @@ impl NexusState {
     // Create a `ReconfigureMsg` for the latest nexus config
     pub fn reconfigure_msg_for_latest_config(
         &self,
-    ) -> (&PlatformId, ReconfigureMsg) {
+    ) -> (&BaseboardId, ReconfigureMsg) {
         let config = self.configs.iter().last().expect("at least one config");
         (&config.coordinator, config.to_reconfigure_msg(self.rack_id))
     }
@@ -163,7 +163,7 @@ impl NexusState {
     // Create an `LrtqUpgradeMsg` for the latest nexus config
     pub fn lrtq_upgrade_msg_for_latest_config(
         &self,
-    ) -> (&PlatformId, LrtqUpgradeMsg) {
+    ) -> (&BaseboardId, LrtqUpgradeMsg) {
         let config = self.configs.iter().last().expect("at least one config");
         (&config.coordinator, config.to_lrtq_upgrade_msg(self.rack_id))
     }
@@ -215,6 +215,6 @@ impl NexusState {
     Diffable,
 )]
 pub enum NexusReply {
-    AckedPreparesFromCoordinator { epoch: Epoch, acks: BTreeSet<PlatformId> },
-    CommitAck { from: PlatformId, epoch: Epoch },
+    AckedPreparesFromCoordinator { epoch: Epoch, acks: BTreeSet<BaseboardId> },
+    CommitAck { from: BaseboardId, epoch: Epoch },
 }

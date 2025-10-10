@@ -94,11 +94,22 @@ pub static USER_EXTERNAL_AUTHN: LazyLock<UserBuiltinConfig> =
         )
     });
 
+/// Internal user used by Nexus when authenticating SCIM requests
+pub static USER_EXTERNAL_SCIM: LazyLock<UserBuiltinConfig> =
+    LazyLock::new(|| {
+        UserBuiltinConfig::new_static(
+            "001de000-05e4-4000-8000-000000000004",
+            "external-scim",
+            "used by Nexus when authenticating SCIM requests",
+        )
+    });
+
 #[cfg(test)]
 mod test {
     use super::super::assert_valid_typed_uuid;
     use super::USER_DB_INIT;
     use super::USER_EXTERNAL_AUTHN;
+    use super::USER_EXTERNAL_SCIM;
     use super::USER_INTERNAL_API;
     use super::USER_INTERNAL_READ;
     use super::USER_SAGA_RECOVERY;
@@ -112,5 +123,6 @@ mod test {
         assert_valid_typed_uuid(&USER_EXTERNAL_AUTHN.id);
         assert_valid_typed_uuid(&USER_INTERNAL_READ.id);
         assert_valid_typed_uuid(&USER_SAGA_RECOVERY.id);
+        assert_valid_typed_uuid(&USER_EXTERNAL_SCIM.id);
     }
 }

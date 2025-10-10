@@ -2329,16 +2329,18 @@ impl DataStore {
             })
     }
 
-    /// Attempt to read the latest collection.
+    /// Attempt to get the ID of the latest collection.
     ///
     /// If there aren't any collections, return `Ok(None)`.
-    pub async fn inventory_get_latest_collection(
+    pub async fn inventory_get_latest_collection_id(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<Collection>, Error> {
+    ) -> Result<Option<CollectionUuid>, Error> {
+        use nexus_db_schema::schema::inv_collection::dsl;
+
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        use nexus_db_schema::schema::inv_collection::dsl;
+
         let collection_id = dsl::inv_collection
             .select(dsl::id)
             .order_by(dsl::time_started.desc())
@@ -2347,17 +2349,23 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        let Some(collection_id) = collection_id else {
+        Ok(collection_id.map(CollectionUuid::from_untyped_uuid))
+    }
+
+    /// Attempt to read the latest collection.
+    ///
+    /// If there aren't any collections, return `Ok(None)`.
+    pub async fn inventory_get_latest_collection(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<Collection>, Error> {
+        let Some(collection_id) =
+            self.inventory_get_latest_collection_id(opctx).await?
+        else {
             return Ok(None);
         };
 
-        Ok(Some(
-            self.inventory_collection_read(
-                opctx,
-                CollectionUuid::from_untyped_uuid(collection_id),
-            )
-            .await?,
-        ))
+        Ok(Some(self.inventory_collection_read(opctx, collection_id).await?))
     }
 
     /// Attempt to read the current collection

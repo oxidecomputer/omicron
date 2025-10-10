@@ -94,7 +94,8 @@ pub(crate) type MulticastDataplaneResult<T> = Result<T, Error>;
 /// This handles multicast group and member operations across all switches
 /// in the rack, with automatic error handling and rollback.
 pub(crate) struct MulticastDataplaneClient {
-    datastore: Arc<DataStore>,
+    // Will be used to fetch mvlan from multicast_group table in follow-up commit
+    _datastore: Arc<DataStore>,
     dpd_clients: HashMap<SwitchLocation, dpd_client::Client>,
     log: Logger,
 }
@@ -124,7 +125,7 @@ impl MulticastDataplaneClient {
             );
             Error::internal_error("failed to build DPD clients")
         })?;
-        Ok(Self { datastore, dpd_clients, log })
+        Ok(Self { _datastore: datastore, dpd_clients, log })
     }
 
     async fn ensure_underlay_created_on(
@@ -298,34 +299,11 @@ impl MulticastDataplaneClient {
         self.dpd_clients.len()
     }
 
-    /// Get VLAN ID for a multicast group from its associated IP pool.
-    /// Returns None if the multicast pool doesn't have a VLAN configured.
-    async fn get_group_vlan_id(
-        &self,
-        opctx: &OpContext,
-        external_group: &ExternalMulticastGroup,
-    ) -> MulticastDataplaneResult<Option<omicron_common::vlan::VlanID>> {
-        let vlan = self
-            .datastore
-            .multicast_group_get_mvlan(opctx, external_group.id())
-            .await
-            .map_err(|e| {
-                error!(
-                    self.log,
-                    "failed to get VLAN ID for multicast group";
-                    "group_id" => %external_group.id(),
-                    "error" => %e
-                );
-                Error::internal_error("failed to get VLAN ID for group")
-            })?;
-
-        Ok(vlan)
-    }
 
     /// Apply multicast group configuration across switches (via DPD).
     pub(crate) async fn create_groups(
         &self,
-        opctx: &OpContext,
+        _opctx: &OpContext,
         external_group: &ExternalMulticastGroup,
         underlay_group: &UnderlayMulticastGroup,
     ) -> MulticastDataplaneResult<(
@@ -350,7 +328,8 @@ impl MulticastDataplaneClient {
         let tag = external_group.name().to_string();
 
         // Pre-compute shared data once to avoid N database calls
-        let vlan_id = self.get_group_vlan_id(opctx, external_group).await?;
+        // NOTE: VLANs moved to switch port/uplink config; not needed for internal fan-in
+        let vlan_id = None;
         let underlay_ip_admin =
             underlay_group.multicast_ip.ip().into_admin_scoped()?;
         let underlay_ipv6 = match underlay_group.multicast_ip.ip() {
@@ -398,7 +377,7 @@ impl MulticastDataplaneClient {
                     let external_entry = MulticastGroupCreateExternalEntry {
                         group_ip: external_group_ip,
                         external_forwarding: ExternalForwarding {
-                            vlan_id: vlan_id.map(|v| v.into()),
+                            vlan_id,
                         },
                         internal_forwarding: InternalForwarding {
                             nat_target: Some(nat_target),
@@ -470,7 +449,7 @@ impl MulticastDataplaneClient {
     /// Update a multicast group's tag (name) and/or sources in the dataplane.
     pub(crate) async fn update_groups(
         &self,
-        opctx: &OpContext,
+        _opctx: &OpContext,
         params: GroupUpdateParams<'_>,
     ) -> MulticastDataplaneResult<(
         MulticastGroupUnderlayResponse,
@@ -488,9 +467,8 @@ impl MulticastDataplaneClient {
         let dpd_clients = &self.dpd_clients;
 
         // Pre-compute shared data once
-
-        let vlan_id =
-            self.get_group_vlan_id(opctx, params.external_group).await?;
+        // NOTE: VLANs moved to switch port/uplink config; not needed for internal fan-in
+        let vlan_id = None;
         let underlay_ip_admin =
             params.underlay_group.multicast_ip.ip().into_admin_scoped()?;
         let underlay_ipv6 = match params.underlay_group.multicast_ip.ip() {
@@ -585,7 +563,7 @@ impl MulticastDataplaneClient {
 
                     // Prepare external update/create entries with pre-computed data
                     let external_forwarding = ExternalForwarding {
-                        vlan_id: vlan_id.map(|v| v.into()),
+                        vlan_id,
                     };
                     let internal_forwarding =
                         InternalForwarding { nat_target: Some(nat_target) };

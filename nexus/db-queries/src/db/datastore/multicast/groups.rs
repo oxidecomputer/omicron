@@ -35,7 +35,6 @@ use omicron_common::api::external::{
     IdentityMetadataCreateParams, ListResultVec, LookupResult, LookupType,
     ResourceType, UpdateResult,
 };
-use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use crate::authz;
@@ -44,7 +43,7 @@ use crate::db::datastore::DataStore;
 use crate::db::model::{
     ExternalMulticastGroup, ExternalMulticastGroupUpdate,
     IncompleteExternalMulticastGroup, IncompleteExternalMulticastGroupParams,
-    IpPool, IpPoolType, MulticastGroup, MulticastGroupState, Name,
+    IpPoolType, MulticastGroup, MulticastGroupState, Name,
     UnderlayMulticastGroup, Vni,
 };
 use crate::db::pagination::paginated;
@@ -228,59 +227,6 @@ impl DataStore {
             })
     }
 
-    /// Get MVLAN ID for a multicast group from its associated IP pool.
-    pub async fn multicast_group_get_mvlan(
-        &self,
-        opctx: &OpContext,
-        group_id: Uuid,
-    ) -> LookupResult<Option<VlanID>> {
-        use nexus_db_schema::schema::multicast_group::dsl;
-
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        // First get the group to find the pool ID
-        let group = {
-            dsl::multicast_group
-                .filter(dsl::id.eq(group_id))
-                .filter(dsl::time_deleted.is_null())
-                .select(ExternalMulticastGroup::as_select())
-                .first_async::<ExternalMulticastGroup>(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::MulticastGroup,
-                            LookupType::ById(group_id.into_untyped_uuid()),
-                        ),
-                    )
-                })?
-        };
-
-        // Then get the MVLAN ID from the pool
-        let vlan_id = {
-            use nexus_db_schema::schema::ip_pool::dsl;
-            dsl::ip_pool
-                .filter(dsl::id.eq(group.ip_pool_id))
-                .filter(dsl::time_deleted.is_null())
-                .select(dsl::mvlan)
-                .first_async::<Option<i32>>(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(
-                        e,
-                        ErrorHandler::NotFoundByLookup(
-                            ResourceType::IpPool,
-                            LookupType::ById(group.ip_pool_id),
-                        ),
-                    )
-                })?
-        };
-
-        let mvlan = vlan_id.map(|vid| VlanID::new(vid as u16)).transpose()?;
-        Ok(mvlan)
-    }
-
     /// List multicast groups in a project.
     pub async fn multicast_groups_list(
         &self,
@@ -408,8 +354,6 @@ impl DataStore {
         rack_id: Uuid,
         params: MulticastGroupAllocationParams,
     ) -> CreateResult<ExternalMulticastGroup> {
-        use nexus_db_schema::schema::ip_pool;
-
         let group_id = Uuid::new_v4();
         let authz_pool = self
             .resolve_pool_for_allocation(
@@ -418,21 +362,6 @@ impl DataStore {
                 IpPoolType::Multicast,
             )
             .await?;
-
-        // Fetch the full IP pool to access its mvlan and switch uplinks
-        let db_pool = {
-            ip_pool::table
-                .filter(ip_pool::id.eq(authz_pool.id()))
-                .filter(ip_pool::time_deleted.is_null())
-                .select(IpPool::as_select())
-                .first_async::<IpPool>(
-                    &*self.pool_connection_authorized(opctx).await?,
-                )
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?
-        };
 
         // Enforce ASM/SSM semantics when allocating from a pool:
         // - If sources are provided without an explicit IP (implicit allocation),
@@ -488,17 +417,10 @@ impl DataStore {
             },
         );
 
-        // Log switchport information from pool (for visibility)
-        if let Some(ref switch_port_uplinks) = db_pool.switch_port_uplinks {
-            info!(
-                opctx.log,
-                "multicast group using pool with switchport configuration";
-                "group_id" => %group_id,
-                "pool_id" => %authz_pool.id(),
-                "switchport_count" => switch_port_uplinks.len(),
-                "pool_mvlan_id" => ?db_pool.mvlan
-            );
-        }
+        // TODO: When external multicast sources are implemented,
+        // VLAN and switch port uplink configuration will be handled
+        // through switch port configuration (similar to unicast),
+        // not through IP pools. See architecture doc for details.
 
         let conn = self.pool_connection_authorized(opctx).await?;
         Self::allocate_external_multicast_group_on_conn(&conn, data).await
@@ -779,6 +701,7 @@ mod tests {
 
     use std::net::Ipv4Addr;
 
+    use crate::db::model::IpPool;
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range};
     use omicron_common::api::external::{
@@ -826,8 +749,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -959,8 +880,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -1133,8 +1052,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -1238,8 +1155,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -1657,8 +1572,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -1850,8 +1763,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -2062,8 +1973,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -2187,8 +2096,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -2344,8 +2251,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -2470,8 +2375,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -2593,8 +2496,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -2777,8 +2678,6 @@ mod tests {
                 IpPool::new_multicast(
                     &pool_identity,
                     IpVersion::V4,
-                    None,
-                    None,
                 ),
             )
             .await
@@ -2890,100 +2789,6 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_multicast_group_vlan_assignment_and_lookup() {
-        let logctx =
-            dev::test_setup_log("test_multicast_group_vlan_assignment");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let project_id = Uuid::new_v4();
-
-        // Create IP pool
-        let pool_identity = IdentityMetadataCreateParams {
-            name: "vlan-test-pool".parse().unwrap(),
-            description: "Test pool for VLAN operations".to_string(),
-        };
-
-        let ip_pool = datastore
-            .ip_pool_create(
-                &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                    None,
-                    Some(VlanID::new(200).unwrap()),
-                ),
-            )
-            .await
-            .expect("Should create multicast IP pool");
-
-        let authz_pool = authz::IpPool::new(
-            authz::FLEET,
-            ip_pool.id(),
-            LookupType::ById(ip_pool.id()),
-        );
-
-        let range = IpRange::V4(
-            Ipv4Range::new(
-                Ipv4Addr::new(224, 100, 40, 1),
-                Ipv4Addr::new(224, 100, 40, 100),
-            )
-            .unwrap(),
-        );
-
-        datastore
-            .ip_pool_add_range(&opctx, &authz_pool, &ip_pool, &range)
-            .await
-            .expect("Should add range to pool");
-
-        let link = IpPoolResource {
-            resource_id: opctx.authn.silo_required().unwrap().id(),
-            resource_type: IpPoolResourceType::Silo,
-            ip_pool_id: ip_pool.id(),
-            is_default: false,
-        };
-        datastore
-            .ip_pool_link_silo(&opctx, link)
-            .await
-            .expect("Should link multicast pool to silo");
-
-        let params = params::MulticastGroupCreate {
-            identity: IdentityMetadataCreateParams {
-                name: "vlan-test-group".parse().unwrap(),
-                description: "Test group for VLAN assignment".to_string(),
-            },
-            multicast_ip: Some("224.100.40.5".parse().unwrap()),
-            source_ips: None,
-            pool: Some(NameOrId::Name("vlan-test-pool".parse().unwrap())),
-            vpc: None,
-        };
-
-        let group = datastore
-            .multicast_group_create(
-                &opctx,
-                project_id,
-                Uuid::new_v4(),
-                &params,
-                Some(authz_pool),
-                None, // vpc_id
-            )
-            .await
-            .expect("Should create multicast group");
-
-        // Test VLAN lookup - should return Some(VlanID) for multicast groups
-        let vlan_result = datastore
-            .multicast_group_get_mvlan(&opctx, group.id())
-            .await
-            .expect("Should get VLAN for multicast group");
-
-        // VLAN should be assigned (not None for multicast groups)
-        assert_eq!(vlan_result.unwrap(), VlanID::new(200).unwrap());
 
         db.terminate().await;
         logctx.cleanup_successful();

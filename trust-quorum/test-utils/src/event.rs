@@ -7,7 +7,7 @@
 use crate::nexus::{NexusConfig, NexusReply};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use trust_quorum::{Envelope, Epoch, PlatformId};
+use trust_quorum::{BaseboardId, Envelope, Epoch};
 
 /// An event that can be fed into our system under test (SUT)
 ///
@@ -18,7 +18,7 @@ pub enum Event {
     InitialSetup {
         member_universe_size: usize,
         config: NexusConfig,
-        crashed_nodes: BTreeSet<PlatformId>,
+        crashed_nodes: BTreeSet<BaseboardId>,
     },
     InitialSetupLrtq {
         member_universe_size: usize,
@@ -31,24 +31,24 @@ pub enum Event {
     /// Since replay is deterministic, we actually know what this value is,
     /// even though a prior event may not have yet sent the message.
     DeliverEnvelope(Envelope),
-    LoadRackSecret(PlatformId, Epoch),
-    ClearSecrets(PlatformId),
+    LoadRackSecret(BaseboardId, Epoch),
+    ClearSecrets(BaseboardId),
     /// Pull a `NexusReply` off the underlay network and update the `NexusState`
     DeliverNexusReply(NexusReply),
-    CommitConfiguration(PlatformId),
+    CommitConfiguration(BaseboardId),
     Reconfigure(NexusConfig),
     LrtqUpgrade(NexusConfig),
-    CrashNode(PlatformId),
+    CrashNode(BaseboardId),
     RestartNode {
-        id: PlatformId,
-        connection_order: Vec<PlatformId>,
+        id: BaseboardId,
+        connection_order: Vec<BaseboardId>,
     },
-    PrepareAndCommit(PlatformId),
+    PrepareAndCommit(BaseboardId),
 }
 
 impl Event {
     /// Return which nodes the event may have mutated.
-    pub fn affected_nodes(&self) -> Vec<PlatformId> {
+    pub fn affected_nodes(&self) -> Vec<BaseboardId> {
         match self {
             Self::InitialSetup { config, crashed_nodes, .. } => {
                 config.members.union(&crashed_nodes).cloned().collect()

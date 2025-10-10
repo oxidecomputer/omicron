@@ -139,8 +139,6 @@ pub(crate) async fn create_multicast_ip_pool_with_range(
             description: "Multicast IP pool for testing".to_string(),
         },
         IpVersion::V4,
-        None,
-        None,
     );
 
     let pool: IpPool =

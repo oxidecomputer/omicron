@@ -10,12 +10,6 @@ mod rot_bootloader;
 mod sp;
 
 use crate::mgs_updates::rot::RotUpdateState;
-use crate::mgs_updates::rot::mgs_update_status_rot;
-use crate::mgs_updates::rot::try_make_update_rot;
-use crate::mgs_updates::rot_bootloader::mgs_update_status_rot_bootloader;
-use crate::mgs_updates::rot_bootloader::try_make_update_rot_bootloader;
-use crate::mgs_updates::sp::mgs_update_status_sp;
-use crate::mgs_updates::sp::try_make_update_sp;
 
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedActiveRotSlot;
@@ -28,14 +22,18 @@ use nexus_types::deployment::PendingMgsUpdateRotDetails;
 use nexus_types::deployment::PendingMgsUpdateSpDetails;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::TargetReleaseDescription;
+use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::deployment::planning_report::BlockedMgsUpdate;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::TypedUuid;
 use slog::{error, info, warn};
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
@@ -106,170 +104,198 @@ impl PlannedMgsUpdates {
     }
 }
 
-/// Generates a new set of `PendingMgsUpdates` based on:
-///
-/// * `inventory`: the latest inventory
-/// * `current_boards`: a set of baseboards to consider updating
-///   (it is possible to have baseboards in inventory that would never be
-///   updated because they're not considered part of the current system)
-/// * `current_updates`: the most recent set of configured `PendingMgsUpdates`
-/// * `current_artifacts`: information about artifacts from the current target
-///   release (if any)
-/// * `nmax_updates`: the maximum number of updates allowed at once
-/// * `impossible_update_policy`: what to do if we detect an update has become
-///   impossible due to unsatisfied preconditions
-///
-/// By current policy, `nmax_updates` is always 1, but the implementation here
-/// supports more than one update per invocation.
-pub(crate) fn plan_mgs_updates(
-    log: &slog::Logger,
-    inventory: &Collection,
-    current_boards: &BTreeSet<Arc<BaseboardId>>,
-    current_updates: &PendingMgsUpdates,
-    current_artifacts: &TargetReleaseDescription,
-    nmax_updates: usize,
-    impossible_update_policy: ImpossibleUpdatePolicy,
-) -> PlannedMgsUpdates {
-    let mut pending_updates = PendingMgsUpdates::new();
-    let mut pending_host_phase_2_changes = PendingHostPhase2Changes::empty();
-    let mut boards_preferred = BTreeSet::new();
-    let mut blocked_mgs_updates = Vec::new();
+/// Input to plan MGS updates.
+#[derive(Debug)]
+pub(crate) struct MgsUpdatePlanner<'a> {
+    pub(crate) log: &'a slog::Logger,
+    /// the latest inventory
+    pub(crate) inventory: &'a Collection,
+    /// a set of baseboards to consider updating (it is possible to have
+    /// baseboards in inventory that would never be updated because they're not
+    /// considered part of the current system)
+    pub(crate) current_boards: &'a BTreeSet<Arc<BaseboardId>>,
+    /// boards containing zones that are unsafe to shut down
+    pub(crate) unsafe_zone_boards: &'a BTreeMap<
+        Arc<BaseboardId>,
+        BTreeMap<TypedUuid<OmicronZoneKind>, ZoneUnsafeToShutdown>,
+    >,
+    /// the most recent set of configured `PendingMgsUpdates`
+    pub(crate) current_updates: &'a PendingMgsUpdates,
+    /// information about artifacts from the current target release (if any)
+    pub(crate) current_artifacts: &'a TargetReleaseDescription,
+    /// the maximum number of updates allowed at once. By current policy,
+    /// `nmax_updates` is always 1, but the implementation here supports more
+    /// than one update per invocation
+    pub(crate) nmax_updates: usize,
+    /// what to do if we detect an update has become impossible due to
+    /// unsatisfied preconditions
+    pub(crate) impossible_update_policy: ImpossibleUpdatePolicy,
+}
 
-    // Determine the status of all currently pending updates by comparing what
-    // they were trying to do (and their preconditions) against the current
-    // state (from inventory).
-    //
-    // If a pending update is either done or impossible, we'll prioritize
-    // evaluating the same board for any further updates.  For the "done" case,
-    // this will cause us to update one board's SP, RoT, etc. before moving onto
-    // another board.  For the "impossible" case, this should just fix up the
-    // update request with updated preconditions so that it can complete.
-    //
-    // If a pending update is in-progress or if we cannot determine its status
-    // because inventory is incomplete, then we'll "keep" it (that is, we copy
-    // the same update into the `PendingMgsUpdates` that we're returning).
-    for update in current_updates {
-        match mgs_update_status(log, inventory, update) {
-            Ok(MgsUpdateStatus::Done) => {
-                info!(
-                    log,
-                    "MGS-driven update completed \
-                     (will remove it and re-evaluate board)";
-                    update
-                );
-                boards_preferred.insert(update.baseboard_id.clone());
-            }
-            Ok(MgsUpdateStatus::Impossible) => match impossible_update_policy {
-                ImpossibleUpdatePolicy::Keep => {
+impl<'a> MgsUpdatePlanner<'a> {
+    /// Generates a new set of `PlannedMgsUpdates`
+    pub(crate) fn plan(self) -> PlannedMgsUpdates {
+        let mut pending_updates = PendingMgsUpdates::new();
+        let mut pending_host_phase_2_changes =
+            PendingHostPhase2Changes::empty();
+        let mut boards_preferred = BTreeSet::new();
+        let mut blocked_mgs_updates = Vec::new();
+        let MgsUpdatePlanner {
+            log,
+            inventory,
+            current_boards,
+            unsafe_zone_boards,
+            current_updates,
+            current_artifacts,
+            nmax_updates,
+            impossible_update_policy,
+        } = self;
+
+        // Determine the status of all currently pending updates by comparing what
+        // they were trying to do (and their preconditions) against the current
+        // state (from inventory).
+        //
+        // If a pending update is either done or impossible, we'll prioritize
+        // evaluating the same board for any further updates.  For the "done" case,
+        // this will cause us to update one board's SP, RoT, etc. before moving onto
+        // another board.  For the "impossible" case, this should just fix up the
+        // update request with updated preconditions so that it can complete.
+        //
+        // If a pending update is in-progress or if we cannot determine its status
+        // because inventory is incomplete, then we'll "keep" it (that is, we copy
+        // the same update into the `PendingMgsUpdates` that we're returning).
+        for update in current_updates {
+            match mgs_update_status(log, inventory, update) {
+                Ok(MgsUpdateStatus::Done) => {
                     info!(
                         log,
-                        "keeping apparently-impossible MGS-driven update \
-                         (waiting for recent update to be applied)";
-                        update
-                    );
-                    pending_updates.insert(update.clone());
-                }
-                ImpossibleUpdatePolicy::Reevaluate => {
-                    info!(
-                        log,
-                        "MGS-driven update impossible \
+                        "MGS-driven update completed \
                          (will remove it and re-evaluate board)";
                         update
                     );
                     boards_preferred.insert(update.baseboard_id.clone());
                 }
-            },
-            Ok(MgsUpdateStatus::NotDone) => {
-                info!(
-                    log,
-                    "MGS-driven update not yet completed (will keep it)";
-                    update
-                );
-                pending_updates.insert(update.clone());
-            }
-            Err(error) => {
-                info!(
-                    log,
-                    "cannot determine MGS-driven update status (will keep it)";
-                    update,
-                    InlineErrorChain::new(&error)
-                );
-                pending_updates.insert(update.clone());
+                Ok(MgsUpdateStatus::Impossible) => {
+                    match impossible_update_policy {
+                        ImpossibleUpdatePolicy::Keep => {
+                            info!(
+                                log,
+                                "keeping apparently-impossible MGS-driven update \
+                                 (waiting for recent update to be applied)";
+                                update
+                            );
+                            pending_updates.insert(update.clone());
+                        }
+                        ImpossibleUpdatePolicy::Reevaluate => {
+                            info!(
+                                log,
+                                "MGS-driven update impossible \
+                                 (will remove it and re-evaluate board)";
+                                update
+                            );
+                            boards_preferred
+                                .insert(update.baseboard_id.clone());
+                        }
+                    }
+                }
+                Ok(MgsUpdateStatus::NotDone) => {
+                    info!(
+                        log,
+                        "MGS-driven update not yet completed (will keep it)";
+                        update
+                    );
+                    pending_updates.insert(update.clone());
+                }
+                Err(error) => {
+                    info!(
+                        log,
+                        "cannot determine MGS-driven update status (will keep it)";
+                        update,
+                        InlineErrorChain::new(&error)
+                    );
+                    pending_updates.insert(update.clone());
+                }
             }
         }
-    }
 
-    // If we don't have a "real" target release (i.e., an uploaded TUF repo
-    // containing artifacts), then we cannot configure more updates.
-    let current_artifacts = match current_artifacts {
-        TargetReleaseDescription::Initial => {
-            info!(
-                log,
-                "system in initial release state \
+        // If we don't have a "real" target release (i.e., an uploaded TUF repo
+        // containing artifacts), then we cannot configure more updates.
+        let current_artifacts = match current_artifacts {
+            TargetReleaseDescription::Initial => {
+                info!(
+                    log,
+                    "system in initial release state \
                 no update artifacts available (no update necessary)",
-            );
-            return PlannedMgsUpdates {
-                pending_updates,
-                pending_host_phase_2_changes,
-                blocked_mgs_updates,
-            };
-        }
-        TargetReleaseDescription::TufRepo(description) => description,
-    };
-
-    // Next, configure new updates for any boards that need an update, up to
-    // `nmax_updates`.
-    //
-    // For the reasons mentioned above, we'll start with the boards that just
-    // had an in-progress update that we elected not to keep.  Then we'll look
-    // at all the other boards.  Note that using `extend` here will cause the
-    // boards that we're prioritizing to appear twice in this list.
-    let non_preferred =
-        current_boards.iter().filter(|b| !boards_preferred.contains(*b));
-    let candidates = boards_preferred.iter().chain(non_preferred);
-    for board in candidates {
-        if pending_updates.len() >= nmax_updates {
-            info!(
-                log,
-                "reached maximum number of pending MGS-driven updates";
-                "max" => nmax_updates
-            );
-            return PlannedMgsUpdates {
-                pending_updates,
-                pending_host_phase_2_changes,
-                blocked_mgs_updates,
-            };
-        }
-
-        // `try_make_update` will always return at most a single update at a
-        // time. This means that this instance of `PlannedMgsUpdates` describes
-        // a single device update
-        let PlannedMgsUpdates {
-            pending_updates: updates,
-            pending_host_phase_2_changes: mut host_phase_2,
-            blocked_mgs_updates: mut blocked_updates,
-        } = try_make_update(log, board, inventory, current_artifacts);
-
-        if let Some(update) = updates.into_iter().next() {
-            info!(log, "configuring MGS-driven update"; update);
-            pending_updates.insert(update.clone());
-        } else {
-            if blocked_mgs_updates.is_empty() && host_phase_2.is_empty() {
-                info!(log, "skipping board for MGS-driven update (no update necessary)"; board);
-            } else {
-                info!(log, "skipping board for MGS-driven update (found issues)"; board);
+                );
+                return PlannedMgsUpdates {
+                    pending_updates,
+                    pending_host_phase_2_changes,
+                    blocked_mgs_updates,
+                };
             }
+            TargetReleaseDescription::TufRepo(description) => description,
+        };
+
+        // Next, configure new updates for any boards that need an update, up to
+        // `nmax_updates`.
+        //
+        // For the reasons mentioned above, we'll start with the boards that just
+        // had an in-progress update that we elected not to keep.  Then we'll look
+        // at all the other boards.  Note that using `extend` here will cause the
+        // boards that we're prioritizing to appear twice in this list.
+        let non_preferred =
+            current_boards.iter().filter(|b| !boards_preferred.contains(*b));
+        let candidates = boards_preferred.iter().chain(non_preferred);
+        for board in candidates {
+            if pending_updates.len() >= nmax_updates {
+                info!(
+                    log,
+                    "reached maximum number of pending MGS-driven updates";
+                    "max" => nmax_updates
+                );
+                return PlannedMgsUpdates {
+                    pending_updates,
+                    pending_host_phase_2_changes,
+                    blocked_mgs_updates,
+                };
+            }
+
+            // `try_make_update` will always return at most a single update at a
+            // time. This means that this instance of `PlannedMgsUpdates` describes
+            // a single device update
+            let PlannedMgsUpdates {
+                pending_updates: updates,
+                pending_host_phase_2_changes: mut host_phase_2,
+                blocked_mgs_updates: mut blocked_updates,
+            } = try_make_update(
+                log,
+                board,
+                inventory,
+                current_artifacts,
+                unsafe_zone_boards,
+            );
+
+            if let Some(update) = updates.into_iter().next() {
+                info!(log, "configuring MGS-driven update"; update);
+                pending_updates.insert(update.clone());
+            } else {
+                if blocked_mgs_updates.is_empty() && host_phase_2.is_empty() {
+                    info!(log, "skipping board for MGS-driven update (no update necessary)"; board);
+                } else {
+                    info!(log, "skipping board for MGS-driven update (found issues)"; board);
+                }
+            }
+
+            pending_host_phase_2_changes.append(&mut host_phase_2);
+            blocked_mgs_updates.append(&mut blocked_updates);
         }
 
-        pending_host_phase_2_changes.append(&mut host_phase_2);
-        blocked_mgs_updates.append(&mut blocked_updates);
-    }
-
-    info!(log, "ran out of boards for MGS-driven update");
-    PlannedMgsUpdates {
-        pending_updates,
-        pending_host_phase_2_changes,
-        blocked_mgs_updates,
+        info!(log, "ran out of boards for MGS-driven update");
+        PlannedMgsUpdates {
+            pending_updates,
+            pending_host_phase_2_changes,
+            blocked_mgs_updates,
+        }
     }
 }
 
@@ -352,7 +378,7 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::Stage0Next, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            mgs_update_status_rot_bootloader(
+            rot_bootloader::update_status(
                 desired_version,
                 expected_stage0_version,
                 expected_stage0_next_version,
@@ -374,7 +400,7 @@ fn mgs_update_status(
                 .caboose_for(CabooseWhich::SpSlot1, baseboard_id)
                 .map(|c| c.caboose.version.as_ref());
 
-            mgs_update_status_sp(
+            sp::update_status(
                 desired_version,
                 expected_active_version,
                 expected_inactive_version,
@@ -447,7 +473,7 @@ fn mgs_update_status(
                 transient_boot_preference: *expected_transient_boot_preference,
             };
 
-            mgs_update_status_rot(
+            rot::update_status(
                 desired_version,
                 expected,
                 found,
@@ -546,15 +572,35 @@ fn mgs_update_status_inactive_versions(
     }
 }
 
+/// Either if an update is unnecessary, or details about the pending MGS update
+#[allow(clippy::large_enum_variant)]
+enum MgsUpdateOutcome {
+    NoUpdateNeeded,
+    Pending(PendingMgsUpdate, PendingHostPhase2Changes),
+}
+
+impl MgsUpdateOutcome {
+    // Host phase 2 changes are only possible during Host OS updates. For the
+    // rest of the components we'll only need to set the pending update.
+    fn pending_with_update_only(update: PendingMgsUpdate) -> MgsUpdateOutcome {
+        MgsUpdateOutcome::Pending(update, PendingHostPhase2Changes::empty())
+    }
+}
+
 /// Determine if the given baseboard needs any MGS-driven update (e.g., update
 /// to its SP, RoT, etc.).  If so, returns the update and a set of changes that
 /// need to be made to sled configs related to host phase 2 images (this set
-/// will be empty if we made a non-host update).  If not, returns `None`.
+/// will be empty if we made a non-host update).  If not, returns
+/// `NoUpdateNeeded`.
 fn try_make_update(
     log: &slog::Logger,
     baseboard_id: &Arc<BaseboardId>,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
+    unsafe_zone_boards: &BTreeMap<
+        Arc<BaseboardId>,
+        BTreeMap<TypedUuid<OmicronZoneKind>, ZoneUnsafeToShutdown>,
+    >,
 ) -> PlannedMgsUpdates {
     let mut pending_actions = PlannedMgsUpdates::new();
 
@@ -569,69 +615,77 @@ fn try_make_update(
     ] {
         let update_attempt = match component {
             MgsUpdateComponent::RotBootloader => {
-                try_make_update_rot_bootloader(
+                rot_bootloader::try_make_update(
                     log,
                     baseboard_id,
                     inventory,
                     current_artifacts,
                 )
+                .map_err(|e| e.into())
             }
-            MgsUpdateComponent::Rot => try_make_update_rot(
+            MgsUpdateComponent::Rot => rot::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
-            ),
-            MgsUpdateComponent::Sp => try_make_update_sp(
+            )
+            .map_err(|e| e.into()),
+            // TODO: Today we pass `unsafe_zone_boards` here, and check within
+            // each of the SP and Host OS's `try_make_update` function whether
+            // we are trying to update a board that is in that list. If that is
+            // the case, we return an error and below it is set as a blocked
+            // update. This isn't ideal because we actually could do an update,
+            // but want to block it because of some higher-level thing entirely
+            // unrelated to MGS-driven updates (i.e., zone safety checks).
+            // For now we are keeping these checks here as we don't want to set
+            // an MGS-driven update as both "pending" and "blocked" since we
+            // want to be able to differentiate between them for the
+            // `PlanningZoneUpdatesStepReport` which can be set to either
+            // `ZoneUpdatesWaitingOn::PendingMgsUpdates` or
+            // `ZoneUpdatesWaitingOn::BlockedMgsUpdates`.
+            //
+            // Also see:
+            // https://github.com/oxidecomputer/omicron/pull/9044/files#r2411133382
+            MgsUpdateComponent::Sp => sp::try_make_update(
                 log,
                 baseboard_id,
                 inventory,
                 current_artifacts,
-            ),
-            MgsUpdateComponent::HostOs => {
-                match host_phase_1::try_make_update(
-                    log,
-                    baseboard_id,
-                    inventory,
-                    current_artifacts,
-                ) {
-                    Ok(pending_update) => {
-                        // Host updates also return host OS phase 2 changes;
-                        // pull those out here and insert them into
-                        // `pending_actions`, then return the typical pending
-                        // update (which will itself be inserted into
-                        // `pending_actions` below).
-                        if let Some((update, host_os_phase_2_changes)) =
-                            pending_update
-                        {
-                            pending_actions.set_pending_host_os_phase2_changes(
-                                host_os_phase_2_changes,
-                            );
-                            Ok(Some(update))
-                        } else {
-                            Ok(None)
-                        }
-                    }
-                    Err(e) => Err(e),
-                }
-            }
+                unsafe_zone_boards,
+            )
+            .map_err(|e| e.into()),
+            MgsUpdateComponent::HostOs => host_phase_1::try_make_update(
+                log,
+                baseboard_id,
+                inventory,
+                current_artifacts,
+                unsafe_zone_boards,
+            )
+            .map_err(|e| e.into()),
         };
 
         match update_attempt {
-            Ok(None) => {
+            Ok(MgsUpdateOutcome::NoUpdateNeeded) => {
                 // No update needed; try the next component.
                 continue;
             }
             // If there is a pending or blocked MGS-driven update, we break so
             // we can return it immediately.
-            Ok(Some(update)) => {
+            Ok(MgsUpdateOutcome::Pending(
+                update,
+                pending_host_os_phase2_changes,
+            )) => {
                 pending_actions.add_pending_update(update);
+                // If update_attempt is a host OS update, stage the phase 2
+                // changes. For any other type, this set will be empty
+                pending_actions.set_pending_host_os_phase2_changes(
+                    pending_host_os_phase2_changes,
+                );
                 break;
             }
             Err(e) => {
                 pending_actions.add_blocked_update(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
-                    component,
                     reason: e,
                 });
                 break;
@@ -647,9 +701,10 @@ mod test_helpers;
 
 #[cfg(test)]
 mod test {
+    use crate::mgs_updates::MgsUpdatePlanner;
+
     use super::ImpossibleUpdatePolicy;
     use super::PlannedMgsUpdates;
-    use super::plan_mgs_updates;
     use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_1;
     use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1;
     use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_2;
@@ -663,17 +718,21 @@ mod test {
     use dropshot::ConfigLoggingLevel;
     use iddqd::IdOrdMap;
     use nexus_types::deployment::ExpectedVersion;
-    use nexus_types::deployment::MgsUpdateComponent;
     use nexus_types::deployment::PendingMgsUpdateDetails;
     use nexus_types::deployment::PendingMgsUpdateSpDetails;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::deployment::planning_report::BlockedMgsUpdate;
+    use nexus_types::deployment::planning_report::FailedHostOsUpdateReason;
     use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
+    use nexus_types::deployment::planning_report::FailedRotBootloaderUpdateReason;
+    use nexus_types::deployment::planning_report::FailedRotUpdateReason;
+    use nexus_types::deployment::planning_report::FailedSpUpdateReason;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::SpType;
     use omicron_test_utils::dev::LogContext;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use strum::IntoEnumIterator;
@@ -720,23 +779,26 @@ mod test {
             pending_updates: updates,
             blocked_mgs_updates,
             ..
-        } = plan_mgs_updates(
+        } = MgsUpdatePlanner {
             log,
-            &collection,
-            &fake_boards,
-            &current_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &fake_boards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &current_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
 
         // The planner should only gather the first failed update (RoT
         // bootloader), and report no pending updates. There will only be a
         // single entry as there is only a single fake board.
         let expected_blocked_updates = vec![BlockedMgsUpdate {
             baseboard_id: fake_board.clone(),
-            component: MgsUpdateComponent::RotBootloader,
-            reason: FailedMgsUpdateReason::SpNotInInventory,
+            reason: FailedMgsUpdateReason::RotBootloader(
+                FailedRotBootloaderUpdateReason::SpNotInInventory,
+            ),
         }];
         assert_eq!(blocked_mgs_updates, expected_blocked_updates);
         assert!(updates.is_empty());
@@ -763,15 +825,17 @@ mod test {
             pending_updates: updates,
             blocked_mgs_updates,
             ..
-        } = plan_mgs_updates(
+        } = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &current_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &current_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
 
         // The planner should only gather the first RoT failed update of
         // each of the boards, and report no pending updates
@@ -779,8 +843,9 @@ mod test {
         for baseboard_id in &collection.baseboards {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::Rot,
-                reason: FailedMgsUpdateReason::RotStateNotInInventory,
+                reason: FailedMgsUpdateReason::Rot(
+                    FailedRotUpdateReason::RotStateNotInInventory,
+                ),
             });
         }
         assert_eq!(blocked_mgs_updates, expected_blocked_updates);
@@ -805,15 +870,17 @@ mod test {
             pending_updates: updates,
             blocked_mgs_updates,
             ..
-        } = plan_mgs_updates(
+        } = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &current_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &current_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
 
         // The planner should only gather the first SP failed update of
         // each of the boards, and report no pending updates
@@ -821,9 +888,10 @@ mod test {
         for baseboard_id in &collection.baseboards {
             expected_blocked_updates.push(BlockedMgsUpdate {
                 baseboard_id: baseboard_id.clone(),
-                component: MgsUpdateComponent::Sp,
-                reason: FailedMgsUpdateReason::CabooseNotInInventory(
-                    CabooseWhich::SpSlot0,
+                reason: FailedMgsUpdateReason::Sp(
+                    FailedSpUpdateReason::CabooseNotInInventory(
+                        CabooseWhich::SpSlot0,
+                    ),
                 ),
             });
         }
@@ -848,15 +916,17 @@ mod test {
             pending_updates: updates,
             blocked_mgs_updates,
             ..
-        } = plan_mgs_updates(
+        } = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &current_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &current_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
             nmax_updates,
             impossible_update_policy,
-        );
+        }
+        .plan();
 
         // The planner should only gather the first Host OS failed update of
         // each of the sled boards, and report no pending updates
@@ -865,8 +935,9 @@ mod test {
             if baseboard_id.part_number == "dummy_sled" {
                 expected_blocked_updates.push(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
-                    component: MgsUpdateComponent::HostOs,
-                    reason: FailedMgsUpdateReason::SledAgentInfoNotInInventory,
+                    reason: FailedMgsUpdateReason::HostOs(
+                        FailedHostOsUpdateReason::SledAgentInfoNotInInventory,
+                    ),
                 });
             }
         }
@@ -915,15 +986,19 @@ mod test {
         let mut updates = None;
         for impossible_update_policy in ImpossibleUpdatePolicy::iter() {
             let PlannedMgsUpdates { pending_updates: planned_updates, .. } =
-                plan_mgs_updates(
+                MgsUpdatePlanner {
                     log,
-                    &collection,
+                    inventory: &collection,
                     current_boards,
-                    &initial_updates,
-                    &TargetReleaseDescription::TufRepo(repo.clone()),
+                    unsafe_zone_boards: &BTreeMap::new(),
+                    current_updates: &initial_updates,
+                    current_artifacts: &TargetReleaseDescription::TufRepo(
+                        repo.clone(),
+                    ),
                     nmax_updates,
                     impossible_update_policy,
-                );
+                }
+                .plan();
             assert_eq!(planned_updates.len(), 1);
             let first_update =
                 planned_updates.iter().next().expect("at least one update");
@@ -965,29 +1040,37 @@ mod test {
         // replace the update, even though its preconditions are no longer
         // valid.
         let PlannedMgsUpdates { pending_updates: keep_updates, .. } =
-            plan_mgs_updates(
+            MgsUpdatePlanner {
                 log,
-                &collection,
+                inventory: &collection,
                 current_boards,
-                &updates,
-                &TargetReleaseDescription::TufRepo(repo.clone()),
+                unsafe_zone_boards: &BTreeMap::new(),
+                current_updates: &updates,
+                current_artifacts: &TargetReleaseDescription::TufRepo(
+                    repo.clone(),
+                ),
                 nmax_updates,
-                ImpossibleUpdatePolicy::Keep,
-            );
+                impossible_update_policy: ImpossibleUpdatePolicy::Keep,
+            }
+            .plan();
         assert_eq!(updates, keep_updates);
 
         // On the other hand, if we plan with
         // `ImpossibleUpdatePolicy::Reevaluate`, we should replace the update.
         let PlannedMgsUpdates { pending_updates: reeval_updates, .. } =
-            plan_mgs_updates(
+            MgsUpdatePlanner {
                 log,
-                &collection,
+                inventory: &collection,
                 current_boards,
-                &initial_updates,
-                &TargetReleaseDescription::TufRepo(repo.clone()),
+                unsafe_zone_boards: &BTreeMap::new(),
+                current_updates: &initial_updates,
+                current_artifacts: &TargetReleaseDescription::TufRepo(
+                    repo.clone(),
+                ),
                 nmax_updates,
-                ImpossibleUpdatePolicy::Keep,
-            );
+                impossible_update_policy: ImpossibleUpdatePolicy::Keep,
+            }
+            .plan();
         assert_eq!(reeval_updates.len(), 1);
         let first_update =
             reeval_updates.iter().next().expect("at least one update");
@@ -1061,15 +1144,19 @@ mod test {
                 pending_updates: new_updates,
                 mut pending_host_phase_2_changes,
                 ..
-            } = plan_mgs_updates(
+            } = MgsUpdatePlanner {
                 log,
-                &collection,
+                inventory: &collection,
                 current_boards,
-                &latest_updates,
-                &TargetReleaseDescription::TufRepo(repo.clone()),
+                unsafe_zone_boards: &BTreeMap::new(),
+                current_updates: &latest_updates,
+                current_artifacts: &TargetReleaseDescription::TufRepo(
+                    repo.clone(),
+                ),
                 nmax_updates,
                 impossible_update_policy,
-            );
+            }
+            .plan();
             assert_eq!(new_updates.len(), 1);
             let update =
                 new_updates.iter().next().expect("at least one update");
@@ -1132,15 +1219,19 @@ mod test {
         // Take one more lap.  It should reflect zero updates.
         let collection = builder.build();
         let PlannedMgsUpdates { pending_updates: last_updates, .. } =
-            plan_mgs_updates(
+            MgsUpdatePlanner {
                 log,
-                &collection,
-                &collection.baseboards,
-                &latest_updates,
-                &TargetReleaseDescription::TufRepo(repo.clone()),
+                inventory: &collection,
+                current_boards: &collection.baseboards,
+                unsafe_zone_boards: &BTreeMap::new(),
+                current_updates: &latest_updates,
+                current_artifacts: &TargetReleaseDescription::TufRepo(
+                    repo.clone(),
+                ),
                 nmax_updates,
                 impossible_update_policy,
-            );
+            }
+            .plan();
         assert!(last_updates.is_empty());
 
         logctx.cleanup_successful();
@@ -1190,15 +1281,17 @@ mod test {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
             ..
-        } = plan_mgs_updates(
+        } = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            usize::MAX,
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: usize::MAX,
             impossible_update_policy,
-        );
+        }
+        .plan();
 
         for update in &all_updates {
             // Confirm all our updates are to RoT bootloaders.
@@ -1235,15 +1328,17 @@ mod test {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
             ..
-        } = plan_mgs_updates(
+        } = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            usize::MAX,
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: usize::MAX,
             impossible_update_policy,
-        );
+        }
+        .plan();
         for update in &all_updates {
             // Confirm all our updates are to RoTs.
             match &update.details {
@@ -1278,15 +1373,17 @@ mod test {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
             ..
-        } = plan_mgs_updates(
+        } = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            usize::MAX,
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: usize::MAX,
             impossible_update_policy,
-        );
+        }
+        .plan();
         for update in &all_updates {
             // Confirm all our updates are to SPs.
             match &update.details {
@@ -1320,15 +1417,17 @@ mod test {
             pending_updates: all_updates,
             mut pending_host_phase_2_changes,
             ..
-        } = plan_mgs_updates(
+        } = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &PendingMgsUpdates::new(),
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            usize::MAX,
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &PendingMgsUpdates::new(),
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: usize::MAX,
             impossible_update_policy,
-        );
+        }
+        .plan();
         for update in &all_updates {
             // Confirm all our updates are to SPs.
             match &update.details {
@@ -1354,15 +1453,17 @@ mod test {
             pending_updates: all_updates_done,
             pending_host_phase_2_changes,
             ..
-        } = plan_mgs_updates(
+        } = MgsUpdatePlanner {
             log,
-            &collection,
-            &collection.baseboards,
-            &all_updates,
-            &TargetReleaseDescription::TufRepo(repo.clone()),
-            1,
+            inventory: &collection,
+            current_boards: &collection.baseboards,
+            unsafe_zone_boards: &BTreeMap::new(),
+            current_updates: &all_updates,
+            current_artifacts: &TargetReleaseDescription::TufRepo(repo.clone()),
+            nmax_updates: 1,
             impossible_update_policy,
-        );
+        }
+        .plan();
         assert!(all_updates_done.is_empty());
         assert!(pending_host_phase_2_changes.is_empty());
 
@@ -1391,15 +1492,19 @@ mod test {
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
         let PlannedMgsUpdates { pending_updates: updates, .. } =
-            plan_mgs_updates(
+            MgsUpdatePlanner {
                 log,
-                &collection,
-                &collection.baseboards,
-                &PendingMgsUpdates::new(),
-                &TargetReleaseDescription::TufRepo(repo.clone()),
+                inventory: &collection,
+                current_boards: &collection.baseboards,
+                unsafe_zone_boards: &BTreeMap::new(),
+                current_updates: &PendingMgsUpdates::new(),
+                current_artifacts: &TargetReleaseDescription::TufRepo(
+                    repo.clone(),
+                ),
                 nmax_updates,
                 impossible_update_policy,
-            );
+            }
+            .plan();
         assert!(!updates.is_empty());
         let update = updates.into_iter().next().expect("at least one update");
 
@@ -1415,15 +1520,19 @@ mod test {
         // Plan again.  The configured update should be updated to reflect the
         // new location.
         let PlannedMgsUpdates { pending_updates: new_updates, .. } =
-            plan_mgs_updates(
+            MgsUpdatePlanner {
                 log,
-                &collection,
-                &collection.baseboards,
-                &updates,
-                &TargetReleaseDescription::TufRepo(repo.clone()),
+                inventory: &collection,
+                current_boards: &collection.baseboards,
+                unsafe_zone_boards: &BTreeMap::new(),
+                current_updates: &updates,
+                current_artifacts: &TargetReleaseDescription::TufRepo(
+                    repo.clone(),
+                ),
                 nmax_updates,
                 impossible_update_policy,
-            );
+            }
+            .plan();
         assert!(!new_updates.is_empty());
         let new_update =
             new_updates.into_iter().next().expect("at least one update");

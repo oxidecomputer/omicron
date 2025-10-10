@@ -6,8 +6,6 @@
 
 use crate::external_api::params;
 use crate::external_api::shared;
-use crate::external_api::views;
-use chrono::Utc;
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
@@ -80,38 +78,12 @@ impl super::Nexus {
         // https://github.com/oxidecomputer/omicron/issues/8881
         let ip_version = pool_params.ip_version.into();
 
-        let pool = match (
-            pool_params.pool_type.clone(),
-            pool_params.switch_port_uplinks.is_some(),
-        ) {
-            (shared::IpPoolType::Unicast, true) => {
-                return Err(Error::invalid_request(
-                    "switch_port_uplinks are only allowed for multicast IP pools",
-                ));
-            }
-            (shared::IpPoolType::Unicast, false) => {
-                if pool_params.mvlan.is_some() {
-                    return Err(Error::invalid_request(
-                        "mvlan is only allowed for multicast IP pools",
-                    ));
-                }
+        let pool = match pool_params.pool_type.clone() {
+            shared::IpPoolType::Unicast => {
                 IpPool::new(&pool_params.identity, ip_version)
             }
-            (shared::IpPoolType::Multicast, _) => {
-                let switch_port_ids = self
-                    .resolve_switch_port_ids(
-                        opctx,
-                        self.rack_id(),
-                        &pool_params.switch_port_uplinks,
-                    )
-                    .await?;
-
-                IpPool::new_multicast(
-                    &pool_params.identity,
-                    ip_version,
-                    switch_port_ids,
-                    pool_params.mvlan,
-                )
+            shared::IpPoolType::Multicast => {
+                IpPool::new_multicast(&pool_params.identity, ip_version)
             }
         };
 
@@ -316,21 +288,7 @@ impl super::Nexus {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
-        let switch_port_ids = self
-            .resolve_switch_port_ids(
-                opctx,
-                self.rack_id(),
-                &updates.switch_port_uplinks,
-            )
-            .await?;
-
-        let updates_db = IpPoolUpdate {
-            name: updates.identity.name.clone().map(Into::into),
-            description: updates.identity.description.clone(),
-            switch_port_uplinks: switch_port_ids,
-            mvlan: updates.mvlan.map(|vid| u16::from(vid).into()),
-            time_modified: Utc::now(),
-        };
+        let updates_db = IpPoolUpdate::from(updates.clone());
 
         self.db_datastore.ip_pool_update(opctx, &authz_pool, updates_db).await
     }
@@ -543,100 +501,5 @@ impl super::Nexus {
             .await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
-    }
-
-    async fn resolve_switch_port_ids(
-        &self,
-        opctx: &OpContext,
-        rack_id: Uuid,
-        uplinks: &Option<Vec<params::SwitchPortUplink>>,
-    ) -> Result<Option<Vec<Uuid>>, Error> {
-        match uplinks {
-            None => Ok(None),
-            Some(list) => {
-                let mut ids = Vec::with_capacity(list.len());
-
-                for uplink in list {
-                    let switch_location =
-                        Name::from(uplink.switch_location.clone());
-                    let port_name = Name::from(uplink.port_name.clone());
-                    let id = self
-                        .db_datastore
-                        .switch_port_get_id(
-                            opctx,
-                            rack_id,
-                            switch_location,
-                            port_name,
-                        )
-                        .await
-                        .map_err(|_| {
-                            Error::invalid_value(
-                                "switch_port_uplinks",
-                                format!("Switch port '{}' not found", uplink),
-                            )
-                        })?;
-                    ids.push(id);
-                }
-                Ok(Some(ids))
-            }
-        }
-    }
-
-    /// Convert IP pool with proper switch port name resolution in an async
-    /// context.
-    pub(crate) async fn ip_pool_to_view(
-        &self,
-        opctx: &OpContext,
-        pool: db::model::IpPool,
-    ) -> Result<views::IpPool, Error> {
-        let identity = pool.identity();
-        let pool_type = pool.pool_type;
-
-        // Convert switch port UUIDs to "switch.port" format
-        let switch_port_uplinks = self
-            .resolve_switch_port_names(opctx, &pool.switch_port_uplinks)
-            .await?;
-
-        let mvlan = pool.mvlan.map(|vlan| vlan.into());
-
-        Ok(views::IpPool {
-            identity,
-            ip_version: pool.ip_version.into(),
-            pool_type: pool_type.into(),
-            switch_port_uplinks,
-            mvlan,
-        })
-    }
-
-    // Convert switch port UUIDs to "switch.port" format for views
-    async fn resolve_switch_port_names(
-        &self,
-        opctx: &OpContext,
-        switch_port_ids: &Option<Vec<Uuid>>,
-    ) -> Result<Option<Vec<String>>, Error> {
-        match switch_port_ids {
-            None => Ok(None),
-            Some(ids) => {
-                let mut names = Vec::with_capacity(ids.len());
-                for &id in ids {
-                    let switch_port = self
-                        .db_datastore
-                        .switch_port_get(opctx, id)
-                        .await
-                        .map_err(|_| {
-                            Error::internal_error(&format!(
-                                "Switch port with ID {} not found",
-                                id
-                            ))
-                        })?;
-                    let name = format!(
-                        "{}.{}",
-                        switch_port.switch_location, switch_port.port_name
-                    );
-                    names.push(name);
-                }
-                Ok(Some(names))
-            }
-        }
     }
 }

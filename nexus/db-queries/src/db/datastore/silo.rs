@@ -192,47 +192,73 @@ impl DataStore {
         let silo_admin_group_ensure_query = if let Some(ref admin_group_name) =
             new_silo_params.admin_group_name
         {
-            let silo_admin_group_ensure_query =
-                DataStore::silo_group_ensure_query(
-                    &nexus_opctx,
-                    &authz_silo,
-                    db::model::SiloGroup::new(
-                        silo_group_id,
-                        silo_id,
-                        admin_group_name.clone(),
-                    ),
-                )
-                .await?;
+            let maybe_silo_admin_group =
+                match new_silo_params.identity_mode.user_provision_type() {
+                    shared::UserProvisionType::ApiOnly => {
+                        Some(db::model::SiloGroup::new_api_only(
+                            silo_group_id,
+                            silo_id,
+                            admin_group_name.clone(),
+                        ))
+                    }
 
-            Some(silo_admin_group_ensure_query)
+                    shared::UserProvisionType::Jit => {
+                        Some(db::model::SiloGroup::new_jit(
+                            silo_group_id,
+                            silo_id,
+                            admin_group_name.clone(),
+                        ))
+                    }
+
+                    shared::UserProvisionType::Scim => {
+                        // Do not create any group automatically, the SCIM
+                        // provisioning client is responsible for all user and
+                        // group CRUD.
+                        None
+                    }
+                };
+
+            if let Some(silo_admin_group) = maybe_silo_admin_group {
+                let silo_admin_group_ensure_query =
+                    DataStore::silo_group_ensure_query(
+                        &nexus_opctx,
+                        &authz_silo,
+                        silo_admin_group,
+                    )
+                    .await?;
+
+                Some(silo_admin_group_ensure_query)
+            } else {
+                None
+            }
         } else {
             None
         };
 
-        let silo_admin_group_role_assignment_queries = if new_silo_params
-            .admin_group_name
-            .is_some()
-        {
-            // Grant silo admin role for members of the admin group.
-            let policy = shared::Policy {
-                role_assignments: vec![shared::RoleAssignment::for_silo_group(
-                    silo_group_id,
-                    SiloRole::Admin,
-                )],
+        let silo_admin_group_role_assignment_queries =
+            if silo_admin_group_ensure_query.is_some() {
+                // Grant silo admin role for members of the admin group.
+                let policy = shared::Policy {
+                    role_assignments: vec![
+                        shared::RoleAssignment::for_silo_group(
+                            silo_group_id,
+                            SiloRole::Admin,
+                        ),
+                    ],
+                };
+
+                let silo_admin_group_role_assignment_queries =
+                    DataStore::role_assignment_replace_visible_queries(
+                        opctx,
+                        &authz_silo,
+                        &policy.role_assignments,
+                    )
+                    .await?;
+
+                Some(silo_admin_group_role_assignment_queries)
+            } else {
+                None
             };
-
-            let silo_admin_group_role_assignment_queries =
-                DataStore::role_assignment_replace_visible_queries(
-                    opctx,
-                    &authz_silo,
-                    &policy.role_assignments,
-                )
-                .await?;
-
-            Some(silo_admin_group_role_assignment_queries)
-        } else {
-            None
-        };
 
         // This method uses nested transactions, which are not supported
         // with retryable transactions.
@@ -505,6 +531,10 @@ impl DataStore {
                 silo_user::dsl::silo_user
                     .filter(silo_user::dsl::silo_id.eq(id))
                     .filter(silo_user::dsl::time_deleted.is_null())
+                    .filter(
+                        silo_user::dsl::user_provision_type
+                            .eq(db_silo.user_provision_type),
+                    )
                     .select(silo_user::dsl::id),
             ),
         )
@@ -520,6 +550,10 @@ impl DataStore {
         let updated_rows = diesel::update(silo_user::dsl::silo_user)
             .filter(silo_user::dsl::silo_id.eq(id))
             .filter(silo_user::dsl::time_deleted.is_null())
+            .filter(
+                silo_user::dsl::user_provision_type
+                    .eq(db_silo.user_provision_type),
+            )
             .set(silo_user::dsl::time_deleted.eq(now))
             .execute_async(&*conn)
             .await
@@ -538,6 +572,10 @@ impl DataStore {
                         silo_group::dsl::silo_group
                             .filter(silo_group::dsl::silo_id.eq(id))
                             .filter(silo_group::dsl::time_deleted.is_null())
+                            .filter(
+                                silo_group::dsl::user_provision_type
+                                    .eq(db_silo.user_provision_type),
+                            )
                             .select(silo_group::dsl::id),
                     ),
                 )
@@ -556,6 +594,10 @@ impl DataStore {
         let updated_rows = diesel::update(silo_group::dsl::silo_group)
             .filter(silo_group::dsl::silo_id.eq(id))
             .filter(silo_group::dsl::time_deleted.is_null())
+            .filter(
+                silo_group::dsl::user_provision_type
+                    .eq(db_silo.user_provision_type),
+            )
             .set(silo_group::dsl::time_deleted.eq(now))
             .execute_async(&*conn)
             .await

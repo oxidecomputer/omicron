@@ -20,8 +20,8 @@ use crate::services::{self, ServiceManager, UnderlayInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
+use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
-use crate::zone_bundle::{self, ZoneBundler};
 use anyhow::anyhow;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
@@ -68,7 +68,7 @@ use sled_agent_types::instance::{
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
-    PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
+    PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
 use sled_agent_types::zone_images::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
@@ -612,7 +612,6 @@ impl SledAgent {
                 etherstub_vnic,
                 service_manager: services.clone(),
                 metrics_queue: metrics_manager.request_queue(),
-                zone_bundler: long_running_task_handles.zone_bundler.clone(),
             },
             SledAgentArtifactStoreWrapper(Arc::clone(&artifact_store)),
             config_reconciler_spawn_token,
@@ -1354,7 +1353,6 @@ struct ReconcilerFacilities {
     etherstub_vnic: EtherstubVnic,
     service_manager: ServiceManager,
     metrics_queue: MetricsRequestQueue,
-    zone_bundler: ZoneBundler,
 }
 
 impl SledAgentFacilities for ReconcilerFacilities {
@@ -1414,15 +1412,6 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);
-    }
-
-    async fn zone_bundle_create(
-        &self,
-        zone: &RunningZone,
-        cause: ZoneBundleCause,
-    ) -> anyhow::Result<()> {
-        self.zone_bundler.create(zone, cause).await?;
-        Ok(())
     }
 }
 

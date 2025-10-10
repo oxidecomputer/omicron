@@ -436,8 +436,8 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "b3cdd095437f388069aa57be5efac4b4fadc7b4f" }
 dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.2.1"
-dropshot-api-manager-types = "0.2.1"
+dropshot-api-manager = "0.2.2"
+dropshot-api-manager-types = "0.2.2"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -791,8 +791,11 @@ zone = { version = "0.3.1", default-features = false, features = ["async"] }
 # the kinds). However, uses of omicron-uuid-kinds _within omicron_ will have
 # std and the other features enabled because they'll refer to it via
 # omicron-uuid-kinds.workspace = true.
-newtype-uuid = { version = "1.2.4", default-features = false }
+newtype-uuid = { version = "1.3.1", default-features = false }
+newtype-uuid-macros = "0.1.0"
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
+
+scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs" }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that

@@ -295,9 +295,7 @@ async fn rack_prepare(
                         name: pool_name.parse().unwrap(),
                         description: "Default IP pool".to_string(),
                         ip_version,
-                        mvlan: None,
                         pool_type: IpPoolType::Unicast,
-                        switch_port_uplinks: None,
                     })
                     .send()
                     .await?;

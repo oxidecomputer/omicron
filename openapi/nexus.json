@@ -10968,6 +10968,203 @@
         }
       }
     },
+    "/v1/system/scim/tokens": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "List SCIM tokens",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
+        "operationId": "scim_token_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ScimClientBearerToken",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScimClientBearerToken"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Create SCIM token",
+        "description": "Specify the silo by name or ID using the `silo` query parameter. Be sure to save the bearer token in the response. It will not be retrievable later through the token view and list endpoints.",
+        "operationId": "scim_token_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScimClientBearerTokenValue"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Delete all SCIM tokens",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
+        "operationId": "scim_token_delete_all",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/scim/tokens/{token_id}": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Fetch SCIM token",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
+        "operationId": "scim_token_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScimClientBearerToken"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "Delete SCIM token",
+        "description": "Specify the silo by name or ID using the `silo` query parameter.",
+        "operationId": "scim_token_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/silo-quotas": {
       "get": {
         "tags": [
@@ -21926,13 +22123,6 @@
               }
             ]
           },
-          "mvlan": {
-            "nullable": true,
-            "description": "MVLAN ID for multicast pools Only present for multicast pools.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -21948,14 +22138,6 @@
                 "$ref": "#/components/schemas/IpPoolType"
               }
             ]
-          },
-          "switch_port_uplinks": {
-            "nullable": true,
-            "description": "Switch port uplinks for multicast pools (format: \"switchN.portM\") Only present for multicast pools.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -21994,15 +22176,6 @@
               }
             ]
           },
-          "mvlan": {
-            "nullable": true,
-            "description": "VLAN ID for multicast pools. Only applies to multicast pools, ignored for unicast pools.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VlanId"
-              }
-            ]
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
@@ -22014,14 +22187,6 @@
                 "$ref": "#/components/schemas/IpPoolType"
               }
             ]
-          },
-          "switch_port_uplinks": {
-            "nullable": true,
-            "description": "Rack switch uplinks that carry multicast traffic out of the rack to external groups. Only applies to multicast pools; ignored for unicast pools.\n\nFormat: list of `<switch>.<port>` strings (for example, `switch0.qsfp0`), or objects with `switch_location` and `port_name`.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortUplink"
-            }
           }
         },
         "required": [
@@ -22196,15 +22361,6 @@
             "nullable": true,
             "type": "string"
           },
-          "mvlan": {
-            "nullable": true,
-            "description": "VLAN ID for multicast pools. Only applies to multicast pools, ignored for unicast pools.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VlanId"
-              }
-            ]
-          },
           "name": {
             "nullable": true,
             "allOf": [
@@ -22212,14 +22368,6 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
-          },
-          "switch_port_uplinks": {
-            "nullable": true,
-            "description": "Rack switch uplinks that carry multicast traffic out of the rack to external groups. Only applies to multicast pools; ignored for unicast pools.\n\nFormat: list of `<switch>.<port>` strings (for example, `switch0.qsfp0`), or objects with `switch_location` and `port_name`.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SwitchPortUplink"
-            }
           }
         }
       },
@@ -24627,6 +24775,55 @@
           "technical_contact_email"
         ]
       },
+      "ScimClientBearerToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "time_created"
+        ]
+      },
+      "ScimClientBearerTokenValue": {
+        "description": "The POST response is the only time the generated bearer token is returned to the client.",
+        "type": "object",
+        "properties": {
+          "bearer_token": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_expires": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "bearer_token",
+          "id",
+          "time_created"
+        ]
+      },
       "ServiceIcmpConfig": {
         "description": "Configuration of inbound ICMP allowed by API services.",
         "type": "object",
@@ -24846,6 +25043,13 @@
             "type": "string",
             "enum": [
               "local_only"
+            ]
+          },
+          {
+            "description": "Users are authenticated with SAML using an external authentication provider. Users and groups are managed with SCIM API calls, likely from the same authentication provider.",
+            "type": "string",
+            "enum": [
+              "saml_scim"
             ]
           }
         ]
@@ -26626,32 +26830,6 @@
           "items"
         ]
       },
-      "SwitchPortUplink": {
-        "description": "Switch port uplink specification for multicast IP pools. Combines switch location and port name in \"switchN.portM\" format.",
-        "type": "object",
-        "properties": {
-          "port_name": {
-            "description": "Port name (e.g., \"qsfp0\")",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "switch_location": {
-            "description": "Switch location (e.g., \"switch0\")",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        },
-        "required": [
-          "port_name",
-          "switch_location"
-        ]
-      },
       "SwitchResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -27694,12 +27872,6 @@
           "memory",
           "storage"
         ]
-      },
-      "VlanId": {
-        "description": "Wrapper around a VLAN ID, ensuring it is valid.",
-        "type": "integer",
-        "format": "uint16",
-        "minimum": 0
       },
       "Vni": {
         "description": "A Geneve Virtual Network Identifier",

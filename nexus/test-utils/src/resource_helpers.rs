@@ -296,8 +296,6 @@ pub async fn create_multicast_ip_pool(
             ip_range
                 .map(|r| r.version())
                 .unwrap_or_else(|| views::IpVersion::V4),
-            None, // No switch port uplinks for test helper
-            None, // No VLAN ID for test helper
         ),
     )
     .await;

@@ -17,7 +17,7 @@ use sled_agent_api::v5;
 // Generate v5 client from v5 OpenAPI spec (with enhanced multicast support)
 mod v5_client {
     progenitor::generate_api!(
-        spec = "../openapi/sled-agent/sled-agent-5.0.0-89f1f7.json",
+        spec = "../openapi/sled-agent/sled-agent-5.0.0-253577.json",
         interface = Positional,
         inner_type = slog::Logger,
         derives = [schemars::JsonSchema, Clone, Eq, PartialEq],

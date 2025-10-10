@@ -8,9 +8,7 @@ use dpd_client::types::{
 };
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::db;
-use omicron_common::address::DENDRITE_PORT;
 use omicron_common::{address::MGD_PORT, api::external::SwitchLocation};
-use slog::o;
 use std::{collections::HashMap, net::SocketAddrV6};
 
 pub(crate) fn build_mgd_clients(
@@ -29,44 +27,6 @@ pub(crate) fn build_mgd_clients(
         clients.push((*location, client));
     }
     clients.into_iter().collect::<HashMap<_, _>>()
-}
-
-/// Build DPD clients for each switch location using default port.
-pub fn build_dpd_clients(
-    mappings: &HashMap<SwitchLocation, std::net::Ipv6Addr>,
-    log: &slog::Logger,
-) -> HashMap<SwitchLocation, dpd_client::Client> {
-    build_dpd_clients_with_ports(mappings, None, log)
-}
-
-/// Build DPD clients for each switch location with optional custom ports.
-pub fn build_dpd_clients_with_ports(
-    mappings: &HashMap<SwitchLocation, std::net::Ipv6Addr>,
-    custom_ports: Option<&HashMap<SwitchLocation, u16>>,
-    log: &slog::Logger,
-) -> HashMap<SwitchLocation, dpd_client::Client> {
-    let dpd_clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
-        .iter()
-        .map(|(location, addr)| {
-            let port = custom_ports
-                .and_then(|ports| ports.get(location).copied())
-                .unwrap_or(DENDRITE_PORT);
-
-            let client_state = dpd_client::ClientState {
-                tag: String::from("nexus"),
-                log: log.new(o!(
-                    "component" => "DpdClient"
-                )),
-            };
-
-            let dpd_client = dpd_client::Client::new(
-                &format!("http://[{addr}]:{port}"),
-                client_state,
-            );
-            (*location, dpd_client)
-        })
-        .collect();
-    dpd_clients
 }
 
 pub(crate) fn api_to_dpd_port_settings(

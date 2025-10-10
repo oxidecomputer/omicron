@@ -29,7 +29,6 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
-use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
@@ -88,6 +87,7 @@ mod quiesce;
 mod quota;
 mod rack;
 pub(crate) mod saga;
+mod scim;
 mod session;
 mod silo;
 mod sled;
@@ -888,6 +888,17 @@ impl Nexus {
         )
     }
 
+    /// Returns an [`OpContext`] used for authenticating SCIM requests
+    pub fn opctx_external_scim(&self) -> OpContext {
+        OpContext::for_background(
+            self.log.new(o!("component" => "ExternalScim")),
+            Arc::clone(&self.authz),
+            authn::Context::external_scim(),
+            Arc::clone(&self.db_datastore)
+                as Arc<dyn nexus_auth::storage::Storage>,
+        )
+    }
+
     /// Used as the body of a "stub" endpoint -- one that's currently
     /// unimplemented but that we eventually intend to implement
     ///
@@ -1185,63 +1196,27 @@ pub enum Unimpl {
     ProtectedLookup(Error),
 }
 
+/// Returns a mapping of clients for the Dendrite daemons of reachable switch zones.
+/// If we are unable to communicate with the switch zone and determine the mapping
+/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn dpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
-    // Try DNS + socket + custom ports support first (works in test environments)
-    match resolver.lookup_all_socket_v6(ServiceName::Dendrite).await {
-        Ok(socket_addrs) => {
-            // DNS has port information - use it to get mappings and custom ports
-            let mut mappings = HashMap::new();
-            let mut custom_ports = HashMap::new();
-
-            for socket_addr in socket_addrs {
-                let mappings_result =
-                    map_switch_zone_addrs(log, vec![*socket_addr.ip()]).await;
-                let switch_mappings = match mappings_result {
-                    Ok(m) => m,
-                    Err(e) => {
-                        return Err(format!(
-                            "failed to map switch addresses: {}",
-                            e
-                        ));
-                    }
-                };
-
-                for (location, addr) in switch_mappings {
-                    mappings.insert(location, addr);
-                    custom_ports.insert(location, socket_addr.port());
-                }
-            }
-
-            Ok(build_dpd_clients_with_ports(
-                &mappings,
-                Some(&custom_ports),
-                log,
-            ))
+    let dpd_socketaddrs = match resolver
+        .lookup_all_socket_v6(ServiceName::Dendrite)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+            return Err(e.to_string());
         }
-        Err(_) => {
-            // Fall back to config-based approach (IP only with hardcoded port)
-            let mappings = switch_zone_address_mappings(resolver, log).await?;
-            Ok(build_dpd_clients_with_ports(&mappings, None, log))
-        }
-    }
-}
+    };
 
-/// Build DPD clients with optional custom ports, defaulting to DENDRITE_PORT
-fn build_dpd_clients_with_ports(
-    mappings: &HashMap<SwitchLocation, std::net::Ipv6Addr>,
-    custom_ports: Option<&HashMap<SwitchLocation, u16>>,
-    log: &slog::Logger,
-) -> HashMap<SwitchLocation, dpd_client::Client> {
-    mappings
+    let clients: Vec<(SocketAddrV6, dpd_client::Client)> = dpd_socketaddrs
         .iter()
-        .map(|(location, addr)| {
-            let port = custom_ports
-                .and_then(|ports| ports.get(location).copied())
-                .unwrap_or(DENDRITE_PORT);
-
+        .map(|socket_addr| {
             let client_state = dpd_client::ClientState {
                 tag: String::from("nexus"),
                 log: log.new(o!(
@@ -1249,19 +1224,55 @@ fn build_dpd_clients_with_ports(
                 )),
             };
 
-            let dpd_client = dpd_client::Client::new(
-                &format!("http://[{addr}]:{port}"),
+            let client = dpd_client::Client::new(
+                &format!("http://{socket_addr}"),
                 client_state,
             );
-            (*location, dpd_client)
+
+            (*socket_addr, client)
         })
-        .collect()
+        .collect();
+
+    let mut mappings: HashMap<SwitchLocation, dpd_client::Client> =
+        HashMap::new();
+
+    for (addr, client) in clients {
+        let switch_slot = match client.switch_identifiers().await {
+            Ok(response) => response.slot,
+            Err(e) => {
+                error!(
+                    log,
+                    "failed to determine switch slot for dendrite";
+                    "error" => %e,
+                    "addr" => %addr,
+                );
+                continue;
+            }
+        };
+
+        let location = match switch_slot {
+            0 => SwitchLocation::Switch0,
+            1 => SwitchLocation::Switch1,
+            _ => {
+                warn!(log, "unexpected value for switch slot: {switch_slot}");
+                continue;
+            }
+        };
+
+        mappings.insert(location, client);
+    }
+
+    Ok(mappings)
 }
 
 // We currently ignore the rack_id argument here, as the shared
 // switch_zone_address_mappings function doesn't allow filtering on the rack ID.
 // Since we only have a single rack, this is OK for now.
 // TODO: https://github.com/oxidecomputer/omicron/issues/1276
+//
+/// Returns a mapping of clients for the LLDP daemons of reachable switch zones.
+/// If we are unable to communicate with the switch zone and determine the mapping
+/// of SwitchLocation -> Zone Underlay Address, we omit an entry for that client.
 pub(crate) async fn lldpd_clients(
     resolver: &internal_dns_resolver::Resolver,
     _rack_id: Uuid,
@@ -1283,35 +1294,29 @@ pub(crate) async fn lldpd_clients(
     Ok(clients)
 }
 
-// Look up Dendrite addresses in DNS then determine the switch location for
-// each address DNS returns.  If we fail to lookup ServiceName::Dendrite, we
-// return error, otherwise we keep looping until we can determine the switch
-// location of all addresses returned to us from the lookup.
+/// Look up Dendrite addresses in DNS then determine the switch location of
+/// any addresses we're able to resolve the SwitchLocation for. If a switch
+/// zone is down, the resolution process will fail and the entry will be
+/// missing from the result.
+///
+/// # Errors
+/// If we fail to resolve the ipv6 addresses of the Dendrite service we
+/// return an error
 async fn switch_zone_address_mappings(
     resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
-    loop {
-        let switch_zone_addresses = match resolver
-            .lookup_all_ipv6(ServiceName::Dendrite)
-            .await
-        {
-            Ok(addrs) => addrs,
-            Err(e) => {
-                error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
-                return Err(e.to_string());
-            }
-        };
-        match map_switch_zone_addrs(&log, switch_zone_addresses).await {
-            Ok(mappings) => {
-                return Ok(mappings);
-            }
-            Err(e) => {
-                warn!(log, "Failed to map switch zone addr: {e}, retrying");
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
+    let switch_zone_addresses = match resolver
+        .lookup_all_ipv6(ServiceName::Dendrite)
+        .await
+    {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+            return Err(e.to_string());
         }
-    }
+    };
+    Ok(map_switch_zone_addrs(&log, switch_zone_addresses).await)
 }
 
 // TODO: #3596 Allow updating of Nexus from `handoff_to_nexus()`
@@ -1322,27 +1327,23 @@ async fn switch_zone_address_mappings(
 // via an API call. We probably will need to rethink how we're looking
 // up switch addresses as a whole, since how DNS is currently setup for
 // Dendrite is insufficient for what we need.
-pub(crate) async fn map_switch_zone_addrs(
+//
+/// Query MGS in each switch zone to learn which switch slot is being managed by
+/// the services located on a given ipv6 address. This information can be used
+/// along with the well known port numbers to target a specific switch + service
+/// combination.
+///
+/// We return whatever we're able to successfully resolve. In the event of
+/// a communication timeout or other failure with MGS, the SwitchLocation -> Ipv6Addr
+/// mapping will be missing from the returned HashMap. Callers will need to inspect
+/// the contents to ensure what they expect to be there is actually there.
+async fn map_switch_zone_addrs(
     log: &Logger,
     switch_zone_addresses: Vec<Ipv6Addr>,
-) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
-    // In test environments, MGS may not be running, so provide fallback logic
-    // Check for typical test patterns: single localhost address
-    if switch_zone_addresses.len() == 1
-        && switch_zone_addresses[0] == Ipv6Addr::LOCALHOST
-    {
-        info!(
-            log,
-            "Single localhost dendrite detected - attempting MGS connection, will fallback if unavailable";
-            "zone_address" => #?switch_zone_addresses[0]
-        );
-    }
-
+) -> HashMap<SwitchLocation, Ipv6Addr> {
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
-    let is_single_localhost = switch_zone_addresses.len() == 1
-        && switch_zone_addresses[0] == Ipv6Addr::LOCALHOST;
 
     for addr in switch_zone_addresses {
         let mgs_client = MgsClient::new(
@@ -1350,37 +1351,25 @@ pub(crate) async fn map_switch_zone_addrs(
             log.new(o!("component" => "MgsClient")),
         );
 
-        info!(log, "determining switch slot managed by dendrite zone"; "zone_address" => #?addr);
+        info!(log, "determining switch slot managed by switch zone"; "zone_address" => #?addr);
         let switch_slot = match mgs_client.sp_local_switch_id().await {
             Ok(switch) => {
                 info!(
                     log,
-                    "identified switch slot for dendrite zone";
+                    "identified switch slot for switch zone";
                     "slot" => #?switch,
                     "zone_address" => #?addr
                 );
                 switch.slot
             }
             Err(e) => {
-                warn!(
+                error!(
                     log,
-                    "failed to identify switch slot for dendrite";
+                    "failed to identify switch slot for switch zone";
                     "zone_address" => #?addr,
                     "reason" => #?e
                 );
-
-                // If we can't reach MGS and this looks like a test environment, make assumptions
-                if is_single_localhost {
-                    warn!(
-                        log,
-                        "MGS unavailable for localhost dendrite - assuming Switch0 for test/development environment";
-                        "zone_address" => #?addr
-                    );
-                    0 // Assume localhost is Switch0 in test/development environments
-                } else {
-                    // In production or multi-address scenarios, fail hard
-                    return Err(format!("Cannot determine switch slot: {}", e));
-                }
+                continue;
             }
         };
 
@@ -1399,12 +1388,14 @@ pub(crate) async fn map_switch_zone_addrs(
             }
         };
     }
+
     info!(
         log,
-        "completed mapping dendrite zones to switch slots";
+        "completed mapping switch zones to switch slots";
         "mappings" => #?switch_zone_addrs
     );
-    Ok(switch_zone_addrs)
+
+    switch_zone_addrs
 }
 
 /// Begin configuring an external HTTP client, returning a

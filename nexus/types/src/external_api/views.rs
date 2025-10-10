@@ -396,14 +396,6 @@ pub struct IpPool {
     pub ip_version: IpVersion,
     /// Type of IP pool (unicast or multicast)
     pub pool_type: shared::IpPoolType,
-    /// Switch port uplinks for multicast pools (format: "switchN.portM")
-    /// Only present for multicast pools.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub switch_port_uplinks: Option<Vec<String>>,
-    /// MVLAN ID for multicast pools
-    /// Only present for multicast pools.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mvlan: Option<u16>,
 }
 
 /// The utilization of IP addresses in a pool.
@@ -1630,6 +1622,25 @@ fn expected_one_of<T: strum::VariantArray + fmt::Display>() -> String {
         }
     }
     msg
+}
+
+// SCIM
+
+/// The POST response is the only time the generated bearer token is returned to
+/// the client.
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct ScimClientBearerTokenValue {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
+    pub bearer_token: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct ScimClientBearerToken {
+    pub id: Uuid,
+    pub time_created: DateTime<Utc>,
+    pub time_expires: Option<DateTime<Utc>>,
 }
 
 #[cfg(test)]

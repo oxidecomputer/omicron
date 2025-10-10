@@ -143,8 +143,6 @@ async fn test_multicast_group_create_fails_in_other_silo_pool(
                 .to_string(),
         },
         IpVersion::V4,
-        None,
-        None,
     );
 
     object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)

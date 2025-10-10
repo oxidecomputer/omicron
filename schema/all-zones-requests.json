@@ -241,7 +241,7 @@
           ]
         },
         "id": {
-          "$ref": "#/definitions/TypedUuidForOmicronZoneKind"
+          "$ref": "#/definitions/OmicronZoneUuid"
         },
         "image_source": {
           "default": {
@@ -685,6 +685,15 @@
         }
       ]
     },
+    "OmicronZoneUuid": {
+      "type": "string",
+      "format": "uuid",
+      "x-rust-type": {
+        "crate": "omicron-uuid-kinds",
+        "path": "omicron_uuid_kinds::OmicronZoneUuid",
+        "version": "*"
+      }
+    },
     "SourceNatConfig": {
       "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
       "type": "object",
@@ -712,10 +721,6 @@
           "minimum": 0.0
         }
       }
-    },
-    "TypedUuidForOmicronZoneKind": {
-      "type": "string",
-      "format": "uuid"
     },
     "Vni": {
       "description": "A Geneve Virtual Network Identifier",

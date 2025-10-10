@@ -107,6 +107,7 @@ use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
+use super::tasks::inventory_load;
 use super::tasks::lookup_region_port;
 use super::tasks::metrics_producer_gc;
 use super::tasks::multicast::MulticastGroupReconciler;
@@ -145,6 +146,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
@@ -161,6 +163,17 @@ use uuid::Uuid;
 pub(crate) struct BackgroundTasksInternal {
     pub(crate) external_endpoints:
         watch::Receiver<Option<external_endpoints::ExternalEndpoints>>,
+    inventory_load_rx: watch::Receiver<Option<Arc<Collection>>>,
+}
+
+impl BackgroundTasksInternal {
+    pub(crate) fn inventory_load_rx(
+        &self,
+    ) -> watch::Receiver<Option<Arc<Collection>>> {
+        let mut rx = self.inventory_load_rx.clone();
+        rx.mark_unchanged();
+        rx
+    }
 }
 
 /// Initializes the background task subsystem
@@ -172,6 +185,7 @@ pub struct BackgroundTasksInitializer {
     driver: Driver,
     external_endpoints_tx:
         watch::Sender<Option<external_endpoints::ExternalEndpoints>>,
+    inventory_load_tx: watch::Sender<Option<Arc<Collection>>>,
 }
 
 impl BackgroundTasksInitializer {
@@ -188,10 +202,12 @@ impl BackgroundTasksInitializer {
     {
         let (external_endpoints_tx, external_endpoints_rx) =
             watch::channel(None);
+        let (inventory_load_tx, inventory_load_rx) = watch::channel(None);
 
         let initializer = BackgroundTasksInitializer {
             driver: Driver::new(),
             external_endpoints_tx,
+            inventory_load_tx,
         };
 
         let background_tasks = BackgroundTasks {
@@ -204,6 +220,7 @@ impl BackgroundTasksInitializer {
             task_nat_cleanup: Activator::new(),
             task_bfd_manager: Activator::new(),
             task_inventory_collection: Activator::new(),
+            task_inventory_loader: Activator::new(),
             task_support_bundle_collector: Activator::new(),
             task_physical_disk_adoption: Activator::new(),
             task_decommissioned_disk_cleaner: Activator::new(),
@@ -250,6 +267,7 @@ impl BackgroundTasksInitializer {
 
         let internal = BackgroundTasksInternal {
             external_endpoints: external_endpoints_rx,
+            inventory_load_rx,
         };
 
         (initializer, background_tasks, internal)
@@ -288,6 +306,7 @@ impl BackgroundTasksInitializer {
             task_nat_cleanup,
             task_bfd_manager,
             task_inventory_collection,
+            task_inventory_loader,
             task_support_bundle_collector,
             task_physical_disk_adoption,
             task_decommissioned_disk_cleaner,
@@ -470,14 +489,14 @@ impl BackgroundTasksInitializer {
         // This depends on the "output" of the blueprint executor in
         // order to automatically trigger inventory collection whenever the
         // blueprint executor runs.
-        let inventory_watcher = {
+        let inventory_collect_watcher = {
             let collector = inventory_collection::InventoryCollector::new(
                 &opctx,
                 datastore.clone(),
                 resolver.clone(),
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
-                config.inventory.disable,
+                config.inventory.disable_collect,
             );
             let inventory_watcher = collector.watcher();
             driver.register(TaskDefinition {
@@ -485,7 +504,7 @@ impl BackgroundTasksInitializer {
                 description:
                     "collects hardware and software inventory data from the \
                      whole system",
-                period: config.inventory.period_secs,
+                period: config.inventory.period_secs_collect,
                 task_impl: Box::new(collector),
                 opctx: opctx.child(BTreeMap::new()),
                 watchers: vec![Box::new(rx_blueprint_exec.clone())],
@@ -495,6 +514,23 @@ impl BackgroundTasksInitializer {
             inventory_watcher
         };
 
+        // Background task: inventory loader
+        let inventory_loader = inventory_load::InventoryLoader::new(
+            datastore.clone(),
+            self.inventory_load_tx,
+        );
+        let inventory_load_watcher = inventory_loader.watcher();
+        driver.register(TaskDefinition {
+            name: "inventory_loader",
+            description: "loads the latest inventory collection from the DB",
+            period: config.inventory.period_secs_load,
+            task_impl: Box::new(inventory_loader),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(inventory_collect_watcher)],
+            activator: task_inventory_loader,
+        });
+
+        // Background task: reconfigurator config loader
         let reconfigurator_config_loader =
             ReconfiguratorConfigLoader::new(datastore.clone());
         let reconfigurator_config_watcher =
@@ -516,7 +552,7 @@ impl BackgroundTasksInitializer {
         let blueprint_planner = blueprint_planner::BlueprintPlanner::new(
             datastore.clone(),
             reconfigurator_config_watcher.clone(),
-            inventory_watcher.clone(),
+            inventory_load_watcher.clone(),
             rx_blueprint.clone(),
         );
         let rx_planner = blueprint_planner.watcher();
@@ -527,7 +563,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(blueprint_planner),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![
-                Box::new(inventory_watcher.clone()),
+                Box::new(inventory_load_watcher.clone()),
                 Box::new(rx_blueprint.clone()),
                 Box::new(reconfigurator_config_watcher),
             ],
@@ -592,13 +628,13 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(
                 physical_disk_adoption::PhysicalDiskAdoption::new(
                     datastore.clone(),
-                    inventory_watcher.clone(),
+                    inventory_load_watcher.clone(),
                     config.physical_disk_adoption.disable,
                     rack_id,
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_watcher.clone())],
+            watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_physical_disk_adoption,
         });
 
@@ -613,10 +649,11 @@ impl BackgroundTasksInitializer {
                 blueprint_rendezvous::BlueprintRendezvous::new(
                     datastore.clone(),
                     rx_blueprint.clone(),
+                    inventory_load_watcher.clone(),
                 ),
             ),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_watcher.clone())],
+            watchers: vec![Box::new(inventory_load_watcher.clone())],
             activator: task_blueprint_rendezvous,
         });
 
@@ -646,6 +683,7 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(ServiceZoneNatTracker::new(
                 datastore.clone(),
                 resolver.clone(),
+                inventory_load_watcher.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
