@@ -587,11 +587,9 @@ pub fn turin_v1() -> CpuIdDump {
     // it and it's not clear what a guest would productively do with it anyway.
     leaf.set_tsc_adjust_msr(false);
 
-    // Turin supports MOVDIR64B and MOVDIRI. These instructions should just work
-    // in guests, but it would be nice to test this before committing to passing
-    // them.
-    leaf.set_movdir64b(false);
-    leaf.set_movdiri(false);
+    // Turin supports MOVDIR64B and MOVDIRI, so pass them through.
+    leaf.set_movdir64b(true);
+    leaf.set_movdiri(true);
 
     // These AVX512 features are present for all Turin processors.
     leaf.set_avx512f(true);
@@ -673,6 +671,30 @@ pub fn turin_v1() -> CpuIdDump {
     let mut leaf = cpuid
         .get_extended_processor_and_feature_identifiers()
         .expect("baseline Milan defines leaf 8000_0001");
+
+    // This is the same as the leaf 1 EAX configured earlier.
+    leaf.set_extended_signature(0x00B00F21);
+
+    // Hide topology extensions. We'd want to set this and set
+    // ThreadsPerComputeUnit to indicate SMT is active, but we'd run afoul of
+    // https://github.com/oxidecomputer/propolis/issues/940, which in turn
+    // really needs us to disallow VM shapes with odd vCPU counts. For now, just
+    // hide topology extensions and we'll get sockets into shape in a later CPU
+    // platform rev.
+    leaf.set_topology_extensions(false);
+    // This is just strange. bhyve supports all six performance counters, so we
+    // *should* be free to set this bit. Linux is fine with this. But
+    // experimentally I've seen that with this bit set and TopologyExtensions
+    // *not* set (and leaves 8000_001D,8000_001E zeroed), Windows Server 2022
+    // gets into an infinite loop somewhere early in boot.
+    //
+    // We want to hide topology extensions for a bit still - we'd like to
+    // indicate SMT there, but that wants some other changes (see above or
+    // Propolis#940)
+    //
+    // So, if we don't have TopologyExtensions, apparently Windows can't have
+    // six perf counters?
+    leaf.set_perf_cntr_extensions(false);
     // RDTSCP requires some bhyve and Propolis work to support, so it is masked
     // off for now.
     leaf.set_rdtscp(false);
@@ -732,8 +754,11 @@ pub fn turin_v1() -> CpuIdDump {
     leaf.set_amd_ermsb(true);
     leaf.set_fast_short_repe_cmpsb(true);
     leaf.set_fast_short_rep_stosb(true);
-    // The EFER write is permitted in bhyve, so this *should* work?
-    leaf.set_automatic_ibrs(true);
+    // The EFER write is permitted in bhyve, so this *should* work? But I'm not
+    // very familiar with ohw this is used in practice or where guest OSes would
+    // find it beneficial. Hide it for now and we'll come back to this for a
+    // broader speculative controls enablement with SPEC_CTRL/PRED_CMD later.
+    leaf.set_automatic_ibrs(false);
     // The EFER write is permitted in bhyve, so this *should* work? But the
     // forward utility of this bit is not as clear, so hide it.
     leaf.set_upper_address_ignore(false);
@@ -747,7 +772,12 @@ pub fn turin_v1() -> CpuIdDump {
     // Cache topology leaves are otherwise left zeroed; if we can avoid getting
     // into it, let's try!
 
-    cpuid.into_source()
+    let mut source = cpuid.into_source();
+    // We've cleared `topology_extensions` above, now remove the leaves so
+    // Propolis doesn't try specializing these; we don't want them presented yet!
+    source.set_leaf(0x8000_001D, None);
+    source.set_leaf(0x8000_001E, None);
+    source
 }
 
 pub fn milan_rfd314() -> CpuIdDump {
@@ -1052,13 +1082,13 @@ mod test {
     // maintaining some details that are disabled due to needed bhyve support
     // and including Turin-specific features as supported and relevant to
     // guests.
-    const TURIN_V1_CPUID: [CpuidEntry; 26] = [
+    const TURIN_V1_CPUID: [CpuidEntry; 25] = [
         cpuid_leaf!(0x0, 0x0000000D, 0x68747541, 0x444D4163, 0x69746E65),
         cpuid_leaf!(0x1, 0x00B00F21, 0x00000800, 0xF6D83203, 0x078BFBFF),
         cpuid_leaf!(0x5, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x6, 0x00000004, 0x00000000, 0x00000000, 0x00000000),
         cpuid_subleaf!(
-            0x7, 0x0, 0x00000001, 0xF1BB03A9, 0x00005F42, 0x00000110
+            0x7, 0x0, 0x00000001, 0xF1BB03A9, 0x18005F42, 0x00000110
         ),
         cpuid_subleaf!(
             0x7, 0x1, 0x00000030, 0x00000000, 0x00000000, 0x00000000
@@ -1085,7 +1115,7 @@ mod test {
             0xD, 0x7, 0x00000400, 0x00000580, 0x00000000, 0x00000000
         ),
         cpuid_leaf!(0x80000000, 0x80000021, 0x68747541, 0x444D4163, 0x69746E65),
-        cpuid_leaf!(0x80000001, 0x00A00F11, 0x40000000, 0x44C001F1, 0x25D3FBFF),
+        cpuid_leaf!(0x80000001, 0x00B00F21, 0x40000000, 0x440001F1, 0x25D3FBFF),
         cpuid_leaf!(0x80000002, 0x6469784F, 0x69562065, 0x61757472, 0x7554206C),
         cpuid_leaf!(0x80000003, 0x2D6E6972, 0x656B696C, 0x6F725020, 0x73736563),
         cpuid_leaf!(0x80000004, 0x2020726F, 0x20202020, 0x20202020, 0x00202020),
@@ -1095,9 +1125,8 @@ mod test {
         cpuid_leaf!(0x8000001A, 0x0000000A, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x8000001E, 0x00000000, 0x00000100, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x80000021, 0x000D8D47, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x80000021, 0x000D8C47, 0x00000000, 0x00000000, 0x00000000),
     ];
 
     // Test that Turin V1 matches the predetermined CPUID leaves written above
