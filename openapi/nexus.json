@@ -21426,54 +21426,6 @@
           "items"
         ]
       },
-      "IoCount": {
-        "description": "A count of bytes / rows accessed during a query.",
-        "type": "object",
-        "properties": {
-          "bytes": {
-            "description": "The number of bytes accessed.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "rows": {
-            "description": "The number of rows accessed.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "bytes",
-          "rows"
-        ]
-      },
-      "IoSummary": {
-        "description": "Summary of the I/O resources used by a query.",
-        "type": "object",
-        "properties": {
-          "read": {
-            "description": "The bytes and rows read by the query.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IoCount"
-              }
-            ]
-          },
-          "written": {
-            "description": "The bytes and rows written by the query.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IoCount"
-              }
-            ]
-          }
-        },
-        "required": [
-          "read",
-          "written"
-        ]
-      },
       "IpNet": {
         "x-rust-type": {
           "crate": "oxnet",
@@ -22591,14 +22543,6 @@
         "description": "The result of a successful OxQL query.",
         "type": "object",
         "properties": {
-          "query_summaries": {
-            "nullable": true,
-            "description": "Summaries of queries run against ClickHouse.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OxqlQuerySummary"
-            }
-          },
           "tables": {
             "description": "Tables resulting from the query, each containing timeseries.",
             "type": "array",
@@ -22609,41 +22553,6 @@
         },
         "required": [
           "tables"
-        ]
-      },
-      "OxqlQuerySummary": {
-        "description": "Basic metadata about the resource usage of a single ClickHouse SQL query.",
-        "type": "object",
-        "properties": {
-          "elapsed_ms": {
-            "description": "The total duration of the ClickHouse query (network plus execution).",
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "id": {
-            "description": "The database-assigned query ID.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "io_summary": {
-            "description": "Summary of the data read and written.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IoSummary"
-              }
-            ]
-          },
-          "query": {
-            "description": "The raw ClickHouse SQL query.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "elapsed_ms",
-          "id",
-          "io_summary",
-          "query"
         ]
       },
       "OxqlTable": {
@@ -26034,11 +25943,6 @@
         "description": "A timeseries query string, written in the Oximeter query language.",
         "type": "object",
         "properties": {
-          "include_summaries": {
-            "description": "Whether to include ClickHouse query summaries in the response.",
-            "default": false,
-            "type": "boolean"
-          },
           "query": {
             "description": "A timeseries query string, written in the Oximeter query language.",
             "type": "string"
