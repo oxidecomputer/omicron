@@ -347,6 +347,19 @@ impl<'a> LookupPath<'a> {
         AddressLot::OwnedName(Root { lookup_root: self }, name)
     }
 
+    /// Select a resource of type MulticastGroup, identified by its name
+    pub fn multicast_group_name<'b, 'c>(
+        self,
+        name: &'b Name,
+    ) -> MulticastGroup<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        MulticastGroup::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type MulticastGroup, identified by its id
     pub fn multicast_group_id(self, id: Uuid) -> MulticastGroup<'a> {
         MulticastGroup::PrimaryKey(Root { lookup_root: self }, id)
     }
@@ -737,15 +750,15 @@ lookup_resource! {
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
+// Miscellaneous resources nested directly below "Fleet"
+
 lookup_resource! {
     name = "MulticastGroup",
-    ancestors = [ "Silo", "Project" ],
+    ancestors = [],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
-
-// Miscellaneous resources nested directly below "Fleet"
 
 lookup_resource! {
     name = "ConsoleSession",

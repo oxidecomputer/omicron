@@ -57,10 +57,10 @@ async fn test_multicast_group_basic_crud(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let group_url = mcast_groups_url(project_name);
+    let group_url = mcast_groups_url();
 
     // Verify empty list initially
-    let groups = list_multicast_groups(&client, project_name).await;
+    let groups = list_multicast_groups(&client).await;
     assert_eq!(groups.len(), 0, "Expected empty list of multicast groups");
 
     // Test creating a multicast group with auto-allocated IP
@@ -72,13 +72,12 @@ async fn test_multicast_group_basic_crud(cptestctx: &ControlPlaneTestContext) {
         multicast_ip: None, // Auto-allocate
         source_ips: None,   // Any-Source Multicast
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let created_group: MulticastGroup =
         object_create(client, &group_url, &params).await;
 
-    wait_for_group_active(client, project_name, group_name).await;
+    wait_for_group_active(client, group_name).await;
 
     assert_eq!(created_group.identity.name, group_name);
     assert_eq!(created_group.identity.description, description);
@@ -86,12 +85,12 @@ async fn test_multicast_group_basic_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(created_group.source_ips.len(), 0);
 
     // Verify we can list and find it
-    let groups = list_multicast_groups(&client, project_name).await;
+    let groups = list_multicast_groups(&client).await;
     assert_eq!(groups.len(), 1, "Expected exactly 1 multicast group");
     assert_groups_eq(&created_group, &groups[0]);
 
     // Verify we can fetch it directly
-    let fetched_group_url = mcast_group_url(project_name, group_name);
+    let fetched_group_url = mcast_group_url(group_name);
     let fetched_group: MulticastGroup =
         object_get(client, &fetched_group_url).await;
     assert_groups_eq(&created_group, &fetched_group);
@@ -133,9 +132,9 @@ async fn test_multicast_group_basic_crud(cptestctx: &ControlPlaneTestContext) {
     object_delete(client, &fetched_group_url).await;
 
     // Wait for group to be deleted (should return 404)
-    wait_for_group_deleted(client, project_name, group_name).await;
+    wait_for_group_deleted(client, group_name).await;
 
-    let groups = list_multicast_groups(&client, project_name).await;
+    let groups = list_multicast_groups(&client).await;
     assert_eq!(groups.len(), 0, "Expected empty list after deletion");
 }
 
@@ -176,7 +175,7 @@ async fn test_multicast_group_with_default_pool(
     // Link the pool to the silo as the default multicast pool
     link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
 
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
 
     // Test creating with default pool (pool: None)
     let params = MulticastGroupCreate {
@@ -187,7 +186,6 @@ async fn test_multicast_group_with_default_pool(
         multicast_ip: None, // Auto-allocate
         source_ips: None,   // Any-Source Multicast
         pool: None,         // Use default multicast pool
-        vpc: None,
     };
 
     let created_group: MulticastGroup =
@@ -195,11 +193,10 @@ async fn test_multicast_group_with_default_pool(
     assert_eq!(created_group.identity.name, group_name);
     assert!(created_group.multicast_ip.is_multicast());
 
-    wait_for_group_active(client, project_name, group_name).await;
+    wait_for_group_active(client, group_name).await;
 
     // Clean up
-    let group_delete_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_delete_url = format!("/v1/multicast-groups/{group_name}");
     object_delete(client, &group_delete_url).await;
 
     // Wait for the multicast group reconciler to process the deletion
@@ -229,7 +226,7 @@ async fn test_multicast_group_with_specific_ip(
         (224, 2, 0, 255),
     )
     .await;
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
 
     // Auto-allocation (should work)
     let auto_params = MulticastGroupCreate {
@@ -240,21 +237,19 @@ async fn test_multicast_group_with_specific_ip(
         multicast_ip: None, // Auto-allocate
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let auto_group: MulticastGroup =
         object_create(client, &group_url, &auto_params).await;
 
-    wait_for_group_active(client, project_name, group_name).await;
+    wait_for_group_active(client, group_name).await;
 
     assert!(auto_group.multicast_ip.is_multicast());
     assert_eq!(auto_group.identity.name, group_name);
     assert_eq!(auto_group.identity.description, "Group with auto-allocated IP");
 
     // Clean up auto-allocated group
-    let auto_delete_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let auto_delete_url = format!("/v1/multicast-groups/{group_name}");
     object_delete(client, &auto_delete_url).await;
 
     // Wait for the multicast group reconciler to process the deletion
@@ -276,7 +271,6 @@ async fn test_multicast_group_with_specific_ip(
         multicast_ip: Some(ipv4_addr),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let explicit_group: MulticastGroup =
@@ -286,12 +280,11 @@ async fn test_multicast_group_with_specific_ip(
     assert_eq!(explicit_group.identity.description, "Group with explicit IPv4");
 
     // Wait for explicit group to become active before deletion
-    wait_for_group_active(client, project_name, explicit_group_name).await;
+    wait_for_group_active(client, explicit_group_name).await;
 
     // Clean up explicit group
-    let explicit_delete_url = format!(
-        "/v1/multicast-groups/{explicit_group_name}?project={project_name}"
-    );
+    let explicit_delete_url =
+        format!("/v1/multicast-groups/{explicit_group_name}");
     object_delete(client, &explicit_delete_url).await;
 
     // Wait for the multicast group reconciler to process the deletion
@@ -321,7 +314,7 @@ async fn test_multicast_group_with_source_ips(
         (232, 11, 0, 255),
     )
     .await;
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
 
     // Test creating with Source-Specific Multicast (SSM) source IPs
     // SSM range is 232.0.0.0/8, so we use our unique SSM range
@@ -338,7 +331,6 @@ async fn test_multicast_group_with_source_ips(
         multicast_ip: Some(ssm_ip),
         source_ips: Some(source_ips.clone()),
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let created_group: MulticastGroup =
@@ -346,7 +338,7 @@ async fn test_multicast_group_with_source_ips(
 
     // Wait for group to become active
     let active_group =
-        wait_for_group_active(client, project_name, group_name).await;
+        wait_for_group_active(client, group_name).await;
 
     // Verify SSM group properties
     assert_eq!(created_group.source_ips, source_ips);
@@ -367,8 +359,7 @@ async fn test_multicast_group_with_source_ips(
     );
 
     // Clean up
-    let group_delete_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_delete_url = format!("/v1/multicast-groups/{group_name}");
     object_delete(client, &group_delete_url).await;
 
     // Wait for the multicast group reconciler to process the deletion
@@ -398,7 +389,7 @@ async fn test_multicast_group_validation_errors(
     )
     .await;
 
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
 
     // Test with non-multicast IP address
     let unicast_ip = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1));
@@ -410,7 +401,6 @@ async fn test_multicast_group_validation_errors(
         multicast_ip: Some(unicast_ip),
         source_ips: None,
         pool: None, // Use default pool for validation test
-        vpc: None,
     };
 
     let error = object_create_error(
@@ -436,7 +426,6 @@ async fn test_multicast_group_validation_errors(
         multicast_ip: Some(link_local_ip),
         source_ips: None,
         pool: None, // Use default pool for validation test
-        vpc: None,
     };
 
     let error = object_create_error(
@@ -477,7 +466,7 @@ async fn test_multicast_group_member_operations(
     .await;
 
     // Create multicast group and instance in parallel
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -486,14 +475,13 @@ async fn test_multicast_group_member_operations(
         multicast_ip: None,
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let (_, instance) = ops::join2(
         async {
             object_create::<_, MulticastGroup>(client, &group_url, &params)
                 .await;
-            wait_for_group_active(client, project_name, group_name).await;
+            wait_for_group_active(client, group_name).await;
         },
         create_instance(client, project_name, instance_name),
     )
@@ -501,7 +489,7 @@ async fn test_multicast_group_member_operations(
 
     // Test listing members (should be empty initially)
     let members =
-        list_multicast_group_members(&client, project_name, group_name).await;
+        list_multicast_group_members(&client, group_name).await;
     assert_eq!(members.len(), 0, "Expected empty member list initially");
 
     // Test adding instance to multicast group
@@ -525,7 +513,6 @@ async fn test_multicast_group_member_operations(
     // Member only transitions to "Joined" AFTER successful DPD update
     wait_for_member_state(
         &client,
-        project_name,
         group_name,
         instance.identity.id,
         "Joined",
@@ -534,7 +521,7 @@ async fn test_multicast_group_member_operations(
 
     // Test listing members (should have 1 now in Joined state)
     let members =
-        list_multicast_group_members(&client, project_name, group_name).await;
+        list_multicast_group_members(&client, group_name).await;
     assert_eq!(members.len(), 1, "Expected exactly 1 member");
     assert_eq!(members[0].instance_id, added_member.instance_id);
     assert_eq!(members[0].multicast_group_id, added_member.multicast_group_id);
@@ -542,8 +529,7 @@ async fn test_multicast_group_member_operations(
     // DPD Validation: Verify groups exist in dataplane after member addition
     let dpd_client = dpd_client(cptestctx);
     // Get the multicast IP from the group (since member doesn't have the IP field)
-    let group_get_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_get_url = format!("/v1/multicast-groups/{group_name}");
     let group: MulticastGroup = object_get(client, &group_get_url).await;
     let external_multicast_ip = group.multicast_ip;
 
@@ -629,7 +615,7 @@ async fn test_multicast_group_member_operations(
     .expect("Failed to remove member from multicast group");
 
     // Wait for member count to reach 0 after removal
-    wait_for_member_count(&client, project_name, group_name, 0).await;
+    wait_for_member_count(&client, group_name, 0).await;
 
     // DPD Validation: Verify group has no members in dataplane after removal
     let dpd_group = dpd_client.multicast_group_get(&external_multicast_ip).await
@@ -641,8 +627,7 @@ async fn test_multicast_group_member_operations(
         "external group after member removal",
     );
 
-    let group_delete_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_delete_url = format!("/v1/multicast-groups/{group_name}");
     object_delete(client, &group_delete_url).await;
 }
 
@@ -668,7 +653,7 @@ async fn test_instance_multicast_endpoints(
     .await;
 
     // Create two multicast groups in parallel
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
 
     let group1_params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
@@ -678,7 +663,6 @@ async fn test_instance_multicast_endpoints(
         multicast_ip: None,
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let group2_params = MulticastGroupCreate {
@@ -689,7 +673,6 @@ async fn test_instance_multicast_endpoints(
         multicast_ip: None,
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     // Create both groups in parallel then wait for both to be active
@@ -700,8 +683,8 @@ async fn test_instance_multicast_endpoints(
     .await;
 
     ops::join2(
-        wait_for_group_active(client, project_name, group1_name),
-        wait_for_group_active(client, project_name, group2_name),
+        wait_for_group_active(client, group1_name),
+        wait_for_group_active(client, group2_name),
     )
     .await;
 
@@ -748,7 +731,6 @@ async fn test_instance_multicast_endpoints(
     // Wait for member to become joined
     wait_for_member_state(
         &client,
-        project_name,
         group1_name,
         instance.identity.id,
         "Joined",
@@ -758,7 +740,7 @@ async fn test_instance_multicast_endpoints(
     // Test: Verify membership shows up in both endpoints
     // Check group-centric view
     let group1_members =
-        list_multicast_group_members(&client, project_name, group1_name).await;
+        list_multicast_group_members(&client, group1_name).await;
     assert_eq!(group1_members.len(), 1);
     assert_eq!(group1_members[0].instance_id, instance.identity.id);
 
@@ -792,7 +774,6 @@ async fn test_instance_multicast_endpoints(
     // Wait for member to become joined
     wait_for_member_state(
         &client,
-        project_name,
         group2_name,
         instance.identity.id,
         "Joined",
@@ -831,9 +812,9 @@ async fn test_instance_multicast_endpoints(
 
     // Verify each group shows the instance as a member
     let group1_members =
-        list_multicast_group_members(&client, project_name, group1_name).await;
+        list_multicast_group_members(&client, group1_name).await;
     let group2_members =
-        list_multicast_group_members(&client, project_name, group2_name).await;
+        list_multicast_group_members(&client, group2_name).await;
     assert_eq!(group1_members.len(), 1);
     assert_eq!(group2_members.len(), 1);
     assert_eq!(group1_members[0].instance_id, instance.identity.id);
@@ -870,9 +851,9 @@ async fn test_instance_multicast_endpoints(
 
     // Check group-centric views
     let group1_members =
-        list_multicast_group_members(&client, project_name, group1_name).await;
+        list_multicast_group_members(&client, group1_name).await;
     let group2_members =
-        list_multicast_group_members(&client, project_name, group2_name).await;
+        list_multicast_group_members(&client, group2_name).await;
     assert_eq!(group1_members.len(), 0, "Group1 should have no members");
     assert_eq!(group2_members.len(), 1, "Group2 should still have 1 member");
 
@@ -904,21 +885,15 @@ async fn test_instance_multicast_endpoints(
     );
 
     let group1_members =
-        list_multicast_group_members(&client, project_name, group1_name).await;
+        list_multicast_group_members(&client, group1_name).await;
     let group2_members =
-        list_multicast_group_members(&client, project_name, group2_name).await;
+        list_multicast_group_members(&client, group2_name).await;
     assert_eq!(group1_members.len(), 0);
     assert_eq!(group2_members.len(), 0);
 
     // Clean up
-    let group1_delete_url = format!(
-        "/v1/multicast-groups/{}?project={}",
-        group1_name, project_name
-    );
-    let group2_delete_url = format!(
-        "/v1/multicast-groups/{}?project={}",
-        group2_name, project_name
-    );
+    let group1_delete_url = format!("/v1/multicast-groups/{}", group1_name);
+    let group2_delete_url = format!("/v1/multicast-groups/{}", group2_name);
 
     object_delete(client, &group1_delete_url).await;
     object_delete(client, &group2_delete_url).await;
@@ -944,7 +919,7 @@ async fn test_multicast_group_member_errors(
     .await;
 
     // Create a multicast group
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -953,12 +928,11 @@ async fn test_multicast_group_member_errors(
         multicast_ip: None,
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
     object_create::<_, MulticastGroup>(client, &group_url, &params).await;
 
     // Wait for group to become active before testing member operations
-    wait_for_group_active(&client, project_name, group_name).await;
+    wait_for_group_active(&client, group_name).await;
 
     // Test adding nonexistent instance to group
     let member_add_url = format!(
@@ -1001,8 +975,7 @@ async fn test_multicast_group_member_errors(
     );
 
     // Clean up - follow standard deletion pattern
-    let group_delete_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_delete_url = format!("/v1/multicast-groups/{group_name}");
     object_delete(client, &group_delete_url).await;
 }
 
@@ -1026,7 +999,7 @@ async fn test_lookup_multicast_group_by_ip(
 
     // Create a multicast group with specific IP - use safe IP range
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 7, 0, 100));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -1035,13 +1008,12 @@ async fn test_lookup_multicast_group_by_ip(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
     let created_group: MulticastGroup =
         object_create(client, &group_url, &params).await;
 
     // Wait for group to become active - follow working pattern
-    wait_for_group_active(&client, project_name, group_name).await;
+    wait_for_group_active(&client, group_name).await;
 
     // Test lookup by IP
     let lookup_url =
@@ -1062,8 +1034,7 @@ async fn test_lookup_multicast_group_by_ip(
     );
 
     // Clean up - follow standard deletion pattern
-    let group_delete_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_delete_url = format!("/v1/multicast-groups/{group_name}");
     object_delete(client, &group_delete_url).await;
 }
 
@@ -1089,7 +1060,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
 
     // Create multicast group
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 9, 0, 50)); // Use IP from our range
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -1098,14 +1069,13 @@ async fn test_instance_deletion_removes_multicast_memberships(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let created_group: MulticastGroup =
         object_create(client, &group_url, &params).await;
 
     // Wait for group to become active
-    wait_for_group_active(&client, project_name, group_name).await;
+    wait_for_group_active(&client, group_name).await;
 
     // Create instance and add as member
     let instance = create_instance(client, project_name, instance_name).await;
@@ -1127,7 +1097,6 @@ async fn test_instance_deletion_removes_multicast_memberships(
     // Wait for member to join
     wait_for_member_state(
         &client,
-        project_name,
         group_name,
         instance.identity.id,
         "Joined",
@@ -1136,7 +1105,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
 
     // Verify member was added
     let members =
-        list_multicast_group_members(&client, project_name, group_name).await;
+        list_multicast_group_members(&client, group_name).await;
     assert_eq!(members.len(), 1, "Instance should be a member of the group");
     assert_eq!(members[0].instance_id, instance.identity.id);
 
@@ -1152,7 +1121,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
     assert!(error.message.contains("not found"));
 
     // Critical test: Verify instance was automatically removed from multicast group
-    wait_for_member_count(&client, project_name, group_name, 0).await;
+    wait_for_member_count(&client, group_name, 0).await;
 
     // DPD Validation: Ensure dataplane members are cleaned up
     let dpd_client = dpd_client(cptestctx);
@@ -1166,8 +1135,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
     );
 
     // Verify group still exists (just no members)
-    let group_get_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_get_url = format!("/v1/multicast-groups/{group_name}");
     let group_after_deletion: MulticastGroup =
         object_get(client, &group_get_url).await;
     assert_eq!(group_after_deletion.identity.id, created_group.identity.id);
@@ -1198,7 +1166,7 @@ async fn test_member_operations_via_rpw_reconciler(
 
     // Create multicast group
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 10, 0, 50)); // Use IP from our range
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -1207,14 +1175,13 @@ async fn test_member_operations_via_rpw_reconciler(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let created_group: MulticastGroup =
         object_create(client, &group_url, &params).await;
 
     // Wait for group to become active
-    wait_for_group_active(&client, project_name, group_name).await;
+    wait_for_group_active(&client, group_name).await;
 
     assert_eq!(created_group.multicast_ip, multicast_ip);
     assert_eq!(created_group.identity.name, group_name);
@@ -1236,7 +1203,6 @@ async fn test_member_operations_via_rpw_reconciler(
     // Wait for member to become joined
     wait_for_member_state(
         &client,
-        project_name,
         group_name,
         instance.identity.id,
         "Joined",
@@ -1245,7 +1211,7 @@ async fn test_member_operations_via_rpw_reconciler(
 
     // Verify member was added and reached Joined state
     let members =
-        list_multicast_group_members(&client, project_name, group_name).await;
+        list_multicast_group_members(&client, group_name).await;
     assert_eq!(members.len(), 1, "Member should be added to group");
     assert_eq!(members[0].instance_id, added_member.instance_id);
     assert_eq!(members[0].state, "Joined", "Member should be in Joined state");
@@ -1279,7 +1245,7 @@ async fn test_member_operations_via_rpw_reconciler(
     .expect("Failed to remove member from multicast group");
 
     // Verify member was removed (wait for member count to reach 0)
-    wait_for_member_count(&client, project_name, group_name, 0).await;
+    wait_for_member_count(&client, group_name, 0).await;
 
     // DPD Validation: Check group has no members after removal
     let dpd_group = dpd_client.multicast_group_get(&multicast_ip).await.expect(
@@ -1293,8 +1259,7 @@ async fn test_member_operations_via_rpw_reconciler(
     );
 
     // Clean up - reconciler is automatically activated by deletion
-    let group_delete_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_delete_url = format!("/v1/multicast-groups/{group_name}");
     object_delete(client, &group_delete_url).await;
 }
 
@@ -1324,7 +1289,7 @@ async fn test_multicast_group_comprehensive_updates(
     .await;
 
     // Create multicast group
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let create_params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(original_name).parse().unwrap(),
@@ -1333,18 +1298,14 @@ async fn test_multicast_group_comprehensive_updates(
         multicast_ip: None,
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let created_group: MulticastGroup =
         object_create(client, &group_url, &create_params).await;
 
-    wait_for_group_active(client, project_name, original_name).await;
+    wait_for_group_active(client, original_name).await;
 
-    let original_group_url = format!(
-        "/v1/multicast-groups/{}?project={}",
-        original_name, project_name
-    );
+    let original_group_url = format!("/v1/multicast-groups/{}", original_name);
 
     // Description-only update (no saga required)
     let description_update = MulticastGroupUpdate {
@@ -1392,10 +1353,7 @@ async fn test_multicast_group_comprehensive_updates(
     );
 
     // Verify we can access with new name
-    let updated_group_url = format!(
-        "/v1/multicast-groups/{}?project={}",
-        updated_name, project_name
-    );
+    let updated_group_url = format!("/v1/multicast-groups/{}", updated_name);
     let fetched_group: MulticastGroup =
         object_get(client, &updated_group_url).await;
     assert_eq!(fetched_group.identity.name, updated_name);
@@ -1431,9 +1389,8 @@ async fn test_multicast_group_comprehensive_updates(
     );
 
     // Verify group remains active through updates
-    let final_group_url =
-        format!("/v1/multicast-groups/{final_name}?project={project_name}");
-    wait_for_group_active(client, project_name, final_name).await;
+    let final_group_url = format!("/v1/multicast-groups/{final_name}");
+    wait_for_group_active(client, final_name).await;
 
     // DPD validation
     let dpd_client = dpd_client(cptestctx);
@@ -1566,7 +1523,7 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
 
     // Negative: creating in SSM pool without sources should be rejected
     let ssm_no_sources = MulticastGroupCreate {
@@ -1577,7 +1534,6 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         multicast_ip: None, // implicit allocation
         source_ips: None,   // missing sources in SSM pool
         pool: Some(NameOrId::Name(ssm_pool.identity.name.clone())),
-        vpc: None,
     };
     let err: HttpErrorResponseBody = object_create_error(
         client,
@@ -1604,7 +1560,6 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         multicast_ip: None, // implicit allocation
         source_ips: Some(vec!["10.10.10.10".parse().unwrap()]), // sources present
         pool: Some(NameOrId::Name(asm_pool.identity.name.clone())),
-        vpc: None,
     };
     let err2: HttpErrorResponseBody = object_create_error(
         client,
@@ -1630,7 +1585,6 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         multicast_ip: None,
         source_ips: None, // No sources = ASM
         pool: Some(NameOrId::Name(asm_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let asm_group = object_create::<_, MulticastGroup>(
@@ -1639,7 +1593,7 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         &asm_create_params,
     )
     .await;
-    wait_for_group_active(client, project_name, asm_group_name).await;
+    wait_for_group_active(client, asm_group_name).await;
 
     // Verify ASM group allocation (should get any available multicast address)
     assert!(
@@ -1659,10 +1613,7 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
     };
     let updated_asm: MulticastGroup = object_put(
         client,
-        &format!(
-            "/v1/multicast-groups/{}?project={}",
-            asm_group_name, project_name
-        ),
+        &format!("/v1/multicast-groups/{}", asm_group_name),
         &description_update,
     )
     .await;
@@ -1680,10 +1631,7 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
 
     let error: HttpErrorResponseBody = object_put_error(
         client,
-        &format!(
-            "/v1/multicast-groups/{}?project={}",
-            asm_group_name, project_name
-        ),
+        &format!("/v1/multicast-groups/{}", asm_group_name),
         &invalid_ssm_update,
         StatusCode::BAD_REQUEST,
     )
@@ -1704,7 +1652,6 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         multicast_ip: Some("232.99.0.20".parse().unwrap()), // Explicit SSM IP required
         source_ips: Some(vec!["10.2.2.2".parse().unwrap()]), // SSM sources from start
         pool: Some(NameOrId::Name(ssm_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let ssm_group = object_create::<_, MulticastGroup>(
@@ -1713,7 +1660,7 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         &ssm_create_params,
     )
     .await;
-    wait_for_group_active(client, project_name, ssm_group_name).await;
+    wait_for_group_active(client, ssm_group_name).await;
 
     // Verify SSM group has correct explicit IP and sources
     assert_eq!(ssm_group.multicast_ip.to_string(), "232.99.0.20");
@@ -1735,10 +1682,7 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
     };
     let updated_ssm: MulticastGroup = object_put(
         client,
-        &format!(
-            "/v1/multicast-groups/{}?project={}",
-            ssm_group_name, project_name
-        ),
+        &format!("/v1/multicast-groups/{}", ssm_group_name),
         &ssm_update,
     )
     .await;
@@ -1758,10 +1702,7 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
     };
     let reduced_ssm: MulticastGroup = object_put(
         client,
-        &format!(
-            "/v1/multicast-groups/{}?project={}",
-            ssm_group_name, project_name
-        ),
+        &format!("/v1/multicast-groups/{}", ssm_group_name),
         &ssm_source_reduction,
     )
     .await;
@@ -1782,7 +1723,6 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         multicast_ip: Some("232.99.0.42".parse().unwrap()), // Explicit SSM IP
         source_ips: Some(vec!["10.5.5.5".parse().unwrap()]),
         pool: Some(NameOrId::Name(ssm_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let ssm_explicit = object_create::<_, MulticastGroup>(
@@ -1791,7 +1731,7 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         &ssm_explicit_params,
     )
     .await;
-    wait_for_group_active(client, project_name, ssm_explicit_name).await;
+    wait_for_group_active(client, ssm_explicit_name).await;
 
     assert_eq!(ssm_explicit.multicast_ip.to_string(), "232.99.0.42");
     assert_eq!(ssm_explicit.source_ips.len(), 1);
@@ -1805,7 +1745,6 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         multicast_ip: Some("224.99.0.42".parse().unwrap()), // ASM IP with sources
         source_ips: Some(vec!["10.6.6.6".parse().unwrap()]), // Sources with ASM IP
         pool: Some(NameOrId::Name(ssm_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let creation_error: HttpErrorResponseBody = object_create_error(
@@ -1824,10 +1763,7 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
 
     // Clean up all groups
     for group_name in [asm_group_name, ssm_group_name, ssm_explicit_name] {
-        let delete_url = format!(
-            "/v1/multicast-groups/{}?project={}",
-            group_name, project_name
-        );
+        let delete_url = format!("/v1/multicast-groups/{}", group_name);
         object_delete(client, &delete_url).await;
     }
 }
@@ -1840,5 +1776,4 @@ fn assert_groups_eq(left: &MulticastGroup, right: &MulticastGroup) {
     assert_eq!(left.multicast_ip, right.multicast_ip);
     assert_eq!(left.source_ips, right.source_ips);
     assert_eq!(left.ip_pool_id, right.ip_pool_id);
-    assert_eq!(left.project_id, right.project_id);
 }

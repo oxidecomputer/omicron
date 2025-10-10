@@ -6819,9 +6819,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
 
-    /* Project this multicast group belongs to */
-    project_id UUID NOT NULL,
-
     /* VNI for multicast group (derived or random) */
     vni INT4 NOT NULL,
 
@@ -6948,7 +6945,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS multicast_group_version_added ON omicron.publi
     version_added
 ) STORING (
     name,
-    project_id,
     multicast_ip,
     time_created,
     time_deleted
@@ -6960,7 +6956,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS multicast_group_version_removed ON omicron.pub
     version_removed
 ) STORING (
     name,
-    project_id,
     multicast_ip,
     time_created,
     time_deleted
@@ -6998,10 +6993,9 @@ CREATE INDEX IF NOT EXISTS multicast_group_reconciler_query ON omicron.public.mu
     ip_pool_id
 ) WHERE time_deleted IS NULL;
 
--- Name uniqueness within project scope
--- Supports: SELECT ... WHERE project_id = ? AND name = ? AND time_deleted IS NULL
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_multicast_group_by_name_and_project ON omicron.public.multicast_group (
-    project_id,
+-- Fleet-wide unique name constraint (groups are fleet-scoped like IP pools)
+-- Supports: SELECT ... WHERE name = ? AND time_deleted IS NULL
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_multicast_group_by_name ON omicron.public.multicast_group (
     name
 ) WHERE time_deleted IS NULL;
 

@@ -67,7 +67,7 @@ use sagas::instance_start;
 use sagas::instance_update;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -321,31 +321,23 @@ impl super::Nexus {
         instance_selector: params::InstanceSelector,
     ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
-            params::InstanceSelector {
-                instance: NameOrId::Id(id),
-                project: None,
-            } => {
+            params::InstanceSelector { instance: NameOrId::Id(id), .. } => {
                 let instance =
                     LookupPath::new(opctx, &self.db_datastore).instance_id(id);
                 Ok(instance)
             }
             params::InstanceSelector {
                 instance: NameOrId::Name(name),
-                project: Some(project),
+                project,
             } => {
+                let project = project.ok_or_else(|| {
+                    Error::invalid_request("project must be specified when looking up instance by name")
+                })?;
                 let instance = self
                     .project_lookup(opctx, params::ProjectSelector { project })?
                     .instance_name_owned(name.into());
                 Ok(instance)
             }
-            params::InstanceSelector { instance: NameOrId::Id(_), .. } => {
-                Err(Error::invalid_request(
-                    "when providing instance as an ID project should not be specified",
-                ))
-            }
-            _ => Err(Error::invalid_request(
-                "instance should either be UUID or project should be specified",
-            )),
         }
     }
 
@@ -358,7 +350,6 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        authz_project: &authz::Project,
         multicast_groups: &[NameOrId],
     ) -> Result<(), Error> {
         let instance_id = authz_instance.id();
@@ -396,19 +387,20 @@ impl super::Nexus {
             "current_group_ids" => ?current_group_ids
         );
 
-        // Resolve new multicast group names/IDs to group records
+        // Resolve new multicast group names/IDs to group records and capture names for logging
         let mut new_group_ids = HashSet::new();
+        let mut group_names: HashMap<uuid::Uuid, String> = HashMap::new();
         for group_name_or_id in multicast_groups {
             let multicast_group_selector = params::MulticastGroupSelector {
-                project: Some(NameOrId::Id(authz_project.id())),
                 multicast_group: group_name_or_id.clone(),
             };
-            let multicast_group_lookup = self
-                .multicast_group_lookup(opctx, multicast_group_selector)
-                .await?;
+            let multicast_group_lookup =
+                self.multicast_group_lookup(opctx, &multicast_group_selector)?;
             let (.., db_group) =
                 multicast_group_lookup.fetch_for(authz::Action::Read).await?;
-            new_group_ids.insert(db_group.id());
+            let id = db_group.id();
+            new_group_ids.insert(id);
+            group_names.insert(id, db_group.name().to_string());
         }
 
         // Determine which groups to leave and join
@@ -427,11 +419,25 @@ impl super::Nexus {
 
         // Remove members from groups that are no longer wanted
         for group_id in groups_to_leave {
+            let group_name = match self
+                .datastore()
+                .multicast_group_fetch(
+                    opctx,
+                    omicron_uuid_kinds::MulticastGroupUuid::from_untyped_uuid(
+                        group_id,
+                    ),
+                )
+                .await
+            {
+                Ok(g) => Some(g.name().to_string()),
+                Err(_) => None,
+            };
             debug!(
                 opctx.log,
                 "removing member from group";
                 "instance_id" => %instance_id,
-                "group_id" => %group_id
+                "group_id" => %group_id,
+                "group_name" => group_name.as_deref().unwrap_or("<unknown>")
             );
             self.datastore()
                 .multicast_group_member_detach_by_group_and_instance(
@@ -444,11 +450,14 @@ impl super::Nexus {
 
         // Add members to new groups
         for group_id in groups_to_join {
+            let group_name =
+                group_names.get(&group_id).map(|s| s.as_str()).unwrap_or("<unknown>");
             debug!(
                 opctx.log,
                 "adding member to group (reconciler will handle dataplane updates)";
                 "instance_id" => %instance_id,
-                "group_id" => %group_id
+                "group_id" => %group_id,
+                "group_name" => group_name
             );
             self.datastore()
                 .multicast_group_member_attach_to_instance(
@@ -525,7 +534,6 @@ impl super::Nexus {
             self.handle_multicast_group_changes(
                 opctx,
                 &authz_instance,
-                &authz_project,
                 multicast_groups,
             )
             .await?;

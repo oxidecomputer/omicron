@@ -45,7 +45,7 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
 
     // Create group that will experience DPD communication failure
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 250));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -54,7 +54,6 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     // Stop DPD BEFORE reconciler runs to test failure recovery
@@ -86,8 +85,7 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
 
     // Verify group remains in "Creating" state since DPD is unavailable
     // The reconciler can't progress the group to Active without DPD communication
-    let group_get_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_get_url = format!("/v1/multicast-groups/{group_name}");
     let fetched_group: MulticastGroup =
         object_get(client, &group_get_url).await;
 
@@ -143,7 +141,7 @@ async fn test_multicast_group_reconciler_state_consistency_validation(
 
     // Create all groups rapidly to stress test reconciler
     let created_groups =
-        create_multicast_groups(client, project_name, &mcast_pool, group_specs)
+        create_multicast_groups(client, &mcast_pool, group_specs)
             .await;
     let group_names: Vec<&str> = group_specs.iter().map(|g| g.name).collect();
 
@@ -175,10 +173,7 @@ async fn test_multicast_group_reconciler_state_consistency_validation(
     // Verify each group is in a consistent state (DPD failure prevents reconciliation)
     for (i, group_name) in group_names.iter().enumerate() {
         let original_group = &created_groups[i];
-        let group_get_url = format!(
-            "/v1/multicast-groups/{}?project={}",
-            group_name, project_name
-        );
+        let group_get_url = format!("/v1/multicast-groups/{}", group_name);
         let fetched_group: MulticastGroup =
             object_get(client, &group_get_url).await;
 
@@ -196,7 +191,7 @@ async fn test_multicast_group_reconciler_state_consistency_validation(
     }
 
     // Clean up all groups - test reconciler's ability to handle batch deletions
-    cleanup_multicast_groups(client, project_name, &group_names).await;
+    cleanup_multicast_groups(client, &group_names).await;
 }
 
 #[nexus_test]
@@ -218,7 +213,7 @@ async fn test_dpd_failure_during_creating_state(
 
     // Create group (IP within pool range 224.0.1.10 to 224.0.1.255)
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 210));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -228,7 +223,6 @@ async fn test_dpd_failure_during_creating_state(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     // Stop DPD before object creation of groups.
@@ -265,8 +259,7 @@ async fn test_dpd_failure_during_creating_state(
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Check group state after reconciler processes with DPD unavailable
-    let group_get_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_get_url = format!("/v1/multicast-groups/{group_name}");
     let fetched_group: MulticastGroup =
         object_get(client, &group_get_url).await;
 
@@ -306,7 +299,7 @@ async fn test_dpd_failure_during_active_state(
 
     // Create group that will become active first
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 211));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -316,7 +309,6 @@ async fn test_dpd_failure_during_active_state(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let created_group: MulticastGroup =
@@ -343,8 +335,7 @@ async fn test_dpd_failure_during_active_state(
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Verify group is now Active (or at least not Creating anymore)
-    let group_get_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_get_url = format!("/v1/multicast-groups/{group_name}");
     let active_group: MulticastGroup = object_get(client, &group_get_url).await;
 
     // Group should be Active or at least no longer Creating
@@ -404,7 +395,7 @@ async fn test_dpd_failure_during_deleting_state(
 
     // Create group that we'll delete while DPD is down
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 212));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -414,7 +405,6 @@ async fn test_dpd_failure_during_deleting_state(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     let created_group: MulticastGroup =
@@ -438,11 +428,10 @@ async fn test_dpd_failure_during_deleting_state(
     .await;
 
     // Wait for group to reach "Active" state before testing deletion
-    wait_for_group_active(client, project_name, group_name).await;
+    wait_for_group_active(client, group_name).await;
 
     // Now delete the group to put it in "Deleting" state
-    let group_delete_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_delete_url = format!("/v1/multicast-groups/{group_name}");
     object_delete(client, &group_delete_url).await;
 
     // Stop DPD AFTER deletion but BEFORE reconciler processes deletion
@@ -455,7 +444,7 @@ async fn test_dpd_failure_during_deleting_state(
     // Try to get group - should be accessible in "Deleting" state
     let get_result = objects_list_page_authz::<MulticastGroup>(
         client,
-        &format!("/v1/multicast-groups?project={project_name}"),
+        "/v1/multicast-groups",
     )
     .await;
 
@@ -482,9 +471,7 @@ async fn test_dpd_failure_during_deleting_state(
     let final_result =
         nexus_test_utils::resource_helpers::objects_list_page_authz::<
             MulticastGroup,
-        >(
-            client, &format!("/v1/multicast-groups?project={project_name}")
-        )
+        >(client, "/v1/multicast-groups")
         .await;
 
     let final_groups: Vec<_> = final_result
@@ -529,7 +516,7 @@ async fn test_multicast_group_members_during_dpd_failure(
 
     // Create group
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 213));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: String::from(group_name).parse().unwrap(),
@@ -539,7 +526,6 @@ async fn test_multicast_group_members_during_dpd_failure(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     // Stop DPD to test member operations during failure
@@ -608,8 +594,7 @@ async fn test_multicast_group_members_during_dpd_failure(
     );
 
     // Verify group is still in "Creating" state
-    let group_get_url =
-        format!("/v1/multicast-groups/{group_name}?project={project_name}");
+    let group_get_url = format!("/v1/multicast-groups/{group_name}");
     let fetched_group: MulticastGroup =
         object_get(client, &group_get_url).await;
 

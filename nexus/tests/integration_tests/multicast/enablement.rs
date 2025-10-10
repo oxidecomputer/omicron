@@ -64,10 +64,9 @@ async fn test_multicast_enablement() {
         multicast_ip: Some("224.0.1.100".parse::<IpAddr>().unwrap()),
         source_ips: None,
         pool: Some(NameOrId::Name("test-pool".parse().unwrap())),
-        vpc: None,
     };
 
-    let group_url = format!("/v1/multicast-groups?project={}", PROJECT_NAME);
+    let group_url = "/v1/multicast-groups".to_string();
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
 
     // Create instance with multicast groups specified
@@ -86,7 +85,7 @@ async fn test_multicast_enablement() {
 
     // Verify NO multicast members were created (since multicast is disabled)
     let members =
-        list_multicast_group_members(client, PROJECT_NAME, GROUP_NAME).await;
+        list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         0,
@@ -129,7 +128,7 @@ async fn test_multicast_enablement() {
 
     // Still no multicast members should exist
     let members =
-        list_multicast_group_members(client, PROJECT_NAME, GROUP_NAME).await;
+        list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         0,
@@ -172,7 +171,7 @@ async fn test_multicast_enablement() {
 
     // Still no multicast members should exist
     let members =
-        list_multicast_group_members(client, PROJECT_NAME, GROUP_NAME).await;
+        list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         0,
@@ -201,7 +200,7 @@ async fn test_multicast_enablement() {
 
     // Verify no multicast state was ever created
     let members =
-        list_multicast_group_members(client, PROJECT_NAME, GROUP_NAME).await;
+        list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         0,
@@ -242,7 +241,7 @@ async fn test_multicast_enablement() {
     // Verify that direct API calls DO create member records even when disabled
     // (This is correct behavior for experimental APIs - they handle config management)
     let members =
-        list_multicast_group_members(client, PROJECT_NAME, GROUP_NAME).await;
+        list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         1,

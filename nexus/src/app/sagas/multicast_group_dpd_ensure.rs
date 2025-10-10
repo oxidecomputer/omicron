@@ -20,6 +20,7 @@ use uuid::Uuid;
 use dpd_client::types::{
     MulticastGroupExternalResponse, MulticastGroupUnderlayResponse,
 };
+
 use nexus_db_lookup::LookupDataStore;
 use nexus_db_model::{MulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::authn;
@@ -143,6 +144,7 @@ async fn mgde_fetch_group_data(
                 osagactx.log(),
                 "external group not in 'Creating' state for DPD";
                 "external_group_id" => %params.external_group_id,
+                "external_group_name" => external_group.name().as_str(),
                 "current_state" => ?other_state
             );
             return Err(ActionError::action_failed(format!(
@@ -156,6 +158,7 @@ async fn mgde_fetch_group_data(
         osagactx.log(),
         "fetched multicast group data";
         "external_group_id" => %external_group.id(),
+        "external_group_name" => external_group.name().as_str(),
         "external_ip" => %external_group.multicast_ip,
         "underlay_group_id" => %underlay_group.id,
         "underlay_ip" => %underlay_group.multicast_ip,
@@ -192,6 +195,7 @@ async fn mgde_update_dataplane(
         "applying multicast configuration via DPD";
         "switch_count" => %dataplane.switch_count(),
         "external_group_id" => %external_group.id(),
+        "external_group_name" => external_group.name().as_str(),
         "external_ip" => %external_group.multicast_ip,
         "underlay_group_id" => %underlay_group.id,
         "underlay_ip" => %underlay_group.multicast_ip,
@@ -206,6 +210,7 @@ async fn mgde_update_dataplane(
         osagactx.log(),
         "applied multicast configuration via DPD";
         "external_group_id" => %external_group.id(),
+        "external_group_name" => external_group.name().as_str(),
         "underlay_group_id" => %underlay_group.id,
         "external_ip" => %external_group.multicast_ip,
         "underlay_ip" => %underlay_group.multicast_ip
@@ -243,6 +248,7 @@ async fn mgde_rollback_dataplane(
         "external_group_id" => %params.external_group_id,
         "underlay_group_id" => %params.underlay_group_id,
         "tag" => %multicast_tag,
+        "external_group_name" => external_group.name().as_str(),
     );
 
     dataplane

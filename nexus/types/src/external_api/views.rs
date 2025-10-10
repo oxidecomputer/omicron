@@ -550,8 +550,6 @@ pub struct MulticastGroup {
     pub source_ips: Vec<IpAddr>,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,
-    /// The project this resource exists within.
-    pub project_id: Uuid,
     /// Current state of the multicast group.
     pub state: String,
 }

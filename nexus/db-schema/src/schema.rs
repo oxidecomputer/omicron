@@ -2757,7 +2757,6 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        project_id -> Uuid,
         ip_pool_id -> Uuid,
         ip_pool_range_id -> Uuid,
         vni -> Int4,

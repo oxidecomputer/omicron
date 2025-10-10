@@ -45,7 +45,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let group_params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
@@ -54,11 +54,10 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         multicast_ip: None, // Test with auto-assigned IP
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, project_name, group_name).await;
+    wait_for_group_active(client, group_name).await;
 
     // Case: Stopped instances (all APIs should handle stopped instances
     // identically)
@@ -132,7 +131,6 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     for (i, instance) in [&instance1, &instance2].iter().enumerate() {
         wait_for_member_state(
             client,
-            project_name,
             group_name,
             instance.identity.id,
             "Left", // Stopped instances should be Left
@@ -173,7 +171,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
 
     // Final verification: member count should still be 2 (no duplicates)
     let final_members =
-        list_multicast_group_members(client, project_name, group_name).await;
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(
         final_members.len(),
         2,
@@ -188,5 +186,5 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         &["edge-case-1", "edge-case-2"],
     )
     .await;
-    cleanup_multicast_groups(client, project_name, &[group_name]).await;
+    cleanup_multicast_groups(client, &[group_name]).await;
 }

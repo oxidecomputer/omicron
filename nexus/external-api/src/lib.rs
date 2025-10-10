@@ -1249,10 +1249,14 @@ pub trait NexusExternalApi {
     }]
     async fn multicast_group_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+        query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>;
 
     /// Create a multicast group.
+    ///
+    /// Multicast groups are fleet-scoped resources that can be joined by
+    /// instances across projects and silos, enabling efficient IP usage and
+    /// cross-project/cross-silo multicast communication.
     #[endpoint {
         method = POST,
         path = "/v1/multicast-groups",
@@ -1260,7 +1264,6 @@ pub trait NexusExternalApi {
     }]
     async fn multicast_group_create(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::ProjectSelector>,
         group_params: TypedBody<params::MulticastGroupCreate>,
     ) -> Result<HttpResponseCreated<views::MulticastGroup>, HttpError>;
 
@@ -1273,7 +1276,6 @@ pub trait NexusExternalApi {
     async fn multicast_group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::MulticastGroupPath>,
-        query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
 
     /// Update a multicast group.
@@ -1285,7 +1287,6 @@ pub trait NexusExternalApi {
     async fn multicast_group_update(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::MulticastGroupPath>,
-        query_params: Query<params::OptionalProjectSelector>,
         updated_group: TypedBody<params::MulticastGroupUpdate>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
 
@@ -1298,7 +1299,6 @@ pub trait NexusExternalApi {
     async fn multicast_group_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::MulticastGroupPath>,
-        query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Look up multicast group by IP address.
@@ -1321,10 +1321,14 @@ pub trait NexusExternalApi {
     async fn multicast_group_member_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::MulticastGroupPath>,
-        query_params: Query<PaginatedById<params::OptionalProjectSelector>>,
+        query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<MulticastGroupMember>>, HttpError>;
 
     /// Add instance to a multicast group.
+    ///
+    /// This is functionally equivalent to updating the instance's `multicast_groups`
+    /// field via the instance update endpoint. Both approaches modify the same
+    /// underlying membership and trigger the same reconciliation logic.
     #[endpoint {
         method = POST,
         path = "/v1/multicast-groups/{multicast_group}/members",
@@ -1338,6 +1342,10 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseCreated<MulticastGroupMember>, HttpError>;
 
     /// Remove instance from a multicast group.
+    ///
+    /// This is functionally equivalent to removing the group from the instance's
+    /// `multicast_groups` field or using the instance leave endpoint. All
+    /// approaches modify the same membership and trigger reconciliation.
     #[endpoint {
         method = DELETE,
         path = "/v1/multicast-groups/{multicast_group}/members/{instance}",
@@ -2577,7 +2585,11 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Join multicast group
+    /// Join multicast group.
+    ///
+    /// This is functionally equivalent to adding the instance via the group's
+    /// member management endpoint or updating the instance's `multicast_groups`
+    /// field. All approaches modify the same membership and trigger reconciliation.
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
@@ -2589,7 +2601,11 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>;
 
-    /// Leave multicast group
+    /// Leave multicast group.
+    ///
+    /// This is functionally equivalent to removing the instance via the group's
+    /// member management endpoint or updating the instance's `multicast_groups`
+    /// field. All approaches modify the same membership and trigger reconciliation.
     #[endpoint {
         method = DELETE,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",

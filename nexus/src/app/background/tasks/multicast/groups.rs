@@ -428,7 +428,8 @@ impl MulticastGroupReconciler {
                 debug!(
                     opctx.log,
                     "cleaning up deleted multicast group from local database";
-                    "group_id" => %group.id()
+                    "group_id" => %group.id(),
+                    "group_name" => group.name().as_str()
                 );
 
                 // Try to delete underlay group record if it exists
@@ -465,9 +466,9 @@ impl MulticastGroupReconciler {
             opctx.log,
             "processing external multicast group transition: Creating → Active";
             "group_id" => %group.id(),
+            "group_name" => group.name().as_str(),
             "multicast_ip" => %group.multicast_ip,
             "multicast_scope" => if group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
-            "project_id" => %group.project_id,
             "vni" => ?group.vni,
             "underlay_linked" => group.underlay_group_id.is_some()
         );
@@ -492,6 +493,7 @@ impl MulticastGroupReconciler {
             opctx.log,
             "processing external multicast group transition: Deleting → Deleted (switch cleanup)";
             "group_id" => %group.id(),
+            "group_name" => group.name().as_str(),
             "multicast_ip" => %group.multicast_ip,
             "multicast_scope" => if group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
             "underlay_group_id" => ?group.underlay_group_id,

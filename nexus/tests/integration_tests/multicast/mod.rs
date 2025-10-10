@@ -50,19 +50,18 @@ const POLL_INTERVAL: Duration = Duration::from_millis(80);
 const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Helpers for building multicast API URLs.
-pub(crate) fn mcast_groups_url(project_name: &str) -> String {
-    format!("/v1/multicast-groups?project={project_name}")
+/// Multicast groups are fleet-scoped, so no project parameter is needed.
+pub(crate) fn mcast_groups_url() -> String {
+    "/v1/multicast-groups".to_string()
 }
 
-pub(crate) fn mcast_group_url(project_name: &str, group_name: &str) -> String {
-    format!("/v1/multicast-groups/{group_name}?project={project_name}")
+pub(crate) fn mcast_group_url(group_name: &str) -> String {
+    format!("/v1/multicast-groups/{group_name}")
 }
 
-pub(crate) fn mcast_group_members_url(
-    project_name: &str,
-    group_name: &str,
-) -> String {
-    format!("/v1/multicast-groups/{group_name}/members?project={project_name}")
+/// Multicast group members are identified by UUID, so no project parameter is needed for listing.
+pub(crate) fn mcast_group_members_url(group_name: &str) -> String {
+    format!("/v1/multicast-groups/{group_name}/members")
 }
 
 /// Utility functions for running multiple async operations in parallel.
@@ -187,22 +186,20 @@ pub(crate) async fn wait_for_multicast_reconciler(
 /// Get a single multicast group by name.
 pub(crate) async fn get_multicast_group(
     client: &ClientTestContext,
-    project_name: &str,
     group_name: &str,
 ) -> MulticastGroup {
-    let url = mcast_group_url(project_name, group_name);
+    let url = mcast_group_url(group_name);
     NexusRequest::object_get(client, &url)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute_and_parse_unwrap::<MulticastGroup>()
         .await
 }
 
-/// List all multicast groups in a project.
+/// List all multicast groups.
 pub(crate) async fn list_multicast_groups(
     client: &ClientTestContext,
-    project_name: &str,
 ) -> Vec<MulticastGroup> {
-    let url = mcast_groups_url(project_name);
+    let url = mcast_groups_url();
     nexus_test_utils::resource_helpers::objects_list_page_authz::<
         MulticastGroup,
     >(client, &url)
@@ -213,10 +210,9 @@ pub(crate) async fn list_multicast_groups(
 /// List members of a multicast group.
 pub(crate) async fn list_multicast_group_members(
     client: &ClientTestContext,
-    project_name: &str,
     group_name: &str,
 ) -> Vec<MulticastGroupMember> {
-    let url = mcast_group_members_url(project_name, group_name);
+    let url = mcast_group_members_url(group_name);
     nexus_test_utils::resource_helpers::objects_list_page_authz::<
         MulticastGroupMember,
     >(client, &url)
@@ -227,14 +223,13 @@ pub(crate) async fn list_multicast_group_members(
 /// Wait for a multicast group to transition to the specified state.
 pub(crate) async fn wait_for_group_state(
     client: &ClientTestContext,
-    project_name: &str,
     group_name: &str,
     expected_state: &str,
 ) -> MulticastGroup {
     match wait_for_condition(
         || async {
             let group =
-                get_multicast_group(client, project_name, group_name).await;
+                get_multicast_group(client, group_name).await;
             if group.state == expected_state {
                 Ok(group)
             } else {
@@ -263,26 +258,23 @@ pub(crate) async fn wait_for_group_state(
 /// Convenience function to wait for a group to become "Active".
 pub(crate) async fn wait_for_group_active(
     client: &ClientTestContext,
-    project_name: &str,
     group_name: &str,
 ) -> MulticastGroup {
-    wait_for_group_state(client, project_name, group_name, "Active").await
+    wait_for_group_state(client, group_name, "Active").await
 }
 
 /// Wait for a specific member to reach the expected state
 /// (e.g., "Joined", "Joining", "Leaving", "Left").
 pub(crate) async fn wait_for_member_state(
     client: &ClientTestContext,
-    project_name: &str,
     group_name: &str,
     instance_id: uuid::Uuid,
     expected_state: &str,
 ) -> MulticastGroupMember {
     match wait_for_condition(
         || async {
-            let members = list_multicast_group_members(
-                client, project_name, group_name
-            ).await;
+            let members =
+                list_multicast_group_members(client, group_name).await;
 
             // If we're looking for "Joined" state, we need to ensure the member exists first
             // and then wait for the reconciler to process it
@@ -344,15 +336,12 @@ pub(crate) async fn wait_for_member_state(
 /// Wait for a multicast group to have a specific number of members.
 pub(crate) async fn wait_for_member_count(
     client: &ClientTestContext,
-    project_name: &str,
     group_name: &str,
     expected_count: usize,
 ) {
     match wait_for_condition(
         || async {
-            let members =
-                list_multicast_group_members(client, project_name, group_name)
-                    .await;
+            let members = list_multicast_group_members(client, group_name).await;
             if members.len() == expected_count {
                 Ok(())
             } else {
@@ -381,14 +370,11 @@ pub(crate) async fn wait_for_member_count(
 /// Wait for a multicast group to be deleted (returns 404).
 pub(crate) async fn wait_for_group_deleted(
     client: &ClientTestContext,
-    project_name: &str,
     group_name: &str,
 ) {
     match wait_for_condition(
         || async {
-            let group_url = format!(
-                "/v1/multicast-groups/{group_name}?project={project_name}"
-            );
+            let group_url = format!("/v1/multicast-groups/{group_name}");
             match NexusRequest::object_get(client, &group_url)
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
@@ -545,12 +531,11 @@ pub(crate) async fn multicast_group_attach(
 /// Create multiple multicast groups from the same pool.
 pub(crate) async fn create_multicast_groups(
     client: &ClientTestContext,
-    project_name: &str,
     pool: &IpPool,
     group_specs: &[MulticastGroupForTest],
 ) -> Vec<MulticastGroup> {
     let create_futures = group_specs.iter().map(|spec| {
-        let group_url = mcast_groups_url(project_name);
+        let group_url = mcast_groups_url();
         let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: spec.name.parse().unwrap(),
@@ -562,7 +547,6 @@ pub(crate) async fn create_multicast_groups(
             multicast_ip: Some(spec.multicast_ip),
             source_ips: None,
             pool: Some(NameOrId::Name(pool.identity.name.clone())),
-            vpc: None,
         };
 
         async move {
@@ -577,12 +561,11 @@ pub(crate) async fn create_multicast_groups(
 /// Wait for multiple groups to become "Active".
 pub(crate) async fn wait_for_groups_active(
     client: &ClientTestContext,
-    project_name: &str,
     group_names: &[&str],
 ) -> Vec<MulticastGroup> {
     let wait_futures = group_names
         .iter()
-        .map(|name| wait_for_group_active(client, project_name, name));
+        .map(|name| wait_for_group_active(client, name));
 
     ops::join_all(wait_futures).await
 }
@@ -590,11 +573,10 @@ pub(crate) async fn wait_for_groups_active(
 /// Clean up multiple groups.
 pub(crate) async fn cleanup_multicast_groups(
     client: &ClientTestContext,
-    project_name: &str,
     group_names: &[&str],
 ) {
     let delete_futures = group_names.iter().map(|name| {
-        let url = format!("/v1/multicast-groups/{name}?project={project_name}");
+        let url = format!("/v1/multicast-groups/{name}");
         async move { object_delete(client, &url).await }
     });
 

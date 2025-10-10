@@ -394,6 +394,7 @@ impl MulticastGroupReconciler {
                     "member_id" => %member.id,
                     "instance_id" => %member.parent_id,
                     "group_id" => %group.id(),
+                    "group_name" => group.name().as_str(),
                     "current_sled_id" => ?member.sled_id,
                     "reason" => "instance_not_valid_for_multicast_traffic",
                     "instance_states_valid" => "[Creating, Starting, Running, Rebooting, Migrating, Repairing]"
@@ -428,6 +429,7 @@ impl MulticastGroupReconciler {
                     "member_id" => %member.id,
                     "instance_id" => %member.parent_id,
                     "group_id" => %group.id(),
+                    "group_name" => group.name().as_str(),
                     "group_multicast_ip" => %group.multicast_ip,
                     "forwarding_status" => "EXCLUDED",
                     "dpd_cleanup" => "not_required_for_Joining_to_Left_transition"
@@ -451,6 +453,8 @@ impl MulticastGroupReconciler {
                 opctx.log,
                 "member staying in Joining state - group still Creating";
                 "member_id" => %member.id,
+                "group_id" => %group.id(),
+                "group_name" => group.name().as_str(),
                 "instance_valid" => instance_valid,
                 "group_state" => ?group.state
             );
@@ -478,6 +482,7 @@ impl MulticastGroupReconciler {
                 "member_id" => %member.id,
                 "instance_id" => %member.parent_id,
                 "group_id" => %group.id(),
+                "group_name" => group.name().as_str(),
                 "group_multicast_ip" => %group.multicast_ip,
                 "previous_sled_id" => ?member.sled_id,
                 "reason" => "instance_no_longer_valid_for_multicast_traffic",
@@ -540,6 +545,8 @@ impl MulticastGroupReconciler {
                     opctx.log,
                     "detected sled migration for joined member - re-applying configuration";
                     "member_id" => %member.id,
+                    "group_id" => %group.id(),
+                    "group_name" => group.name().as_str(),
                     "old_sled_id" => ?member.sled_id,
                     "new_sled_id" => %sled_id
                 );
@@ -587,6 +594,7 @@ impl MulticastGroupReconciler {
                     "member configuration re-applied after sled migration";
                     "member_id" => %member.id,
                     "group_id" => %group.id(),
+                    "group_name" => group.name().as_str(),
                     "new_sled_id" => %sled_id
                 );
                 Ok(StateTransition::StateChanged)
@@ -660,7 +668,9 @@ impl MulticastGroupReconciler {
                     opctx.log,
                     "transitioning member from Left to Joining - instance became valid and group is active";
                     "member_id" => %member.id,
-                    "parent_id" => %member.parent_id
+                    "parent_id" => %member.parent_id,
+                    "group_id" => %group.id(),
+                    "group_name" => group.name().as_str()
                 );
                 self.datastore
                     .multicast_group_member_set_state(
@@ -677,7 +687,8 @@ impl MulticastGroupReconciler {
                     opctx.log,
                     "member transitioned to Joining state";
                     "member_id" => %member.id,
-                    "group_id" => %group.id()
+                    "group_id" => %group.id(),
+                    "group_name" => group.name().as_str()
                 );
                 Ok(StateTransition::StateChanged)
             } else {
@@ -1053,6 +1064,7 @@ impl MulticastGroupReconciler {
             "cleaning up member from dataplane";
             "member_id" => %member.id,
             "group_id" => %group.id(),
+            "group_name" => group.name().as_str(),
             "parent_id" => %member.parent_id,
             "time_deleted" => ?member.time_deleted
         );
@@ -1068,7 +1080,8 @@ impl MulticastGroupReconciler {
             opctx.log,
             "member cleaned up from dataplane";
             "member_id" => %member.id,
-            "group_id" => %group.id()
+            "group_id" => %group.id(),
+            "group_name" => group.name().as_str()
         );
         Ok(())
     }
@@ -1085,7 +1098,8 @@ impl MulticastGroupReconciler {
             opctx.log,
             "verifying joined member consistency";
             "member_id" => %member.id,
-            "group_id" => %group.id()
+            "group_id" => %group.id(),
+            "group_name" => group.name().as_str()
         );
 
         // Get sled_id from member

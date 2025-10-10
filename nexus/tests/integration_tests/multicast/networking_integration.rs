@@ -70,7 +70,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Create multicast group
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 100, 0, 50));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let group_params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
@@ -79,11 +79,10 @@ async fn test_multicast_with_external_ip_basic(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, project_name, group_name).await;
+    wait_for_group_active(client, group_name).await;
 
     // Create instance (will start by default)
     let instance_params = InstanceCreate {
@@ -139,7 +138,6 @@ async fn test_multicast_with_external_ip_basic(
     // Wait for multicast member to reach "Joined" state
     wait_for_member_state(
         client,
-        project_name,
         group_name,
         instance_id,
         "Joined",
@@ -148,7 +146,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Verify member count
     let members =
-        list_multicast_group_members(client, project_name, group_name).await;
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have one multicast member");
 
     // Allocate ephemeral external IP to the same instance
@@ -172,7 +170,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Check that multicast membership is preserved
     let members_after_ip =
-        list_multicast_group_members(client, project_name, group_name).await;
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(
         members_after_ip.len(),
         1,
@@ -206,7 +204,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Verify multicast membership is still intact after external IP removal
     let members_after_detach =
-        list_multicast_group_members(client, project_name, group_name).await;
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(
         members_after_detach.len(),
         1,
@@ -229,7 +227,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    cleanup_multicast_groups(client, project_name, &[group_name]).await;
+    cleanup_multicast_groups(client, &[group_name]).await;
 }
 
 /// Test external IP allocation/deallocation lifecycle for multicast group members.
@@ -264,7 +262,7 @@ async fn test_multicast_external_ip_lifecycle(
 
     // Create multicast group and instance (similar to previous test)
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 101, 0, 75));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let group_params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
@@ -273,11 +271,10 @@ async fn test_multicast_external_ip_lifecycle(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, project_name, group_name).await;
+    wait_for_group_active(client, group_name).await;
 
     let instance_params = InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -331,7 +328,7 @@ async fn test_multicast_external_ip_lifecycle(
 
     // Verify initial multicast state
     let initial_members =
-        list_multicast_group_members(client, project_name, group_name).await;
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(initial_members.len(), 1);
     assert_eq!(initial_members[0].state, "Joined");
 
@@ -359,8 +356,7 @@ async fn test_multicast_external_ip_lifecycle(
 
         // Verify multicast state is preserved
         let members_with_ip =
-            list_multicast_group_members(client, project_name, group_name)
-                .await;
+            list_multicast_group_members(client, group_name).await;
         assert_eq!(
             members_with_ip.len(),
             1,
@@ -395,8 +391,7 @@ async fn test_multicast_external_ip_lifecycle(
 
         // Verify multicast state is still preserved
         let members_without_ip =
-            list_multicast_group_members(client, project_name, group_name)
-                .await;
+            list_multicast_group_members(client, group_name).await;
         assert_eq!(
             members_without_ip.len(),
             1,
@@ -422,7 +417,7 @@ async fn test_multicast_external_ip_lifecycle(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    cleanup_multicast_groups(client, project_name, &[group_name]).await;
+    cleanup_multicast_groups(client, &[group_name]).await;
 }
 
 /// Test that instances can be created with both external IP and multicast group simultaneously.
@@ -457,7 +452,7 @@ async fn test_multicast_with_external_ip_at_creation(
 
     // Create multicast group first
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 102, 0, 100));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let group_params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
@@ -466,11 +461,10 @@ async fn test_multicast_with_external_ip_at_creation(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, project_name, group_name).await;
+    wait_for_group_active(client, group_name).await;
 
     // Create instance with external IP specified at creation
     let external_ip_param = ExternalIpCreate::Ephemeral { pool: None };
@@ -536,7 +530,6 @@ async fn test_multicast_with_external_ip_at_creation(
     // Verify both features work together - wait for member to reach Joined state
     wait_for_member_state(
         client,
-        project_name,
         group_name,
         instance_id,
         "Joined",
@@ -544,7 +537,7 @@ async fn test_multicast_with_external_ip_at_creation(
     .await;
 
     let members =
-        list_multicast_group_members(client, project_name, group_name).await;
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have multicast member");
 
     let external_ips_final =
@@ -556,7 +549,7 @@ async fn test_multicast_with_external_ip_at_creation(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    cleanup_multicast_groups(client, project_name, &[group_name]).await;
+    cleanup_multicast_groups(client, &[group_name]).await;
 }
 
 /// Test that instances can have both floating IPs and multicast group membership.
@@ -598,7 +591,7 @@ async fn test_multicast_with_floating_ip_basic(
 
     // Create multicast group
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 200, 0, 50));
-    let group_url = format!("/v1/multicast-groups?project={project_name}");
+    let group_url = "/v1/multicast-groups".to_string();
     let group_params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
@@ -607,11 +600,10 @@ async fn test_multicast_with_floating_ip_basic(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
-        vpc: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
-    wait_for_group_active(client, project_name, group_name).await;
+    wait_for_group_active(client, group_name).await;
 
     // Create instance (will start by default)
     let instance_params = InstanceCreate {
@@ -667,7 +659,6 @@ async fn test_multicast_with_floating_ip_basic(
     // Wait for multicast member to reach "Joined" state
     wait_for_member_state(
         client,
-        project_name,
         group_name,
         instance_id,
         "Joined",
@@ -676,7 +667,7 @@ async fn test_multicast_with_floating_ip_basic(
 
     // Verify member count
     let members =
-        list_multicast_group_members(client, project_name, group_name).await;
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have one multicast member");
 
     // Attach floating IP to the same instance
@@ -705,7 +696,7 @@ async fn test_multicast_with_floating_ip_basic(
 
     // Check that multicast membership is preserved
     let members_after_ip =
-        list_multicast_group_members(client, project_name, group_name).await;
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(
         members_after_ip.len(),
         1,
@@ -750,7 +741,7 @@ async fn test_multicast_with_floating_ip_basic(
 
     // Verify multicast membership is still intact after floating IP removal
     let members_after_detach =
-        list_multicast_group_members(client, project_name, group_name).await;
+        list_multicast_group_members(client, group_name).await;
     assert_eq!(
         members_after_detach.len(),
         1,
@@ -781,5 +772,5 @@ async fn test_multicast_with_floating_ip_basic(
 
     // Cleanup
     cleanup_instances(cptestctx, client, project_name, &[instance_name]).await;
-    cleanup_multicast_groups(client, project_name, &[group_name]).await;
+    cleanup_multicast_groups(client, &[group_name]).await;
 }

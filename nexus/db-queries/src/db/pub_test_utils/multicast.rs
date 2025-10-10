@@ -190,17 +190,14 @@ pub async fn create_test_group_with_state(
         multicast_ip: Some(multicast_ip.parse().unwrap()),
         source_ips: None,
         pool: None,
-        vpc: None,
     };
 
     let group = datastore
         .multicast_group_create(
             &opctx,
-            setup.project_id,
-            Uuid::new_v4(),
+            Uuid::new_v4(), // rack_id
             &params,
             Some(setup.authz_pool.clone()),
-            Some(setup.vpc_id), // VPC ID from test setup
         )
         .await
         .expect("Should create multicast group");

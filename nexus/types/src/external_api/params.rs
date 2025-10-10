@@ -238,9 +238,7 @@ pub struct FloatingIpSelector {
 
 #[derive(Deserialize, JsonSchema, Clone)]
 pub struct MulticastGroupSelector {
-    /// Name or ID of the project, only required if `multicast_group` is provided as a `Name`
-    pub project: Option<NameOrId>,
-    /// Name or ID of the multicast group
+    /// Name or ID of the multicast group (fleet-scoped)
     pub multicast_group: NameOrId,
 }
 
@@ -1815,12 +1813,12 @@ pub struct LoopbackAddressCreate {
     /// address from.
     pub address_lot: NameOrId,
 
-    /// The containing the switch this loopback address will be configured on.
+    /// The rack containing the switch this loopback address will be configured on.
     pub rack_id: Uuid,
 
     // TODO: #3604 Consider using `SwitchLocation` type instead of `Name` for `LoopbackAddressCreate.switch_location`
     /// The location of the switch within the rack this loopback address will be
-    /// configupred on.
+    /// configured on.
     pub switch_location: Name,
 
     /// The address to create.
@@ -2788,8 +2786,6 @@ pub struct MulticastGroupCreate {
     /// Name or ID of the IP pool to allocate from. If None, uses the default
     /// multicast pool.
     pub pool: Option<NameOrId>,
-    /// Name or ID of the VPC to derive VNI from. If None, uses random VNI generation.
-    pub vpc: Option<NameOrId>,
 }
 
 /// Update-time parameters for a multicast group.

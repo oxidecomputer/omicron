@@ -6,14 +6,29 @@
 //!
 //! This module provides a unified interface for multicast group and member
 //! operations in the dataplane (DPD - Data Plane Daemon).
+//!
+//! ## VNI and Forwarding Model
+//!
+//! All external multicast groups use `DEFAULT_MULTICAST_VNI` (77), a reserved
+//! system VNI below `MIN_GUEST_VNI` (1024). The bifurcated architecture uses
+//! NAT translation at switches:
+//!
+//! 1. External multicast packets arrive with VNI 77
+//! 2. Switches perform NAT translation to underlay IPv6 multicast addresses
+//! 3. Forwarding decisions happen at the underlay layer, not based on VNI
+//! 4. Security relies on underlay group membership validation, not VNI isolation
+//!
+//! This design enables cross-project and cross-silo multicast (a feature, not a bug)
+//! while maintaining security through API authorization and underlay membership control.
+
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::Arc;
 
 use futures::{TryStreamExt, future::try_join_all};
 use ipnetwork::IpNetwork;
 use oxnet::MulticastMac;
 use slog::{Logger, debug, error, info};
-use std::collections::HashMap;
-use std::net::IpAddr;
-use std::sync::Arc;
 
 use dpd_client::Error as DpdError;
 use dpd_client::types::{
@@ -25,6 +40,7 @@ use dpd_client::types::{
     NatTarget, Vni,
 };
 use internal_dns_resolver::Resolver;
+
 use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -299,7 +315,6 @@ impl MulticastDataplaneClient {
         self.dpd_clients.len()
     }
 
-
     /// Apply multicast group configuration across switches (via DPD).
     pub(crate) async fn create_groups(
         &self,
@@ -376,9 +391,7 @@ impl MulticastDataplaneClient {
 
                     let external_entry = MulticastGroupCreateExternalEntry {
                         group_ip: external_group_ip,
-                        external_forwarding: ExternalForwarding {
-                            vlan_id,
-                        },
+                        external_forwarding: ExternalForwarding { vlan_id },
                         internal_forwarding: InternalForwarding {
                             nat_target: Some(nat_target),
                         },
@@ -562,9 +575,7 @@ impl MulticastDataplaneClient {
                         })?;
 
                     // Prepare external update/create entries with pre-computed data
-                    let external_forwarding = ExternalForwarding {
-                        vlan_id,
-                    };
+                    let external_forwarding = ExternalForwarding { vlan_id };
                     let internal_forwarding =
                         InternalForwarding { nat_target: Some(nat_target) };
 

@@ -1149,18 +1149,38 @@ authz_resource! {
     polar_snippet = InProject,
 }
 
-// Note: MulticastGroup member attachments/detachments (instances
-// joining/leaving groups) use the existing `MulticastGroup` and
-// `Instance` authz resources rather than creating a separate
-// `MulticastGroupMember` authz resource. This follows
-// the same pattern as external IP attachments, where the relationship
-// permissions are controlled by the parent resources being connected.
+// MulticastGroup Authorization Model
+//
+// MulticastGroups are **fleet-scoped resources** (parent = "Fleet"), similar to
+// IP pools, to enable efficient cross-project and cross-silo multicast communication.
+//
+// Design Rationale:
+// - When a multicast group is created, the allocated multicast IP belongs to that
+//   group object. If groups were project-scoped, no other projects could receive
+//   traffic on that multicast address.
+// - Fleet-scoping allows instances from different projects and silos to join the
+//   same group, enabling collaboration without wasting multicast IP addresses.
+// - This mirrors the IP pool model: fleet admins create pools, link them to silos,
+//   and silo users consume IPs without needing pool modification rights.
+//
+// Authorization Rules (polar_snippet = FleetChild):
+// - Creating/modifying/deleting groups: Requires Fleet::Admin role
+// - Listing groups: Requires Fleet::Viewer role or higher
+// - Attaching instances to groups: Only requires Instance::Modify permission
+//   (silo users can attach their own instances to any fleet-scoped group)
+//
+// Member Management:
+// MulticastGroup member attachments/detachments (instances joining/leaving groups)
+// use the existing `MulticastGroup` and `Instance` authz resources rather than
+// creating a separate `MulticastGroupMember` authz resource. This follows the same
+// pattern as external IP attachments, where relationship permissions are controlled
+// by the parent resources being connected.
 authz_resource! {
     name = "MulticastGroup",
-    parent = "Project",
+    parent = "Fleet",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = FleetChild,
 }
 
 // Customer network integration resources nested below "Fleet"

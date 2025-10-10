@@ -15,6 +15,25 @@
 //! - Are exposed via customer APIs for application multicast traffic
 //! - Support Source-Specific Multicast (SSM) with configurable source IPs
 //! - Follow the Resource trait pattern for user-facing identity management
+//! - Are **fleet-scoped** (not project-scoped) to enable cross-project multicast
+//! - All use `DEFAULT_MULTICAST_VNI` (77) for consistent fleet-wide behavior
+//!
+//! ### VNI and Security Model
+//!
+//! **All external multicast groups share VNI 77**, which is below `MIN_GUEST_VNI` (1024)
+//! and reserved for Oxide system use. This design choice has important implications:
+//!
+//! - **No VPC-level isolation**: Unlike unicast traffic where each VPC gets a unique VNI,
+//!   all multicast traffic shares VNI 77. Multicast does NOT provide automatic VPC isolation.
+//! - **NAT-based forwarding**: The bifurcated architecture performs NAT translation at
+//!   switches, mapping external multicast IPs to underlay IPv6 groups. Actual forwarding
+//!   decisions happen at the underlay layer, not based on VNI.
+//! - **Security boundaries**: Multicast security relies on:
+//!   - **API authorization** (Fleet::Admin creates groups, users attach instances)
+//!   - **Underlay group membership** validation (which instances can receive traffic)
+//!   - **NOT** on VNI-based tenant isolation
+//! - **Cross-project capability**: The shared VNI enables the intended cross-project and
+//!   cross-silo multicast functionality (similar to how IP pools are fleet-scoped resources)
 //!
 //! ## Underlay Multicast Groups
 //!
@@ -56,14 +75,14 @@ use db_macros::Resource;
 use nexus_db_schema::schema::{
     multicast_group, multicast_group_member, underlay_multicast_group,
 };
-use omicron_uuid_kinds::SledKind;
-
-use crate::typed_uuid::DbTypedUuid;
-use crate::{Generation, Name, Vni, impl_enum_type};
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource as IdentityResource;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadata;
+use omicron_uuid_kinds::SledKind;
+
+use crate::typed_uuid::DbTypedUuid;
+use crate::{Generation, Name, Vni, impl_enum_type};
 
 impl_enum_type!(
     MulticastGroupStateEnum:
@@ -137,8 +156,6 @@ pub type MulticastGroup = ExternalMulticastGroup;
 pub struct ExternalMulticastGroup {
     #[diesel(embed)]
     pub identity: ExternalMulticastGroupIdentity,
-    /// Project this multicast group belongs to.
-    pub project_id: Uuid,
     /// IP pool this address was allocated from.
     pub ip_pool_id: Uuid,
     /// IP pool range this address was allocated from.
@@ -237,7 +254,6 @@ impl From<ExternalMulticastGroup> for views::MulticastGroup {
                 .map(|ip| ip.ip())
                 .collect(),
             ip_pool_id: group.ip_pool_id,
-            project_id: group.project_id,
             state: group.state.to_string(),
         }
     }
@@ -275,7 +291,6 @@ pub struct IncompleteExternalMulticastGroup {
     pub name: Name,
     pub description: String,
     pub time_created: DateTime<Utc>,
-    pub project_id: Uuid,
     pub ip_pool_id: Uuid,
     pub source_ips: Vec<IpNetwork>,
     // Optional address requesting that a specific multicast IP address be
@@ -292,7 +307,6 @@ pub struct IncompleteExternalMulticastGroupParams {
     pub id: Uuid,
     pub name: Name,
     pub description: String,
-    pub project_id: Uuid,
     pub ip_pool_id: Uuid,
     pub rack_id: Uuid,
     pub explicit_address: Option<IpAddr>,
@@ -309,7 +323,6 @@ impl IncompleteExternalMulticastGroup {
             name: params.name,
             description: params.description,
             time_created: Utc::now(),
-            project_id: params.project_id,
             ip_pool_id: params.ip_pool_id,
             source_ips: params.source_ips,
             explicit_address: params.explicit_address.map(|ip| ip.into()),

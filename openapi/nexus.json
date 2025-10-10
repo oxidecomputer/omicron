@@ -4329,7 +4329,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Join multicast group",
+        "summary": "Join multicast group.",
+        "description": "This is functionally equivalent to adding the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.",
         "operationId": "instance_multicast_group_join",
         "parameters": [
           {
@@ -4382,7 +4383,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Leave multicast group",
+        "summary": "Leave multicast group.",
+        "description": "This is functionally equivalent to removing the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.",
         "operationId": "instance_multicast_group_leave",
         "parameters": [
           {
@@ -6056,14 +6058,6 @@
           },
           {
             "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/NameOrIdSortMode"
@@ -6089,9 +6083,7 @@
           }
         },
         "x-dropshot-pagination": {
-          "required": [
-            "project"
-          ]
+          "required": []
         }
       },
       "post": {
@@ -6099,18 +6091,8 @@
           "experimental"
         ],
         "summary": "Create a multicast group.",
+        "description": "Multicast groups are fleet-scoped resources that can be joined by instances across projects and silos, enabling efficient IP usage and cross-project/cross-silo multicast communication.",
         "operationId": "multicast_group_create",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -6157,14 +6139,6 @@
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
           }
         ],
         "responses": {
@@ -6198,14 +6172,6 @@
             "name": "multicast_group",
             "description": "Name or ID of the multicast group",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6252,14 +6218,6 @@
             "name": "multicast_group",
             "description": "Name or ID of the multicast group",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -6358,6 +6316,7 @@
           "experimental"
         ],
         "summary": "Add instance to a multicast group.",
+        "description": "This is functionally equivalent to updating the instance's `multicast_groups` field via the instance update endpoint. Both approaches modify the same underlying membership and trigger the same reconciliation logic.",
         "operationId": "multicast_group_member_add",
         "parameters": [
           {
@@ -6414,6 +6373,7 @@
           "experimental"
         ],
         "summary": "Remove instance from a multicast group.",
+        "description": "This is functionally equivalent to removing the group from the instance's `multicast_groups` field or using the instance leave endpoint. All approaches modify the same membership and trigger reconciliation.",
         "operationId": "multicast_group_member_remove",
         "parameters": [
           {
@@ -22888,12 +22848,12 @@
             "minimum": 0
           },
           "rack_id": {
-            "description": "The containing the switch this loopback address will be configured on.",
+            "description": "The rack containing the switch this loopback address will be configured on.",
             "type": "string",
             "format": "uuid"
           },
           "switch_location": {
-            "description": "The location of the switch within the rack this loopback address will be configupred on.",
+            "description": "The location of the switch within the rack this loopback address will be configured on.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -23075,11 +23035,6 @@
               }
             ]
           },
-          "project_id": {
-            "description": "The project this resource exists within.",
-            "type": "string",
-            "format": "uuid"
-          },
           "source_ips": {
             "description": "Source IP addresses for Source-Specific Multicast (SSM). Empty array means any source is allowed.",
             "type": "array",
@@ -23109,7 +23064,6 @@
           "ip_pool_id",
           "multicast_ip",
           "name",
-          "project_id",
           "source_ips",
           "state",
           "time_created",
@@ -23149,15 +23103,6 @@
               "type": "string",
               "format": "ip"
             }
-          },
-          "vpc": {
-            "nullable": true,
-            "description": "Name or ID of the VPC to derive VNI from. If None, uses random VNI generation.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
           }
         },
         "required": [

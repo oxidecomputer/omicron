@@ -57,7 +57,6 @@ pub(crate) struct MulticastGroupAllocationParams {
     pub ip: Option<IpAddr>,
     pub pool: Option<authz::IpPool>,
     pub source_ips: Option<Vec<IpAddr>>,
-    pub vpc_id: Option<Uuid>,
 }
 
 impl DataStore {
@@ -113,22 +112,18 @@ impl DataStore {
     pub async fn multicast_group_create(
         &self,
         opctx: &OpContext,
-        project_id: Uuid,
         rack_id: Uuid,
         params: &params::MulticastGroupCreate,
         authz_pool: Option<authz::IpPool>,
-        vpc_id: Option<Uuid>,
     ) -> CreateResult<ExternalMulticastGroup> {
         self.allocate_external_multicast_group(
             opctx,
-            project_id,
             rack_id,
             MulticastGroupAllocationParams {
                 identity: params.identity.clone(),
                 ip: params.multicast_ip,
                 pool: authz_pool,
                 source_ips: params.source_ips.clone(),
-                vpc_id,
             },
         )
         .await
@@ -227,16 +222,15 @@ impl DataStore {
             })
     }
 
-    /// List multicast groups in a project.
+    /// List multicast groups (fleet-wide).
     pub async fn multicast_groups_list(
         &self,
         opctx: &OpContext,
-        authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<ExternalMulticastGroup> {
         use nexus_db_schema::schema::multicast_group::dsl;
 
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -249,7 +243,6 @@ impl DataStore {
             ),
         }
         .filter(dsl::time_deleted.is_null())
-        .filter(dsl::project_id.eq(authz_project.id()))
         .select(ExternalMulticastGroup::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
@@ -350,7 +343,6 @@ impl DataStore {
     pub(crate) async fn allocate_external_multicast_group(
         &self,
         opctx: &OpContext,
-        project_id: Uuid,
         rack_id: Uuid,
         params: MulticastGroupAllocationParams,
     ) -> CreateResult<ExternalMulticastGroup> {
@@ -396,9 +388,11 @@ impl DataStore {
             })
             .unwrap_or_default();
 
-        // Derive VNI for the multicast group
-        let vni =
-            self.derive_vni_from_vpc_or_default(opctx, params.vpc_id).await?;
+        // Fleet-scoped multicast groups always use DEFAULT_MULTICAST_VNI (77).
+        // This reserved VNI is below MIN_GUEST_VNI (1024) and provides consistent
+        // behavior across all multicast groups. VNI is not derived from VPC since
+        // groups are fleet-wide and can span multiple projects/VPCs.
+        let vni = Vni(external::Vni::DEFAULT_MULTICAST_VNI);
 
         // Create the incomplete group
         let data = IncompleteExternalMulticastGroup::new(
@@ -406,7 +400,6 @@ impl DataStore {
                 id: group_id,
                 name: Name(params.identity.name.clone()),
                 description: params.identity.description.clone(),
-                project_id,
                 ip_pool_id: authz_pool.id(),
                 rack_id,
                 explicit_address: params.ip,
@@ -608,21 +601,6 @@ impl DataStore {
         Ok(underlay_group)
     }
 
-    /// Derive VNI for a multicast group based on VPC association.
-    async fn derive_vni_from_vpc_or_default(
-        &self,
-        opctx: &OpContext,
-        vpc_id: Option<Uuid>,
-    ) -> CreateResult<Vni> {
-        if let Some(vpc_id) = vpc_id {
-            // VPC provided - must succeed or fail the operation
-            self.resolve_vpc_to_vni(opctx, vpc_id).await
-        } else {
-            // No VPC - use the default multicast VNI
-            Ok(Vni(external::Vni::DEFAULT_MULTICAST_VNI))
-        }
-    }
-
     /// Fetch an underlay multicast group by ID.
     pub async fn underlay_multicast_group_fetch(
         &self,
@@ -746,10 +724,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -783,10 +758,6 @@ mod tests {
             .await
             .expect("Should link multicast pool to silo");
 
-        let project_id_1 = Uuid::new_v4();
-        let project_id_2 = Uuid::new_v4();
-        let project_id_3 = Uuid::new_v4();
-
         // Allocate first address
         let params1 = params::MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
@@ -796,16 +767,13 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("exhaust-pool".parse().unwrap())),
-            vpc: None,
         };
         datastore
             .multicast_group_create(
                 &opctx,
-                project_id_1,
                 Uuid::new_v4(),
                 &params1,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create first group");
@@ -819,16 +787,13 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("exhaust-pool".parse().unwrap())),
-            vpc: None,
         };
         datastore
             .multicast_group_create(
                 &opctx,
-                project_id_2,
                 Uuid::new_v4(),
                 &params2,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create second group");
@@ -842,16 +807,13 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("exhaust-pool".parse().unwrap())),
-            vpc: None,
         };
         let result3 = datastore
             .multicast_group_create(
                 &opctx,
-                project_id_3,
                 Uuid::new_v4(),
                 &params3,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await;
         assert!(
@@ -877,10 +839,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -913,9 +872,6 @@ mod tests {
             .await
             .expect("Should link multicast pool to silo");
 
-        let project_id_1 = Uuid::new_v4();
-        let project_id_2 = Uuid::new_v4();
-
         // Create group without specifying pool (should use default)
         let params_default = params::MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
@@ -925,17 +881,14 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: None, // No pool specified - should use default
-            vpc: None,
         };
 
         let group_default = datastore
             .multicast_group_create(
                 &opctx,
-                project_id_1,
                 Uuid::new_v4(),
                 &params_default,
                 None,
-                None, // vpc_id
             )
             .await
             .expect("Should create group from default pool");
@@ -960,16 +913,13 @@ mod tests {
             pool: Some(NameOrId::Name(
                 "default-multicast-pool".parse().unwrap(),
             )),
-            vpc: None,
         };
         let group_explicit = datastore
             .multicast_group_create(
                 &opctx,
-                project_id_2,
                 Uuid::new_v4(),
                 &params_explicit,
                 None,
-                None, // vpc_id
             )
             .await
             .expect("Should create group from explicit pool");
@@ -1049,10 +999,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -1086,7 +1033,6 @@ mod tests {
             .await
             .expect("Should link multicast pool to silo");
 
-        let project_id_1 = Uuid::new_v4();
         // Create external multicast group with explicit address
         let params = params::MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
@@ -1096,17 +1042,14 @@ mod tests {
             multicast_ip: Some("224.1.3.3".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("test-multicast-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let external_group = datastore
             .multicast_group_create(
                 &opctx,
-                project_id_1,
                 Uuid::new_v4(),
                 &params,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create external group");
@@ -1152,10 +1095,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -1202,17 +1142,14 @@ mod tests {
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("parent-id-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let group = datastore
             .multicast_group_create(
                 &opctx,
-                authz_project.id(),
-                Uuid::new_v4(),
+                Uuid::new_v4(), // rack_id
                 &params,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create multicast group");
@@ -1569,10 +1506,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -1667,17 +1601,14 @@ mod tests {
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("duplicate-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let group = datastore
             .multicast_group_create(
                 &opctx,
-                authz_project.id(),
-                Uuid::new_v4(),
+                Uuid::new_v4(), // rack_id
                 &params,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create multicast group");
@@ -1760,10 +1691,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -1798,7 +1726,6 @@ mod tests {
             .expect("Should link pool to silo");
 
         // Create multicast group (datastore-only; not exercising reconciler)
-        let project_id = Uuid::new_v4();
         let group_params = params::MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "state-test-group".parse().unwrap(),
@@ -1808,16 +1735,13 @@ mod tests {
             multicast_ip: None, // Let it allocate from pool
             source_ips: None,
             pool: Some(NameOrId::Name("state-test-pool".parse().unwrap())),
-            vpc: None,
         };
         let group = datastore
             .multicast_group_create(
                 &opctx,
-                project_id,
                 Uuid::new_v4(),
                 &group_params,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create multicast group");
@@ -1970,10 +1894,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2007,8 +1928,6 @@ mod tests {
             .await
             .expect("Should link pool to silo");
 
-        let project_id = Uuid::new_v4();
-
         // Create group with specific IP
         let target_ip = "224.10.1.101".parse().unwrap();
         let params = params::MulticastGroupCreate {
@@ -2019,17 +1938,14 @@ mod tests {
             multicast_ip: Some(target_ip),
             source_ips: None,
             pool: Some(NameOrId::Name("reuse-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let group1 = datastore
             .multicast_group_create(
                 &opctx,
-                project_id,
                 Uuid::new_v4(),
                 &params,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create first group");
@@ -2051,17 +1967,14 @@ mod tests {
             multicast_ip: Some(target_ip),
             source_ips: None,
             pool: Some(NameOrId::Name("reuse-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let group2 = datastore
             .multicast_group_create(
                 &opctx,
-                project_id,
                 Uuid::new_v4(),
                 &params2,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create second group with same IP after first was deleted");
@@ -2093,10 +2006,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2130,8 +2040,6 @@ mod tests {
             .await
             .expect("Should link pool to silo");
 
-        let project_id = Uuid::new_v4();
-
         // Exhaust the pool
         let params1 = params::MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
@@ -2141,17 +2049,14 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("cycle-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let group1 = datastore
             .multicast_group_create(
                 &opctx,
-                project_id,
                 Uuid::new_v4(),
                 &params1,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create first group");
@@ -2166,17 +2071,14 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("cycle-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let result2 = datastore
             .multicast_group_create(
                 &opctx,
-                project_id,
                 Uuid::new_v4(),
                 &params2,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await;
         assert!(
@@ -2201,17 +2103,14 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("cycle-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let group3 = datastore
             .multicast_group_create(
                 &opctx,
-                project_id,
                 Uuid::new_v4(),
                 &params3,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create third group after first was deleted");
@@ -2248,10 +2147,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2285,8 +2181,6 @@ mod tests {
             .await
             .expect("Should link pool to silo");
 
-        let project_id = Uuid::new_v4();
-
         // Create a group
         let params = params::MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
@@ -2296,17 +2190,14 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("dealloc-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let group = datastore
             .multicast_group_create(
                 &opctx,
-                project_id,
                 Uuid::new_v4(),
                 &params,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
             .expect("Should create multicast group");
@@ -2361,7 +2252,6 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create project for multicast groups
-        let project_id = Uuid::new_v4();
 
         // Create IP pool
         let pool_identity = IdentityMetadataCreateParams {
@@ -2372,10 +2262,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2422,17 +2309,14 @@ mod tests {
                 "10.0.0.2".parse().unwrap(),
             ]),
             pool: Some(NameOrId::Name("fetch-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let group = datastore
             .multicast_group_create(
                 &opctx,
-                project_id,
                 Uuid::new_v4(),
                 &params,
                 Some(authz_pool),
-                None, // vpc_id
             )
             .await
             .expect("Should create multicast group");
@@ -2451,7 +2335,6 @@ mod tests {
         assert_eq!(group.description(), fetched_group.description());
         assert_eq!(group.multicast_ip, fetched_group.multicast_ip);
         assert_eq!(group.source_ips, fetched_group.source_ips);
-        assert_eq!(group.project_id, fetched_group.project_id);
         assert_eq!(group.state, MulticastGroupState::Creating);
 
         // Test fetching non-existent group
@@ -2475,14 +2358,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_multicast_group_list_by_project() {
+    async fn test_multicast_group_list_fleet_wide() {
         let logctx =
-            dev::test_setup_log("test_multicast_group_list_by_project");
+            dev::test_setup_log("test_multicast_group_list_fleet_wide");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        let project_id_1 = Uuid::new_v4();
-        let project_id_2 = Uuid::new_v4();
 
         // Create IP pool
         let pool_identity = IdentityMetadataCreateParams {
@@ -2493,10 +2373,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2531,127 +2408,90 @@ mod tests {
             .await
             .expect("Should link multicast pool to silo");
 
-        // Create groups in different projects
+        // Create fleet-wide multicast groups
         let params_1 = params::MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
-                name: "project1-group1".parse().unwrap(),
-                description: "Group 1 in project 1".to_string(),
+                name: "fleet-group-1".parse().unwrap(),
+                description: "Fleet-wide group 1".to_string(),
             },
             multicast_ip: Some("224.100.20.10".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("list-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let params_2 = params::MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
-                name: "project1-group2".parse().unwrap(),
-                description: "Group 2 in project 1".to_string(),
+                name: "fleet-group-2".parse().unwrap(),
+                description: "Fleet-wide group 2".to_string(),
             },
             multicast_ip: Some("224.100.20.11".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("list-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         let params_3 = params::MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
-                name: "project2-group1".parse().unwrap(),
-                description: "Group 1 in project 2".to_string(),
+                name: "fleet-group-3".parse().unwrap(),
+                description: "Fleet-wide group 3".to_string(),
             },
             multicast_ip: Some("224.100.20.12".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("list-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
-        // Create groups
+        // Create groups (all are fleet-wide)
         datastore
             .multicast_group_create(
                 &opctx,
-                project_id_1,
                 Uuid::new_v4(),
                 &params_1,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
-            .expect("Should create group 1 in project 1");
+            .expect("Should create fleet-group-1");
 
         datastore
             .multicast_group_create(
                 &opctx,
-                project_id_1,
                 Uuid::new_v4(),
                 &params_2,
                 Some(authz_pool.clone()),
-                None, // vpc_id
             )
             .await
-            .expect("Should create group 2 in project 1");
+            .expect("Should create fleet-group-2");
 
         datastore
             .multicast_group_create(
                 &opctx,
-                project_id_2,
                 Uuid::new_v4(),
                 &params_3,
                 Some(authz_pool),
-                None, // vpc_id
             )
             .await
-            .expect("Should create group 1 in project 2");
+            .expect("Should create fleet-group-3");
 
-        // List groups in project 1 - should get 2 groups
+        // List all groups fleet-wide - should get 3 groups
         let pagparams = DataPageParams {
             marker: None,
             direction: external::PaginationOrder::Ascending,
             limit: std::num::NonZeroU32::new(10).unwrap(),
         };
 
-        let silo_id = opctx.authn.silo_required().unwrap().id();
-        let authz_silo =
-            authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
-        let authz_project_1 = authz::Project::new(
-            authz_silo.clone(),
-            project_id_1,
-            LookupType::ById(project_id_1),
-        );
         let paginated_by =
             external::http_pagination::PaginatedBy::Id(pagparams);
-        let groups_p1 = datastore
-            .multicast_groups_list(&opctx, &authz_project_1, &paginated_by)
+        let groups = datastore
+            .multicast_groups_list(&opctx, &paginated_by)
             .await
-            .expect("Should list groups in project 1");
+            .expect("Should list all fleet-wide groups");
 
-        assert_eq!(groups_p1.len(), 2, "Project 1 should have 2 groups");
+        assert_eq!(groups.len(), 3, "Should have 3 fleet-wide groups");
 
-        // List groups in project 2 - should get 1 group
-        let authz_project_2 = authz::Project::new(
-            authz_silo.clone(),
-            project_id_2,
-            LookupType::ById(project_id_2),
-        );
-        let groups_p2 = datastore
-            .multicast_groups_list(&opctx, &authz_project_2, &paginated_by)
-            .await
-            .expect("Should list groups in project 2");
-
-        assert_eq!(groups_p2.len(), 1, "Project 2 should have 1 group");
-
-        // List groups in non-existent project - should get empty list
-        let fake_project_id = Uuid::new_v4();
-        let authz_fake_project = authz::Project::new(
-            authz_silo,
-            fake_project_id,
-            LookupType::ById(fake_project_id),
-        );
-        let groups_fake = datastore
-            .multicast_groups_list(&opctx, &authz_fake_project, &paginated_by)
-            .await
-            .expect("Should list groups in fake project (empty)");
-
-        assert_eq!(groups_fake.len(), 0, "Fake project should have 0 groups");
+        // Verify the groups have the correct names
+        let group_names: Vec<_> =
+            groups.iter().map(|g| g.name().to_string()).collect();
+        assert!(group_names.contains(&"fleet-group-1".to_string()));
+        assert!(group_names.contains(&"fleet-group-2".to_string()));
+        assert!(group_names.contains(&"fleet-group-3".to_string()));
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2664,8 +2504,6 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let project_id = Uuid::new_v4();
-
         // Create IP pool
         let pool_identity = IdentityMetadataCreateParams {
             name: "state-test-pool".parse().unwrap(),
@@ -2675,10 +2513,7 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(
-                    &pool_identity,
-                    IpVersion::V4,
-                ),
+                IpPool::new_multicast(&pool_identity, IpVersion::V4),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2721,18 +2556,15 @@ mod tests {
             multicast_ip: Some("224.100.30.5".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("state-test-pool".parse().unwrap())),
-            vpc: None,
         };
 
         // Create group - starts in "Creating" state
         let group = datastore
             .multicast_group_create(
                 &opctx,
-                project_id,
                 Uuid::new_v4(),
                 &params,
                 Some(authz_pool),
-                None, // vpc_id
             )
             .await
             .expect("Should create multicast group");

@@ -1017,13 +1017,11 @@ async fn sic_join_instance_multicast_group(
 
     // Look up the multicast group by name or ID using the existing nexus method
     let multicast_group_selector = params::MulticastGroupSelector {
-        project: Some(NameOrId::Id(saga_params.project_id)),
         multicast_group: group_name_or_id.clone(),
     };
     let multicast_group_lookup = osagactx
         .nexus()
-        .multicast_group_lookup(&opctx, multicast_group_selector)
-        .await
+        .multicast_group_lookup(&opctx, &multicast_group_selector)
         .map_err(ActionError::action_failed)?;
 
     let (.., db_group) = multicast_group_lookup
@@ -1094,13 +1092,11 @@ async fn sic_join_instance_multicast_group_undo(
 
     // Look up the multicast group by name or ID using the existing nexus method
     let multicast_group_selector = params::MulticastGroupSelector {
-        project: Some(NameOrId::Id(saga_params.project_id)),
         multicast_group: group_name_or_id.clone(),
     };
     let multicast_group_lookup = osagactx
         .nexus()
-        .multicast_group_lookup(&opctx, multicast_group_selector)
-        .await?;
+        .multicast_group_lookup(&opctx, &multicast_group_selector)?;
     let (.., db_group) =
         multicast_group_lookup.fetch_for(authz::Action::Modify).await?;
 

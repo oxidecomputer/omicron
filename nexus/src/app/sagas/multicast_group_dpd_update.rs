@@ -21,6 +21,7 @@ use uuid::Uuid;
 use dpd_client::types::{
     MulticastGroupExternalResponse, MulticastGroupUnderlayResponse,
 };
+
 use nexus_db_model::{MulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::authn;
 use nexus_types::identity::Resource;
@@ -141,6 +142,7 @@ async fn mgu_fetch_group_data(
         osagactx.log(),
         "successfully fetched multicast group data for update";
         "external_group_id" => %external_group.id(),
+        "external_group_name" => external_group.name().as_str(),
         "external_ip" => %external_group.multicast_ip,
         "underlay_group_id" => %underlay_group.id,
         "underlay_ip" => %underlay_group.multicast_ip
@@ -175,6 +177,8 @@ async fn mgu_update_dataplane(
         osagactx.log(),
         "updating multicast group identity via DPD across switches";
         "switch_count" => %dataplane.switch_count(),
+        "external_group_id" => %external_group.id(),
+        "external_group_name" => external_group.name().as_str(),
         "external_ip" => %external_group.multicast_ip,
         "underlay_ip" => %underlay_group.multicast_ip,
         "params" => ?params,
@@ -234,6 +238,7 @@ async fn mgu_rollback_dataplane(
         "rolling back multicast group updates";
         "external_group_id" => %params.external_group_id,
         "underlay_group_id" => %params.underlay_group_id,
+        "external_group_name" => external_group.name().as_str(),
         "reverting_to_old_name" => %params.old_name,
     );
 

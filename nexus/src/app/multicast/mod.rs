@@ -7,11 +7,43 @@
 //! This module provides multicast group management operations including
 //! group creation, member management, and integration with IP pools
 //! following the bifurcated design from [RFD 488](https://rfd.shared.oxide.computer/rfd/488).
+//!
+//! ## Fleet-Scoped Authorization Model
+//!
+//! Multicast groups are **fleet-scoped resources** (authz parent = "Fleet"),
+//! similar to IP pools. This design decision enables:
+//!
+//! - **Cross-project multicast**: Instances from different projects can join
+//!   the same multicast group, enabling collaboration without IP waste.
+//! - **Cross-silo multicast**: Instances from different silos can join the
+//!   same group (when pools are linked to multiple silos).
+//! - **Efficient IP address usage**: One multicast IP serves many projects/silos
+//!   rather than requiring separate groups per project.
+//!
+//! ### Authorization Rules
+//!
+//! - **Creating/modifying/deleting groups**: Requires Fleet::Admin role (fleet admins only)
+//! - **Attaching instances to groups**: Requires only instance modification rights
+//!   (project collaborators can attach their own instances to any fleet-scoped group)
+//! - **Listing groups**: Requires Fleet::Viewer role or higher
+//!
+//! This mirrors the IP pool model where fleet admins create pools, link them to
+//! silos, and then silo users consume IPs from those pools without needing pool
+//! modification rights.
+//!
+//! ### VNI Assignment
+//!
+//! All fleet-scoped multicast groups use `DEFAULT_MULTICAST_VNI` (77), which is
+//! reserved for fleet-wide multicast traffic and below the `MIN_GUEST_VNI` (1024)
+//! threshold. This ensures consistent behavior across all multicast groups.
 
 use std::net::IpAddr;
 use std::sync::Arc;
 
+use ref_cast::RefCast;
+
 use nexus_db_lookup::{LookupPath, lookup};
+use nexus_db_model::Name;
 use nexus_db_queries::authn::saga::Serialized;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::{authz, db};
@@ -31,43 +63,26 @@ use crate::app::sagas::multicast_group_dpd_update::{
 pub(crate) mod dataplane;
 
 impl super::Nexus {
-    /// Look up a multicast group by name or ID within a project.
-    pub(crate) async fn multicast_group_lookup<'a>(
+    /// Look up a fleet-scoped multicast group by name or ID.
+    pub(crate) fn multicast_group_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
-        multicast_group_selector: params::MulticastGroupSelector,
+        multicast_group_selector: &'a params::MulticastGroupSelector,
     ) -> LookupResult<lookup::MulticastGroup<'a>> {
-        match multicast_group_selector {
-            params::MulticastGroupSelector {
-                multicast_group: NameOrId::Id(id),
-                project: None,
-            } => {
+        // Multicast groups are fleet-scoped (like IP pools)
+        match &multicast_group_selector.multicast_group {
+            NameOrId::Id(id) => {
                 let multicast_group =
                     LookupPath::new(opctx, &self.db_datastore)
-                        .multicast_group_id(id);
+                        .multicast_group_id(*id);
                 Ok(multicast_group)
             }
-            params::MulticastGroupSelector {
-                multicast_group: NameOrId::Name(name),
-                project: Some(project),
-            } => {
-                let multicast_group = self
-                    .project_lookup(opctx, params::ProjectSelector { project })?
-                    .multicast_group_name_owned(name.into());
+            NameOrId::Name(name) => {
+                let multicast_group =
+                    LookupPath::new(opctx, &self.db_datastore)
+                        .multicast_group_name(Name::ref_cast(name));
                 Ok(multicast_group)
             }
-            params::MulticastGroupSelector {
-                multicast_group: NameOrId::Name(_),
-                project: None,
-            } => Err(Error::invalid_request(
-                "project must be specified when looking up multicast group by name",
-            )),
-            params::MulticastGroupSelector {
-                multicast_group: NameOrId::Id(_),
-                ..
-            } => Err(Error::invalid_request(
-                "when providing a multicast group as an ID project should not be specified",
-            )),
         }
     }
 
@@ -75,11 +90,10 @@ impl super::Nexus {
     pub(crate) async fn multicast_group_create(
         &self,
         opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
         params: &params::MulticastGroupCreate,
     ) -> CreateResult<db::model::ExternalMulticastGroup> {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::CreateChild).await?;
+        // Multicast groups are fleet-scoped
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         // If an explicit multicast IP is provided, validate ASM/SSM semantics:
         // - ASM IPs must not specify sources
@@ -113,36 +127,10 @@ impl super::Nexus {
             None => None,
         };
 
-        // Resolve VPC if provided
-        let vpc_id = match &params.vpc {
-            Some(vpc_selector) => {
-                let vpc_lookup = self.vpc_lookup(
-                    opctx,
-                    params::VpcSelector {
-                        vpc: vpc_selector.clone(),
-                        project: Some(external::NameOrId::Id(
-                            authz_project.id(),
-                        )),
-                    },
-                )?;
-                let (.., authz_vpc) =
-                    vpc_lookup.lookup_for(authz::Action::Read).await?;
-                Some(authz_vpc.id())
-            }
-            None => None,
-        };
-
-        // Create multicast group
+        // Create multicast group (fleet-scoped, uses DEFAULT_MULTICAST_VNI)
         let group = self
             .db_datastore
-            .multicast_group_create(
-                opctx,
-                authz_project.id(),
-                self.rack_id(),
-                params,
-                authz_pool,
-                vpc_id,
-            )
+            .multicast_group_create(opctx, self.rack_id(), params, authz_pool)
             .await?;
 
         // Activate reconciler to process the new group ("Creating" → "Active")
@@ -175,18 +163,15 @@ impl super::Nexus {
         self.db_datastore.multicast_group_lookup_by_ip(opctx, ip_addr).await
     }
 
-    /// List multicast groups in a project.
+    /// List all multicast groups fleet-wide.
     pub(crate) async fn multicast_groups_list(
         &self,
         opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::ExternalMulticastGroup> {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::ListChildren).await?;
-        self.db_datastore
-            .multicast_groups_list(opctx, &authz_project, pagparams)
-            .await
+        // Multicast groups are fleet-scoped
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        self.db_datastore.multicast_groups_list(opctx, pagparams).await
     }
 
     /// Update a multicast group.
@@ -312,10 +297,12 @@ impl super::Nexus {
         group_lookup: &lookup::MulticastGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
     ) -> CreateResult<db::model::MulticastGroupMember> {
-        let (.., _authz_project, authz_group) =
-            group_lookup.lookup_for(authz::Action::Modify).await?;
+        // Multicast groups are fleet-scoped - users only need Read permission on the group
+        // and Modify permission on the instance to attach it
+        let (.., authz_group) =
+            group_lookup.lookup_for(authz::Action::Read).await?;
         let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Read).await?;
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         let member = self
             .db_datastore
@@ -338,10 +325,12 @@ impl super::Nexus {
         group_lookup: &lookup::MulticastGroup<'_>,
         instance_lookup: &lookup::Instance<'_>,
     ) -> DeleteResult {
-        let (.., _authz_project, authz_group) =
-            group_lookup.lookup_for(authz::Action::Modify).await?;
+        // Multicast groups are fleet-scoped - users only need Read permission on the group
+        // and Modify permission on the instance to detach it
+        let (.., authz_group) =
+            group_lookup.lookup_for(authz::Action::Read).await?;
         let (.., authz_instance) =
-            instance_lookup.lookup_for(authz::Action::Read).await?;
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
 
         // First, get the member ID by group and instance
         // For idempotency, if the member doesn't exist, we consider the removal successful

@@ -800,7 +800,6 @@ pub static DEMO_MULTICAST_GROUP_CREATE: LazyLock<params::MulticastGroupCreate> =
         },
         multicast_ip: Some("224.0.1.100".parse().unwrap()),
         pool: Some(DEMO_MULTICAST_IP_POOL_NAME.clone().into()),
-        vpc: None,
         source_ips: Some(Vec::new()),
     });
 pub static DEMO_MULTICAST_GROUP_UPDATE: LazyLock<params::MulticastGroupUpdate> =

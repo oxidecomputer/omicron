@@ -6,10 +6,6 @@
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-
-use omicron_uuid_kinds::{
-    GenericUuid, InstanceUuid, MulticastGroupUuid, SledKind,
-};
 use slog::debug;
 use uuid::Uuid;
 
@@ -17,6 +13,9 @@ use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, ListResultVec,
     LookupType, ResourceType, UpdateResult,
+};
+use omicron_uuid_kinds::{
+    GenericUuid, InstanceUuid, MulticastGroupUuid, SledKind,
 };
 
 use crate::context::OpContext;
@@ -738,17 +737,14 @@ mod tests {
             source_ips: None,
             // Pool resolved via authz_pool argument to datastore call
             pool: None,
-            vpc: None,
         };
 
         let creating_group = datastore
             .multicast_group_create(
                 &opctx,
-                setup.project_id,
                 Uuid::new_v4(),
                 &creating_group_params,
                 Some(setup.authz_pool.clone()),
-                None,
             )
             .await
             .expect("Should create creating multicast group");

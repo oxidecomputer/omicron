@@ -360,7 +360,7 @@ async fn make_project(
 
     let multicast_group_name = format!("{project_name}-multicast-group1");
     builder.new_resource(authz::MulticastGroup::new(
-        project.clone(),
+        authz::FLEET,
         Uuid::new_v4(),
         LookupType::ByName(multicast_group_name),
     ));
