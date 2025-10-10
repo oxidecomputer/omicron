@@ -997,6 +997,22 @@ impl std::fmt::Debug for CertificateCreate {
 
 // IP POOLS
 
+/// Filters for listing IP pools.
+#[derive(
+    Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
+pub struct IpPoolListSelector {
+    /// Restrict pools to a specific IP version.
+    #[serde(default)]
+    pub ip_version: Option<IpVersion>,
+
+    /// Filter on pools delegated for internal Oxide use.
+    ///
+    /// Defaults to excluding internal pools when unset.
+    #[serde(default)]
+    pub delegated_for_internal_use: Option<bool>,
+}
+
 /// Create-time parameters for an `IpPool`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolCreate {

@@ -14,7 +14,9 @@ use http::StatusCode;
 use http::method::Method;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::SERVICE_IPV4_POOL_NAME;
+use nexus_db_queries::db::datastore::{
+    SERVICE_IPV4_POOL_NAME, SERVICE_IPV6_POOL_NAME,
+};
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -222,16 +224,23 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
         .expect("Expected to be able to delete an empty IP Pool");
 }
 
-async fn get_ip_pools(client: &ClientTestContext) -> Vec<IpPool> {
+async fn get_ip_pools_with_params(
+    client: &ClientTestContext,
+    params: &str,
+) -> Vec<IpPool> {
     NexusRequest::iter_collection_authn::<IpPool>(
         client,
         "/v1/system/ip-pools",
-        "",
+        params,
         None,
     )
     .await
     .expect("Failed to list IP Pools")
     .all_items
+}
+
+async fn get_ip_pools(client: &ClientTestContext) -> Vec<IpPool> {
+    get_ip_pools_with_params(client, "").await
 }
 
 // this test exists primarily because of a bug in the initial implementation
@@ -704,6 +713,85 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 1);
     assert_eq!(silos_p1.items[0].is_default, false);
+}
+
+#[nexus_test]
+async fn test_ip_pool_list_filter_delegated(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let (user_pool, ..) = create_ip_pool(client, "pool-filter", None).await;
+
+    let default_pools = get_ip_pools(client).await;
+    assert!(
+        default_pools
+            .iter()
+            .any(|pool| pool.identity.id == user_pool.identity.id)
+    );
+
+    let delegated_only =
+        get_ip_pools_with_params(client, "delegated_for_internal_use=true")
+            .await;
+    assert!(
+        delegated_only
+            .iter()
+            .any(|pool| pool.identity.name == SERVICE_IPV4_POOL_NAME)
+    );
+    assert!(
+        delegated_only
+            .iter()
+            .any(|pool| pool.identity.name == SERVICE_IPV6_POOL_NAME)
+    );
+    assert!(
+        delegated_only
+            .iter()
+            .all(|pool| pool.identity.id != user_pool.identity.id)
+    );
+
+    let non_delegated =
+        get_ip_pools_with_params(client, "delegated_for_internal_use=false")
+            .await;
+    assert!(
+        non_delegated
+            .iter()
+            .any(|pool| pool.identity.id == user_pool.identity.id)
+    );
+    assert!(non_delegated.iter().all(|pool| {
+        pool.identity.name != SERVICE_IPV4_POOL_NAME
+            && pool.identity.name != SERVICE_IPV6_POOL_NAME
+    }));
+}
+
+#[nexus_test]
+async fn test_ip_pool_list_filter_ip_version(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let (user_pool, ..) = create_ip_pool(client, "pool-filter-v4", None).await;
+
+    let v4_pools = get_ip_pools_with_params(
+        client,
+        "ip_version=v4&delegated_for_internal_use=false",
+    )
+    .await;
+    assert!(v4_pools.iter().all(|pool| pool.ip_version == IpVersion::V4));
+    assert!(
+        v4_pools.iter().any(|pool| pool.identity.id == user_pool.identity.id)
+    );
+
+    let delegated_v6 = get_ip_pools_with_params(
+        client,
+        "delegated_for_internal_use=true&ip_version=v6",
+    )
+    .await;
+    assert!(delegated_v6.iter().all(|pool| pool.ip_version == IpVersion::V6));
+    assert!(
+        delegated_v6
+            .iter()
+            .any(|pool| pool.identity.name == SERVICE_IPV6_POOL_NAME)
+    );
 }
 
 // IP pool list fetch logic includes a join to ip_pool_resource, which is

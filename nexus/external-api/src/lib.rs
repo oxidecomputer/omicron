@@ -924,7 +924,7 @@ pub trait NexusExternalApi {
     }]
     async fn ip_pool_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId>,
+        query_params: Query<PaginatedByNameOrId<params::IpPoolListSelector>>,
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError>;
 
     /// Create IP pool
