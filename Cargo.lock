@@ -560,7 +560,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "attest-data 0.5.0",
- "camino",
  "clap",
  "hex",
  "hubpack",
@@ -10265,6 +10264,7 @@ checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
 [[package]]
 name = "pki-playground"
 version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/pki-playground?rev=7600756029ce046a02c6234aa84ce230cc5eaa04#7600756029ce046a02c6234aa84ce230cc5eaa04"
 dependencies = [
  "camino",
  "clap",
@@ -13421,6 +13421,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sprockets-tls-test-utils"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "pki-playground",
+]
+
+[[package]]
 name = "sqlformat"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14829,6 +14837,7 @@ dependencies = [
  "attest-mock",
  "bcs",
  "bootstore",
+ "bytes",
  "camino",
  "chacha20poly1305",
  "daft",
@@ -14842,7 +14851,6 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "pki-playground",
  "proptest",
  "rand 0.9.2",
  "secrecy 0.10.3",
@@ -14854,6 +14862,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "sprockets-tls",
+ "sprockets-tls-test-utils",
  "static_assertions",
  "subtle",
  "test-strategy",

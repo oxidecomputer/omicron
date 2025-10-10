@@ -72,13 +72,6 @@ pub struct NodeTask {
     rx: mpsc::Receiver<NodeApiRequest>,
 }
 
-fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
-    let mut platform_id_iter = platform_id.split(":");
-    let part_number = platform_id_iter.nth(1).unwrap().to_string();
-    let serial_number = platform_id_iter.skip(1).next().unwrap().to_string();
-    BaseboardId { part_number, serial_number }
-}
-
 impl NodeTask {
     pub fn new(config: Config, log: &Logger) -> (NodeTask, NodeTaskHandle) {
         let log = log.new(o!(
@@ -123,36 +116,7 @@ impl NodeTask {
         }
     }
 
-    async fn on_accept(&mut self, acceptor: SprocketsAcceptor) {
-        let log = self.log.clone();
-        tokio::spawn(async move {
-            match acceptor.handshake().await {
-                Ok((stream, addr)) => {
-                    let platform_id =
-                        stream.peer_platform_id().as_str().unwrap();
-                    let baseboard_id = platform_id_to_baseboard_id(platform_id);
-
-                    // TODO: Conversion between `PlatformId` and `BaseboardId` should
-                    // happen in `sled-agent-types`. This is waiting on an update
-                    // to the `dice-mfg-msgs` crate.
-                    let log =
-                        log.new(o!("baseboard_id" => baseboard_id.to_string()));
-                    let SocketAddr::V6(addr) = addr else {
-                        warn!(
-                            log,
-                            "Got connection from IPv4 address";
-                            "addr" => addr
-                        );
-                        return;
-                    };
-                    info!(log, "Accepted sprockets connection"; "addr" => %addr);
-                }
-                Err(err) => {
-                    error!(log, "Failed to accept a connection: {err:?}");
-                }
-            }
-        });
-    }
+    async fn on_accept(&mut self, acceptor: SprocketsAcceptor) {}
 
     async fn on_api_request(&mut self, request: NodeApiRequest) {
         match request {
