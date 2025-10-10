@@ -4,11 +4,12 @@
 
 //! A mechanism for maintaining a full mesh of trust quorum node connections
 
-use crate::BaseboardId;
+use crate::{BaseboardId, PeerMsg};
 use bytes::Buf;
 use camino::Utf8PathBuf;
 use futures::stream::FuturesUnordered;
-use slog::{Logger, error, info, o, warn};
+use serde::{Deserialize, Serialize};
+use slog::{Logger, error, info, o};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::VecDeque;
@@ -20,7 +21,7 @@ use tokio::io::{Interest, Ready};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior, interval, sleep};
+use tokio::time::{Instant, MissedTickBehavior, interval};
 
 /// We only expect one outstanding request at a time for `Init_` or
 /// `LoadRackSecret` requests, We can have one of those requests in
@@ -84,6 +85,34 @@ pub enum MainToConnMsg {
     Msg,
 }
 
+/// All possible messages sent over established connections
+///
+/// This include trust quorum related `PeerMsg`s, but also ancillary network
+/// messages used for other purposes.
+///
+/// All `WireMsg`s sent between nodes is prefixed with a 4 byte size header used
+/// for framing.
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum WireMsg {
+    /// Used for connection keep alive
+    Ping,
+    /// Trust quorum peer messages
+    Tq(PeerMsg),
+    /// Early network configuration to enable NTP timesync
+    ///
+    /// Technically this is not part of the trust quorum protocol. However it is
+    /// necessary to gossip this information to all nodes on the system so that
+    /// each can establish NTP sync required for the rest of the control plane
+    /// to boot. In short, we can't have rack unlock without this information,
+    /// even if we can decrypt the drives. For simplicity, we just piggyback
+    /// this information on the trust quorum connections. This is why the
+    /// implementation of LRTQ lived inside the `bootstore` directory in the
+    /// `omicron` repo. This is technically an eventually consistent database
+    /// of tiny information layered on top of trust quorum. You can still think
+    /// of it as a bootstore, although, we no longer use that name.
+    NetworkConfig,
+}
+
 /// Messages sent from connection managing tasks to the main peer task
 ///
 /// We include `handle_unique_id` to differentiate which task they come from so
@@ -100,9 +129,9 @@ pub enum ConnToMainMsgInner {
     Accepted { addr: SocketAddrV6, peer_id: BaseboardId },
     Connected { addr: SocketAddrV6, peer_id: BaseboardId },
     Disconnected { peer_id: BaseboardId },
-    //    Received { from: Baseboard, msg: FsmMsg },
+    //    Received { from: BaseboardId, msg: FsmMsg },
     //  FailedAcceptorHandshake { addr: SocketAddrV6 },
-    //ReceivedNetworkConfig { from: Baseboard, config: NetworkConfig },
+    //ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
 }
 
 pub struct TaskHandle {
