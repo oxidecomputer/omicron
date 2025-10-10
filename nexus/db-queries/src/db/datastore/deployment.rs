@@ -4781,11 +4781,11 @@ mod tests {
 
             if !problematic_tables.is_empty() {
                 panic!(
-                    "Expected tables to be populated across test blueprints: {:?}\n\n\
-                    If every blueprint should be expected to have a value in this table, then this is a bug. \
-                    Otherwise, you may need to add a table to the exception list in `ensure_fully_populated()`. \
-                    If you do this, please ensure that you add a test to `test_representative_blueprint()` that creates a \
-                    blueprint that _does_ populate this table and verifies it.",
+                    "Expected these table  to be populated by one of the test blueprints, \
+                    but they weren't: {:?}\n\n\
+                    If you're adding a new table that's only populated for some blueprints, \
+                    you may need to add a new test blueprint that uses that table to make \
+                    sure that it gets covered.",
                     problematic_tables
                 );
             }
