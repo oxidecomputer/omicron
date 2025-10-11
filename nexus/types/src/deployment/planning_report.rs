@@ -228,13 +228,18 @@ pub struct PlanningNoopImageSourceConverted {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlanningNoopImageSourceStepReport {
     pub no_target_release: bool,
-    // Make these maps small to avoid bloating the size of generated test data.
+    // Make these maps and sets small to avoid bloating the size of generated
+    // test data.
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub skipped_sled_zones:
         BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledZonesReason>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub skipped_sled_host_phase_2:
         BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledHostPhase2Reason>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub sled_zones_all_already_artifact: BTreeSet<SledUuid>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub sled_host_phase_2_both_already_artifact: BTreeSet<SledUuid>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub skipped_zones:
         BTreeMap<OmicronZoneUuid, PlanningNoopImageSourceSkipZoneReason>,
@@ -247,7 +252,9 @@ impl PlanningNoopImageSourceStepReport {
         Self {
             no_target_release: false,
             skipped_sled_zones: BTreeMap::new(),
+            sled_zones_all_already_artifact: BTreeSet::new(),
             skipped_sled_host_phase_2: BTreeMap::new(),
+            sled_host_phase_2_both_already_artifact: BTreeSet::new(),
             skipped_zones: BTreeMap::new(),
             converted: BTreeMap::new(),
         }
@@ -269,12 +276,20 @@ impl PlanningNoopImageSourceStepReport {
         self.skipped_sled_zones.insert(sled_id, reason);
     }
 
+    pub fn sled_zones_all_already_artifact(&mut self, sled_id: SledUuid) {
+        self.sled_zones_all_already_artifact.insert(sled_id);
+    }
+
     pub fn skip_sled_host_phase_2(
         &mut self,
         sled_id: SledUuid,
         reason: PlanningNoopImageSourceSkipSledHostPhase2Reason,
     ) {
         self.skipped_sled_host_phase_2.insert(sled_id, reason);
+    }
+
+    pub fn sled_host_phase_2_both_already_artifact(&mut self, sled_id: SledUuid) {
+        self.sled_host_phase_2_both_already_artifact.insert(sled_id);
     }
 
     pub fn skip_zone(
@@ -311,6 +326,11 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
             no_target_release,
             skipped_sled_zones,
             skipped_sled_host_phase_2,
+            // We track the sleds that are all already artifact, but don't
+            // display them in the report because that's the steady state of the
+            // system.
+            sled_zones_all_already_artifact: _,
+            sled_host_phase_2_both_already_artifact: _,
             skipped_zones: _,
             converted,
         } = self;
@@ -376,7 +396,6 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum PlanningNoopImageSourceSkipSledZonesReason {
-    AllZonesAlreadyArtifact { num_total: usize },
     SledNotInInventory,
     ErrorRetrievingZoneManifest { error: String },
     RemoveMupdateOverride { id: MupdateOverrideUuid },
@@ -385,9 +404,6 @@ pub enum PlanningNoopImageSourceSkipSledZonesReason {
 impl fmt::Display for PlanningNoopImageSourceSkipSledZonesReason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::AllZonesAlreadyArtifact { num_total } => {
-                write!(f, "all {num_total} zones are already from artifacts")
-            }
             Self::SledNotInInventory => {
                 write!(f, "sled not present in latest inventory collection")
             }
@@ -414,16 +430,12 @@ impl fmt::Display for PlanningNoopImageSourceSkipSledZonesReason {
 #[serde(rename_all = "snake_case", tag = "type")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum PlanningNoopImageSourceSkipSledHostPhase2Reason {
-    BothSlotsAlreadyArtifact,
     SledNotInInventory,
 }
 
 impl fmt::Display for PlanningNoopImageSourceSkipSledHostPhase2Reason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::BothSlotsAlreadyArtifact => {
-                write!(f, "both host phase 2 slots are already from artifacts")
-            }
             Self::SledNotInInventory => {
                 write!(f, "sled not present in latest inventory collection")
             }
