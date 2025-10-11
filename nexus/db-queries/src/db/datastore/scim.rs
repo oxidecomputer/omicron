@@ -13,6 +13,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::LookupPath;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
@@ -85,21 +86,23 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        id: Uuid,
-    ) -> LookupResult<Option<ScimClientBearerToken>> {
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+        token_id: Uuid,
+    ) -> LookupResult<ScimClientBearerToken> {
+        let (_, authz_token) = LookupPath::new(opctx, self)
+            .scim_client_bearer_token_id(token_id)
+            .lookup_for(authz::Action::Read)
+            .await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
         use nexus_db_schema::schema::scim_client_bearer_token::dsl;
         let token = dsl::scim_client_bearer_token
             .filter(dsl::silo_id.eq(authz_silo.id()))
-            .filter(dsl::id.eq(id))
+            .filter(dsl::id.eq(authz_token.id()))
             .filter(dsl::time_deleted.is_null())
             .select(ScimClientBearerToken::as_select())
             .first_async::<ScimClientBearerToken>(&*conn)
             .await
-            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(token)
@@ -109,16 +112,19 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        id: Uuid,
+        token_id: Uuid,
     ) -> DeleteResult {
-        opctx.authorize(authz::Action::Modify, authz_silo).await?;
+        let (_, authz_token) = LookupPath::new(opctx, self)
+            .scim_client_bearer_token_id(token_id)
+            .lookup_for(authz::Action::Delete)
+            .await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
         use nexus_db_schema::schema::scim_client_bearer_token::dsl;
         diesel::update(dsl::scim_client_bearer_token)
             .filter(dsl::silo_id.eq(authz_silo.id()))
-            .filter(dsl::id.eq(id))
+            .filter(dsl::id.eq(authz_token.id()))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(Utc::now()))
             .execute_async(&*conn)

@@ -10,8 +10,8 @@ use base64::Engine;
 use chrono::Utc;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_queries::authn::USER_TEST_PRIVILEGED;
 use nexus_db_queries::authn::silos::{IdentityProviderType, SamlLoginPost};
-use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::model::ScimClientBearerToken;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::create_silo;
@@ -23,6 +23,7 @@ use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views::{self, Silo};
 use nexus_types::external_api::{params, shared};
+use nexus_types::identity::Asset;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_nexus::TestInterfaces;
 use uuid::Uuid;
@@ -216,11 +217,6 @@ async fn test_no_jit_for_saml_scim_silos(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.server_context().nexus;
-    let opctx = OpContext::for_tests(
-        cptestctx.logctx.log.new(o!()),
-        nexus.datastore().clone(),
-    );
 
     // Create a Silo, then grant the PrivilegedUser the Admin role on it
 
@@ -232,18 +228,16 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
         shared::SiloRole::Admin,
-        opctx.authn.actor().unwrap().silo_user_id().unwrap(),
+        USER_TEST_PRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
     .await;
 
     // Initially, there should be no tokens created during silo create.
 
-    let tokens: Vec<views::ScimClientBearerToken> = object_get(
-        client,
-        &format!("/v1/system/scim/tokens?silo={}", SILO_NAME),
-    )
-    .await;
+    let tokens: Vec<views::ScimClientBearerToken> =
+        object_get(client, &format!("/v1/system/scim/tokens?silo={SILO_NAME}"))
+            .await;
 
     assert!(tokens.is_empty());
 
@@ -340,12 +334,6 @@ async fn test_scim_client_token_crud(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.server_context().nexus;
-
-    let opctx = OpContext::for_tests(
-        cptestctx.logctx.log.new(o!()),
-        nexus.datastore().clone(),
-    );
 
     // Create two Silos, then grant the PrivilegedUser the Admin role on both
 
@@ -362,7 +350,7 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
         client,
         &format!("/v1/system/silos/{SILO_1_NAME}"),
         shared::SiloRole::Admin,
-        opctx.authn.actor().unwrap().silo_user_id().unwrap(),
+        USER_TEST_PRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
     .await;
@@ -371,7 +359,7 @@ async fn test_scim_client_token_tenancy(cptestctx: &ControlPlaneTestContext) {
         client,
         &format!("/v1/system/silos/{SILO_2_NAME}"),
         shared::SiloRole::Admin,
-        opctx.authn.actor().unwrap().silo_user_id().unwrap(),
+        USER_TEST_PRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
     .await;
@@ -427,11 +415,6 @@ async fn test_scim_client_token_bearer_auth(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.server_context().nexus;
-    let opctx = OpContext::for_tests(
-        cptestctx.logctx.log.new(o!()),
-        nexus.datastore().clone(),
-    );
 
     // Create a Silo, then grant the PrivilegedUser the Admin role on it
 
@@ -443,7 +426,7 @@ async fn test_scim_client_token_bearer_auth(
         client,
         &format!("/v1/system/silos/{SILO_NAME}"),
         shared::SiloRole::Admin,
-        opctx.authn.actor().unwrap().silo_user_id().unwrap(),
+        USER_TEST_PRIVILEGED.id(),
         AuthnMode::PrivilegedUser,
     )
     .await;

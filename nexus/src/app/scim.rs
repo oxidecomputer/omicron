@@ -58,18 +58,12 @@ impl super::Nexus {
         let (.., authz_silo, _) =
             silo_lookup.fetch_for(authz::Action::ListChildren).await?;
 
-        let maybe_token = self
+        let token = self
             .datastore()
             .scim_idp_get_token_by_id(opctx, &authz_silo, token_id)
             .await?;
 
-        match maybe_token {
-            Some(token) => Ok(token.into()),
-
-            None => Err(Error::non_resourcetype_not_found(format!(
-                "token with id {token_id} not found"
-            ))),
-        }
+        Ok(token.into())
     }
 
     pub(crate) async fn scim_idp_delete_token_by_id(

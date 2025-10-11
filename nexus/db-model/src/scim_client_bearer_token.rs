@@ -25,6 +25,12 @@ pub struct ScimClientBearerToken {
     pub bearer_token: String,
 }
 
+impl ScimClientBearerToken {
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+}
+
 impl From<ScimClientBearerToken> for views::ScimClientBearerToken {
     fn from(t: ScimClientBearerToken) -> views::ScimClientBearerToken {
         views::ScimClientBearerToken {
