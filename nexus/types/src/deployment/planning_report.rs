@@ -288,7 +288,10 @@ impl PlanningNoopImageSourceStepReport {
         self.skipped_sled_host_phase_2.insert(sled_id, reason);
     }
 
-    pub fn sled_host_phase_2_both_already_artifact(&mut self, sled_id: SledUuid) {
+    pub fn sled_host_phase_2_both_already_artifact(
+        &mut self,
+        sled_id: SledUuid,
+    ) {
         self.sled_host_phase_2_both_already_artifact.insert(sled_id);
     }
 
