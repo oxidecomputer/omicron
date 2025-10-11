@@ -1429,3 +1429,11 @@ authz_resource! {
     roles_allowed = false,
     polar_snippet = Custom,
 }
+
+authz_resource! {
+    name = "ScimClientBearerToken",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = Custom,
+}

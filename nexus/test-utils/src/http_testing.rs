@@ -660,6 +660,17 @@ impl<'a> NexusRequest<'a> {
         )
     }
 
+    /// Returns a new `NexusRequest` suitable for `POST $uri` with no body
+    pub fn objects_post_no_body(
+        testctx: &'a ClientTestContext,
+        uri: &str,
+    ) -> Self {
+        NexusRequest::new(
+            RequestBuilder::new(testctx, http::Method::POST, uri)
+                .expect_status(Some(http::StatusCode::CREATED)),
+        )
+    }
+
     /// Returns a new `NexusRequest` suitable for `GET $uri`
     pub fn object_get(testctx: &'a ClientTestContext, uri: &str) -> Self {
         NexusRequest::new(

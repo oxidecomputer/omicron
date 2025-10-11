@@ -1031,40 +1031,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn scim_token_delete_all(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::SiloSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
-
-            let result = async {
-                let query = query_params.into_inner();
-                let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
-
-                nexus
-                    .scim_idp_delete_tokens_for_silo(&opctx, &silo_lookup)
-                    .await?;
-
-                Ok(HttpResponseDeleted())
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn scim_v2_list_users(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<scim2_rs::QueryParams>,

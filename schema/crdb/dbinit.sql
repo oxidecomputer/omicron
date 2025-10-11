@@ -6762,6 +6762,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_db_metadata_nexus_by_state on omicron.p
     nexus_id
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.scim_client_bearer_token (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    time_expires TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+
+    bearer_token TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+    lookup_scim_client_by_silo_id
+ON
+    omicron.public.scim_client_bearer_token (silo_id, id)
+WHERE
+    time_deleted IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+    bearer_token_unique_for_scim_client
+ON
+    omicron.public.scim_client_bearer_token (bearer_token)
+WHERE
+    time_deleted IS NULL;
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -6771,7 +6798,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '197.0.0', NULL)
+    (TRUE, NOW(), NOW(), '198.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
