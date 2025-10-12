@@ -5259,20 +5259,6 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "both_slots_already_artifact"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
                   "sled_not_in_inventory"
                 ]
               }
@@ -5285,26 +5271,6 @@
       },
       "PlanningNoopImageSourceSkipSledZonesReason": {
         "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "num_total": {
-                "type": "integer",
-                "format": "uint",
-                "minimum": 0
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "all_zones_already_artifact"
-                ]
-              }
-            },
-            "required": [
-              "num_total",
-              "type"
-            ]
-          },
           {
             "type": "object",
             "properties": {
@@ -5465,6 +5431,20 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/PlanningNoopImageSourceSkipZoneReason"
             }
+          },
+          "sled_host_phase_2_both_already_artifact": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledUuid"
+            },
+            "uniqueItems": true
+          },
+          "sled_zones_all_already_artifact": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SledUuid"
+            },
+            "uniqueItems": true
           }
         },
         "required": [
@@ -5472,7 +5452,9 @@
           "no_target_release",
           "skipped_sled_host_phase_2",
           "skipped_sled_zones",
-          "skipped_zones"
+          "skipped_zones",
+          "sled_host_phase_2_both_already_artifact",
+          "sled_zones_all_already_artifact"
         ]
       },
       "PlanningOutOfDateZone": {
