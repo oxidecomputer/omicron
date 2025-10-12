@@ -19,6 +19,7 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
+use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -548,6 +549,9 @@ pub struct MulticastGroup {
     /// Source IP addresses for Source-Specific Multicast (SSM).
     /// Empty array means any source is allowed.
     pub source_ips: Vec<IpAddr>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// None means no VLAN tagging on egress.
+    pub mvlan: Option<VlanID>,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,
     /// Current state of the multicast group.

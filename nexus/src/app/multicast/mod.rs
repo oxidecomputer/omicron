@@ -54,6 +54,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, NameOrId, UpdateResult, http_pagination::PaginatedBy,
 };
+use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
 
 use crate::app::sagas::multicast_group_dpd_update::{
@@ -163,14 +164,18 @@ impl super::Nexus {
         self.db_datastore.multicast_group_lookup_by_ip(opctx, ip_addr).await
     }
 
-    /// List all multicast groups fleet-wide.
+    /// List all multicast groups (any authenticated user can list).
     pub(crate) async fn multicast_groups_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::ExternalMulticastGroup> {
-        // Multicast groups are fleet-scoped
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &authz::MULTICAST_GROUP_LIST,
+            )
+            .await?;
         self.db_datastore.multicast_groups_list(opctx, pagparams).await
     }
 
@@ -212,6 +217,8 @@ impl super::Nexus {
         let old_name = current_group.name().clone();
         // store the old sources
         let old_sources = current_group.source_ips.clone();
+        // store the old mvlan to detect changes
+        let old_mvlan = current_group.mvlan;
 
         // Validate the new source configuration if provided
         if let Some(ref new_source_ips) = params.source_ips {
@@ -231,12 +238,14 @@ impl super::Nexus {
             )
             .await?;
 
-        // If name or sources changed, execute DPD update saga to keep dataplane
-        // configuration in sync with the database (including tag updates)
+        // If name, sources, or mvlan changed, execute DPD update saga to keep
+        // dataplane configuration in sync with the database (including tag updates)
         if Self::needs_dataplane_update(
             old_name.as_str(),
             &params.identity.name,
             &params.source_ips,
+            old_mvlan,
+            &params.mvlan,
         ) {
             let new_name = params
                 .identity
@@ -256,7 +265,11 @@ impl super::Nexus {
                     .source_ips
                     .as_ref()
                     .map(|ips| ips.iter().map(|ip| (*ip).into()).collect())
-                    .unwrap_or_default(),
+                    .unwrap_or_else(|| {
+                        // If no source change requested, use current sources from DB
+                        // This is important for SSM groups which require sources
+                        current_group.source_ips.clone()
+                    }),
             };
 
             self.sagas.saga_execute::<SagaMulticastGroupDpdUpdate>(saga_params)
@@ -408,11 +421,19 @@ impl super::Nexus {
         old_name: &str,
         new_name: &Option<external::Name>,
         new_sources: &Option<Vec<IpAddr>>,
+        old_mvlan: Option<i16>,
+        new_mvlan: &Option<external::Nullable<VlanID>>,
     ) -> bool {
         let name_changed =
             new_name.as_ref().map_or(false, |n| n.as_str() != old_name);
         let sources_changed = new_sources.is_some();
-        name_changed || sources_changed
+        // Check if mvlan changed: new_mvlan.is_some() means the field was provided in the update
+        // If provided, extract the inner value and compare with old_mvlan
+        let mvlan_changed = new_mvlan.as_ref().map_or(false, |nullable| {
+            let new_mvlan = nullable.0.map(|vlan| u16::from(vlan) as i16);
+            new_mvlan != old_mvlan
+        });
+        name_changed || sources_changed || mvlan_changed
     }
 }
 

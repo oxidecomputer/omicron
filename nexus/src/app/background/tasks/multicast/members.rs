@@ -58,7 +58,7 @@
 //! # Member State Transition Matrix
 //!
 //! The RPW reconciler handles all possible state transitions for multicast group
-//! members. This comprehensive matrix ensures no edge cases are missed:
+//! members:
 //!
 //! ## Valid Instance States for Multicast
 //! - **Valid**: Creating, Starting, Running, Rebooting, Migrating, Repairing

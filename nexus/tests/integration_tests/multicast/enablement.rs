@@ -64,6 +64,7 @@ async fn test_multicast_enablement() {
         multicast_ip: Some("224.0.1.100".parse::<IpAddr>().unwrap()),
         source_ips: None,
         pool: Some(NameOrId::Name("test-pool".parse().unwrap())),
+        mvlan: None,
     };
 
     let group_url = "/v1/multicast-groups".to_string();
@@ -84,8 +85,7 @@ async fn test_multicast_enablement() {
     assert_eq!(instance.identity.name, "test-instance-lifecycle");
 
     // Verify NO multicast members were created (since multicast is disabled)
-    let members =
-        list_multicast_group_members(client, GROUP_NAME).await;
+    let members = list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         0,
@@ -127,8 +127,7 @@ async fn test_multicast_enablement() {
     .await;
 
     // Still no multicast members should exist
-    let members =
-        list_multicast_group_members(client, GROUP_NAME).await;
+    let members = list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         0,
@@ -170,8 +169,7 @@ async fn test_multicast_enablement() {
     .await;
 
     // Still no multicast members should exist
-    let members =
-        list_multicast_group_members(client, GROUP_NAME).await;
+    let members = list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         0,
@@ -199,8 +197,7 @@ async fn test_multicast_enablement() {
         .await;
 
     // Verify no multicast state was ever created
-    let members =
-        list_multicast_group_members(client, GROUP_NAME).await;
+    let members = list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         0,
@@ -221,8 +218,8 @@ async fn test_multicast_enablement() {
 
     // Try to attach to multicast group via API - should succeed
     let attach_url = format!(
-        "/v1/instances/{}/multicast-groups/{}?project={}",
-        "test-instance-api", GROUP_NAME, PROJECT_NAME
+        "/v1/instances/{}/multicast-groups/{}?project={PROJECT_NAME}",
+        "test-instance-api", GROUP_NAME
     );
 
     nexus_test_utils::http_testing::NexusRequest::new(
@@ -240,8 +237,7 @@ async fn test_multicast_enablement() {
 
     // Verify that direct API calls DO create member records even when disabled
     // (This is correct behavior for experimental APIs - they handle config management)
-    let members =
-        list_multicast_group_members(client, GROUP_NAME).await;
+    let members = list_multicast_group_members(client, GROUP_NAME).await;
     assert_eq!(
         members.len(),
         1,

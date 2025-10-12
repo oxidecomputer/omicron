@@ -13,13 +13,14 @@
 //! system VNI below `MIN_GUEST_VNI` (1024). The bifurcated architecture uses
 //! NAT translation at switches:
 //!
-//! 1. External multicast packets arrive with VNI 77
-//! 2. Switches perform NAT translation to underlay IPv6 multicast addresses
-//! 3. Forwarding decisions happen at the underlay layer, not based on VNI
-//! 4. Security relies on underlay group membership validation, not VNI isolation
+//! - External multicast packets arrive with VNI 77
+//! - Switches perform NAT translation to underlay IPv6 multicast addresses
+//! - Forwarding decisions happen at the underlay layer
+//! - Security relies on underlay group membership validation
 //!
-//! This design enables cross-project and cross-silo multicast (a feature, not a bug)
-//! while maintaining security through API authorization and underlay membership control.
+//! This design enables cross-project and cross-silo multicast
+//! while maintaining security through API authorization and underlay membership
+//! control.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -46,6 +47,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, SwitchLocation};
+use omicron_common::vlan::VlanID;
 
 use crate::app::dpd_clients;
 
@@ -109,6 +111,10 @@ pub(crate) type MulticastDataplaneResult<T> = Result<T, Error>;
 ///
 /// This handles multicast group and member operations across all switches
 /// in the rack, with automatic error handling and rollback.
+///
+/// TODO: Add `switch_port_uplinks` configuration to multicast groups to specify
+/// which rack switch ports (e.g., `<switch>.<port>`) should carry multicast traffic
+/// out of the rack to external groups.
 pub(crate) struct MulticastDataplaneClient {
     // Will be used to fetch mvlan from multicast_group table in follow-up commit
     _datastore: Arc<DataStore>,
@@ -342,9 +348,15 @@ impl MulticastDataplaneClient {
         let dpd_clients = &self.dpd_clients;
         let tag = external_group.name().to_string();
 
-        // Pre-compute shared data once to avoid N database calls
-        // NOTE: VLANs moved to switch port/uplink config; not needed for internal fan-in
-        let vlan_id = None;
+        // Convert MVLAN to u16 for DPD, validating through VlanID
+        let vlan_id = external_group
+            .mvlan
+            .map(|v| VlanID::new(v as u16))
+            .transpose()
+            .map_err(|e| {
+                Error::internal_error(&format!("invalid VLAN ID: {e:#}"))
+            })?
+            .map(u16::from);
         let underlay_ip_admin =
             underlay_group.multicast_ip.ip().into_admin_scoped()?;
         let underlay_ipv6 = match underlay_group.multicast_ip.ip() {
@@ -480,8 +492,16 @@ impl MulticastDataplaneClient {
         let dpd_clients = &self.dpd_clients;
 
         // Pre-compute shared data once
-        // NOTE: VLANs moved to switch port/uplink config; not needed for internal fan-in
-        let vlan_id = None;
+        // Convert MVLAN to u16 for DPD, validating through VlanID
+        let vlan_id = params
+            .external_group
+            .mvlan
+            .map(|v| VlanID::new(v as u16))
+            .transpose()
+            .map_err(|e| {
+                Error::internal_error(&format!("invalid VLAN ID: {e:#}"))
+            })?
+            .map(u16::from);
         let underlay_ip_admin =
             params.underlay_group.multicast_ip.ip().into_admin_scoped()?;
         let underlay_ipv6 = match params.underlay_group.multicast_ip.ip() {

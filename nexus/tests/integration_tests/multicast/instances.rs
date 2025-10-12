@@ -12,10 +12,6 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use http::{Method, StatusCode};
-
-use dpd_client::types as dpd_types;
-use omicron_common::api::external::Nullable;
-
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_instance, create_project, object_create,
@@ -28,10 +24,12 @@ use nexus_types::external_api::params::{
 };
 use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
+
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    InstanceState, NameOrId,
+    InstanceState, NameOrId, Nullable,
 };
+use omicron_common::vlan::VlanID;
 use omicron_nexus::TestInterfaces;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use sled_agent_client::TestInterfaces as _;
@@ -84,8 +82,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     ];
 
     let groups =
-        create_multicast_groups(client, &mcast_pool, group_specs)
-            .await;
+        create_multicast_groups(client, &mcast_pool, group_specs).await;
 
     // Wait for all groups to become active in parallel
     let group_names: Vec<&str> = group_specs.iter().map(|g| g.name).collect();
@@ -130,7 +127,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         .await,
     ];
 
-    // Test Scenario 1: Verify create-time attachment worked
+    // Verify create-time attachment worked
     wait_for_member_state(
         client,
         "group-lifecycle-1",
@@ -139,7 +136,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // Test Scenario 2: Live attach/detach operations
+    // Live attach/detach operations
     // Attach instance-live-1 to group-lifecycle-2
     multicast_group_attach(
         client,
@@ -169,7 +166,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         .await;
     }
 
-    // Test Scenario 3: Multi-group attachment (instance to multiple groups)
+    // Multi-group attachment (instance to multiple groups)
     // Attach instance-multi-groups to multiple groups
     multicast_group_attach(
         client,
@@ -198,7 +195,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         .await;
     }
 
-    // Test Scenario 4: Detach operations and idempotency
+    // Detach operations and idempotency
     // Detach instance-live-1 from group-lifecycle-2
     multicast_group_detach(
         client,
@@ -223,7 +220,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
             MulticastGroupMember,
         >(
             client,
-            "/v1/multicast-groups/group-lifecycle-2/members",
+            &mcast_group_members_url("group-lifecycle-2"),
             &format!("project={PROJECT_NAME}"),
             None,
         )
@@ -239,9 +236,9 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     );
     assert_eq!(members[0].instance_id, instances[2].identity.id);
 
-    // Test Scenario 5: Verify groups are still active and functional
+    // Verify groups are still active and functional
     for (i, group_name) in group_names.iter().enumerate() {
-        let group_url = format!("/v1/multicast-groups/{group_name}");
+        let group_url = mcast_group_url(group_name);
         let current_group: MulticastGroup =
             object_get(client, &group_url).await;
         assert_eq!(
@@ -296,6 +293,7 @@ async fn test_multicast_group_attach_conflicts(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
     object_create::<_, MulticastGroup>(client, &group_url, &params).await;
 
@@ -332,7 +330,7 @@ async fn test_multicast_group_attach_conflicts(
             MulticastGroupMember,
         >(
             client,
-            "/v1/multicast-groups/mcast-group-1/members",
+            &mcast_group_members_url("mcast-group-1"),
             &format!("project={PROJECT_NAME}"),
             None,
         )
@@ -396,8 +394,7 @@ async fn test_multicast_group_attach_limits(
         },
     ];
 
-    create_multicast_groups(client, &mcast_pool, group_specs)
-        .await;
+    create_multicast_groups(client, &mcast_pool, group_specs).await;
     let group_names: Vec<&str> = group_specs.iter().map(|g| g.name).collect();
 
     // Wait for all groups to become Active in parallel
@@ -418,18 +415,13 @@ async fn test_multicast_group_attach_limits(
 
     // Wait for members to reach "Left" state for each group (instance is stopped, so reconciler transitions "Joining"→"Left")
     for group_name in &multicast_group_names {
-        wait_for_member_state(
-            client,
-            group_name,
-            instance.identity.id,
-            "Left",
-        )
-        .await;
+        wait_for_member_state(client, group_name, instance.identity.id, "Left")
+            .await;
     }
 
     // Verify instance is member of multiple groups
     for group_name in &multicast_group_names {
-        let members_url = format!("/v1/multicast-groups/{group_name}/members");
+        let members_url = mcast_group_members_url(group_name);
         let members = nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<MulticastGroupMember>(
              client,
              &members_url,
@@ -477,13 +469,14 @@ async fn test_multicast_group_instance_state_transitions(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
     object_create::<_, MulticastGroup>(client, &group_url, &params).await;
 
     // Wait for group to become Active before proceeding
     wait_for_group_active(client, "state-test-group").await;
 
-    // Test Case 1: Create stopped instance and add to multicast group
+    // Create stopped instance and add to multicast group
     let stopped_instance = instance_for_multicast_groups(
         cptestctx,
         PROJECT_NAME,
@@ -505,52 +498,7 @@ async fn test_multicast_group_instance_state_transitions(
     )
     .await;
 
-    // DPD Validation: Stopped instance should NOT have configuration applied via DPD
-    // (no multicast forwarding needed for stopped instances)
-    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
-    match dpd_client.multicast_group_get(&multicast_ip).await {
-        Ok(dpd_group) => {
-            let group_data = dpd_group.into_inner();
-            assert_eq!(
-                match &group_data {
-                    dpd_types::MulticastGroupResponse::External {
-                        group_ip,
-                        ..
-                    } => *group_ip,
-                    dpd_types::MulticastGroupResponse::Underlay {
-                        group_ip,
-                        ..
-                    } => IpAddr::V6(group_ip.0),
-                },
-                multicast_ip
-            );
-            match &group_data {
-                dpd_types::MulticastGroupResponse::Underlay {
-                    members, ..
-                } => {
-                    assert_eq!(
-                        members.len(),
-                        0,
-                        "DPD should NOT program multicast group for stopped instances"
-                    );
-                }
-                dpd_types::MulticastGroupResponse::External { .. } => {
-                    // External groups may not expose member count directly
-                    eprintln!(
-                        "Note: External group member validation skipped for stopped instance test"
-                    );
-                }
-            }
-        }
-        Err(e) if e.to_string().contains("404") => {
-            // Group not configured via DPD for stopped instance (expected behavior)
-        }
-        Err(_e) => {
-            // DPD communication error - expected in test environment
-        }
-    }
-
-    // Test Case 2: Start the instance and verify multicast behavior
+    // Start the instance and verify multicast behavior
     let instance_id =
         InstanceUuid::from_untyped_uuid(stopped_instance.identity.id);
     let nexus = &cptestctx.server.server_context().nexus;
@@ -574,13 +522,7 @@ async fn test_multicast_group_instance_state_transitions(
     instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
-    // Skip underlay group lookup for now due to external API limitations
-    // In production, the reconciler handles proper underlay/external group coordination
-
-    // Skip DPD validation for running instance due to external API limitations
-    // The test verified member state reached "Joined" which is the key requirement
-
-    // Test Case 3: Stop the instance and verify multicast behavior persists
+    // Stop the instance and verify multicast behavior persists
     let stop_url = format!(
         "/v1/instances/state-test-instance/stop?project={PROJECT_NAME}"
     );
@@ -598,14 +540,8 @@ async fn test_multicast_group_instance_state_transitions(
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
-    // Skip DPD validation for stopped instance due to external API limitations
-    // The test verified control plane membership persists which is the key requirement
-
     // Verify control plane still shows membership regardless of instance state
-    let members_url = format!(
-        "/v1/multicast-groups/{}/members?project={}",
-        "state-test-group", PROJECT_NAME
-    );
+    let members_url = mcast_group_members_url("state-test-group");
     let final_members: Vec<MulticastGroupMember> =
         nexus_test_utils::http_testing::NexusRequest::iter_collection_authn(
             client,
@@ -633,11 +569,7 @@ async fn test_multicast_group_instance_state_transitions(
         ),
     )
     .await;
-    object_delete(
-        client,
-        &format!("/v1/multicast-groups/{}", "state-test-group"),
-    )
-    .await;
+    object_delete(client, &mcast_group_url("state-test-group")).await;
 }
 
 /// Test that multicast group membership persists through instance stop/start cycles
@@ -663,6 +595,7 @@ async fn test_multicast_group_persistence_through_stop_start(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
     object_create::<_, MulticastGroup>(client, &group_url, &params).await;
 
@@ -695,10 +628,7 @@ async fn test_multicast_group_persistence_through_stop_start(
     .await;
 
     // Verify instance is in the group
-    let members_url = format!(
-        "/v1/multicast-groups/{}/members?project={}",
-        "persist-test-group", PROJECT_NAME
-    );
+    let members_url = mcast_group_members_url("persist-test-group");
     let members_before_stop =
         nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<
             MulticastGroupMember,
@@ -890,22 +820,15 @@ async fn test_multicast_group_persistence_through_stop_start(
     )
     .await;
 
-    object_delete(
-        client,
-        &format!("/v1/multicast-groups/{}", "persist-test-group"),
-    )
-    .await;
+    object_delete(client, &mcast_group_url("persist-test-group")).await;
 }
 
-/// Test concurrent multicast operations happening to a multicast group.
+/// Verify concurrent multicast operations maintain correct member states.
 ///
-/// This test validates that the system handles concurrent operations correctly:
-/// - Multiple instances joining the same group simultaneously
-/// - Rapid attach/detach cycles on different instances
-/// - Concurrent member operations during reconciler processing
-///
-/// These scenarios can expose race conditions in member state transitions,
-/// reconciler processing, and DPD synchronization that sequential tests miss.
+/// The system handles multiple instances joining simultaneously, rapid attach/detach
+/// cycles, and concurrent operations during reconciler processing. These scenarios
+/// expose race conditions in member state transitions, reconciler processing, and
+/// DPD synchronization that sequential tests can't catch.
 #[nexus_test]
 async fn test_multicast_concurrent_operations(
     cptestctx: &ControlPlaneTestContext,
@@ -932,6 +855,7 @@ async fn test_multicast_concurrent_operations(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
     wait_for_group_active(client, "concurrent-test-group").await;
@@ -971,11 +895,8 @@ async fn test_multicast_concurrent_operations(
     }
 
     // Verify final member count matches expected (all 4 instances)
-    let members = list_multicast_group_members(
-        client,
-        "concurrent-test-group",
-    )
-    .await;
+    let members =
+        list_multicast_group_members(client, "concurrent-test-group").await;
     assert_eq!(
         members.len(),
         4,
@@ -996,8 +917,7 @@ async fn test_multicast_concurrent_operations(
     .await;
 
     // Wait for member count to reach 2 after detachments
-    wait_for_member_count(client, "concurrent-test-group", 2)
-        .await;
+    wait_for_member_count(client, "concurrent-test-group", 2).await;
 
     // Re-attach one instance while detaching another (overlapping operations)
     let reattach_future = multicast_group_attach(
@@ -1017,8 +937,7 @@ async fn test_multicast_concurrent_operations(
     ops::join2(reattach_future, detach_future).await;
 
     // Wait for final state to be consistent (should still have 2 members)
-    wait_for_member_count(client, "concurrent-test-group", 2)
-        .await;
+    wait_for_member_count(client, "concurrent-test-group", 2).await;
 
     // Concurrent operations during reconciler processing
 
@@ -1045,15 +964,11 @@ async fn test_multicast_concurrent_operations(
     rapid_ops_future.await;
 
     // Wait for system to reach consistent final state (should have 2 members)
-    wait_for_member_count(client, "concurrent-test-group", 2)
-        .await;
+    wait_for_member_count(client, "concurrent-test-group", 2).await;
 
     // Get the final members for state verification
-    let post_rapid_members = list_multicast_group_members(
-        client,
-        "concurrent-test-group",
-    )
-    .await;
+    let post_rapid_members =
+        list_multicast_group_members(client, "concurrent-test-group").await;
 
     // Wait for all remaining members to reach "Joined" state
     for member in &post_rapid_members {
@@ -1068,19 +983,16 @@ async fn test_multicast_concurrent_operations(
 
     // Cleanup
     cleanup_instances(cptestctx, client, PROJECT_NAME, &instance_names).await;
-    cleanup_multicast_groups(client, &["concurrent-test-group"])
-        .await;
+    cleanup_multicast_groups(client, &["concurrent-test-group"]).await;
 }
 
-/// Test that multicast members are properly cleaned up when an instance
+/// Verify that multicast members are properly cleaned up when an instance
 /// is deleted without ever starting (orphaned member cleanup).
 ///
-/// This tests the edge case where:
-/// 1. Instance is created → multicast member in "Joining" state with sled_id=NULL
-/// 2. Instance never starts (doesn't get a sled assignment)
-/// 3. Instance is deleted → member should be cleaned up by RPW reconciler
-///
-/// Without proper cleanup, the member would remain orphaned in "Joining" state.
+/// When an instance is created and added to a multicast group but never started,
+/// the member enters "Joining" state with sled_id=NULL. If the instance is then
+/// deleted before ever starting, the RPW reconciler must detect and clean up the
+/// orphaned member to prevent it from remaining stuck in "Joining" state.
 #[nexus_test]
 async fn test_multicast_member_cleanup_instance_never_started(
     cptestctx: &ControlPlaneTestContext,
@@ -1112,6 +1024,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
@@ -1145,7 +1058,8 @@ async fn test_multicast_member_cleanup_instance_never_started(
 
     // Add instance as multicast member (will be in "Joining" state with no sled_id)
     let member_add_url = format!(
-        "/v1/multicast-groups/{group_name}/members?project={project_name}"
+        "{}?project={project_name}",
+        mcast_group_members_url(group_name)
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
@@ -1159,17 +1073,11 @@ async fn test_multicast_member_cleanup_instance_never_started(
     .await;
 
     // Wait specifically for member to reach "Left" state since instance was created stopped
-    wait_for_member_state(
-        client,
-        group_name,
-        instance.identity.id,
-        "Left",
-    )
-    .await;
+    wait_for_member_state(client, group_name, instance.identity.id, "Left")
+        .await;
 
     // Verify member count
-    let members =
-        list_multicast_group_members(client, group_name).await;
+    let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have one member");
 
     // Delete the instance directly without starting it
@@ -1185,8 +1093,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
     // Critical test: Verify the orphaned member was cleaned up
     // The RPW reconciler should detect that the member's instance was deleted
     // and remove the member from the group
-    let final_members =
-        list_multicast_group_members(client, group_name).await;
+    let final_members = list_multicast_group_members(client, group_name).await;
     assert_eq!(
         final_members.len(),
         0,
@@ -1197,16 +1104,13 @@ async fn test_multicast_member_cleanup_instance_never_started(
     cleanup_multicast_groups(client, &[group_name]).await;
 }
 
-/// Test that multicast group membership persists correctly during instance migration.
+/// Verify multicast group membership persists through instance migration.
 ///
-/// This test verifies the multicast architecture's 3-state member lifecycle during migration:
-/// - Before migration: member should be "Joined" on source sled
-/// - During migration: RPW reconciler should handle the sled_id change
-/// - After migration: member should be "Joined" on target sled
-///
-/// The test covers the key requirement that multicast traffic continues uninterrupted
-/// during migration by ensuring DPD configuration is updated correctly on both source
-/// and target switches.
+/// The RPW reconciler detects sled_id changes and updates DPD configuration on
+/// both source and target switches to maintain uninterrupted multicast traffic.
+/// Member state follows the expected lifecycle: Joined on source sled → sled_id
+/// updated during migration → Joined again on target sled after reconciler
+/// processes the change.
 #[nexus_test(extra_sled_agents = 1)]
 async fn test_multicast_group_membership_during_migration(
     cptestctx: &ControlPlaneTestContext,
@@ -1229,21 +1133,30 @@ async fn test_multicast_group_membership_during_migration(
     )
     .await;
 
-    // Create multicast group
+    // Create multicast group with mvlan
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 60, 0, 100));
     let group_url = "/v1/multicast-groups".to_string();
     let group_params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
-            description: "Group for migration testing".to_string(),
+            description: "Group for migration testing with mvlan".to_string(),
         },
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: Some(VlanID::new(3000).unwrap()), // Test mvlan persistence through migration
     };
 
-    object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
+    let created_group: MulticastGroup =
+        object_create(client, &group_url, &group_params).await;
     wait_for_group_active(client, group_name).await;
+
+    // Verify mvlan is set
+    assert_eq!(
+        created_group.mvlan,
+        Some(VlanID::new(3000).unwrap()),
+        "MVLAN should be set on group creation"
+    );
 
     // Create and start instance with multicast group membership
     let instance = instance_for_multicast_groups(
@@ -1262,19 +1175,37 @@ async fn test_multicast_group_membership_during_migration(
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     // Wait for instance to reach "Joined" state (member creation is processed by reconciler)
-    wait_for_member_state(
-        client,
-        group_name,
-        instance.identity.id,
-        "Joined",
-    )
-    .await;
+    wait_for_member_state(client, group_name, instance.identity.id, "Joined")
+        .await;
 
     let pre_migration_members =
         list_multicast_group_members(client, group_name).await;
     assert_eq!(pre_migration_members.len(), 1);
     assert_eq!(pre_migration_members[0].instance_id, instance.identity.id);
     assert_eq!(pre_migration_members[0].state, "Joined");
+
+    // Verify mvlan is in DPD before migration
+    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
+    let pre_migration_dpd_group = dpd_client
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("Multicast group should exist in DPD before migration");
+
+    match pre_migration_dpd_group.into_inner() {
+        dpd_client::types::MulticastGroupResponse::External {
+            external_forwarding,
+            ..
+        } => {
+            assert_eq!(
+                external_forwarding.vlan_id,
+                Some(3000),
+                "DPD should show vlan_id=3000 before migration"
+            );
+        }
+        dpd_client::types::MulticastGroupResponse::Underlay { .. } => {
+            panic!("Expected external group, got underlay");
+        }
+    }
 
     // Get source and target sleds for migration
     let source_sled_id = nexus
@@ -1368,19 +1299,36 @@ async fn test_multicast_group_membership_during_migration(
 
     // Wait for member to reach "Joined" state on target sled
     // The RPW reconciler should transition the member back to "Joined" after re-applying DPD configuration
-    wait_for_member_state(
-        client,
-        group_name,
-        instance.identity.id,
-        "Joined",
-    )
-    .await;
+    wait_for_member_state(client, group_name, instance.identity.id, "Joined")
+        .await;
 
     let final_member_state = &post_migration_members[0];
     assert_eq!(
         final_member_state.state, "Joined",
         "Member should be in 'Joined' state after migration completes"
     );
+
+    // Verify mvlan persisted in DPD after migration
+    let post_migration_dpd_group = dpd_client
+        .multicast_group_get(&multicast_ip)
+        .await
+        .expect("Multicast group should exist in DPD after migration");
+
+    match post_migration_dpd_group.into_inner() {
+        dpd_client::types::MulticastGroupResponse::External {
+            external_forwarding,
+            ..
+        } => {
+            assert_eq!(
+                external_forwarding.vlan_id,
+                Some(3000),
+                "DPD should still show vlan_id=3000 after migration - mvlan must persist"
+            );
+        }
+        dpd_client::types::MulticastGroupResponse::Underlay { .. } => {
+            panic!("Expected external group, got underlay");
+        }
+    }
 
     // Cleanup: Stop and delete instance, then cleanup group
     let stop_url =
@@ -1418,16 +1366,12 @@ async fn test_multicast_group_membership_during_migration(
     cleanup_multicast_groups(client, &[group_name]).await;
 }
 
-/// Test multicast group membership during failed migration scenarios.
+/// Verify the RPW reconciler handles concurrent instance migrations within the same multicast group.
 ///
-/// This test verifies that multicast membership remains consistent even when
-/// migrations fail partway through, ensuring the system handles error cases
-/// gracefully without leaving members in inconsistent states.
-/// Test that multiple instances in the same multicast group can be migrated
-/// concurrently without interfering with each other's membership states.
-///
-/// This test validates that the RPW reconciler correctly handles concurrent
-/// sled_id changes for multiple members of the same multicast group.
+/// Multiple instances in the same multicast group can migrate simultaneously without
+/// interfering with each other's membership states. The reconciler correctly processes
+/// concurrent sled_id changes for all members, ensuring each reaches Joined state on
+/// their respective target sleds.
 #[nexus_test(extra_sled_agents = 2)]
 async fn test_multicast_group_concurrent_member_migrations(
     cptestctx: &ControlPlaneTestContext,
@@ -1460,6 +1404,7 @@ async fn test_multicast_group_concurrent_member_migrations(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;

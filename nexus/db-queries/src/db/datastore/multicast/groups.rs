@@ -35,6 +35,7 @@ use omicron_common::api::external::{
     IdentityMetadataCreateParams, ListResultVec, LookupResult, LookupType,
     ResourceType, UpdateResult,
 };
+use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use crate::authz;
@@ -57,6 +58,7 @@ pub(crate) struct MulticastGroupAllocationParams {
     pub ip: Option<IpAddr>,
     pub pool: Option<authz::IpPool>,
     pub source_ips: Option<Vec<IpAddr>>,
+    pub mvlan: Option<VlanID>,
 }
 
 impl DataStore {
@@ -124,6 +126,7 @@ impl DataStore {
                 ip: params.multicast_ip,
                 pool: authz_pool,
                 source_ips: params.source_ips.clone(),
+                mvlan: params.mvlan,
             },
         )
         .await
@@ -258,8 +261,18 @@ impl DataStore {
     ) -> UpdateResult<ExternalMulticastGroup> {
         use nexus_db_schema::schema::multicast_group::dsl;
 
-        let update = ExternalMulticastGroupUpdate::from(params.clone());
-        let updated_group = diesel::update(dsl::multicast_group)
+        // Create update struct with mvlan=None (won't update field)
+        let mut update = ExternalMulticastGroupUpdate::from(params.clone());
+
+        // Handle mvlan manually like VpcSubnetUpdate handles custom_router_id
+        // - None: leave as None (don't update field)
+        // - Some(Nullable(Some(v))): set to update field to value
+        // - Some(Nullable(None)): set to update field to NULL
+        if let Some(mvlan) = &params.mvlan {
+            update.mvlan = Some(mvlan.0.map(|vlan| u16::from(vlan) as i16));
+        }
+
+        diesel::update(dsl::multicast_group)
             .filter(dsl::id.eq(group_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .set(update)
@@ -274,9 +287,7 @@ impl DataStore {
                         LookupType::ById(group_id.into_untyped_uuid()),
                     ),
                 )
-            })?;
-
-        Ok(updated_group)
+            })
     }
 
     /// Mark a multicast group for soft deletion.
@@ -404,16 +415,12 @@ impl DataStore {
                 rack_id,
                 explicit_address: params.ip,
                 source_ips: source_ip_networks,
+                mvlan: params.mvlan.map(|vlan_id| u16::from(vlan_id) as i16),
                 vni,
-                // Set the tag to the group name for tagging strategy on removals
+                // Set tag to group name for lifecycle management
                 tag: Some(params.identity.name.to_string()),
             },
         );
-
-        // TODO: When external multicast sources are implemented,
-        // VLAN and switch port uplink configuration will be handled
-        // through switch port configuration (similar to unicast),
-        // not through IP pools. See architecture doc for details.
 
         let conn = self.pool_connection_authorized(opctx).await?;
         Self::allocate_external_multicast_group_on_conn(&conn, data).await
@@ -679,7 +686,6 @@ mod tests {
 
     use std::net::Ipv4Addr;
 
-    use crate::db::model::IpPool;
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range};
     use omicron_common::api::external::{
@@ -692,6 +698,7 @@ mod tests {
 
     use crate::db::datastore::Error;
     use crate::db::datastore::LookupType;
+    use crate::db::model::IpPool;
     use crate::db::model::{
         Generation, InstanceRuntimeState, IpPoolResource, IpPoolResourceType,
         IpVersion, MulticastGroupMemberState,
@@ -767,6 +774,7 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("exhaust-pool".parse().unwrap())),
+            mvlan: None,
         };
         datastore
             .multicast_group_create(
@@ -787,6 +795,7 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("exhaust-pool".parse().unwrap())),
+            mvlan: None,
         };
         datastore
             .multicast_group_create(
@@ -807,6 +816,7 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("exhaust-pool".parse().unwrap())),
+            mvlan: None,
         };
         let result3 = datastore
             .multicast_group_create(
@@ -881,6 +891,7 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: None, // No pool specified - should use default
+            mvlan: None,
         };
 
         let group_default = datastore
@@ -913,6 +924,7 @@ mod tests {
             pool: Some(NameOrId::Name(
                 "default-multicast-pool".parse().unwrap(),
             )),
+            mvlan: None,
         };
         let group_explicit = datastore
             .multicast_group_create(
@@ -1042,6 +1054,7 @@ mod tests {
             multicast_ip: Some("224.1.3.3".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("test-multicast-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let external_group = datastore
@@ -1142,6 +1155,7 @@ mod tests {
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("parent-id-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let group = datastore
@@ -1601,6 +1615,7 @@ mod tests {
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("duplicate-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let group = datastore
@@ -1735,6 +1750,7 @@ mod tests {
             multicast_ip: None, // Let it allocate from pool
             source_ips: None,
             pool: Some(NameOrId::Name("state-test-pool".parse().unwrap())),
+            mvlan: None,
         };
         let group = datastore
             .multicast_group_create(
@@ -1938,6 +1954,7 @@ mod tests {
             multicast_ip: Some(target_ip),
             source_ips: None,
             pool: Some(NameOrId::Name("reuse-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let group1 = datastore
@@ -1967,6 +1984,7 @@ mod tests {
             multicast_ip: Some(target_ip),
             source_ips: None,
             pool: Some(NameOrId::Name("reuse-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let group2 = datastore
@@ -2049,6 +2067,7 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("cycle-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let group1 = datastore
@@ -2071,6 +2090,7 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("cycle-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let result2 = datastore
@@ -2103,6 +2123,7 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("cycle-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let group3 = datastore
@@ -2190,6 +2211,7 @@ mod tests {
             multicast_ip: None,
             source_ips: None,
             pool: Some(NameOrId::Name("dealloc-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let group = datastore
@@ -2309,6 +2331,7 @@ mod tests {
                 "10.0.0.2".parse().unwrap(),
             ]),
             pool: Some(NameOrId::Name("fetch-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let group = datastore
@@ -2417,6 +2440,7 @@ mod tests {
             multicast_ip: Some("224.100.20.10".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("list-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let params_2 = params::MulticastGroupCreate {
@@ -2427,6 +2451,7 @@ mod tests {
             multicast_ip: Some("224.100.20.11".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("list-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         let params_3 = params::MulticastGroupCreate {
@@ -2437,6 +2462,7 @@ mod tests {
             multicast_ip: Some("224.100.20.12".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("list-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         // Create groups (all are fleet-wide)
@@ -2556,6 +2582,7 @@ mod tests {
             multicast_ip: Some("224.100.30.5".parse().unwrap()),
             source_ips: None,
             pool: Some(NameOrId::Name("state-test-pool".parse().unwrap())),
+            mvlan: None,
         };
 
         // Create group - starts in "Creating" state
@@ -2785,6 +2812,7 @@ mod tests {
                 description: Some("Updated group description".to_string()),
             },
             source_ips: None,
+            mvlan: None,
         };
 
         let updated_group = datastore
@@ -2813,6 +2841,7 @@ mod tests {
                 "10.1.1.10".parse().unwrap(),
                 "10.1.1.20".parse().unwrap(),
             ]),
+            mvlan: None,
         };
 
         let group_with_sources = datastore
@@ -2838,6 +2867,7 @@ mod tests {
                 description: Some("Final group description".to_string()),
             },
             source_ips: Some(vec!["192.168.1.1".parse().unwrap()]),
+            mvlan: None,
         };
 
         let final_group = datastore

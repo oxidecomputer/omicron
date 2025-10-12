@@ -228,8 +228,7 @@ pub(crate) async fn wait_for_group_state(
 ) -> MulticastGroup {
     match wait_for_condition(
         || async {
-            let group =
-                get_multicast_group(client, group_name).await;
+            let group = get_multicast_group(client, group_name).await;
             if group.state == expected_state {
                 Ok(group)
             } else {
@@ -341,7 +340,8 @@ pub(crate) async fn wait_for_member_count(
 ) {
     match wait_for_condition(
         || async {
-            let members = list_multicast_group_members(client, group_name).await;
+            let members =
+                list_multicast_group_members(client, group_name).await;
             if members.len() == expected_count {
                 Ok(())
             } else {
@@ -374,7 +374,7 @@ pub(crate) async fn wait_for_group_deleted(
 ) {
     match wait_for_condition(
         || async {
-            let group_url = format!("/v1/multicast-groups/{group_name}");
+            let group_url = mcast_group_url(group_name);
             match NexusRequest::object_get(client, &group_url)
                 .authn_as(AuthnMode::PrivilegedUser)
                 .execute()
@@ -513,8 +513,8 @@ pub(crate) async fn multicast_group_attach(
     group_name: &str,
 ) {
     let url = format!(
-        "/v1/instances/{}/multicast-groups/{}?project={}",
-        instance_name, group_name, project_name
+        "/v1/instances/{}/multicast-groups/{}?project={project_name}",
+        instance_name, group_name
     );
 
     // Use PUT to attach instance to multicast group
@@ -547,6 +547,7 @@ pub(crate) async fn create_multicast_groups(
             multicast_ip: Some(spec.multicast_ip),
             source_ips: None,
             pool: Some(NameOrId::Name(pool.identity.name.clone())),
+            mvlan: None,
         };
 
         async move {
@@ -563,9 +564,8 @@ pub(crate) async fn wait_for_groups_active(
     client: &ClientTestContext,
     group_names: &[&str],
 ) -> Vec<MulticastGroup> {
-    let wait_futures = group_names
-        .iter()
-        .map(|name| wait_for_group_active(client, name));
+    let wait_futures =
+        group_names.iter().map(|name| wait_for_group_active(client, name));
 
     ops::join_all(wait_futures).await
 }
@@ -576,7 +576,7 @@ pub(crate) async fn cleanup_multicast_groups(
     group_names: &[&str],
 ) {
     let delete_futures = group_names.iter().map(|name| {
-        let url = format!("/v1/multicast-groups/{name}");
+        let url = mcast_group_url(name);
         async move { object_delete(client, &url).await }
     });
 
@@ -686,10 +686,6 @@ pub(crate) async fn stop_instances(
     project_name: &str,
     instance_names: &[&str],
 ) {
-    use crate::integration_tests::instances::{
-        instance_simulate, instance_wait_for_state,
-    };
-
     let nexus = &cptestctx.server.server_context().nexus;
 
     // First, fetch all instances in parallel
@@ -748,8 +744,12 @@ pub(crate) async fn stop_instances(
 
                     match stop_result {
                         Ok(_) => {
-                            instance_simulate(nexus, instance_id).await;
-                            instance_wait_for_state(
+                            instance_helpers::instance_simulate(
+                                nexus,
+                                instance_id,
+                            )
+                            .await;
+                            instance_helpers::instance_wait_for_state(
                                 client,
                                 *instance_id,
                                 InstanceState::Stopped,
@@ -809,8 +809,8 @@ pub(crate) async fn multicast_group_detach(
     group_name: &str,
 ) {
     let url = format!(
-        "/v1/instances/{}/multicast-groups/{}?project={}",
-        instance_name, group_name, project_name
+        "/v1/instances/{}/multicast-groups/{}?project={project_name}",
+        instance_name, group_name
     );
 
     // Use DELETE to detach instance from multicast group

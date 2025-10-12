@@ -121,20 +121,23 @@ async fn mgde_fetch_group_data(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Fetch both groups atomically to ensure consistent state view
-    let (external_group, underlay_group) = tokio::try_join!(
-        osagactx.datastore().multicast_group_fetch_on_conn(
+    // Fetch both groups using the same connection to ensure consistent state view
+    // (sequential fetches since we're using the same connection)
+    let external_group = osagactx
+        .datastore()
+        .multicast_group_fetch_on_conn(&opctx, &conn, params.external_group_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let underlay_group = osagactx
+        .datastore()
+        .underlay_multicast_group_fetch_on_conn(
             &opctx,
             &conn,
-            params.external_group_id
-        ),
-        osagactx.datastore().underlay_multicast_group_fetch_on_conn(
-            &opctx,
-            &conn,
-            params.underlay_group_id
+            params.underlay_group_id,
         )
-    )
-    .map_err(ActionError::action_failed)?;
+        .await
+        .map_err(ActionError::action_failed)?;
 
     // Validate that groups are in correct state
     match external_group.state {
@@ -308,10 +311,28 @@ async fn mgde_update_group_state(
 #[cfg(test)]
 mod test {
     use super::*;
+
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use omicron_uuid_kinds::GenericUuid;
+
+    use nexus_db_queries::authn::saga::Serialized;
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    use nexus_test_utils::resource_helpers::{
+        create_default_ip_pool, link_ip_pool, object_create,
+    };
+    use nexus_test_utils_macros::nexus_test;
+    use nexus_types::external_api::params::{
+        IpPoolCreate, MulticastGroupCreate,
+    };
+    use nexus_types::external_api::shared::{IpRange, Ipv4Range};
+    use nexus_types::external_api::views::{IpPool, IpPoolRange, IpVersion};
+    use omicron_common::api::external::{
+        IdentityMetadataCreateParams, NameOrId,
+    };
+
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use nexus_db_queries::authn::saga::Serialized;
-    use nexus_test_utils_macros::nexus_test;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -380,5 +401,145 @@ mod test {
 
         assert!(node_labels.contains("FetchGroupData"));
         assert!(node_labels.contains("UpdateDataplane"));
+    }
+
+    /// Verify saga handles missing groups gracefully when executed with
+    /// non-existent group IDs.
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_handles_missing_groups(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let opctx = test_helpers::test_opctx(cptestctx);
+
+        // Create params with non-existent UUIDs
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            external_group_id: Uuid::new_v4(), // Non-existent
+            underlay_group_id: Uuid::new_v4(), // Non-existent
+        };
+
+        // Execute the saga - should fail gracefully when fetching non-existent groups
+        let result = nexus
+            .sagas
+            .saga_execute::<SagaMulticastGroupDpdEnsure>(params)
+            .await;
+
+        // Saga should fail (groups don't exist)
+        assert!(
+            result.is_err(),
+            "Saga should fail when groups don't exist in database"
+        );
+    }
+
+    /// Test that the saga rejects external groups that are not in "Creating" state.
+    ///
+    /// The saga validates that external groups are in "Creating" state before applying
+    /// DPD configuration. This test verifies that validation works correctly.
+    #[nexus_test(server = crate::Server)]
+    async fn test_saga_rejects_non_creating_state(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = test_helpers::test_opctx(cptestctx);
+
+        // Setup: Create IP pools
+        create_default_ip_pool(client).await;
+
+        // Create multicast IP pool
+        let pool_name = "saga-state-pool";
+        let pool_params = IpPoolCreate::new_multicast(
+            IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: "Multicast IP pool for saga test".to_string(),
+            },
+            IpVersion::V4,
+        );
+        object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
+            .await;
+
+        // Add multicast IP range
+        let asm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 70, 0, 1),
+                Ipv4Addr::new(224, 70, 0, 255),
+            )
+            .unwrap(),
+        );
+        let range_url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
+        object_create::<_, IpPoolRange>(client, &range_url, &asm_range).await;
+
+        // Link pool to silo
+        link_ip_pool(client, pool_name, &DEFAULT_SILO.id(), false).await;
+
+        // Create multicast group via API (starts in Creating state)
+        let group_params = MulticastGroupCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "saga-reject-test".parse().unwrap(),
+                description: "Test saga state validation".to_string(),
+            },
+            multicast_ip: Some(IpAddr::V4(Ipv4Addr::new(224, 70, 0, 100))),
+            source_ips: None,
+            pool: Some(NameOrId::Name("saga-state-pool".parse().unwrap())),
+            mvlan: None,
+        };
+
+        let group: nexus_types::external_api::views::MulticastGroup =
+            object_create(client, "/v1/multicast-groups", &group_params).await;
+
+        // Fetch the external group from database to get full model
+        let group_id =
+            omicron_uuid_kinds::MulticastGroupUuid::from_untyped_uuid(
+                group.identity.id,
+            );
+        let external_group = datastore
+            .multicast_group_fetch(&opctx, group_id)
+            .await
+            .expect("Failed to fetch external group");
+
+        // Manually create underlay group (normally done by reconciler)
+        let underlay_group = datastore
+            .ensure_underlay_multicast_group(
+                &opctx,
+                external_group.clone(),
+                "ff04::1:2:3:4".parse().unwrap(),
+                external_group.vni,
+            )
+            .await
+            .expect("Failed to create underlay group");
+
+        // Manually transition the group to "Active" state in the database
+        datastore
+            .multicast_group_set_state(
+                &opctx,
+                group.identity.id,
+                nexus_db_model::MulticastGroupState::Active,
+            )
+            .await
+            .expect("Failed to set group to Active state");
+
+        // Try to run saga on Active group - should fail
+        let params = Params {
+            serialized_authn: Serialized::for_opctx(&opctx),
+            external_group_id: group.identity.id,
+            underlay_group_id: underlay_group.id,
+        };
+
+        let result = nexus
+            .sagas
+            .saga_execute::<SagaMulticastGroupDpdEnsure>(params)
+            .await;
+
+        // Saga should reject Active group
+        assert!(result.is_err(), "Saga should reject group in Active state");
+
+        // Cleanup
+        nexus_test_utils::resource_helpers::object_delete(
+            client,
+            &format!("/v1/multicast-groups/{}", group.identity.name),
+        )
+        .await;
     }
 }

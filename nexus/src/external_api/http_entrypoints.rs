@@ -2427,8 +2427,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 &query,
                 groups
                     .into_iter()
-                    .map(views::MulticastGroup::from)
-                    .collect::<Vec<_>>(),
+                    .map(views::MulticastGroup::try_from)
+                    .collect::<Result<Vec<_>, _>>()?,
                 &marker_for_name_or_id,
             )?;
             Ok(HttpResponseOk(results_page))
@@ -2453,7 +2453,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let group =
                 nexus.multicast_group_create(&opctx, &create_params).await?;
-            Ok(HttpResponseCreated(views::MulticastGroup::from(group)))
+            Ok(HttpResponseCreated(views::MulticastGroup::try_from(group)?))
         };
         apictx
             .context
@@ -2479,7 +2479,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.multicast_group_lookup(&opctx, &group_selector)?;
             let group =
                 nexus.multicast_group_fetch(&opctx, &group_lookup).await?;
-            Ok(HttpResponseOk(views::MulticastGroup::from(group)))
+            Ok(HttpResponseOk(views::MulticastGroup::try_from(group)?))
         };
         apictx
             .context
@@ -2512,7 +2512,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &updated_group_params,
                 )
                 .await?;
-            Ok(HttpResponseOk(views::MulticastGroup::from(group)))
+            Ok(HttpResponseOk(views::MulticastGroup::try_from(group)?))
         };
         apictx
             .context
@@ -2564,7 +2564,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let group =
                 nexus.multicast_group_lookup_by_ip(&opctx, ip_addr).await?;
-            Ok(HttpResponseOk(views::MulticastGroup::from(group)))
+            Ok(HttpResponseOk(views::MulticastGroup::try_from(group)?))
         };
         apictx
             .context

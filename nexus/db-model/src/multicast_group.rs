@@ -20,20 +20,27 @@
 //!
 //! ### VNI and Security Model
 //!
-//! **All external multicast groups share VNI 77**, which is below `MIN_GUEST_VNI` (1024)
-//! and reserved for Oxide system use. This design choice has important implications:
+//! External multicast groups use VNI 77, a reserved system VNI below
+//! `MIN_GUEST_VNI` (1024). This differs from VPC unicast traffic where each
+//! VPC receives its own VNI for tenant isolation.
 //!
-//! - **No VPC-level isolation**: Unlike unicast traffic where each VPC gets a unique VNI,
-//!   all multicast traffic shares VNI 77. Multicast does NOT provide automatic VPC isolation.
-//! - **NAT-based forwarding**: The bifurcated architecture performs NAT translation at
-//!   switches, mapping external multicast IPs to underlay IPv6 groups. Actual forwarding
-//!   decisions happen at the underlay layer, not based on VNI.
-//! - **Security boundaries**: Multicast security relies on:
-//!   - **API authorization** (Fleet::Admin creates groups, users attach instances)
-//!   - **Underlay group membership** validation (which instances can receive traffic)
-//!   - **NOT** on VNI-based tenant isolation
-//! - **Cross-project capability**: The shared VNI enables the intended cross-project and
-//!   cross-silo multicast functionality (similar to how IP pools are fleet-scoped resources)
+//! The shared VNI design reflects multicast's fleet-scoped authorization model:
+//! groups are fleet resources (like IP pools) that can span projects and silos.
+//! Forwarding occurs through Dendrite's bifurcated NAT architecture, which
+//! translates external multicast addresses to underlay IPv6 groups at the switch.
+//!
+//! **VNI Selection**: RFD 488 discusses using an "arbitrary multicast VNI for
+//! multicast groups spanning VPCs" since we don't need VPC-specific VNIs for
+//! groups that transcend VPC boundaries. VNI 77 serves as this default/arbitrary
+//! VNI for all external multicast groups. Future implementations may support
+//! per-VPC multicast VNIs if VPC-isolated multicast groups become necessary.
+//!
+//! Security enforcement occurs at two layers:
+//! - **Control plane**: Fleet admins create groups; users attach instances via API
+//! - **Dataplane**: Switch hardware validates underlay group membership
+//!
+//! This enables cross-project and cross-silo multicast while maintaining explicit
+//! membership control through the underlay forwarding tables.
 //!
 //! ## Underlay Multicast Groups
 //!
@@ -77,8 +84,8 @@ use nexus_db_schema::schema::{
 };
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource as IdentityResource;
-use omicron_common::api::external;
-use omicron_common::api::external::IdentityMetadata;
+use omicron_common::api::external::{self, IdentityMetadata};
+use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::SledKind;
 
 use crate::typed_uuid::DbTypedUuid;
@@ -167,8 +174,29 @@ pub struct ExternalMulticastGroup {
     /// Source IP addresses for Source-Specific Multicast (SSM).
     /// Empty array means any source is allowed.
     pub source_ips: Vec<IpNetwork>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    ///
+    /// When specified, this VLAN ID is passed to switches (via DPD) as part of
+    /// the `ExternalForwarding` configuration to tag multicast packets leaving
+    /// the rack. This enables multicast traffic to traverse VLAN-segmented
+    /// upstream networks (e.g., peering with external multicast sources/receivers
+    /// on specific VLANs).
+    ///
+    /// The MVLAN value is sent to switches during group creation/updates and
+    /// controls VLAN tagging for egress traffic only; it does not affect ingress
+    /// multicast traffic received by the rack. Switch port selection for egress
+    /// traffic remains pending (see TODO at `nexus/src/app/multicast/dataplane.rs:113-115`).
+    ///
+    /// Valid range when specified: 2-4094 (IEEE 802.1Q; Dendrite requires >= 2).
+    ///
+    /// Database Type: i16 (INT2) - this field uses `i16` (INT2) for storage
+    /// efficiency, unlike other VLAN columns in the schema which use `SqlU16`
+    /// (forcing INT4). Direct `i16` is appropriate here since VLANs fits in
+    /// INT2's range.
+    pub mvlan: Option<i16>,
     /// Associated underlay group for NAT.
-    /// Initially None in ["Creating"](MulticastGroupState::Creating) state, populated by reconciler when group becomes ["Active"](MulticastGroupState::Active).
+    /// Initially None in ["Creating"](MulticastGroupState::Creating) state,
+    /// populated by reconciler when group becomes ["Active"](MulticastGroupState::Active).
     pub underlay_group_id: Option<Uuid>,
     /// Rack ID multicast group was created on.
     pub rack_id: Uuid,
@@ -243,9 +271,21 @@ pub struct MulticastGroupMember {
 
 // Conversions to external API views
 
-impl From<ExternalMulticastGroup> for views::MulticastGroup {
-    fn from(group: ExternalMulticastGroup) -> Self {
-        views::MulticastGroup {
+impl TryFrom<ExternalMulticastGroup> for views::MulticastGroup {
+    type Error = external::Error;
+
+    fn try_from(group: ExternalMulticastGroup) -> Result<Self, Self::Error> {
+        let mvlan = group
+            .mvlan
+            .map(|vlan| VlanID::new(vlan as u16))
+            .transpose()
+            .map_err(|e| {
+                external::Error::internal_error(&format!(
+                    "invalid VLAN ID: {e:#}"
+                ))
+            })?;
+
+        Ok(views::MulticastGroup {
             identity: group.identity(),
             multicast_ip: group.multicast_ip.ip(),
             source_ips: group
@@ -253,9 +293,10 @@ impl From<ExternalMulticastGroup> for views::MulticastGroup {
                 .into_iter()
                 .map(|ip| ip.ip())
                 .collect(),
+            mvlan,
             ip_pool_id: group.ip_pool_id,
             state: group.state.to_string(),
-        }
+        })
     }
 }
 
@@ -296,6 +337,7 @@ pub struct IncompleteExternalMulticastGroup {
     // Optional address requesting that a specific multicast IP address be
     // allocated or provided
     pub explicit_address: Option<IpNetwork>,
+    pub mvlan: Option<i16>,
     pub vni: Vni,
     pub tag: Option<String>,
     pub rack_id: Uuid,
@@ -311,6 +353,7 @@ pub struct IncompleteExternalMulticastGroupParams {
     pub rack_id: Uuid,
     pub explicit_address: Option<IpAddr>,
     pub source_ips: Vec<IpNetwork>,
+    pub mvlan: Option<i16>,
     pub vni: Vni,
     pub tag: Option<String>,
 }
@@ -326,6 +369,7 @@ impl IncompleteExternalMulticastGroup {
             ip_pool_id: params.ip_pool_id,
             source_ips: params.source_ips,
             explicit_address: params.explicit_address.map(|ip| ip.into()),
+            mvlan: params.mvlan,
             vni: params.vni,
             tag: params.tag,
             rack_id: params.rack_id,
@@ -413,6 +457,9 @@ pub struct ExternalMulticastGroupUpdate {
     pub name: Option<Name>,
     pub description: Option<String>,
     pub source_ips: Option<Vec<IpNetwork>>,
+    // Needs to be double Option so we can set a value of null in the DB by
+    // passing Some(None). None by itself is ignored by Diesel.
+    pub mvlan: Option<Option<i16>>,
     pub time_modified: DateTime<Utc>,
 }
 
@@ -428,6 +475,8 @@ impl From<nexus_types::external_api::params::MulticastGroupUpdate>
             source_ips: params
                 .source_ips
                 .map(|ips| ips.into_iter().map(IpNetwork::from).collect()),
+            // mvlan is always None here - handled manually in datastore
+            mvlan: None,
             time_modified: Utc::now(),
         }
     }

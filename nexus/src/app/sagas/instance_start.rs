@@ -1122,10 +1122,15 @@ mod test {
 
         // Shutdown one of the switch daemons
         let port = {
-            let mut dendrite = cptestctx.dendrite.write().unwrap();
-            let switch0_dpd = dendrite
-                .get_mut(&SwitchLocation::Switch0)
-                .expect("there should be at least one dendrite running");
+            // Remove the switch from the map to take ownership and drop the lock
+            // before awaiting. This is intentional - the test later inserts a new
+            // switch instance at this location.
+            let mut switch0_dpd = {
+                let mut dendrite = cptestctx.dendrite.write().unwrap();
+                dendrite
+                    .remove(&SwitchLocation::Switch0)
+                    .expect("there should be at least one dendrite running")
+            };
 
             let port = switch0_dpd.port;
 

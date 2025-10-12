@@ -11,7 +11,6 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use http::{Method, StatusCode};
-
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::{
@@ -26,6 +25,7 @@ use nexus_types::external_api::params::{
 use nexus_types::external_api::views::{
     FloatingIp, MulticastGroup, MulticastGroupMember,
 };
+
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
     InstanceState, NameOrId,
@@ -37,13 +37,11 @@ use crate::integration_tests::instances::{
     fetch_instance_external_ips, instance_simulate, instance_wait_for_state,
 };
 
-/// Test that instances can have both external IPs and multicast group membership.
+/// Verify instances can have both external IPs and multicast group membership.
 ///
-/// This verifies:
-/// 1. External IP allocation works for multicast group members
-/// 2. Multicast state is preserved during external IP operations
-/// 3. No conflicts between SNAT and multicast DPD configuration
-/// 4. Both networking features function independently
+/// External IP allocation works for multicast group members, multicast state persists
+/// through external IP operations, and no conflicts occur between external IP and multicast
+/// DPD configuration.
 #[nexus_test]
 async fn test_multicast_with_external_ip_basic(
     cptestctx: &nexus_test_utils::ControlPlaneTestContext<
@@ -79,6 +77,7 @@ async fn test_multicast_with_external_ip_basic(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
@@ -121,8 +120,8 @@ async fn test_multicast_with_external_ip_basic(
 
     // Add instance to multicast group
     let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={}",
-        group_name, project_name
+        "{}?project={project_name}",
+        mcast_group_members_url(group_name)
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
@@ -136,17 +135,10 @@ async fn test_multicast_with_external_ip_basic(
     .await;
 
     // Wait for multicast member to reach "Joined" state
-    wait_for_member_state(
-        client,
-        group_name,
-        instance_id,
-        "Joined",
-    )
-    .await;
+    wait_for_member_state(client, group_name, instance_id, "Joined").await;
 
     // Verify member count
-    let members =
-        list_multicast_group_members(client, group_name).await;
+    let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have one multicast member");
 
     // Allocate ephemeral external IP to the same instance
@@ -230,12 +222,11 @@ async fn test_multicast_with_external_ip_basic(
     cleanup_multicast_groups(client, &[group_name]).await;
 }
 
-/// Test external IP allocation/deallocation lifecycle for multicast group members.
+/// Verify external IP allocation/deallocation lifecycle for multicast group members.
 ///
-/// This verifies:
-/// 1. Multiple external IP attach/detach cycles don't affect multicast state
-/// 2. Concurrent operations don't cause race conditions
-/// 3. Dataplane configuration remains consistent
+/// Multiple external IP attach/detach cycles don't affect multicast state, concurrent
+/// operations don't cause race conditions, and dataplane configuration remains consistent
+/// throughout the lifecycle.
 #[nexus_test]
 async fn test_multicast_external_ip_lifecycle(
     cptestctx: &nexus_test_utils::ControlPlaneTestContext<
@@ -271,6 +262,7 @@ async fn test_multicast_external_ip_lifecycle(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
@@ -311,8 +303,8 @@ async fn test_multicast_external_ip_lifecycle(
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={}",
-        group_name, project_name
+        "{}?project={project_name}",
+        mcast_group_members_url(group_name)
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
@@ -420,12 +412,10 @@ async fn test_multicast_external_ip_lifecycle(
     cleanup_multicast_groups(client, &[group_name]).await;
 }
 
-/// Test that instances can be created with both external IP and multicast group simultaneously.
+/// Verify instances can be created with both external IP and multicast group simultaneously.
 ///
-/// This verifies:
-/// 1. Instance creation with both features works
-/// 2. No conflicts during initial setup
-/// 3. Both features are properly configured from creation
+/// Instance creation with both features works without conflicts during initial setup,
+/// and both features are properly configured from creation.
 #[nexus_test]
 async fn test_multicast_with_external_ip_at_creation(
     cptestctx: &nexus_test_utils::ControlPlaneTestContext<
@@ -461,6 +451,7 @@ async fn test_multicast_with_external_ip_at_creation(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
@@ -513,8 +504,8 @@ async fn test_multicast_with_external_ip_at_creation(
 
     // Add to multicast group
     let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={}",
-        group_name, project_name
+        "{}?project={project_name}",
+        mcast_group_members_url(group_name)
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
@@ -528,16 +519,9 @@ async fn test_multicast_with_external_ip_at_creation(
     .await;
 
     // Verify both features work together - wait for member to reach Joined state
-    wait_for_member_state(
-        client,
-        group_name,
-        instance_id,
-        "Joined",
-    )
-    .await;
+    wait_for_member_state(client, group_name, instance_id, "Joined").await;
 
-    let members =
-        list_multicast_group_members(client, group_name).await;
+    let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have multicast member");
 
     let external_ips_final =
@@ -552,13 +536,11 @@ async fn test_multicast_with_external_ip_at_creation(
     cleanup_multicast_groups(client, &[group_name]).await;
 }
 
-/// Test that instances can have both floating IPs and multicast group membership.
+/// Verify instances can have both floating IPs and multicast group membership.
 ///
-/// This verifies:
-/// 1. Floating IP attachment works for multicast group members
-/// 2. Multicast state is preserved during floating IP operations
-/// 3. No conflicts between floating IP and multicast DPD configuration
-/// 4. Both networking features function independently
+/// Floating IP attachment works for multicast group members, multicast state persists
+/// through floating IP operations, and no conflicts occur between floating IP and
+/// multicast DPD configuration.
 #[nexus_test]
 async fn test_multicast_with_floating_ip_basic(
     cptestctx: &nexus_test_utils::ControlPlaneTestContext<
@@ -600,6 +582,7 @@ async fn test_multicast_with_floating_ip_basic(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
@@ -642,8 +625,8 @@ async fn test_multicast_with_floating_ip_basic(
 
     // Add instance to multicast group
     let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={}",
-        group_name, project_name
+        "{}?project={project_name}",
+        mcast_group_members_url(group_name)
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
@@ -657,23 +640,16 @@ async fn test_multicast_with_floating_ip_basic(
     .await;
 
     // Wait for multicast member to reach "Joined" state
-    wait_for_member_state(
-        client,
-        group_name,
-        instance_id,
-        "Joined",
-    )
-    .await;
+    wait_for_member_state(client, group_name, instance_id, "Joined").await;
 
     // Verify member count
-    let members =
-        list_multicast_group_members(client, group_name).await;
+    let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have one multicast member");
 
     // Attach floating IP to the same instance
     let attach_url = format!(
-        "/v1/floating-ips/{}/attach?project={}",
-        floating_ip_name, project_name
+        "/v1/floating-ips/{}/attach?project={project_name}",
+        floating_ip_name
     );
     let attach_params = FloatingIpAttach {
         kind: nexus_types::external_api::params::FloatingIpParentKind::Instance,
@@ -722,8 +698,8 @@ async fn test_multicast_with_floating_ip_basic(
 
     // Detach floating IP and verify multicast is unaffected
     let detach_url = format!(
-        "/v1/floating-ips/{}/detach?project={}",
-        floating_ip_name, project_name
+        "/v1/floating-ips/{}/detach?project={project_name}",
+        floating_ip_name
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &detach_url)
@@ -764,10 +740,8 @@ async fn test_multicast_with_floating_ip_basic(
     );
 
     // Cleanup floating IP
-    let fip_delete_url = format!(
-        "/v1/floating-ips/{}?project={}",
-        floating_ip_name, project_name
-    );
+    let fip_delete_url =
+        format!("/v1/floating-ips/{floating_ip_name}?project={project_name}");
     object_delete(client, &fip_delete_url).await;
 
     // Cleanup

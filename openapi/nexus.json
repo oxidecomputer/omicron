@@ -6091,7 +6091,7 @@
           "experimental"
         ],
         "summary": "Create a multicast group.",
-        "description": "Multicast groups are fleet-scoped resources that can be joined by instances across projects and silos, enabling efficient IP usage and cross-project/cross-silo multicast communication.",
+        "description": "Multicast groups are fleet-scoped resources that can be joined by instances across projects and silos. A single multicast IP serves all group members regardless of project or silo boundaries.",
         "operationId": "multicast_group_create",
         "requestBody": {
           "content": {
@@ -6275,14 +6275,6 @@
           },
           {
             "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "sort_by",
             "schema": {
               "$ref": "#/components/schemas/IdSortMode"
@@ -6316,7 +6308,7 @@
           "experimental"
         ],
         "summary": "Add instance to a multicast group.",
-        "description": "This is functionally equivalent to updating the instance's `multicast_groups` field via the instance update endpoint. Both approaches modify the same underlying membership and trigger the same reconciliation logic.",
+        "description": "Functionally equivalent to updating the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger the same reconciliation logic.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
         "operationId": "multicast_group_member_add",
         "parameters": [
           {
@@ -6373,7 +6365,7 @@
           "experimental"
         ],
         "summary": "Remove instance from a multicast group.",
-        "description": "This is functionally equivalent to removing the group from the instance's `multicast_groups` field or using the instance leave endpoint. All approaches modify the same membership and trigger reconciliation.",
+        "description": "Functionally equivalent to removing the group from the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger reconciliation.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
         "operationId": "multicast_group_member_remove",
         "parameters": [
           {
@@ -23027,6 +23019,13 @@
             "type": "string",
             "format": "ip"
           },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. None means no VLAN tagging on egress.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -23082,6 +23081,13 @@
             "description": "The multicast IP address to allocate. If None, one will be allocated from the default pool.",
             "type": "string",
             "format": "ip"
+          },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. Tags packets leaving the rack to traverse VLAN-segmented upstream networks.\n\nValid range: 2-4094 (Dendrite requires >= 2).",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -23233,6 +23239,13 @@
           "description": {
             "nullable": true,
             "type": "string"
+          },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. Set to null to clear the MVLAN. Valid range: 2-4094 when provided. Omit the field to leave mvlan unchanged.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           },
           "name": {
             "nullable": true,

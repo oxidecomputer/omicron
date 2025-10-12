@@ -25,7 +25,7 @@
 //! # Group State Transition Matrix
 //!
 //! The RPW reconciler handles all possible state transitions for multicast
-//! groups. This comprehensive matrix ensures no edge cases are missed:
+//! groups:
 //!
 //! ## Group State Lifecycle
 //! ```text

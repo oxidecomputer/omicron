@@ -54,6 +54,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         multicast_ip: None, // Test with auto-assigned IP
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
 
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
@@ -114,8 +115,8 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
 
     // Add to group after creation
     let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={}",
-        group_name, project_name
+        "{}?project={project_name}",
+        mcast_group_members_url(group_name)
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name("edge-case-2".parse().unwrap()),
@@ -153,37 +154,161 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
         instance: NameOrId::Name("edge-case-1".parse().unwrap()),
     };
 
-    // This should not error (idempotent operation)
-    let result = NexusRequest::new(
+    // This should succeed idempotently
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &member_add_url)
             .body(Some(&duplicate_member_params))
-            .expect_status(Some(StatusCode::CREATED)), // Should succeed idempotently
+            .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
-    .await;
-
-    match result {
-        Ok(_) => {}
-        Err(e) if e.to_string().contains("already exists") => {}
-        Err(e) => panic!("Unexpected error in idempotency test: {}", e),
-    }
+    .await
+    .expect("Idempotent member add should succeed");
 
     // Final verification: member count should still be 2 (no duplicates)
-    let final_members =
-        list_multicast_group_members(client, group_name).await;
+    let final_members = list_multicast_group_members(client, group_name).await;
     assert_eq!(
         final_members.len(),
         2,
         "Should have exactly 2 members (no duplicates from idempotency test)"
     );
 
-    // Cleanup
+    // Case: UUID-based API access (without project names)
+    // Since multicast groups are fleet-scoped, UUID-based operations should work
+    // without requiring project parameter
+
+    let instance3_params = InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "edge-case-3".parse().unwrap(),
+            description: "Instance for UUID-based access".to_string(),
+        },
+        ncpus: InstanceCpuCount::try_from(1).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "edge-case-3".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        multicast_groups: vec![],
+        disks: vec![],
+        boot_disk: None,
+        start: false, // Create stopped to test UUID operations on non-running instances
+        cpu_platform: None,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+    };
+
+    let (instance3, group) = ops::join2(
+        object_create::<_, Instance>(client, &instance_url, &instance3_params),
+        get_multicast_group(client, group_name),
+    )
+    .await;
+    let instance_uuid = instance3.identity.id;
+    let group_uuid = group.identity.id;
+
+    // Join using UUIDs (no project parameter)
+    let join_url_uuid =
+        format!("/v1/instances/{instance_uuid}/multicast-groups/{group_uuid}");
+    let member_uuid: MulticastGroupMember = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &join_url_uuid)
+            .body(Some(&()))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("UUID-based join should succeed")
+    .parsed_body()
+    .expect(
+        "Failed to parse MulticastGroupMember from UUID-based join response",
+    );
+
+    assert_eq!(member_uuid.instance_id, instance_uuid);
+    // Instance is stopped (start: false), so reconciler will set member to "Left" state
+    wait_for_member_state(client, group_name, instance_uuid, "Left").await;
+
+    // Verify membership via UUID-based instance group list (no project parameter)
+    let instance_groups_url =
+        format!("/v1/instances/{instance_uuid}/multicast-groups");
+    let uuid_memberships: Vec<MulticastGroupMember> =
+        NexusRequest::iter_collection_authn(
+            client,
+            &instance_groups_url,
+            "",
+            None,
+        )
+        .await
+        .expect("UUID-based instance group list should succeed")
+        .all_items;
+
+    assert_eq!(
+        uuid_memberships.len(),
+        1,
+        "UUID-based list should show 1 membership"
+    );
+    assert_eq!(uuid_memberships[0].instance_id, instance_uuid);
+
+    // Verify UUID-based group member listing
+    let group_members_url_uuid =
+        mcast_group_members_url(&group_uuid.to_string());
+    let uuid_based_members: Vec<MulticastGroupMember> =
+        NexusRequest::iter_collection_authn(
+            client,
+            &group_members_url_uuid,
+            "",
+            None,
+        )
+        .await
+        .expect("UUID-based group member list should succeed")
+        .all_items;
+
+    assert_eq!(
+        uuid_based_members.len(),
+        3,
+        "Should show 3 members via UUID-based group list"
+    );
+
+    // Leave using UUIDs (no project parameter)
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &join_url_uuid)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("UUID-based leave should succeed");
+
+    wait_for_member_count(client, group_name, 2).await;
+
+    // Verify instance3 was actually removed
+    let final_members_after_leave =
+        list_multicast_group_members(client, group_name).await;
+    assert!(
+        !final_members_after_leave
+            .iter()
+            .any(|m| m.instance_id == instance_uuid),
+        "instance3 should not be in the group after UUID-based leave"
+    );
+
+    // Negative test: invalid UUID should fail with 400 Bad Request
+    let invalid_join_url =
+        format!("/v1/instances/not-a-uuid/multicast-groups/{group_uuid}");
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &invalid_join_url)
+            .body(Some(&()))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Invalid UUID should return 400 Bad Request");
+
+    // Cleanup - instance3 has already left the group above
     cleanup_instances(
         cptestctx,
         client,
         project_name,
-        &["edge-case-1", "edge-case-2"],
+        &["edge-case-1", "edge-case-2", "edge-case-3"],
     )
     .await;
     cleanup_multicast_groups(client, &[group_name]).await;

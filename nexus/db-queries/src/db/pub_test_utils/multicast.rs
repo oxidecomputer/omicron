@@ -190,6 +190,7 @@ pub async fn create_test_group_with_state(
         multicast_ip: Some(multicast_ip.parse().unwrap()),
         source_ips: None,
         pool: None,
+        mvlan: None,
     };
 
     let group = datastore

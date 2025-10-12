@@ -737,6 +737,7 @@ mod tests {
             source_ips: None,
             // Pool resolved via authz_pool argument to datastore call
             pool: None,
+            mvlan: None,
         };
 
         let creating_group = datastore

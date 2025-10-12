@@ -1255,8 +1255,8 @@ pub trait NexusExternalApi {
     /// Create a multicast group.
     ///
     /// Multicast groups are fleet-scoped resources that can be joined by
-    /// instances across projects and silos, enabling efficient IP usage and
-    /// cross-project/cross-silo multicast communication.
+    /// instances across projects and silos. A single multicast IP serves
+    /// all group members regardless of project or silo boundaries.
     #[endpoint {
         method = POST,
         path = "/v1/multicast-groups",
@@ -1326,9 +1326,11 @@ pub trait NexusExternalApi {
 
     /// Add instance to a multicast group.
     ///
-    /// This is functionally equivalent to updating the instance's `multicast_groups`
-    /// field via the instance update endpoint. Both approaches modify the same
-    /// underlying membership and trigger the same reconciliation logic.
+    /// Functionally equivalent to updating the instance's `multicast_groups` field.
+    /// Both approaches modify the same underlying membership and trigger the same
+    /// reconciliation logic.
+    ///
+    /// Specify instance by name (requires `?project=<name>`) or UUID.
     #[endpoint {
         method = POST,
         path = "/v1/multicast-groups/{multicast_group}/members",
@@ -1343,9 +1345,11 @@ pub trait NexusExternalApi {
 
     /// Remove instance from a multicast group.
     ///
-    /// This is functionally equivalent to removing the group from the instance's
-    /// `multicast_groups` field or using the instance leave endpoint. All
-    /// approaches modify the same membership and trigger reconciliation.
+    /// Functionally equivalent to removing the group from the instance's
+    /// `multicast_groups` field. Both approaches modify the same underlying
+    /// membership and trigger reconciliation.
+    ///
+    /// Specify instance by name (requires `?project=<name>`) or UUID.
     #[endpoint {
         method = DELETE,
         path = "/v1/multicast-groups/{multicast_group}/members/{instance}",

@@ -110,6 +110,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Fleet::get_polar_class(),
         Inventory::get_polar_class(),
         IpPoolList::get_polar_class(),
+        MulticastGroupList::get_polar_class(),
         ConsoleSessionList::get_polar_class(),
         DeviceAuthRequestList::get_polar_class(),
         QuiesceState::get_polar_class(),

@@ -17,6 +17,7 @@ use omicron_common::api::external::{
     Nullable, PaginationOrder, RouteDestination, RouteTarget, UserId,
 };
 use omicron_common::disk::DiskVariant;
+use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use parse_display::Display;
@@ -2786,6 +2787,12 @@ pub struct MulticastGroupCreate {
     /// Name or ID of the IP pool to allocate from. If None, uses the default
     /// multicast pool.
     pub pool: Option<NameOrId>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// Tags packets leaving the rack to traverse VLAN-segmented upstream networks.
+    ///
+    /// Valid range: 2-4094 (Dendrite requires >= 2).
+    #[serde(deserialize_with = "validate_mvlan_option")]
+    pub mvlan: Option<VlanID>,
 }
 
 /// Update-time parameters for a multicast group.
@@ -2793,8 +2800,21 @@ pub struct MulticastGroupCreate {
 pub struct MulticastGroupUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
-    #[serde(deserialize_with = "validate_source_ips_param")]
+    #[serde(
+        default,
+        deserialize_with = "validate_source_ips_param",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub source_ips: Option<Vec<IpAddr>>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// Set to null to clear the MVLAN. Valid range: 2-4094 when provided.
+    /// Omit the field to leave mvlan unchanged.
+    #[serde(
+        default,
+        deserialize_with = "validate_mvlan_option_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mvlan: Option<Nullable<VlanID>>,
 }
 
 /// Parameters for adding an instance to a multicast group.
@@ -2802,6 +2822,56 @@ pub struct MulticastGroupUpdate {
 pub struct MulticastGroupMemberAdd {
     /// Name or ID of the instance to add to the multicast group
     pub instance: NameOrId,
+}
+
+// MVLAN validators
+
+/// Dendrite requires VLAN IDs >= 2 (rejects 0 and 1)
+///
+/// Valid range is 2-4094
+fn validate_mvlan(vlan_id: VlanID) -> Result<VlanID, String> {
+    let value: u16 = vlan_id.into();
+    if value >= 2 {
+        Ok(vlan_id)
+    } else {
+        Err(format!(
+            "invalid mvlan: {} (must be >= 2, Dendrite requirement)",
+            value
+        ))
+    }
+}
+
+fn validate_mvlan_option<'de, D>(
+    deserializer: D,
+) -> Result<Option<VlanID>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<VlanID>::deserialize(deserializer)?;
+    match opt {
+        Some(v) => {
+            validate_mvlan(v).map(Some).map_err(serde::de::Error::custom)
+        }
+        None => Ok(None),
+    }
+}
+
+fn validate_mvlan_option_nullable<'de, D>(
+    deserializer: D,
+) -> Result<Option<Nullable<VlanID>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // Deserialize as Nullable<VlanID> directly, which handles null properly
+    // When field has null value, Nullable deserializer returns Nullable(None)
+    // We always wrap in Some because if field is present, we got here
+    let nullable = Nullable::<VlanID>::deserialize(deserializer)?;
+    match nullable.0 {
+        Some(v) => validate_mvlan(v)
+            .map(|vv| Some(Nullable(Some(vv))))
+            .map_err(serde::de::Error::custom),
+        None => Ok(Some(Nullable(None))), // Explicit null to clear
+    }
 }
 
 /// Parameters for removing an instance from a multicast group.

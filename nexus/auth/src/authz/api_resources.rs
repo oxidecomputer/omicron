@@ -471,6 +471,67 @@ impl AuthorizedResource for IpPoolList {
     }
 }
 
+/// Synthetic, fleet-scoped resource representing the `/v1/multicast-groups`
+/// collection. This is not a persisted entity; it exists only to authorize
+/// collection-level actions on multicast groups.
+///
+/// Authorization derives from the parent Fleet (via the `parent_fleet`
+/// relation). Fleet Admins may create groups; Fleet Viewers may list them.
+/// Additionally, policy permits any authenticated actor in the same
+/// silo/fleet to list multicast groups (see `omicron.polar`) so instances can
+/// discover and attach to groups without requiring `Fleet::Viewer`.
+///
+/// Akin to [IpPoolList]'s approach.
+#[derive(Clone, Copy, Debug)]
+pub struct MulticastGroupList;
+
+/// Singleton representing the [`MulticastGroupList`] itself for authz purposes.
+pub const MULTICAST_GROUP_LIST: MulticastGroupList = MulticastGroupList;
+
+impl Eq for MulticastGroupList {}
+
+impl PartialEq for MulticastGroupList {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl oso::PolarClass for MulticastGroupList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &MulticastGroupList| FLEET)
+    }
+}
+
+impl AuthorizedResource for MulticastGroupList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the MulticastGroupList, only permissions. But we
+        // still need to load the Fleet-related roles to verify that the actor's
+        // role on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Similar to IpPoolList, the audit log is a collection that doesn't exist in
 // the database as an entity distinct from its children (IP pools, or in this
 // case, audit log entries). We need a dummy resource here because we need
@@ -1149,32 +1210,27 @@ authz_resource! {
     polar_snippet = InProject,
 }
 
-// MulticastGroup Authorization Model
+// MulticastGroup Authorization
 //
 // MulticastGroups are **fleet-scoped resources** (parent = "Fleet"), similar to
-// IP pools, to enable efficient cross-project and cross-silo multicast communication.
+// IP pools, to enable efficient cross-project and cross-silo multicast
+// communication.
 //
-// Design Rationale:
-// - When a multicast group is created, the allocated multicast IP belongs to that
-//   group object. If groups were project-scoped, no other projects could receive
-//   traffic on that multicast address.
-// - Fleet-scoping allows instances from different projects and silos to join the
-//   same group, enabling collaboration without wasting multicast IP addresses.
-// - This mirrors the IP pool model: fleet admins create pools, link them to silos,
-//   and silo users consume IPs without needing pool modification rights.
-//
-// Authorization Rules (polar_snippet = FleetChild):
-// - Creating/modifying/deleting groups: Requires Fleet::Admin role
-// - Listing groups: Requires Fleet::Viewer role or higher
-// - Attaching instances to groups: Only requires Instance::Modify permission
+// Authorization rules:
+// - Creating/modifying/deleting groups: requires Fleet::Admin role
+// - Listing groups: Any authenticated user in the same fleet
+// - Viewing individual groups: Any authenticated user in the same fleet
+// - Attaching instances to groups: only requires Instance::Modify permission
 //   (silo users can attach their own instances to any fleet-scoped group)
 //
-// Member Management:
-// MulticastGroup member attachments/detachments (instances joining/leaving groups)
-// use the existing `MulticastGroup` and `Instance` authz resources rather than
-// creating a separate `MulticastGroupMember` authz resource. This follows the same
-// pattern as external IP attachments, where relationship permissions are controlled
-// by the parent resources being connected.
+// See omicron.polar for the special `has_permission` rules that grant list/read
+// access to all authenticated users in the fleet, enabling cross-project and
+// cross-silo multicast without requiring Fleet::Viewer role.
+//
+// Member management: `MulticastGroup` member attachments/detachments (instances
+// joining/leaving groups) use the existing `MulticastGroup` and `Instance`
+// authz resources rather than creating a separate `MulticastGroupMember` authz
+// resource.
 authz_resource! {
     name = "MulticastGroup",
     parent = "Fleet",

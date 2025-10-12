@@ -33,6 +33,7 @@ use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
     InstanceCpuCount, NameOrId,
 };
+use omicron_common::vlan::VlanID;
 
 use super::*;
 
@@ -83,9 +84,11 @@ async fn test_only_fleet_admins_can_create_multicast_groups(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name("mcast-pool".parse().unwrap())),
+        mvlan: None,
     };
 
-    let error = NexusRequest::new(
+    // Try to create multicast group as silo user - should get 403 Forbidden
+    NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &group_url)
             .body(Some(&group_params))
             .expect_status(Some(StatusCode::FORBIDDEN)),
@@ -93,16 +96,7 @@ async fn test_only_fleet_admins_can_create_multicast_groups(
     .authn_as(AuthnMode::SiloUser(user.id))
     .execute()
     .await
-    .expect("Expected 403 Forbidden for silo user creating multicast group")
-    .parsed_body::<dropshot::HttpErrorResponseBody>()
-    .unwrap();
-
-    assert!(
-        error.message.contains("forbidden")
-            || error.message.contains("Forbidden"),
-        "Expected forbidden error, got: {}",
-        error.message
-    );
+    .expect("Expected 403 Forbidden for silo user creating multicast group");
 
     // Now create multicast group as fleet admin - should SUCCEED
     let group: MulticastGroup = NexusRequest::new(
@@ -185,6 +179,7 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name("mcast-pool".parse().unwrap())),
+        mvlan: None,
     };
     let group: MulticastGroup = NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &group_url)
@@ -235,8 +230,8 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
 
     // Silo user can attach their instance to the fleet-scoped multicast group
     let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project=user-project",
-        group.identity.name
+        "{}?project=user-project",
+        mcast_group_members_url(&group.identity.name.to_string())
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Id(instance.identity.id),
@@ -256,6 +251,96 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
 
     assert_eq!(member.instance_id, instance.identity.id);
     assert_eq!(member.multicast_group_id, group.identity.id);
+}
+
+/// Test that authenticated silo users can read multicast groups without
+/// requiring Fleet::Viewer role (verifies the Polar policy for read permission).
+#[nexus_test]
+async fn test_authenticated_users_can_read_multicast_groups(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_default_ip_pool(&client).await;
+
+    // Get current silo info
+    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    let silo: Silo = object_get(client, &silo_url).await;
+
+    // Create multicast pool and link to silo
+    create_multicast_ip_pool(&client, "mcast-pool").await;
+    link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
+
+    // Create a regular silo user with NO special roles (not even viewer)
+    let user = create_local_user(
+        client,
+        &silo,
+        &"regular-user".parse().unwrap(),
+        UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // Fleet admin creates a multicast group
+    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 100));
+    let group_url = "/v1/multicast-groups";
+    let group_params = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "readable-group".parse().unwrap(),
+            description: "Group that should be readable by all silo users"
+                .to_string(),
+        },
+        multicast_ip: Some(multicast_ip),
+        source_ips: None,
+        pool: Some(NameOrId::Name("mcast-pool".parse().unwrap())),
+        mvlan: Some(VlanID::new(100).unwrap()),
+    };
+    let group: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &group_url)
+            .body(Some(&group_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Wait for group to become active
+    wait_for_group_active(client, "readable-group").await;
+
+    // Regular silo user (with no Fleet roles) can GET the multicast group
+    let get_group_url = mcast_group_url(&group.identity.name.to_string());
+    let read_group: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::GET, &get_group_url)
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute()
+    .await
+    .expect("Silo user should be able to read multicast group")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(read_group.identity.id, group.identity.id);
+    assert_eq!(read_group.identity.name, group.identity.name);
+    assert_eq!(read_group.multicast_ip, multicast_ip);
+    assert_eq!(read_group.mvlan, Some(VlanID::new(100).unwrap()));
+
+    // Regular silo user can also LIST multicast groups
+    let list_groups: Vec<MulticastGroup> = NexusRequest::iter_collection_authn(
+        client,
+        "/v1/multicast-groups",
+        "",
+        None,
+    )
+    .await
+    .expect("Silo user should be able to list multicast groups")
+    .all_items;
+
+    assert!(
+        list_groups.iter().any(|g| g.identity.id == group.identity.id),
+        "Multicast group should appear in list for silo user"
+    );
 }
 
 /// Test that instances from different projects can attach to the same
@@ -287,6 +372,7 @@ async fn test_cross_project_instance_attachment_allowed(
         multicast_ip: Some(multicast_ip),
         source_ips: None,
         pool: Some(NameOrId::Name(mcast_pool.identity.name.clone())),
+        mvlan: None,
     };
     let group: MulticastGroup = NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &group_url)
@@ -306,8 +392,8 @@ async fn test_cross_project_instance_attachment_allowed(
 
     // Attach instance from project1 to the group
     let member_add_url1 = format!(
-        "/v1/multicast-groups/{}/members?project=project1",
-        group.identity.name
+        "{}?project=project1",
+        mcast_group_members_url(&group.identity.name.to_string())
     );
     let member_params1 = MulticastGroupMemberAdd {
         instance: NameOrId::Id(instance1.identity.id),
@@ -317,8 +403,8 @@ async fn test_cross_project_instance_attachment_allowed(
 
     // Attach instance from project2 to the SAME group - should succeed
     let member_add_url2 = format!(
-        "/v1/multicast-groups/{}/members?project=project2",
-        group.identity.name
+        "{}?project=project2",
+        mcast_group_members_url(&group.identity.name.to_string())
     );
     let member_params2 = MulticastGroupMemberAdd {
         instance: NameOrId::Id(instance2.identity.id),
@@ -331,4 +417,53 @@ async fn test_cross_project_instance_attachment_allowed(
     assert_eq!(member2.multicast_group_id, group.identity.id);
     assert_eq!(member1.instance_id, instance1.identity.id);
     assert_eq!(member2.instance_id, instance2.identity.id);
+}
+
+/// Verify that unauthenticated users cannot list multicast groups without
+/// proper authentication for the list endpoint.
+#[nexus_test]
+async fn test_unauthenticated_cannot_list_multicast_groups(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_default_ip_pool(&client).await;
+
+    // Get current silo info
+    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    let silo: Silo = object_get(client, &silo_url).await;
+
+    // Create multicast pool and link to silo
+    create_multicast_ip_pool(&client, "mcast-pool").await;
+    link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
+
+    // Fleet admin creates a multicast group
+    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 150));
+    let group_url = "/v1/multicast-groups";
+    let group_params = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "test-group".parse().unwrap(),
+            description: "Group for auth test".to_string(),
+        },
+        multicast_ip: Some(multicast_ip),
+        source_ips: None,
+        pool: Some(NameOrId::Name("mcast-pool".parse().unwrap())),
+        mvlan: None,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &group_url)
+            .body(Some(&group_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap();
+
+    // Try to list multicast groups without authentication - should get 401 Unauthorized
+    RequestBuilder::new(client, http::Method::GET, &group_url)
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("Expected 401 Unauthorized for unauthenticated list request");
 }
