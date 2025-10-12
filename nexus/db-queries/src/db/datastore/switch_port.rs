@@ -1138,46 +1138,6 @@ impl DataStore {
         Ok(id)
     }
 
-    /// Given a list of switch port UUIDs, return a list of strings in the
-    /// format "<switch_location>.<port_name>". The order of the returned list
-    /// matches the order of the input UUIDs.
-    pub async fn switch_ports_from_ids(
-        &self,
-        opctx: &OpContext,
-        uplink_uuids: &[Uuid],
-    ) -> LookupResult<Vec<String>> {
-        use nexus_db_schema::schema::switch_port::{
-            self, dsl, port_name, switch_location,
-        };
-
-        if uplink_uuids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let uplink_uuids_vec: Vec<Uuid> = uplink_uuids.to_vec();
-
-        // Maintain the order from the input UUIDs
-        let mut result = Vec::with_capacity(uplink_uuids.len());
-        for uuid in uplink_uuids_vec.iter() {
-            let switch_port_info = dsl::switch_port
-                .filter(switch_port::id.eq(*uuid))
-                .select((switch_location, port_name))
-                .first_async::<(String, String)>(&*conn)
-                .await
-                .map_err(|_| {
-                    Error::internal_error(&format!(
-                        "Switch port UUID {uuid} not found",
-                    ))
-                })?;
-
-            result
-                .push(format!("{}.{}", switch_port_info.0, switch_port_info.1));
-        }
-
-        Ok(result)
-    }
-
     pub async fn switch_ports_with_uplinks(
         &self,
         opctx: &OpContext,

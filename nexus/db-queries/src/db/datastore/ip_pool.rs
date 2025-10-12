@@ -45,7 +45,7 @@ use nexus_db_model::IpVersion;
 use nexus_db_model::Project;
 use nexus_db_model::Vpc;
 use nexus_types::external_api::shared::IpRange;
-use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_FLAG_FIELD};
+use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -1458,9 +1458,7 @@ impl DataStore {
             }
             IpRange::V6(v6_range) => {
                 let first = v6_range.first_address();
-                // Check if the flag field (second nibble) is 3 for SSM
-                let flag_field = (first.octets()[1] & 0xF0) >> 4;
-                flag_field == IPV6_SSM_FLAG_FIELD
+                IPV6_SSM_SUBNET.contains(first)
             }
         };
 
@@ -1481,11 +1479,7 @@ impl DataStore {
         for existing_range in &existing_ranges {
             let existing_is_ssm = match &existing_range.first_address {
                 IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-                IpNetwork::V6(net) => {
-                    // Check if the flag field (second nibble) is 3 for SSM
-                    let flag_field = (net.network().octets()[1] & 0xF0) >> 4;
-                    flag_field == IPV6_SSM_FLAG_FIELD
-                }
+                IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
             };
 
             // If we have a mix of ASM and SSM within this pool, reject
@@ -1493,9 +1487,7 @@ impl DataStore {
                 let new_type = if new_range_is_ssm { "SSM" } else { "ASM" };
                 let existing_type = if existing_is_ssm { "SSM" } else { "ASM" };
                 return Err(Error::invalid_request(&format!(
-                    "Cannot mix {new_type} and {existing_type} ranges in multicast pool. \
-                     {new_type} ranges (IPv4 232/8, IPv6 FF3x::/32) and \
-                     {existing_type} ranges (IPv4 224/4, IPv6 FF0x-FF2x::/32) must be in separate pools."
+                    "Cannot mix {new_type} and {existing_type} ranges in the same multicast pool"
                 )));
             }
         }
@@ -1534,11 +1526,7 @@ impl DataStore {
 
         let is_ssm = match range.first_address {
             IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
-            IpNetwork::V6(net) => {
-                // Check if the flag field (second nibble) is 3 for SSM
-                let flags = (net.network().octets()[1] & 0xF0) >> 4;
-                flags == IPV6_SSM_FLAG_FIELD
-            }
+            IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
         };
 
         Ok(is_ssm)
