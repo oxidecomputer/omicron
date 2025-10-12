@@ -1389,6 +1389,7 @@ impl fmt::Display for BlueprintArtifactVersion {
 pub struct BlueprintSingleMeasurement {
     pub version: BlueprintArtifactVersion,
     pub hash: ArtifactHash,
+    pub prune: bool,
 }
 
 /// Where the measurement source is located
@@ -1427,7 +1428,35 @@ pub enum BlueprintMeasurementSetDesiredContents {
     /// This originates from TUF repos uploaded to Nexus which are then
     /// replicated out to all sleds.
     #[serde(rename_all = "snake_case")]
-    Artifacts { artifacts: Vec<BlueprintSingleMeasurement> },
+    Artifacts { artifacts: BTreeSet<BlueprintSingleMeasurement> },
+}
+
+impl From<BlueprintMeasurementSetDesiredContents>
+    for BTreeSet<BlueprintSingleMeasurement>
+{
+    fn from(value: BlueprintMeasurementSetDesiredContents) -> Self {
+        match value {
+            BlueprintMeasurementSetDesiredContents::InstallDataset => {
+                Self::new()
+            }
+            BlueprintMeasurementSetDesiredContents::Artifacts {
+                artifacts,
+                ..
+            } => artifacts,
+        }
+    }
+}
+
+impl From<BTreeSet<BlueprintSingleMeasurement>>
+    for BlueprintMeasurementSetDesiredContents
+{
+    fn from(value: BTreeSet<BlueprintSingleMeasurement>) -> Self {
+        if value.is_empty() {
+            Self::InstallDataset
+        } else {
+            Self::Artifacts { artifacts: value }
+        }
+    }
 }
 
 impl From<BlueprintMeasurementSetDesiredContents>
@@ -1468,22 +1497,39 @@ impl fmt::Display for BlueprintMeasurementSetDesiredContents {
 )]
 #[serde(rename_all = "snake_case")]
 pub struct BlueprintMeasurementsDesiredContents {
-    pub previous: BlueprintMeasurementSetDesiredContents,
-    pub current: BlueprintMeasurementSetDesiredContents,
+    pub measurements: BTreeSet<BlueprintSingleMeasurement>,
 }
 
 impl From<BlueprintMeasurementsDesiredContents> for OmicronMeasurements {
     fn from(value: BlueprintMeasurementsDesiredContents) -> Self {
-        Self { previous: value.previous.into(), current: value.current.into() }
+        Self {
+            measurements: {
+                if value.measurements.is_empty() {
+                    OmicronMeasurementSetDesiredContents::InstallDataset
+                } else {
+                    OmicronMeasurementSetDesiredContents::Artifacts {
+                        hashes: value
+                            .measurements
+                            .into_iter()
+                            .map(|x| x.hash)
+                            .collect(),
+                    }
+                }
+            },
+        }
     }
 }
 
 impl BlueprintMeasurementsDesiredContents {
     pub fn default_contents() -> Self {
-        Self {
-            previous: BlueprintMeasurementSetDesiredContents::InstallDataset,
-            current: BlueprintMeasurementSetDesiredContents::InstallDataset,
-        }
+        Self { measurements: BTreeSet::new() }
+    }
+
+    pub fn append_measurement(
+        &mut self,
+        single: BlueprintSingleMeasurement,
+    ) {
+        self.measurements.insert(single);
     }
 }
 

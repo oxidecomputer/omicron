@@ -24,8 +24,8 @@ use nexus_db_schema::schema::{
     bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
     bp_oximeter_read_policy, bp_pending_mgs_update_host_phase_1,
     bp_pending_mgs_update_rot, bp_pending_mgs_update_rot_bootloader,
-    bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
-    debug_log_blueprint_planning,
+    bp_pending_mgs_update_sp, bp_single_measurements, bp_sled_metadata,
+    bp_target, debug_log_blueprint_planning,
 };
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
@@ -33,6 +33,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::ExpectedActiveRotSlot;
@@ -1199,6 +1200,106 @@ impl TryFrom<DbBpZoneImageSourceColumns> for BlueprintZoneImageSource {
         }
     }
 }
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_single_measurements)]
+//#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct BpSingleMeasurement {
+    pub blueprint_id: DbTypedUuid<BlueprintKind>,
+    pub id: DbTypedUuid<PhysicalDiskKind>,
+
+    pub image_artifact_sha256: Option<ArtifactHash>,
+    pub prune: bool,
+}
+
+impl BpSingleMeasurement {
+    fn to_measurement(self, artifact: Option<TufArtifact>) -> BlueprintSingleMeasurement {
+        BlueprintSingleMeasurement {
+            version: match artifact {
+                Some(a) => BlueprintArtifactVersion::Available {
+                    version: a.version.0
+                }
+            },
+            hash: self.image_artifact_sha256.expect("this should always be set"),
+            prune: self.prune,
+        }
+    }
+}
+//struct DbBpZoneImageSourceColumns {
+//    image_source: DbBpZoneImageSource,
+// image_artifact_data is Some if and only if image_source is Artifact.
+//
+// The BlueprintZoneImageVersion is not actually stored in bp_omicron_zone
+// table directly, but is instead looked up from the tuf_artifact table at
+// blueprint load time.
+//    image_artifact_data: Option<(BlueprintArtifactVersion, ArtifactHash)>,
+//}
+
+//impl DbBpZoneImageSourceColumns {
+//    fn new(
+//        image_source: DbBpZoneImageSource,
+//        image_artifact_sha256: Option<ArtifactHash>,
+//        image_artifact_row: Option<TufArtifact>,
+//    ) -> Self {
+// Note that artifact_row can only be Some if image_artifact_sha256 is
+// Some.
+//        let image_artifact_data = image_artifact_sha256.map(|hash| {
+//            let version = match image_artifact_row {
+//                Some(artifact_row) => BlueprintArtifactVersion::Available {
+//                    version: artifact_row.version.0,
+//                },
+//                None => BlueprintArtifactVersion::Unknown,
+//            };
+//            (version, hash)
+//        });
+//        Self { image_source, image_artifact_data }
+//    }
+//}
+
+//impl From<BlueprintZoneImageSource> for DbBpZoneImageSourceColumns {
+//    fn from(image_source: BlueprintZoneImageSource) -> Self {
+//        match image_source {
+//            BlueprintZoneImageSource::InstallDataset => Self {
+//                image_source: DbBpZoneImageSource::InstallDataset,
+//                image_artifact_data: None,
+//            },
+//            BlueprintZoneImageSource::Artifact { version, hash } => Self {
+//                image_source: DbBpZoneImageSource::Artifact,
+//                image_artifact_data: Some((version, hash.into())),
+//            },
+//        }
+//    }
+//}
+
+//impl TryFrom<DbBpZoneImageSourceColumns> for BlueprintZoneImageSource {
+//    type Error = anyhow::Error;
+
+//    fn try_from(
+//        value: DbBpZoneImageSourceColumns,
+//    ) -> Result<Self, Self::Error> {
+//        match (value.image_source, value.image_artifact_data) {
+//            (DbBpZoneImageSource::Artifact, Some((version, hash))) => {
+//                Ok(Self::Artifact { version, hash: hash.into() })
+//            }
+//            (DbBpZoneImageSource::Artifact, None) => Err(anyhow!(
+//                "illegal database state (CHECK constraint broken?!): \
+//                 image_source {:?}, image_artifact_data None",
+//                value.image_source,
+//            )),
+//           (DbBpZoneImageSource::InstallDataset, data @ Some(_)) => {
+//                Err(anyhow!(
+//                    "illegal database state (CHECK constraint broken?!): \
+//                 image_source {:?}, image_artifact_data {:?}",
+//                    value.image_source,
+//                    data,
+//                ))
+//            }
+//            (DbBpZoneImageSource::InstallDataset, None) => {
+//                Ok(Self::InstallDataset)
+//            }
+//        }
+//    }
+//}
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_omicron_zone_nic)]

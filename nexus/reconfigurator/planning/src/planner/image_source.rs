@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::HashMap, fmt};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fmt,
+};
 
 use anyhow::anyhow;
 use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
@@ -812,7 +815,7 @@ pub(crate) enum NoopConvertHostPhase2IneligibleReason {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum NoopConvertMeasurementContents {
-    AlreadyArtifact { artifacts: Vec<BlueprintSingleMeasurement> },
+    AlreadyArtifact { artifacts: BTreeSet<BlueprintSingleMeasurement> },
     Ineligible(NoopConvertMeasurementsIneligibleReason),
     Eligible(BlueprintMeasurementSetDesiredContents),
 }
@@ -835,16 +838,18 @@ impl NoopConvertMeasurementContents {
                 Self::AlreadyArtifact { artifacts }
             }
             BlueprintMeasurementSetDesiredContents::InstallDataset => {
-                let mut artifacts = Vec::new();
+                let mut artifacts = BTreeSet::new();
                 for artifact in &measurement_manifest.artifacts {
                     if let Some(meta) =
                         artifacts_by_hash.get(&artifact.expected_hash)
                     {
-                        artifacts.push(BlueprintSingleMeasurement {
+                        artifacts.insert(BlueprintSingleMeasurement {
                             version: BlueprintArtifactVersion::Available {
                                 version: meta.id.version.clone(),
                             },
                             hash: meta.hash,
+                            // Noooo don't get rid of the install dataset
+                            prune: false,
                         });
                     } else {
                         return Self::Ineligible(
@@ -916,8 +921,7 @@ impl NoopConvertMeasurementContents {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct NoopConvertMeasurements {
-    pub(crate) previous: NoopConvertMeasurementContents,
-    pub(crate) current: NoopConvertMeasurementContents,
+    pub(crate) measurements: NoopConvertMeasurementContents,
 }
 
 impl NoopConvertMeasurements {
@@ -927,13 +931,8 @@ impl NoopConvertMeasurements {
         artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
     ) -> Self {
         Self {
-            previous: NoopConvertMeasurementContents::new(
-                measurement.previous,
-                measurement_manifest,
-                artifacts_by_hash,
-            ),
-            current: NoopConvertMeasurementContents::new(
-                measurement.current,
+            measurements: NoopConvertMeasurementContents::new(
+                measurement.measurements.into(),
                 measurement_manifest,
                 artifacts_by_hash,
             ),
@@ -942,18 +941,13 @@ impl NoopConvertMeasurements {
 
     /// Returns true if both slots are already set to Artifact.
     pub(crate) fn both_already_artifact(&self) -> bool {
-        self.previous.is_already_artifact()
-            && self.current.is_already_artifact()
+            self.measurements.is_already_artifact()
     }
 
     fn log_to(&self, log: &slog::Logger) {
         {
-            let log = log.new(o!("set" => "previous"));
-            self.previous.log_to(&log);
-        }
-        {
             let log = log.new(o!("set" => "current"));
-            self.current.log_to(&log);
+            self.measurements.log_to(&log);
         }
     }
 }

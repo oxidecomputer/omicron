@@ -5,24 +5,36 @@
 use super::scalar::ScalarEditor;
 use nexus_types::deployment::BlueprintMeasurementSetDesiredContents;
 use nexus_types::deployment::BlueprintMeasurementsDesiredContents;
+use nexus_types::deployment::BlueprintSingleMeasurement;
 
-fn generate_from_choices(
-    old_previous: BlueprintMeasurementSetDesiredContents,
-    old_current: BlueprintMeasurementSetDesiredContents,
-    new_current: Option<BlueprintMeasurementSetDesiredContents>,
+use std::collections::BTreeSet;
+
+fn merge_sets(
+    old: BTreeSet<BlueprintSingleMeasurement>,
+    new: BTreeSet<BlueprintSingleMeasurement>,
 ) -> BlueprintMeasurementsDesiredContents {
-    match new_current {
-        // This is the easy case, simply return what we have
-        None => BlueprintMeasurementsDesiredContents {
-            previous: old_previous,
-            current: old_current,
-        },
-        // We drop our old previous, old current becomes our previuos, new becomes our current
-        Some(new) => BlueprintMeasurementsDesiredContents {
-            previous: old_current,
-            current: new,
-        },
+    // Our goal is to have the new set contain what will be our current measurements
+    // and only the the old entries that are immediately present
+
+    let mut going_in = old.into_iter()
+            // Step 1: grab anything that doesn't need to be pruned
+            .filter(|x| x.prune == false)
+            // Step 2: mark anything that isn't  in our new set as prunable
+            .map(|mut x| { if !new.contains(&x) { x.prune = true; } x }).collect::<BTreeSet<BlueprintSingleMeasurement>>();
+
+    // Step 3: Union
+    //let mut going_in = going_in.union(&new).collect();
+
+    let mut measurements : BTreeSet<BlueprintSingleMeasurement> = BTreeSet::new();
+    //measurements.append(&mut going_in);
+    for m in going_in.union(&new) {
+        measurements.insert(m.clone());
     }
+
+    BlueprintMeasurementsDesiredContents {
+        measurements
+    }
+    
 }
 
 /// No no okay this is where the work needs to happen!
@@ -33,44 +45,38 @@ fn generate_from_choices(
 /// By the time we `finalize` we need to DROP the current set of
 #[derive(Debug)]
 pub(super) struct MeasurementEditor {
-    old_previous: ScalarEditor<BlueprintMeasurementSetDesiredContents>,
-    old_current: ScalarEditor<BlueprintMeasurementSetDesiredContents>,
-    new_current: ScalarEditor<Option<BlueprintMeasurementSetDesiredContents>>,
+    old_measurements: ScalarEditor<BTreeSet<BlueprintSingleMeasurement>>,
+    new_measurements: ScalarEditor<BTreeSet<BlueprintSingleMeasurement>>,
 }
 
 impl MeasurementEditor {
     pub fn new(measurements: BlueprintMeasurementsDesiredContents) -> Self {
         Self {
-            old_previous: ScalarEditor::new(measurements.previous),
-            old_current: ScalarEditor::new(measurements.current),
-            new_current: ScalarEditor::new(None),
+            old_measurements: ScalarEditor::new(measurements.measurements),
+            new_measurements: ScalarEditor::new(BTreeSet::new()),
         }
     }
 
     pub fn value(&self) -> BlueprintMeasurementsDesiredContents {
-        // XXX not sure this is correct
-        generate_from_choices(
-            self.old_previous.value().clone(),
-            self.old_current.value().clone(),
-            self.new_current.value().clone(),
+        merge_sets(
+            self.old_measurements.value().clone(),
+            self.new_measurements.value().clone(),
         )
     }
 
+    /// Force overwrite our settings as if we called `new`
     pub fn set_value(
         &mut self,
         measurements: BlueprintMeasurementsDesiredContents,
     ) -> BlueprintMeasurementsDesiredContents {
-        // XXX I think this is wrong???
         let previous_set = BlueprintMeasurementsDesiredContents {
-            previous: self
-                .old_previous
-                .set_value(measurements.previous)
-                .into_owned(),
-            current: self
-                .old_current
-                .set_value(measurements.current)
-                .into_owned(),
+            measurements: self
+                .old_measurements
+                .set_value(measurements.measurements)
+                .into_owned()
+                .into(),
         };
+        self.new_measurements.set_value(BTreeSet::new());
         previous_set
     }
 
@@ -78,24 +84,22 @@ impl MeasurementEditor {
         &mut self,
         current: BlueprintMeasurementSetDesiredContents,
     ) -> BlueprintMeasurementsDesiredContents {
-        self.new_current.set_value(Some(current));
+        self.new_measurements.set_value(current.into());
         self.value()
     }
 
     pub fn is_modified(&self) -> bool {
-        let Self { old_previous, old_current, new_current } = self;
-        old_previous.is_modified()
-            || old_current.is_modified()
-            || new_current.is_modified()
+        let Self { old_measurements, new_measurements } = self;
+        old_measurements.is_modified()
+            || new_measurements.is_modified()
     }
 
     pub fn finalize(self) -> BlueprintMeasurementsDesiredContents {
-        let Self { old_previous, old_current, new_current } = self;
+        let Self { old_measurements, new_measurements } = self;
 
-        generate_from_choices(
-            old_previous.finalize(),
-            old_current.finalize(),
-            new_current.finalize(),
+        merge_sets(
+            old_measurements.finalize(),
+            new_measurements.finalize(),
         )
     }
 }

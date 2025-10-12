@@ -58,9 +58,11 @@ use nexus_db_model::BpPendingMgsUpdateHostPhase1;
 use nexus_db_model::BpPendingMgsUpdateRot;
 use nexus_db_model::BpPendingMgsUpdateRotBootloader;
 use nexus_db_model::BpPendingMgsUpdateSp;
+use nexus_db_model::BpSingleMeasurement;
 use nexus_db_model::BpSledMetadata;
 use nexus_db_model::BpTarget;
 use nexus_db_model::DbArtifactVersion;
+use nexus_db_model::DbBpMeasurementLifeState;
 use nexus_db_model::DbTypedUuid;
 use nexus_db_model::DebugLogBlueprintPlanning;
 use nexus_db_model::HwBaseboardId;
@@ -722,6 +724,72 @@ impl DataStore {
             }
             sled_configs
         };
+
+        {
+            use nexus_db_schema::schema::bp_single_measurements::dsl;
+            use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
+
+            let mut paginator = Paginator::new(
+                SQL_BATCH_SIZE,
+                dropshot::PaginationOrder::Ascending,
+            );
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_single_measurements,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(to_db_typed_uuid(blueprint_id)))
+                // Left join in case the artifact is missing from the
+                // tuf_artifact table, which is non-fatal.
+                .left_join(
+                    tuf_artifact_dsl::tuf_artifact.on(tuf_artifact_dsl::kind
+                        // XXX WRONG
+                        .eq(ArtifactKind::HOST_PHASE_2.to_string())
+                        .and(
+                            tuf_artifact_dsl::sha256
+                                .nullable()
+                                .eq(dsl::image_artifact_sha256),
+                        )),
+                )
+                .select((
+                    BpSingleMeasurement::as_select(),
+                    Option::<TufArtifact>::as_select(),
+                ))
+                .load_async::<(
+                    BpSingleMeasurement,
+                    Option<TufArtifact>,
+                )>(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|(z, _)| z.id);
+
+                for (m, artifact) in batch {
+                    let sled_config = sled_configs
+                        .get_mut(&m.sled_id.into())
+                        .ok_or_else(|| {
+                        // This error means that we found a row in
+                        // bp_omicron_dataset with no associated record in
+                        // bp_sled_omicron_datasets.  This should be
+                        // impossible and reflects either a bug or database
+                        // corruption.
+                        Error::internal_error(&format!(
+                            "measurement {}: unknown sled: {}",
+                            m.blueprint_id, m.sled_id
+                        ))
+                    })?;
+
+                        
+                        sled_config
+                            .measurements
+                            .append_measurement(m.to_measurement(artifact)),
+                    }
+                }
+            }
+        }
 
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
         // match these up with the corresponding zone below, we'll remove items

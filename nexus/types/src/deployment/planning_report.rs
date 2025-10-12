@@ -217,8 +217,7 @@ pub struct PlanningNoopImageSourceConverted {
     pub num_dataset: usize,
     pub host_phase_2_slot_a_eligible: bool,
     pub host_phase_2_slot_b_eligible: bool,
-    pub measurement_previous_eligible: bool,
-    pub measurement_current_eligible: bool,
+    pub measurement_eligible: bool,
 }
 
 #[derive(
@@ -304,8 +303,7 @@ impl PlanningNoopImageSourceStepReport {
         num_dataset: usize,
         host_phase_2_slot_a_eligible: bool,
         host_phase_2_slot_b_eligible: bool,
-        measurement_current_eligible: bool,
-        measurement_previous_eligible: bool,
+        measurement_eligible: bool,
     ) {
         self.converted.insert(
             sled_id,
@@ -314,8 +312,7 @@ impl PlanningNoopImageSourceStepReport {
                 num_dataset,
                 host_phase_2_slot_a_eligible,
                 host_phase_2_slot_b_eligible,
-                measurement_current_eligible,
-                measurement_previous_eligible,
+                measurement_eligible,
             },
         );
     }
@@ -364,8 +361,7 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
                 num_dataset,
                 host_phase_2_slot_a_eligible,
                 host_phase_2_slot_b_eligible,
-                measurement_previous_eligible,
-                measurement_current_eligible,
+                measurement_eligible,
             },
         ) in converted.iter()
         {
@@ -388,13 +384,7 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
                     "* noop converting host phase 2 slot B to Artifact on sled {sled_id}"
                 )?;
             }
-            if *measurement_previous_eligible {
-                writeln!(
-                    f,
-                    "* noop converting previous measurments to Artifact on sled {sled_id}"
-                )?;
-            }
-            if *measurement_current_eligible {
+            if *measurement_eligible {
                 writeln!(
                     f,
                     "* noop converting current measurements to Artifact on sled {sled_id}"

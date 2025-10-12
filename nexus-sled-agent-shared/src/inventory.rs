@@ -1815,16 +1815,13 @@ fn measurement_set_default() -> OmicronMeasurementSetDesiredContents {
 )]
 pub struct OmicronMeasurements {
     #[serde(default = "measurement_set_default")]
-    pub previous: OmicronMeasurementSetDesiredContents,
-    #[serde(default = "measurement_set_default")]
-    pub current: OmicronMeasurementSetDesiredContents,
+    pub measurements: OmicronMeasurementSetDesiredContents,
 }
 
 impl OmicronMeasurements {
     pub fn measurements_defaults() -> OmicronMeasurements {
         OmicronMeasurements {
-            previous: measurement_set_default(),
-            current: measurement_set_default(),
+            measurements: measurement_set_default(),
         }
     }
 }

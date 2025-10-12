@@ -746,8 +746,7 @@ impl<'a> Planner<'a> {
             if zone_counts.num_eligible > 0
                 || eligible.host_phase_2.slot_a.is_eligible()
                 || eligible.host_phase_2.slot_b.is_eligible()
-                || eligible.measurements.current.is_eligible()
-                || eligible.measurements.previous.is_eligible()
+                || eligible.measurements.measurements.is_eligible()
             {
                 // XXX FIXME
                 report.converted(
@@ -756,8 +755,7 @@ impl<'a> Planner<'a> {
                     zone_counts.num_install_dataset(),
                     eligible.host_phase_2.slot_a.is_eligible(),
                     eligible.host_phase_2.slot_b.is_eligible(),
-                    eligible.measurements.current.is_eligible(),
-                    eligible.measurements.previous.is_eligible(),
+                    eligible.measurements.measurements.is_eligible(),
                 );
             }
 

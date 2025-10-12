@@ -51,6 +51,8 @@ impl PendingMeasurements {
                         version: artifact.id.version.clone(),
                     },
                     hash: artifact.hash,
+                    // These are new measurements, definitely don't want to prune!
+                    prune: false,
                 })
                 .collect(),
         };
