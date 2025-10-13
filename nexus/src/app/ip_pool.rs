@@ -19,6 +19,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::model::Name;
 use nexus_types::identity::Resource;
+use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -77,6 +78,15 @@ impl super::Nexus {
     ) -> CreateResult<IpPool> {
         // https://github.com/oxidecomputer/omicron/issues/8881
         let ip_version = pool_params.ip_version.into();
+
+        // IPv6 is not yet supported for unicast pools
+        if matches!(pool_params.pool_type, shared::IpPoolType::Unicast)
+            && matches!(ip_version, IpVersion::V6)
+        {
+            return Err(Error::invalid_request(
+                "IPv6 pools are not yet supported for unicast pools",
+            ));
+        }
 
         let pool = match pool_params.pool_type.clone() {
             shared::IpPoolType::Unicast => {
@@ -339,16 +349,33 @@ impl super::Nexus {
             ));
         }
 
+        // Validate uniformity: ensure range doesn't span multicast/unicast boundary
         let range_is_multicast = match range {
             shared::IpRange::V4(v4_range) => {
                 let first = v4_range.first_address();
                 let last = v4_range.last_address();
-                first.is_multicast() && last.is_multicast()
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+                first_is_multicast
             }
             shared::IpRange::V6(v6_range) => {
                 let first = v6_range.first_address();
                 let last = v6_range.last_address();
-                first.is_multicast() && last.is_multicast()
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+                first_is_multicast
             }
         };
 
@@ -360,8 +387,34 @@ impl super::Nexus {
                     ));
                 }
 
-                // For multicast pools, validate ASM/SSM separation
-                // This validation is done in the datastore layer
+                // For multicast pools, validate that the range doesn't span
+                // ASM/SSM boundaries
+                match range {
+                    shared::IpRange::V4(v4_range) => {
+                        let first = v4_range.first_address();
+                        let last = v4_range.last_address();
+                        let first_is_ssm = IPV4_SSM_SUBNET.contains(first);
+                        let last_is_ssm = IPV4_SSM_SUBNET.contains(last);
+
+                        if first_is_ssm != last_is_ssm {
+                            return Err(Error::invalid_request(
+                                "IP range cannot span ASM and SSM address spaces",
+                            ));
+                        }
+                    }
+                    shared::IpRange::V6(v6_range) => {
+                        let first = v6_range.first_address();
+                        let last = v6_range.last_address();
+                        let first_is_ssm = IPV6_SSM_SUBNET.contains(first);
+                        let last_is_ssm = IPV6_SSM_SUBNET.contains(last);
+
+                        if first_is_ssm != last_is_ssm {
+                            return Err(Error::invalid_request(
+                                "IP range cannot span ASM and SSM address spaces",
+                            ));
+                        }
+                    }
+                }
             }
             IpPoolType::Unicast => {
                 if range_is_multicast {
@@ -454,17 +507,33 @@ impl super::Nexus {
             ));
         }
 
-        // Validate that the range matches the pool type
+        // Validate that the range matches the pool type and that they match uniformity
         let range_is_multicast = match range {
             shared::IpRange::V4(v4_range) => {
                 let first = v4_range.first_address();
                 let last = v4_range.last_address();
-                first.is_multicast() && last.is_multicast()
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+                first_is_multicast
             }
             shared::IpRange::V6(v6_range) => {
                 let first = v6_range.first_address();
                 let last = v6_range.last_address();
-                first.is_multicast() && last.is_multicast()
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+                first_is_multicast
             }
         };
 

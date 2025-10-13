@@ -1015,7 +1015,14 @@ impl std::fmt::Debug for CertificateCreate {
 
 // IP POOLS
 
-/// Create-time parameters for an `IpPool`
+/// Create-time parameters for an `IpPool`.
+///
+/// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
+/// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
+/// ranges in the same pool is not allowed.
+///
+/// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3
+/// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolCreate {
     #[serde(flatten)]
@@ -1025,7 +1032,7 @@ pub struct IpPoolCreate {
     /// The default is IPv4.
     #[serde(default = "IpVersion::v4")]
     pub ip_version: IpVersion,
-    /// Type of IP pool (defaults to Unicast for backward compatibility)
+    /// Type of IP pool (defaults to Unicast)
     #[serde(default)]
     pub pool_type: shared::IpPoolType,
 }

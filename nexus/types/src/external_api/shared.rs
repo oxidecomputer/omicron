@@ -743,13 +743,15 @@ impl RelayState {
     }
 }
 
-/// Type of IP pool
+/// Type of IP pool.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum IpPoolType {
-    /// Unicast IP pool for standard IP allocations
+    /// Unicast IP pool for standard IP allocations.
     Unicast,
-    /// Multicast IP pool for multicast group allocations
+    /// Multicast IP pool for multicast group allocations.
+    ///
+    /// All ranges in a multicast pool must be either ASM or SSM (not mixed).
     Multicast,
 }
 
