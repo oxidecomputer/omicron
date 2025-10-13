@@ -24,6 +24,16 @@ set -o xtrace
 pfexec mkdir -p /out
 pfexec chown "$UID" /out
 
+
+# NOTE: This version should be in sync with the recommended version in
+# .config/nextest.toml. (Maybe build an automated way to pull the recommended
+# version in the future.)
+NEXTEST_VERSION='0.9.98'
+
+cargo --version
+rustc --version
+curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
+
 #
 # Prep to build omicron
 #
