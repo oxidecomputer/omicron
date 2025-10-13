@@ -1806,7 +1806,7 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
-wrote <TMP_PATH_REDACTED>
+saving to <TMP_PATH_REDACTED> ... done
 =============================================
 EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "--skip-blueprint-validation", "..........<REDACTED_UUID>..........."]
 termination: Exited(0)
