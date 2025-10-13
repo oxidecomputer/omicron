@@ -4,26 +4,192 @@
 
 //! omdb commands related to update status
 
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+    iter,
+};
+
+use super::UpdateStatusArgs;
 use anyhow::Context;
 use gateway_types::rot::RotSlot;
 use nexus_types::internal_api::views::{
-    HostPhase1Status, HostPhase2Status, RotBootloaderStatus, RotStatus,
-    SpStatus, ZoneStatus,
+    HostPhase1Status, HostPhase2Status, MgsDrivenUpdateStatus,
+    RotBootloaderStatus, RotStatus, SledAgentUpdateStatus, SpStatus,
+    TufRepoVersion, UpdateStatus, ZoneStatus,
 };
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use strum::IntoEnumIterator;
 use tabled::Tabled;
 
 /// Runs `omdb nexus update-status`
 pub async fn cmd_nexus_update_status(
     client: &nexus_lockstep_client::Client,
+    args: &UpdateStatusArgs,
 ) -> Result<(), anyhow::Error> {
+    let UpdateStatusArgs { details } = args;
+
     let status = client
         .update_status()
         .await
         .context("retrieving update status")?
         .into_inner();
 
+    if *details {
+        print_status_details(status);
+    } else {
+        print_status_summary(status);
+    }
+
+    Ok(())
+}
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, strum::EnumIter,
+)]
+enum Component {
+    RotBootloader,
+    Rot,
+    Sp,
+    HostPhase1,
+    HostPhase2,
+    Zone,
+}
+
+#[derive(Debug, Default)]
+struct UpdateStatusSummaryBuilder {
+    all_versions: BTreeSet<Cow<'static, str>>,
+    counts: BTreeMap<Component, BTreeMap<Cow<'static, str>, usize>>,
+}
+
+impl UpdateStatusSummaryBuilder {
+    fn insert(&mut self, component: Component, version: TufRepoVersion) {
+        let version = match version {
+            TufRepoVersion::Unknown => Cow::Borrowed("unknown"),
+            TufRepoVersion::InstallDataset => Cow::Borrowed("install-dataset"),
+            TufRepoVersion::Error(_) => Cow::Borrowed("error"),
+            TufRepoVersion::Version(v) => Cow::Owned(v.to_string()),
+        };
+
+        self.all_versions.insert(version.clone());
+        *self
+            .counts
+            .entry(component)
+            .or_default()
+            .entry(version)
+            .or_default() += 1;
+    }
+}
+
+fn print_status_summary(status: UpdateStatus) {
+    let mut builder = UpdateStatusSummaryBuilder::default();
+
+    let UpdateStatus { mgs_driven, sleds } = status;
+
+    for sled in sleds {
+        let SledAgentUpdateStatus { host_phase_2, sled_id: _, zones } = sled;
+
+        // Check the boot disk to know which slot to count.
+        builder.insert(
+            Component::HostPhase2,
+            match host_phase_2.boot_disk {
+                Ok(M2Slot::A) => host_phase_2.slot_a_version,
+                Ok(M2Slot::B) => host_phase_2.slot_b_version,
+                Err(err) => TufRepoVersion::Error(err),
+            },
+        );
+        for z in zones {
+            builder.insert(Component::Zone, z.version);
+        }
+    }
+
+    for mgs in mgs_driven {
+        let MgsDrivenUpdateStatus {
+            baseboard_description: _,
+            rot_bootloader,
+            rot,
+            sp,
+            host_os_phase_1,
+        } = mgs;
+
+        // Bootloader and SP always identify the active slot statically.
+        builder.insert(Component::RotBootloader, rot_bootloader.stage0_version);
+        builder.insert(Component::Sp, sp.slot0_version);
+
+        // RoT and host phase 1 need to check the active slot.
+        builder.insert(
+            Component::Rot,
+            match rot.active_slot {
+                Some(RotSlot::A) => rot.slot_a_version,
+                Some(RotSlot::B) => rot.slot_b_version,
+                None => TufRepoVersion::Unknown,
+            },
+        );
+
+        match host_os_phase_1 {
+            HostPhase1Status::NotASled => (),
+            HostPhase1Status::Sled {
+                active_slot,
+                slot_a_version,
+                slot_b_version,
+                ..
+            } => {
+                builder.insert(
+                    Component::HostPhase1,
+                    match active_slot {
+                        Some(M2Slot::A) => slot_a_version,
+                        Some(M2Slot::B) => slot_b_version,
+                        None => TufRepoVersion::Unknown,
+                    },
+                );
+            }
+        }
+    }
+
+    let rows = Component::iter().map(|c| {
+        let name = match c {
+            Component::RotBootloader => "RoT bootloader",
+            Component::Rot => "RoT",
+            Component::Sp => "SP",
+            Component::HostPhase1 => "Host OS (phase 1)",
+            Component::HostPhase2 => "Host OS (phase 2)",
+            Component::Zone => "Zone",
+        };
+        let builder = &builder;
+        iter::once(Cow::Borrowed(name)).chain(builder.all_versions.iter().map(
+            move |v| {
+                let count = builder
+                    .counts
+                    .get(&c)
+                    .and_then(|by_version| by_version.get(v))
+                    .unwrap_or(&0);
+                Cow::Owned(count.to_string())
+            },
+        ))
+    });
+    let columns =
+        iter::once(Cow::Borrowed("")).chain(builder.all_versions.clone());
+
+    let mut table = tabled::builder::Builder::new();
+    table.push_record(columns);
+    for row in rows {
+        table.push_record(row);
+    }
+    let table = table
+        .build()
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("Counts of each component at specific versions:");
+    println!();
+    println!("{table}");
+    println!();
+    println!("To see each individual component, rerun with `--details`.");
+}
+
+fn print_status_details(status: UpdateStatus) {
     print_rot_bootloaders(
         status
             .mgs_driven
@@ -62,8 +228,6 @@ pub async fn cmd_nexus_update_status(
             .iter()
             .map(|s| (s.sled_id, s.zones.iter().cloned().collect())),
     );
-
-    Ok(())
 }
 
 fn print_zones(zones: impl Iterator<Item = (SledUuid, Vec<ZoneStatus>)>) {

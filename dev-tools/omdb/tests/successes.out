@@ -1759,6 +1759,69 @@ Reconfigurator config:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "update-status"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Component         install-dataset unknown 
+RoT bootloader    0               4       
+RoT               0               4       
+SP                0               4       
+Host OS (phase 1) 0               2       
+Host OS (phase 2) 0               2       
+Zone              7               0       
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "update-status", "--details"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Installed RoT Bootloader Software
+BASEBOARD_ID                 STAGE0_VERSION STAGE0_NEXT_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0 unknown        unknown             
+FAKE_SIM_SIDECAR:SimSidecar1 unknown        unknown             
+i86pc:SimGimlet00            unknown        unknown             
+i86pc:SimGimlet01            unknown        unknown             
+
+Installed RoT Software
+BASEBOARD_ID                 SLOT_A_VERSION   SLOT_B_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0 unknown (active) unknown        
+FAKE_SIM_SIDECAR:SimSidecar1 unknown (active) unknown        
+i86pc:SimGimlet00            unknown (active) unknown        
+i86pc:SimGimlet01            unknown (active) unknown        
+
+Installed SP Software
+BASEBOARD_ID                 SLOT0_VERSION SLOT1_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0 unknown       unknown       
+FAKE_SIM_SIDECAR:SimSidecar1 unknown       unknown       
+i86pc:SimGimlet00            unknown       unknown       
+i86pc:SimGimlet01            unknown       unknown       
+
+Installed Host Phase 1 Software
+BASEBOARD_ID      SLED_ID SLOT_A_VERSION   SLOT_B_VERSION 
+i86pc:SimGimlet00         unknown (active) unknown        
+i86pc:SimGimlet01         unknown (active) unknown        
+
+Installed Host Phase 2 Software
+SLED_ID                              SLOT_A_VERSION      SLOT_B_VERSION 
+..........<REDACTED_UUID>........... unknown (boot disk) unknown        
+..........<REDACTED_UUID>........... unknown (boot disk) unknown        
+
+Running Zones
+SLED_ID                              ZONE_TYPE       ZONE_ID                              VERSION         
+..........<REDACTED_UUID>........... ntp             ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... clickhouse      ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... cockroach       ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... crucible-pantry ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... external-dns    ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... internal-dns    ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... nexus           ..........<REDACTED_UUID>........... install dataset 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
 EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--planner-enabled", "true"]
 termination: Exited(0)
 ---------------------------------------------

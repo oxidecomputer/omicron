@@ -55,6 +55,7 @@ progenitor::generate_api!(
         ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
+        SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
         ZoneStatusVersion = nexus_types::internal_api::views::ZoneStatusVersion,
