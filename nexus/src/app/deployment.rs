@@ -287,11 +287,12 @@ fn is_target_release_change_allowed(
     current_blueprint: &Blueprint,
     current_target_version: &semver::Version,
 ) -> bool {
-    let current_target_version = current_target_version.to_string();
-
     // Convert this to a string; comparing "system version as a string" to
     // "artifact version as a string" below feels bad, but is maybe fine? The
-    // artifact versions are loaded from the DB by joining
+    // artifact versions are loaded from the DB by joining against a table that
+    // populates them as the system version that contained them.
+    let current_target_version = current_target_version.to_string();
+
     // As we look over the blueprint, did we find any component not on the
     // current target release? We can't immediately return `Ok(false)` if we do,
     // because we have to keep checking them all for evidence of a mupdate.
@@ -607,5 +608,7 @@ mod tests {
                 &current_target_version
             ));
         }
+
+        logctx.cleanup_successful();
     }
 }
