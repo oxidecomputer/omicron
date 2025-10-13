@@ -941,10 +941,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 based on parent blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 blueprint source: planner with report:
-planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
+empty planning report
 
 
 
@@ -1151,10 +1148,7 @@ parent:    8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
  PENDING MGS-MANAGED UPDATES: 0
 
 blueprint source: planner with report:
-planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
+empty planning report
 
 
 
@@ -1213,9 +1207,6 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
 * discretionary zones placed:
   * nexus zone on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c from source artifact: version 1.0.0
   * nexus zone on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 from source artifact: version 1.0.0
@@ -1458,9 +1449,6 @@ INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIn
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * zone updates waiting on zone propagation to inventory
 * waiting to update top-level nexus_generation: new Nexus zones are not in inventory yet
 
@@ -1512,9 +1500,6 @@ INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIn
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * zone updates waiting on zone propagation to inventory
 * waiting to update top-level nexus_generation: new Nexus zones are not in inventory yet
 
@@ -1553,9 +1538,6 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 626487fa-7139-45ec-8416-902271fc730b based on parent blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
   * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
@@ -1584,9 +1566,6 @@ INFO ran out of boards for MGS-driven update
 generated blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b based on parent blueprint 626487fa-7139-45ec-8416-902271fc730b
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
   * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
@@ -1619,9 +1598,6 @@ INFO ran out of boards for MGS-driven update
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
   * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
@@ -1710,9 +1686,6 @@ INFO ran out of boards for MGS-driven update
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 3 remaining out-of-date zones
 * 3 zones waiting to be expunged:
   * zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038: nexus image out-of-date, but nexus_generation 1 is still active
@@ -1772,9 +1745,6 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 10 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 1 out-of-date zone expunged:
   * sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, zone 466a9f29-62bf-4e63-924a-b9efdb86afec (nexus)
 * 2 remaining out-of-date zones
@@ -1891,9 +1861,6 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 1 out-of-date zone expunged:
   * sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, zone 0c71b3b2-6ceb-4e8f-b020-b08675e83038 (nexus)
 * 1 remaining out-of-date zone
@@ -2007,9 +1974,6 @@ INFO ran out of boards for MGS-driven update
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 9 zones are already from artifacts
 * 1 out-of-date zone expunged:
   * sled d81c6a84-79b8-4958-ae41-ea46c9b19763, zone 3eeb8d49-eb1a-43f8-bb64-c2338421c2c6 (nexus)
 * 0 remaining out-of-date zones
@@ -2124,10 +2088,7 @@ INFO skipping board for MGS-driven update (no update necessary), serial_number: 
 INFO ran out of boards for MGS-driven update
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 blueprint source: planner with report:
-planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 9 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 8 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 8 zones are already from artifacts
+empty planning report
 
 
 

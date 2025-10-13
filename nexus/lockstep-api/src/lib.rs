@@ -86,6 +86,23 @@ pub trait NexusLockstepApi {
         info: TypedBody<RackInitializationRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
+    /// Fetch an `omdb` binary that lives in the zone alongside this Nexus.
+    ///
+    /// This is only useful as a support tool, and is accessible via `omdb nexus
+    /// fetch-omdb ...`. During a Reconfigurator-driven upgrade, the `omdb`
+    /// binary in the switch zone is updated much earlier in the process than
+    /// Nexus or the database schema, meaning it is often unable to communicate
+    /// with Nexus or the DB due to mismatched expectation. It can be used to
+    /// fetch an _older_ `omdb` that matches the running Nexuses and DB schema
+    /// via this endpoint.
+    #[endpoint {
+        method = GET,
+        path = "/debug/fetch-omdb-binary",
+    }]
+    async fn fetch_omdb(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError>;
+
     #[endpoint {
         method = POST,
         path = "/instances/{instance_id}/migrate",

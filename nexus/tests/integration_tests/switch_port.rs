@@ -352,7 +352,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     .expect("Failed to list switch ports")
     .all_items;
 
-    assert_eq!(ports.len(), 1, "Expected one ports");
+    assert_eq!(ports.len(), 2, "Expected two ports");
 
     // apply port settings
 

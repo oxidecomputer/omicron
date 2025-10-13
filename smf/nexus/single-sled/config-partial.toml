@@ -94,12 +94,12 @@ read_only_region_replacement_start.period_secs = 30
 alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 sp_ereport_ingester.period_secs = 30
-# Disabled in R16, as the Hubris task that handles ereport ingestion requests
-# has not merged yet, and trying to ingest them will just result in Nexus
-# logging a bunch of errors.
-sp_ereport_ingester.disable = true
 
 [default_region_allocation_strategy]
 # by default, allocate without requirement for distinct sleds.
 # seed is omitted so a new seed will be chosen with every allocation.
 type = "random"
+
+[omdb]
+# Path to the omdb binary shipped in the Nexus zone.
+bin_path = "/opt/oxide/omdb/bin/omdb"

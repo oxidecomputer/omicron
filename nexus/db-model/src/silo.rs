@@ -56,6 +56,7 @@ impl_enum_type!(
     // Enum values
     ApiOnly => b"api_only"
     Jit => b"jit"
+    Scim => b"scim"
 );
 
 impl From<shared::UserProvisionType> for UserProvisionType {
@@ -63,6 +64,7 @@ impl From<shared::UserProvisionType> for UserProvisionType {
         match params {
             shared::UserProvisionType::ApiOnly => UserProvisionType::ApiOnly,
             shared::UserProvisionType::Jit => UserProvisionType::Jit,
+            shared::UserProvisionType::Scim => UserProvisionType::Scim,
         }
     }
 }
@@ -72,6 +74,7 @@ impl From<UserProvisionType> for shared::UserProvisionType {
         match model {
             UserProvisionType::ApiOnly => Self::ApiOnly,
             UserProvisionType::Jit => Self::Jit,
+            UserProvisionType::Scim => Self::Scim,
         }
     }
 }
@@ -221,11 +224,16 @@ impl TryFrom<Silo> for views::Silo {
             (AuthenticationMode::Saml, UserProvisionType::Jit) => {
                 Some(SiloIdentityMode::SamlJit)
             }
-            (AuthenticationMode::Saml, UserProvisionType::ApiOnly) => None,
+
             (AuthenticationMode::Local, UserProvisionType::ApiOnly) => {
                 Some(SiloIdentityMode::LocalOnly)
             }
-            (AuthenticationMode::Local, UserProvisionType::Jit) => None,
+
+            (AuthenticationMode::Saml, UserProvisionType::Scim) => {
+                Some(SiloIdentityMode::SamlScim)
+            }
+
+            _ => None,
         }
         .ok_or_else(|| {
             Error::internal_error(&format!(

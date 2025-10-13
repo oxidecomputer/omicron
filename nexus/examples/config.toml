@@ -165,3 +165,8 @@ type = "random"
 # setting `seed` to a fixed value will make dataset selection ordering use the
 # same shuffling order for every region allocation.
 # seed = 0
+
+[omdb]
+# In production omdb is shipped alongside Nexus in its zone; this doesn't happen
+# (and isn't needed) in simulated environments.
+bin_path = "/cannot/fetch/omdb/in/simulated/environments"
