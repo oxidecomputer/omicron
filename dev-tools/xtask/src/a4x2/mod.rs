@@ -23,7 +23,8 @@ const LIVE_TEST_BUNDLE_SCRIPT: &str = "run-live-tests";
 const A4X2_PACKAGE_DIR_PATH: &str = "a4x2-package";
 
 /// Default location where a4x2-package places output and a4x2-deploy reads it.
-const DEFAULT_A4X2_PKG_PATH: &str = "out/a4x2-package.tar.gz";
+/// We are in `target/`, for cohesiveness with `cargo xtask live-tests`
+const DEFAULT_A4X2_PKG_PATH: &str = "target/a4x2-package.tar.gz";
 
 /// These environment variables are set to statically defined values for
 /// commands executed by the xtask.

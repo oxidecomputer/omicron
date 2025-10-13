@@ -33,22 +33,6 @@ pub fn run_subcmd(mut command: Command) -> Result<()> {
     Ok(())
 }
 
-/// Creates and prepares a `std::process::Command` for the `cargo` executable.
-pub(crate) fn cargo_command() -> Command {
-    let cargo =
-        std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
-    let mut command = Command::new(&cargo);
-
-    for (key, _) in std::env::vars_os() {
-        let Some(key) = key.to_str() else { continue };
-        if SANITIZED_ENV_VARS.matches(key) {
-            command.env_remove(key);
-        }
-    }
-
-    command
-}
-
 #[derive(Debug)]
 pub(crate) struct SanitizedEnvVars {
     // At the moment we only ban some prefixes, but we may also want to ban env

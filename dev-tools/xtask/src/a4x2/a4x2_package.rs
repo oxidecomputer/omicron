@@ -196,6 +196,19 @@ fn build_end_to_end_tests(sh: &Shell, env: &Environment) -> Result<()> {
 
 /// Generate a bundle with the live tests included and ready to go.
 fn build_live_tests(sh: &Shell, env: &Environment) -> Result<()> {
+    // XXX
+    // XXX    I don't really think we should be doing this if I'm completely
+    // XXX    honest. It's awkward with start live tests being separate tasks
+    //        in deploy, because they both rely on the same tar being extracted,
+    //
+    // The main thing we're getting from this is having the script to execute
+    // the tests bundle with the tar, but even that doesn't seem terribly
+    // necessary when we can just scp that up alongside the tar. I think it's
+    // better for us to *not* wrap this, and rather let cargo xtask live-tests
+    // exist as its own thing that we run in the CI shell script, and upload
+    // from deploy.
+    //
+
     cmd!(sh, "banner 'live tests'").run()?;
     let _popdir = sh.push_dir(&env.omicron_dir);
 
