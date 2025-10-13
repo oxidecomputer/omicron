@@ -647,8 +647,8 @@ fn post_update_timeout(update: &PendingMgsUpdate) -> Duration {
             // more generous timeout for switches (which we've seen take 10-20
             // seconds in practice).
             match update.sp_type {
-                SpType::Sled | SpType::Power => Duration::from_secs(60),
-                SpType::Switch => Duration::from_secs(120),
+                SpType::Sled | SpType::Power => Duration::from_secs(75),
+                SpType::Switch => Duration::from_secs(135),
             }
         }
         PendingMgsUpdateDetails::Rot { .. } => {
