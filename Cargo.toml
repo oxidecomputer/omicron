@@ -642,10 +642,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
