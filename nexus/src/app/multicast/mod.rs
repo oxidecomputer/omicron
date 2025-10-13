@@ -49,7 +49,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::{authz, db};
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
-use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_FLAG_FIELD};
+use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, NameOrId, UpdateResult, http_pagination::PaginatedBy,
@@ -442,18 +442,14 @@ impl super::Nexus {
 ///
 /// This function validates that:
 /// 1. For IPv4 SSM: multicast address is in 232/8 range
-/// 2. For IPv6 SSM: multicast address is in FF3x::/32 range
+/// 2. For IPv6 SSM: multicast address is in FF30::/12 range (covers all FF3x::/32 SSM scopes)
 fn validate_ssm_configuration(
     multicast_ip: IpAddr,
     source_ips: &[IpAddr],
 ) -> Result<(), omicron_common::api::external::Error> {
     let is_ssm_address = match multicast_ip {
         IpAddr::V4(addr) => IPV4_SSM_SUBNET.contains(addr),
-        IpAddr::V6(addr) => {
-            // Check the flags nibble (high nibble of the second byte) for SSM
-            let flags = (addr.octets()[1] & 0xF0) >> 4;
-            flags == IPV6_SSM_FLAG_FIELD
-        }
+        IpAddr::V6(addr) => IPV6_SSM_SUBNET.contains(addr),
     };
 
     let has_sources = !source_ips.is_empty();
