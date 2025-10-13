@@ -32,7 +32,7 @@ NEXTEST_VERSION='0.9.98'
 
 cargo --version
 rustc --version
-curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/"$1" | gunzip | tar -xvf - -C ~/.cargo/bin
+curl -sSfL --retry 10 https://get.nexte.st/"$NEXTEST_VERSION"/illumos | gunzip | tar -xvf - -C ~/.cargo/bin
 
 #
 # Prep to build omicron
