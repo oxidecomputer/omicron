@@ -411,10 +411,10 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
