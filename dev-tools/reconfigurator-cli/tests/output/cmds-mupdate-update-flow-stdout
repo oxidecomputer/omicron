@@ -1109,7 +1109,6 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 generated blueprint afb09faf-a586-4483-9289-04d4f1d8ba23 based on parent blueprint c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
@@ -1291,7 +1290,6 @@ parent:    c1a0d242-9160-40f4-96ae-61f8f40a0b1b
 
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (3) is lower than minimum required by blueprint (4)
@@ -1438,7 +1436,6 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 generated blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700 based on parent blueprint afb09faf-a586-4483-9289-04d4f1d8ba23
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
@@ -1619,7 +1616,6 @@ parent:    afb09faf-a586-4483-9289-04d4f1d8ba23
 
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
 * noop converting 6/6 install-dataset zones to artifact store on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
@@ -1738,8 +1734,6 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 generated blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1 based on parent blueprint ce365dff-2cdb-4f35-a186-b15e20e1e700
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - sleds have deployment units with image sources not set to Artifact:
@@ -1807,8 +1801,6 @@ INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300 based on parent blueprint 8f2d1f39-7c88-4701-aa43-56bf281b28c1
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * noop converting 7/7 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
@@ -1992,8 +1984,6 @@ parent:    8f2d1f39-7c88-4701-aa43-56bf281b28c1
 
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * noop converting 7/7 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * 1 pending MGS update:
   * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
@@ -2179,9 +2169,6 @@ INFO some zones not yet up-to-date, zones_currently_updating: [ZonePropagationIn
 generated blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839 based on parent blueprint 12d602a6-5ab4-487a-b94e-eb30cdf30300
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 7 zones are already from artifacts
-* skipping noop zone image source check on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: all 6 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * noop converting host phase 2 slot B to Artifact on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * noop converting host phase 2 slot B to Artifact on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
 * noop converting host phase 2 slot B to Artifact on sled d81c6a84-79b8-4958-ae41-ea46c9b19763
@@ -2420,9 +2407,6 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 generated blueprint 27e755bc-dc10-4647-853c-f89bb3a15a2c based on parent blueprint 61a93ea3-c872-48e0-aace-e86b0c52b839
 blueprint source: planner with report:
 planning report:
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 7 zones are already from artifacts
-* skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * zone adds waiting on blockers
 * zone adds and updates are blocked:
   - current target release generation (4) is lower than minimum required by blueprint (5)
@@ -2555,9 +2539,6 @@ planning report:
 planner config:
     add zones with mupdate override:   true
 
-* skipping noop zone image source check on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: all 7 zones are already from artifacts
-* skipping noop zone image source check on sled c3bc4c6d-fdde-4fc4-8493-89d2a1e5ee6b: all 0 zones are already from artifacts
-* skipping noop zone image source check on sled d81c6a84-79b8-4958-ae41-ea46c9b19763: all 6 zones are already from artifacts
 * zone adds and updates are blocked:
   - current target release generation (4) is lower than minimum required by blueprint (5)
   - sleds have remove mupdate override set in blueprint: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6

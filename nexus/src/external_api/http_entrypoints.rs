@@ -41,6 +41,7 @@ use http::{Response, StatusCode, header};
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::lookup::ImageLookup;
 use nexus_db_lookup::lookup::ImageParentLookup;
+use nexus_db_model::TargetReleaseSource;
 use nexus_db_queries::authn::external::session_cookie::{self, SessionStore};
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
@@ -85,8 +86,6 @@ use omicron_common::api::external::ServiceIcmpConfig;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsIdentity;
-use omicron_common::api::external::TufRepoGetResponse;
-use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -94,10 +93,12 @@ use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
 use omicron_common::api::external::http_pagination::PaginatedByTimeAndId;
+use omicron_common::api::external::http_pagination::PaginatedByVersion;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanByName;
 use omicron_common::api::external::http_pagination::ScanByNameOrId;
 use omicron_common::api::external::http_pagination::ScanByTimeAndId;
+use omicron_common::api::external::http_pagination::ScanByVersion;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_id;
@@ -7221,11 +7222,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     // Updates
 
-    async fn system_update_put_repository(
+    async fn system_update_repository_upload(
         rqctx: RequestContext<ApiContext>,
         query: Query<params::UpdatesPutRepositoryParams>,
         body: StreamingBody,
-    ) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {
@@ -7236,7 +7237,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let update = nexus
                 .updates_put_repository(&opctx, body, query.file_name)
                 .await?;
-            Ok(HttpResponseOk(update))
+            Ok(HttpResponseOk(update.into()))
         };
         apictx
             .context
@@ -7245,22 +7246,52 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn system_update_get_repository(
+    async fn system_update_repository_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
-    ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError> {
+    ) -> Result<HttpResponseOk<views::TufRepo>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let params = path_params.into_inner();
-            let description = nexus
+            let repo = nexus
                 .updates_get_repository(&opctx, params.system_version)
                 .await?;
-            Ok(HttpResponseOk(TufRepoGetResponse {
-                description: description.into_external(),
-            }))
+            Ok(HttpResponseOk(repo.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_update_repository_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByVersion>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::TufRepo>>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let pagparams = data_page_params_for(&rqctx, &query)?;
+            let repos =
+                nexus.updates_list_repositories(&opctx, &pagparams).await?;
+
+            let responses: Vec<views::TufRepo> =
+                repos.into_iter().map(Into::into).collect();
+
+            Ok(HttpResponseOk(ScanByVersion::results_page(
+                &query,
+                responses,
+                &|_scan_params, item: &views::TufRepo| {
+                    item.system_version.clone()
+                },
+            )?))
         };
         apictx
             .context
@@ -7378,34 +7409,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn target_release_view(
-        rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let target_release =
-                nexus.datastore().target_release_get_current(&opctx).await?;
-            Ok(HttpResponseOk(
-                nexus
-                    .datastore()
-                    .target_release_view(&opctx, &target_release)
-                    .await?,
-            ))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn target_release_update(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::SetTargetReleaseParams>,
-    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError> {
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -7424,63 +7431,77 @@ impl NexusExternalApi for NexusExternalApiImpl {
             // system version X.Y.Z won't designate different repos over time.
             let current_target_release =
                 nexus.datastore().target_release_get_current(&opctx).await?;
-            let current_target_release_source = nexus
-                .datastore()
-                .target_release_view(&opctx, &current_target_release)
-                .await?
-                .release_source;
+            let current_target_release_source = current_target_release
+                .release_source()
+                .map_err(|err| Error::internal_error(&format!("{err:#}")))?;
 
-            // Disallow downgrades.
-            if let views::TargetReleaseSource::SystemVersion { version } =
-                &current_target_release_source
-            {
-                if !is_new_target_release_version_allowed(
-                    version,
-                    &system_version,
-                ) {
-                    return Err(HttpError::for_bad_request(
-                        None,
-                        format!(
-                            "The requested target system release \
-                             ({system_version}) is older than the current \
-                             target system release ({version}). \
-                             This is not supported."
-                        ),
-                    ));
+            match current_target_release_source {
+                TargetReleaseSource::Unspecified => {
+                    // There is no current target release; it's always fine to
+                    // set the first one.
+                }
+                TargetReleaseSource::SystemVersion(tuf_repo_id) => {
+                    // Disallow downgrades.
+                    let current_version = nexus
+                        .datastore()
+                        .tuf_repo_get_version(&opctx, &tuf_repo_id)
+                        .await?;
+                    if !is_new_target_release_version_allowed(
+                        &current_version,
+                        &system_version,
+                    ) {
+                        return Err(Error::invalid_request(format!(
+                            "Requested target release ({system_version}) \
+                             must not be older than current target release \
+                             ({current_version})."
+                        ))
+                        .into());
+                    }
+
+                    // Ensure we don't change the target release mid-update.
+                    nexus
+                        .validate_target_release_change_allowed(
+                            &opctx,
+                            &current_version,
+                        )
+                        .await?;
                 }
             }
-
-            // Ensure we don't change the target release mid-update.
-            nexus
-                .validate_target_release_change_allowed(
-                    &opctx,
-                    &current_target_release_source,
-                )
-                .await?;
 
             // Fetch the TUF repo metadata and update the target release.
             let tuf_repo_id = nexus
                 .datastore()
                 .tuf_repo_get_by_version(&opctx, system_version.into())
                 .await?
-                .repo
                 .id;
             let next_target_release =
                 nexus_db_model::TargetRelease::new_system_version(
                     &current_target_release,
                     tuf_repo_id,
                 );
-            let target_release = nexus
+            nexus
                 .datastore()
                 .target_release_insert(&opctx, next_target_release)
                 .await?;
+            Ok(HttpResponseUpdatedNoContent())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
 
-            Ok(HttpResponseCreated(
-                nexus
-                    .datastore()
-                    .target_release_view(&opctx, &target_release)
-                    .await?,
-            ))
+    async fn system_update_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<views::UpdateStatus>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let status = nexus.update_status_external(&opctx).await?;
+            Ok(HttpResponseOk(status))
         };
         apictx
             .context

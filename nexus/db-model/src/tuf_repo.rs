@@ -12,7 +12,7 @@ use nexus_db_schema::schema::{
     tuf_artifact, tuf_repo, tuf_repo_artifact, tuf_trust_root,
 };
 use nexus_types::external_api::shared::TufSignedRootRole;
-use nexus_types::external_api::views;
+use nexus_types::external_api::views::{self, TufRepoUploadStatus};
 use omicron_common::{api::external, update::ArtifactId};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TufArtifactKind;
@@ -30,8 +30,6 @@ use uuid::Uuid;
 
 /// A description of a TUF update: a repo, along with the artifacts it
 /// contains.
-///
-/// This is the internal variant of [`external::TufRepoDescription`].
 #[derive(Debug, Clone)]
 pub struct TufRepoDescription {
     /// The repository.
@@ -64,7 +62,6 @@ impl TufRepoDescription {
         }
     }
 
-    /// Converts self into [`external::TufRepoDescription`].
     pub fn into_external(self) -> external::TufRepoDescription {
         external::TufRepoDescription {
             repo: self.repo.into_external(),
@@ -78,8 +75,6 @@ impl TufRepoDescription {
 }
 
 /// A record representing an uploaded TUF repository.
-///
-/// This is the internal variant of [`external::TufRepoMeta`].
 #[derive(
     Queryable, Identifiable, Insertable, Clone, Debug, Selectable, AsChangeset,
 )]
@@ -134,7 +129,6 @@ impl TufRepo {
         )
     }
 
-    /// Converts self into [`external::TufRepoMeta`].
     pub fn into_external(self) -> external::TufRepoMeta {
         external::TufRepoMeta {
             hash: self.sha256.into(),
@@ -153,6 +147,17 @@ impl TufRepo {
     /// Returns the targets role version.
     pub fn targets_role_version(&self) -> u64 {
         self.targets_role_version as u64
+    }
+}
+
+impl From<TufRepo> for views::TufRepo {
+    fn from(repo: TufRepo) -> views::TufRepo {
+        views::TufRepo {
+            hash: repo.sha256.into(),
+            system_version: repo.system_version.into(),
+            file_name: repo.file_name,
+            time_created: repo.time_created,
+        }
     }
 }
 
@@ -411,5 +416,26 @@ impl FromSql<Jsonb, diesel::pg::Pg> for DbTufSignedRootRole {
         serde_json::from_value(value)
             .map(DbTufSignedRootRole)
             .map_err(|e| e.into())
+    }
+}
+
+// The following isn't a real model in the sense that it represents DB data,
+// but it is the return type of a datastore function. The main reason we can't
+// just use the view for this like we do with TufRepoUploadStatus is that
+// TufRepoDescription has a bit more info in it that we rely on in code outside
+// of the external API, like tests and internal APIs
+
+/// The return value of the tuf repo insert function
+pub struct TufRepoUpload {
+    pub recorded: TufRepoDescription,
+    pub status: TufRepoUploadStatus,
+}
+
+impl From<TufRepoUpload> for views::TufRepoUpload {
+    fn from(upload: TufRepoUpload) -> Self {
+        views::TufRepoUpload {
+            repo: upload.recorded.repo.into(),
+            status: upload.status,
+        }
     }
 }

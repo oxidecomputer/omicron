@@ -2398,14 +2398,14 @@ pub struct ResourceMetrics {
 
 // SYSTEM UPDATE
 
-/// Parameters for PUT requests for `/v1/system/update/repository`.
+/// Parameters for PUT requests for `/v1/system/update/repositories`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct UpdatesPutRepositoryParams {
     /// The name of the uploaded file.
     pub file_name: String,
 }
 
-/// Parameters for GET requests for `/v1/system/update/repository`.
+/// Parameters for GET requests for `/v1/system/update/repositories`.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 pub struct UpdatesGetRepositoryParams {
     /// The version to get.

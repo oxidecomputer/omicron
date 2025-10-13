@@ -7,9 +7,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
-use crate::db::model::{
-    Generation, SemverVersion, TargetRelease, TargetReleaseSource,
-};
+use crate::db::model::{Generation, TargetRelease};
 use async_bb8_diesel::AsyncRunQueryDsl as _;
 use diesel::insert_into;
 use diesel::prelude::*;
@@ -17,7 +15,6 @@ use diesel::sql_types;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_schema::enums::TargetReleaseSourceEnum;
 use nexus_db_schema::schema::target_release::dsl;
-use nexus_types::external_api::views;
 use omicron_common::api::external::{CreateResult, Error, LookupResult};
 use omicron_uuid_kinds::TufRepoUuid;
 use std::collections::BTreeSet;
@@ -179,49 +176,6 @@ impl DataStore {
                 .await
                 .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
         }
-    }
-
-    /// Convert a model-level target release to an external view.
-    /// This method lives here because we have to look up the version
-    /// corresponding to the TUF repo.
-    pub async fn target_release_view(
-        &self,
-        opctx: &OpContext,
-        target_release: &TargetRelease,
-    ) -> LookupResult<views::TargetRelease> {
-        opctx
-            .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
-            .await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let release_source = match target_release.release_source {
-            TargetReleaseSource::Unspecified => {
-                views::TargetReleaseSource::Unspecified
-            }
-            TargetReleaseSource::SystemVersion => {
-                use nexus_db_schema::schema::tuf_repo;
-                if let Some(tuf_repo_id) = target_release.tuf_repo_id {
-                    views::TargetReleaseSource::SystemVersion {
-                        version: tuf_repo::table
-                            .select(tuf_repo::system_version)
-                            .filter(tuf_repo::id.eq(tuf_repo_id))
-                            .first_async::<SemverVersion>(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?
-                            .into(),
-                    }
-                } else {
-                    return Err(Error::internal_error(
-                        "missing TUF repo ID for specified system version",
-                    ));
-                }
-            }
-        };
-        Ok(target_release.into_external(release_source))
     }
 
     /// Lists the most recent N distinct target releases
@@ -392,10 +346,9 @@ mod test {
         assert_eq!(initial_target_release.generation, Generation(1.into()));
         assert!(initial_target_release.time_requested < Utc::now());
         assert_eq!(
-            initial_target_release.release_source,
+            initial_target_release.release_source().unwrap(),
             TargetReleaseSource::Unspecified
         );
-        assert!(initial_target_release.tuf_repo_id.is_none());
 
         // We should be able to set a new generation just like the first.
         // We allow some slack in the timestamp comparison because the
@@ -412,7 +365,10 @@ mod test {
                 .abs()
                 < TimeDelta::new(0, 1_000).expect("1 μsec")
         );
-        assert!(target_release.tuf_repo_id.is_none());
+        assert_eq!(
+            target_release.release_source().unwrap(),
+            TargetReleaseSource::Unspecified
+        );
 
         // Trying to reuse a generation should fail.
         assert!(
@@ -454,10 +410,9 @@ mod test {
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
         assert_eq!(
-            target_release.release_source,
-            TargetReleaseSource::SystemVersion
+            target_release.release_source().unwrap(),
+            TargetReleaseSource::SystemVersion(tuf_repo_id.into())
         );
-        assert_eq!(target_release.tuf_repo_id, Some(tuf_repo_id));
 
         // Clean up.
         db.terminate().await;

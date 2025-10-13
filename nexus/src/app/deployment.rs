@@ -19,7 +19,6 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::external_api::views::TargetReleaseSource;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::CreateResult;
@@ -237,17 +236,8 @@ impl super::Nexus {
     pub(crate) async fn validate_target_release_change_allowed(
         &self,
         opctx: &OpContext,
-        current_target_release: &TargetReleaseSource,
+        current_target_version: &semver::Version,
     ) -> Result<(), Error> {
-        let current_target_version = match current_target_release {
-            TargetReleaseSource::Unspecified => {
-                // We've never set a target release before; it's always fine to
-                // set the first one.
-                return Ok(());
-            }
-            TargetReleaseSource::SystemVersion { version } => version,
-        };
-
         let (_, current_blueprint) =
             self.datastore().blueprint_target_get_current_full(opctx).await?;
 

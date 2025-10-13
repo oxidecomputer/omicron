@@ -653,9 +653,6 @@ impl<'a> Planner<'a> {
         &mut self,
         noop_info: NoopConvertInfo,
     ) -> Result<PlanningNoopImageSourceStepReport, Error> {
-        use nexus_types::deployment::PlanningNoopImageSourceSkipSledHostPhase2Reason as SkipSledHostPhase2Reason;
-        use nexus_types::deployment::PlanningNoopImageSourceSkipSledZonesReason as SkipSledZonesReason;
-
         let mut report = PlanningNoopImageSourceStepReport::new();
 
         let sleds = match noop_info {
@@ -670,12 +667,7 @@ impl<'a> Planner<'a> {
 
             let zone_counts = eligible.zone_counts();
             let skipped_zones = if zone_counts.num_install_dataset() == 0 {
-                report.skip_sled_zones(
-                    sled.sled_id,
-                    SkipSledZonesReason::AllZonesAlreadyArtifact {
-                        num_total: zone_counts.num_total,
-                    },
-                );
+                report.sled_zones_all_already_artifact(sled.sled_id);
                 true
             } else {
                 false
@@ -683,10 +675,8 @@ impl<'a> Planner<'a> {
 
             let skipped_host_phase_2 =
                 if eligible.host_phase_2.both_already_artifact() {
-                    report.skip_sled_host_phase_2(
-                        sled.sled_id,
-                        SkipSledHostPhase2Reason::BothSlotsAlreadyArtifact,
-                    );
+                    report
+                        .sled_host_phase_2_both_already_artifact(sled.sled_id);
                     true
                 } else {
                     false
