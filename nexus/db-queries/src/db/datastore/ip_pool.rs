@@ -97,19 +97,26 @@ const INTERNAL_SILO_DEFAULT_CONSTRAINT: &'static str =
 const INTERNAL_SILO_DEFAULT_ERROR: &'static str =
     "The internal Silo cannot have a default IP Pool";
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IpPoolListFilters {
+    pub ip_version: Option<IpVersion>,
+    pub delegated_for_internal_use: Option<bool>,
+}
+
 impl DataStore {
     /// List IP Pools
     pub async fn ip_pools_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
+        filters: &IpPoolListFilters,
     ) -> ListResultVec<IpPool> {
         use nexus_db_schema::schema::ip_pool;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
-        match pagparams {
+        let mut query = match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(ip_pool::table, ip_pool::id, pagparams)
             }
@@ -118,14 +125,34 @@ impl DataStore {
                 ip_pool::name,
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
+        };
+
+        query = query.filter(ip_pool::time_deleted.is_null());
+
+        if let Some(ip_version) = filters.ip_version {
+            query = query.filter(ip_pool::ip_version.eq(ip_version));
         }
-        .filter(ip_pool::name.ne(SERVICE_IPV4_POOL_NAME))
-        .filter(ip_pool::name.ne(SERVICE_IPV6_POOL_NAME))
-        .filter(ip_pool::time_deleted.is_null())
-        .select(IpPool::as_select())
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+
+        match filters.delegated_for_internal_use {
+            Some(true) => {
+                query = query.filter(
+                    ip_pool::name
+                        .eq(SERVICE_IPV4_POOL_NAME)
+                        .or(ip_pool::name.eq(SERVICE_IPV6_POOL_NAME)),
+                );
+            }
+            _ => {
+                query = query
+                    .filter(ip_pool::name.ne(SERVICE_IPV4_POOL_NAME))
+                    .filter(ip_pool::name.ne(SERVICE_IPV6_POOL_NAME));
+            }
+        }
+
+        query
+            .select(IpPool::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Look up whether the given pool is available to users in the current
@@ -1317,6 +1344,7 @@ impl DataStore {
 mod test {
     use std::num::NonZeroU32;
 
+    use super::IpPoolListFilters;
     use crate::authz;
     use crate::db::datastore::ip_pool::INTERNAL_SILO_DEFAULT_ERROR;
     use crate::db::model::{
@@ -1353,7 +1381,7 @@ mod test {
         let pagbyid = PaginatedBy::Id(pagparams_id);
 
         let all_pools = datastore
-            .ip_pools_list(&opctx, &pagbyid)
+            .ip_pools_list(&opctx, &pagbyid, &IpPoolListFilters::default())
             .await
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 0);
@@ -1381,7 +1409,7 @@ mod test {
 
         // shows up in full list but not silo list
         let all_pools = datastore
-            .ip_pools_list(&opctx, &pagbyid)
+            .ip_pools_list(&opctx, &pagbyid, &IpPoolListFilters::default())
             .await
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 1);
