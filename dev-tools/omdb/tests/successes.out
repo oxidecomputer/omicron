@@ -1765,14 +1765,14 @@ termination: Exited(0)
 stdout:
 Count of each component type by system version:
 
-                  |install-dataset |unknown 
-------------------+----------------+--------
-RoT bootloader    |0               |4       
-RoT               |0               |4       
-SP                |0               |4       
-Host OS (phase 1) |0               |2       
-Host OS (phase 2) |0               |2       
-Zone              |7               |0       
+                  |error |unknown 
+------------------+------+--------
+RoT bootloader    |0     |4       
+RoT               |0     |4       
+SP                |0     |4       
+Host OS (phase 1) |0     |2       
+Host OS (phase 2) |2     |0       
+Zone              |0     |0       
 
 To see each individual component, rerun with `--details`.
 ---------------------------------------------
@@ -1787,42 +1787,35 @@ Installed RoT Bootloader Software
 BASEBOARD_ID                 STAGE0_VERSION STAGE0_NEXT_VERSION 
 FAKE_SIM_SIDECAR:SimSidecar0 unknown        unknown             
 FAKE_SIM_SIDECAR:SimSidecar1 unknown        unknown             
-i86pc:SimGimlet00            unknown        unknown             
-i86pc:SimGimlet01            unknown        unknown             
+Unknown:sim-039be560         unknown        unknown             
+Unknown:sim-b6d65341         unknown        unknown             
 
 Installed RoT Software
-BASEBOARD_ID                 SLOT_A_VERSION   SLOT_B_VERSION 
-FAKE_SIM_SIDECAR:SimSidecar0 unknown (active) unknown        
-FAKE_SIM_SIDECAR:SimSidecar1 unknown (active) unknown        
-i86pc:SimGimlet00            unknown (active) unknown        
-i86pc:SimGimlet01            unknown (active) unknown        
+BASEBOARD_ID                 SLOT_A_VERSION   SLOT_B_VERSION                
+FAKE_SIM_SIDECAR:SimSidecar0 unknown (active) unknown                       
+FAKE_SIM_SIDECAR:SimSidecar1 unknown (active) unknown                       
+Unknown:sim-039be560         unknown          unknown (ACTIVE SLOT UNKNOWN) 
+Unknown:sim-b6d65341         unknown          unknown (ACTIVE SLOT UNKNOWN) 
 
 Installed SP Software
 BASEBOARD_ID                 SLOT0_VERSION SLOT1_VERSION 
 FAKE_SIM_SIDECAR:SimSidecar0 unknown       unknown       
 FAKE_SIM_SIDECAR:SimSidecar1 unknown       unknown       
-i86pc:SimGimlet00            unknown       unknown       
-i86pc:SimGimlet01            unknown       unknown       
+Unknown:sim-039be560         unknown       unknown       
+Unknown:sim-b6d65341         unknown       unknown       
 
 Installed Host Phase 1 Software
-BASEBOARD_ID      SLED_ID SLOT_A_VERSION   SLOT_B_VERSION 
-i86pc:SimGimlet00         unknown (active) unknown        
-i86pc:SimGimlet01         unknown (active) unknown        
+BASEBOARD_ID         SLED_ID                              SLOT_A_VERSION SLOT_B_VERSION                
+Unknown:sim-039be560 ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
+Unknown:sim-b6d65341 ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
 
 Installed Host Phase 2 Software
-SLED_ID                              SLOT_A_VERSION      SLOT_B_VERSION 
-..........<REDACTED_UUID>........... unknown (boot disk) unknown        
-..........<REDACTED_UUID>........... unknown (boot disk) unknown        
+SLED_ID                              SLOT_A_VERSION SLOT_B_VERSION                       
+..........<REDACTED_UUID>........... unknown        unknown (BOOT DISK UNKNOWN: unknown) 
+..........<REDACTED_UUID>........... unknown        unknown (BOOT DISK UNKNOWN: unknown) 
 
 Running Zones
-SLED_ID                              ZONE_TYPE       ZONE_ID                              VERSION         
-..........<REDACTED_UUID>........... ntp             ..........<REDACTED_UUID>........... install dataset 
-..........<REDACTED_UUID>........... clickhouse      ..........<REDACTED_UUID>........... install dataset 
-..........<REDACTED_UUID>........... cockroach       ..........<REDACTED_UUID>........... install dataset 
-..........<REDACTED_UUID>........... crucible-pantry ..........<REDACTED_UUID>........... install dataset 
-..........<REDACTED_UUID>........... external-dns    ..........<REDACTED_UUID>........... install dataset 
-..........<REDACTED_UUID>........... internal-dns    ..........<REDACTED_UUID>........... install dataset 
-..........<REDACTED_UUID>........... nexus           ..........<REDACTED_UUID>........... install dataset 
+SLED_ID ZONE_TYPE ZONE_ID VERSION 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
