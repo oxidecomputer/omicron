@@ -43,6 +43,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
+use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
@@ -76,6 +77,29 @@ enum NexusLockstepApiImpl {}
 
 impl NexusLockstepApi for NexusLockstepApiImpl {
     type Context = ApiContext;
+
+    async fn rack_initialization_complete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<RackPathParam>,
+        info: TypedBody<RackInitializationRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let request = info.into_inner();
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
+        nexus
+            .rack_initialize(
+                &opctx,
+                path.rack_id,
+                request,
+                true, // blueprint_execution_enabled
+            )
+            .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
 
     async fn fetch_omdb(
         rqctx: RequestContext<Self::Context>,

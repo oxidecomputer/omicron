@@ -1166,6 +1166,45 @@
         }
       }
     },
+    "/racks/{rack_id}/initialization-complete": {
+      "put": {
+        "summary": "Report that the Rack Setup Service initialization is complete",
+        "description": "See RFD 278 for more details.",
+        "operationId": "rack_initialization_complete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rack_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RackInitializationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sagas": {
       "get": {
         "summary": "List sagas",
@@ -1387,6 +1426,48 @@
           "dependency"
         ]
       },
+      "AllowedSourceIps": {
+        "description": "Description of source IPs allowed to reach rack services.",
+        "oneOf": [
+          {
+            "description": "Allow traffic from any external IP address.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "any"
+                ]
+              }
+            },
+            "required": [
+              "allow"
+            ]
+          },
+          {
+            "description": "Restrict access to a specific set of source IP addresses or subnets.\n\nAll others are prevented from reaching rack services.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "type": "string",
+                "enum": [
+                  "list"
+                ]
+              },
+              "ips": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "allow",
+              "ips"
+            ]
+          }
+        ]
+      },
       "ArtifactVersion": {
         "description": "An artifact version.\n\nThis is a freeform identifier with some basic validation. It may be the serialized form of a semver version, or a custom identifier that uses the same character set as a semver, plus `_`.\n\nThe exact pattern accepted is `^[a-zA-Z0-9._+-]{1,63}$`.\n\n# Ord implementation\n\n`ArtifactVersion`s are not intended to be sorted, just compared for equality. `ArtifactVersion` implements `Ord` only for storage within sorted collections.",
         "type": "string",
@@ -1491,6 +1572,228 @@
         "required": [
           "part_number",
           "serial_number"
+        ]
+      },
+      "BfdMode": {
+        "description": "BFD connection mode.",
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
+      "BfdPeerConfig": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "remote": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "$ref": "#/components/schemas/SwitchLocation"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "remote",
+          "required_rx",
+          "switch"
+        ]
+      },
+      "BgpConfig": {
+        "type": "object",
+        "properties": {
+          "asn": {
+            "description": "The autonomous system number for the BGP configuration.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "checker": {
+            "nullable": true,
+            "description": "Checker to apply to incoming messages.",
+            "default": null,
+            "type": "string"
+          },
+          "originate": {
+            "description": "The set of prefixes for the BGP router to originate.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Net"
+            }
+          },
+          "shaper": {
+            "nullable": true,
+            "description": "Shaper to apply to outgoing messages.",
+            "default": null,
+            "type": "string"
+          }
+        },
+        "required": [
+          "asn",
+          "originate"
+        ]
+      },
+      "BgpPeerConfig": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Address of the peer.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "allowed_export": {
+            "description": "Define export policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Define import policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "asn": {
+            "description": "The autonomous system number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer. In seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "default": false,
+            "type": "boolean"
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset in seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "port": {
+            "description": "Switch port the peer is reachable on.",
+            "type": "string"
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "addr",
+          "asn",
+          "port"
         ]
       },
       "BlockedMgsUpdate": {
@@ -2759,6 +3062,21 @@
           "stage0_next"
         ]
       },
+      "Certificate": {
+        "type": "object",
+        "properties": {
+          "cert": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cert",
+          "key"
+        ]
+      },
       "ClickhouseClusterConfig": {
         "description": "Global configuration for all clickhouse servers (replicas) and keepers",
         "type": "object",
@@ -3261,6 +3579,25 @@
           }
         ]
       },
+      "CrucibleDatasetCreateRequest": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "$ref": "#/components/schemas/DatasetUuid"
+          },
+          "zpool_id": {
+            "$ref": "#/components/schemas/ZpoolUuid"
+          }
+        },
+        "required": [
+          "address",
+          "dataset_id",
+          "zpool_id"
+        ]
+      },
       "CurrentStatus": {
         "description": "Describes the current status of a background task",
         "oneOf": [
@@ -3403,6 +3740,136 @@
           "vendor"
         ]
       },
+      "DnsConfigParams": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "serial": {
+            "description": "See [`DnsConfig`]'s `serial` field for how this is different from `generation`",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DnsConfigZone"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "serial",
+          "time_created",
+          "zones"
+        ]
+      },
+      "DnsConfigZone": {
+        "description": "Configuration for a specific DNS zone, as opposed to illumos zones in which the services described by these records run.\n\nThe name `@` is special: it describes records that should be provided for queries about `zone_name`. This is used in favor of the empty string as `@` is the name used for this purpose in zone files for most DNS configurations. It also avoids potentially-confusing debug output from naively printing out records and their names - if you've seen an `@` record and tools are unclear about what that means, hopefully you've arrived here!",
+        "type": "object",
+        "properties": {
+          "records": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/DnsRecord"
+              }
+            }
+          },
+          "zone_name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "records",
+          "zone_name"
+        ]
+      },
+      "DnsRecord": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string",
+                "format": "ipv4"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "A"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string",
+                "format": "ipv6"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "AAAA"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "$ref": "#/components/schemas/Srv"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "SRV"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "data": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "NS"
+                ]
+              }
+            },
+            "required": [
+              "data",
+              "type"
+            ]
+          }
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -3504,6 +3971,44 @@
         },
         "type": "string",
         "format": "uuid"
+      },
+      "ExternalPortDiscovery": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "auto": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "format": "ipv6"
+                }
+              }
+            },
+            "required": [
+              "auto"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "static": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                }
+              }
+            },
+            "required": [
+              "static"
+            ],
+            "additionalProperties": false
+          }
+        ]
       },
       "FailedHostOsUpdateReason": {
         "description": "Describes the reason why a Host OS failed to update",
@@ -4366,6 +4871,47 @@
           "$ref": "#/components/schemas/BlueprintZoneConfig"
         }
       },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
       "InProgressUpdateStatus": {
         "description": "externally-exposed status for each in-progress update",
         "type": "object",
@@ -4670,6 +5216,26 @@
           }
         ]
       },
+      "IpRange": {
+        "oneOf": [
+          {
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Range"
+              }
+            ]
+          },
+          {
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Range"
+              }
+            ]
+          }
+        ]
+      },
       "Ipv4Net": {
         "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
@@ -4682,6 +5248,24 @@
         "type": "string",
         "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
+      "Ipv4Range": {
+        "description": "A non-decreasing IPv4 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv4"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
+      },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
@@ -4693,6 +5277,24 @@
         },
         "type": "string",
         "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+      },
+      "Ipv6Range": {
+        "description": "A non-decreasing IPv6 address range, inclusive of both ends.\n\nThe first address must be less than or equal to the last address.",
+        "type": "object",
+        "properties": {
+          "first": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "last": {
+            "type": "string",
+            "format": "ipv6"
+          }
+        },
+        "required": [
+          "first",
+          "last"
+        ]
       },
       "KeeperId": {
         "description": "A unique ID for a ClickHouse Keeper",
@@ -4778,6 +5380,67 @@
           "iteration",
           "reason",
           "start_time"
+        ]
+      },
+      "LldpAdminStatus": {
+        "description": "To what extent should this port participate in LLDP",
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "rx_only",
+          "tx_only"
+        ]
+      },
+      "LldpPortConfig": {
+        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "management_addrs": {
+            "nullable": true,
+            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "port_description": {
+            "nullable": true,
+            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
+            "type": "string"
+          },
+          "port_id": {
+            "nullable": true,
+            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
+            "type": "string"
+          },
+          "status": {
+            "description": "To what extent should this port participate in LLDP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpAdminStatus"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
         ]
       },
       "M2Slot": {
@@ -5013,6 +5676,11 @@
             ]
           }
         ]
+      },
+      "NewPasswordHash": {
+        "title": "A password hash in PHC string format",
+        "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
+        "type": "string"
       },
       "NexusGenerationBumpWaitingOn": {
         "oneOf": [
@@ -5878,6 +6546,14 @@
           "time_pending"
         ]
       },
+      "PhysicalDiskKind": {
+        "description": "Describes the form factor of physical disks.",
+        "type": "string",
+        "enum": [
+          "m2",
+          "u2"
+        ]
+      },
       "PhysicalDiskPath": {
         "type": "object",
         "properties": {
@@ -5889,6 +6565,38 @@
         },
         "required": [
           "disk_id"
+        ]
+      },
+      "PhysicalDiskPutRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
+          },
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/PhysicalDiskKind"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "serial",
+          "sled_id",
+          "variant",
+          "vendor"
         ]
       },
       "PhysicalDiskUuid": {
@@ -6527,6 +7235,116 @@
           "waiting_zones"
         ]
       },
+      "PortConfigV2": {
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "This port's addresses and optional vlan IDs",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UplinkAddressConfig"
+            }
+          },
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "default": false,
+            "type": "boolean"
+          },
+          "bgp_peers": {
+            "description": "BGP peers on this port",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
+          "port": {
+            "description": "Nmae of the port this config applies to.",
+            "type": "string"
+          },
+          "routes": {
+            "description": "The set of routes associated with this port.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          },
+          "switch": {
+            "description": "Switch the port belongs to.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          },
+          "tx_eq": {
+            "nullable": true,
+            "description": "TX-EQ configuration for this port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
+          },
+          "uplink_port_fec": {
+            "nullable": true,
+            "description": "Port forward error correction type.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortFec"
+              }
+            ]
+          },
+          "uplink_port_speed": {
+            "description": "Port speed.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PortSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "port",
+          "routes",
+          "switch",
+          "uplink_port_speed"
+        ]
+      },
+      "PortFec": {
+        "description": "Switchport FEC options",
+        "type": "string",
+        "enum": [
+          "firecode",
+          "none",
+          "rs"
+        ]
+      },
+      "PortSpeed": {
+        "description": "Switchport Speed options",
+        "type": "string",
+        "enum": [
+          "speed0_g",
+          "speed1_g",
+          "speed10_g",
+          "speed25_g",
+          "speed40_g",
+          "speed50_g",
+          "speed100_g",
+          "speed200_g",
+          "speed400_g"
+        ]
+      },
       "QuiesceState": {
         "description": "See [`QuiesceStatus`] for more on Nexus quiescing.\n\nAt any given time, Nexus is always in one of these states:\n\n```text Undetermined        (have not loaded persistent state; don't know yet) | | load persistent state and find we're not quiescing v Running             (normal operation) | | quiesce starts v DrainingSagas       (no new sagas are allowed, but some are still running) | | no more sagas running v DrainingDb          (no sagas running; no new db connections may be |                  acquired by Nexus at-large, but some are still held) | | no more database connections held v RecordingQuiesce    (everything is quiesced aside from one connection being |                  used to record our final quiesced state) | | finish recording quiesce state in database v Quiesced            (no sagas running, no database connections in use) ```\n\nQuiescing is (currently) a one-way trip: once a Nexus process starts quiescing, it will never go back to normal operation.  It will never go back to an earlier stage, either.",
         "oneOf": [
@@ -6753,6 +7571,160 @@
           "state"
         ]
       },
+      "RackInitializationRequest": {
+        "type": "object",
+        "properties": {
+          "allowed_source_ips": {
+            "description": "IPs or subnets allowed to make requests to user-facing services",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AllowedSourceIps"
+              }
+            ]
+          },
+          "blueprint": {
+            "description": "Blueprint describing services initialized by RSS.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Blueprint"
+              }
+            ]
+          },
+          "certs": {
+            "description": "x.509 Certificates used to encrypt communication with the external API.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Certificate"
+            }
+          },
+          "crucible_datasets": {
+            "description": "Crucible datasets on the rack which have been provisioned by RSS.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CrucibleDatasetCreateRequest"
+            }
+          },
+          "external_dns_zone_name": {
+            "description": "delegated DNS name for external DNS",
+            "type": "string"
+          },
+          "external_port_count": {
+            "description": "The external qsfp ports per sidecar",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExternalPortDiscovery"
+              }
+            ]
+          },
+          "internal_dns_zone_config": {
+            "description": "initial internal DNS config",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DnsConfigParams"
+              }
+            ]
+          },
+          "internal_services_ip_pool_ranges": {
+            "description": "Ranges of the service IP pool which may be used for internal services, such as Nexus.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpRange"
+            }
+          },
+          "physical_disks": {
+            "description": "\"Managed\" physical disks owned by the control plane",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhysicalDiskPutRequest"
+            }
+          },
+          "rack_network_config": {
+            "description": "Initial rack network configuration",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
+              }
+            ]
+          },
+          "recovery_silo": {
+            "description": "configuration for the initial (recovery) Silo",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RecoverySiloConfig"
+              }
+            ]
+          },
+          "zpools": {
+            "description": "Zpools created within the physical disks created by the control plane.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZpoolPutRequest"
+            }
+          }
+        },
+        "required": [
+          "allowed_source_ips",
+          "blueprint",
+          "certs",
+          "crucible_datasets",
+          "external_dns_zone_name",
+          "external_port_count",
+          "internal_dns_zone_config",
+          "internal_services_ip_pool_ranges",
+          "physical_disks",
+          "rack_network_config",
+          "recovery_silo",
+          "zpools"
+        ]
+      },
+      "RackNetworkConfigV2": {
+        "description": "Initial network configuration",
+        "type": "object",
+        "properties": {
+          "bfd": {
+            "description": "BFD configuration for connecting the rack to external networks",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BfdPeerConfig"
+            }
+          },
+          "bgp": {
+            "description": "BGP configurations for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "infra_ip_first": {
+            "description": "First ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "infra_ip_last": {
+            "description": "Last ip address to be used for configuring network infrastructure",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "ports": {
+            "description": "Uplinks for connecting the rack to external networks",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortConfigV2"
+            }
+          },
+          "rack_subnet": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
+        },
+        "required": [
+          "bgp",
+          "infra_ip_first",
+          "infra_ip_last",
+          "ports",
+          "rack_subnet"
+        ]
+      },
       "ReconfiguratorConfig": {
         "type": "object",
         "properties": {
@@ -6805,6 +7777,25 @@
           "config",
           "time_modified",
           "version"
+        ]
+      },
+      "RecoverySiloConfig": {
+        "type": "object",
+        "properties": {
+          "silo_name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "user_name": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "user_password_hash": {
+            "$ref": "#/components/schemas/NewPasswordHash"
+          }
+        },
+        "required": [
+          "silo_name",
+          "user_name",
+          "user_password_hash"
         ]
       },
       "RotBootloaderStatus": {
@@ -6875,6 +7866,44 @@
         "required": [
           "slot_a_version",
           "slot_b_version"
+        ]
+      },
+      "RouteConfig": {
+        "type": "object",
+        "properties": {
+          "destination": {
+            "description": "The destination of the route.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "nexthop": {
+            "description": "The nexthop/gateway address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "destination",
+          "nexthop"
         ]
       },
       "Saga": {
@@ -7421,6 +8450,35 @@
           "switch"
         ]
       },
+      "Srv": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "prio": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "target": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "port",
+          "prio",
+          "target",
+          "weight"
+        ]
+      },
       "SupportBundleCreate": {
         "type": "object",
         "properties": {
@@ -7527,6 +8585,25 @@
           }
         }
       },
+      "SwitchLocation": {
+        "description": "Identifies switch physical location",
+        "oneOf": [
+          {
+            "description": "Switch in upper slot",
+            "type": "string",
+            "enum": [
+              "switch0"
+            ]
+          },
+          {
+            "description": "Switch in lower slot",
+            "type": "string",
+            "enum": [
+              "switch1"
+            ]
+          }
+        ]
+      },
       "TufRepoVersion": {
         "oneOf": [
           {
@@ -7595,6 +8672,42 @@
             ]
           }
         ]
+      },
+      "TxEqConfig": {
+        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+        "type": "object",
+        "properties": {
+          "main": {
+            "nullable": true,
+            "description": "Main tap",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post1": {
+            "nullable": true,
+            "description": "Post-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post2": {
+            "nullable": true,
+            "description": "Post-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre1": {
+            "nullable": true,
+            "description": "Pre-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre2": {
+            "nullable": true,
+            "description": "Pre-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          }
+        }
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
@@ -7723,6 +8836,33 @@
           "mgs_driven",
           "sleds"
         ]
+      },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "UserId": {
+        "title": "A username for a local-only user",
+        "description": "Usernames must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Usernames cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
+        "type": "string",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
+        "minLength": 1,
+        "maxLength": 63
       },
       "Vni": {
         "description": "A Geneve Virtual Network Identifier",
@@ -7991,6 +9131,28 @@
         "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
         "type": "string",
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      },
+      "ZpoolPutRequest": {
+        "description": "Identifies information about a Zpool that should be part of the control plane.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "physical_disk_id": {
+            "$ref": "#/components/schemas/PhysicalDiskUuid"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "id",
+          "physical_disk_id",
+          "sled_id"
+        ]
       },
       "ZpoolUuid": {
         "x-rust-type": {

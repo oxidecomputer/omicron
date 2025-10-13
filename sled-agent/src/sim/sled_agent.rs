@@ -539,11 +539,13 @@ impl SledAgent {
 
     pub fn get_all_physical_disks(
         &self,
-    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+    ) -> Vec<nexus_lockstep_client::types::PhysicalDiskPutRequest> {
         self.storage.lock().get_all_physical_disks()
     }
 
-    pub fn get_zpools(&self) -> Vec<nexus_client::types::ZpoolPutRequest> {
+    pub fn get_zpools(
+        &self,
+    ) -> Vec<nexus_lockstep_client::types::ZpoolPutRequest> {
         self.storage.lock().get_all_zpools()
     }
 
