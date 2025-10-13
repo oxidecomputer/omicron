@@ -28,9 +28,8 @@ pfexec chown "$UID" /out
 # Prep to build omicron
 #
 
-# XXX would love to not need this
-#banner "prerequisites"
-#./tools/install_builder_prerequisites.sh -y
+banner "prerequisites"
+./tools/install_builder_prerequisites.sh -y
 
 
 #
