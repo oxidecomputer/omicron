@@ -272,6 +272,11 @@ local_idp_user_delete                    DELETE   /v1/system/identity-providers/
 local_idp_user_set_password              POST     /v1/system/identity-providers/local/users/{user_id}/set-password
 saml_identity_provider_create            POST     /v1/system/identity-providers/saml
 saml_identity_provider_view              GET      /v1/system/identity-providers/saml/{provider}
+scim_token_create                        POST     /v1/system/scim/tokens
+scim_token_delete                        DELETE   /v1/system/scim/tokens/{token_id}
+scim_token_delete_all                    DELETE   /v1/system/scim/tokens
+scim_token_list                          GET      /v1/system/scim/tokens
+scim_token_view                          GET      /v1/system/scim/tokens/{token_id}
 silo_create                              POST     /v1/system/silos
 silo_delete                              DELETE   /v1/system/silos/{silo}
 silo_identity_provider_list              GET      /v1/system/identity-providers
@@ -296,14 +301,15 @@ ping                                     GET      /v1/ping
 
 API operations found with tag "system/update"
 OPERATION ID                             METHOD   URL PATH
-system_update_get_repository             GET      /v1/system/update/repository/{system_version}
-system_update_put_repository             PUT      /v1/system/update/repository
+system_update_repository_list            GET      /v1/system/update/repositories
+system_update_repository_upload          PUT      /v1/system/update/repositories
+system_update_repository_view            GET      /v1/system/update/repositories/{system_version}
+system_update_status                     GET      /v1/system/update/status
 system_update_trust_root_create          POST     /v1/system/update/trust-roots
 system_update_trust_root_delete          DELETE   /v1/system/update/trust-roots/{trust_root_id}
 system_update_trust_root_list            GET      /v1/system/update/trust-roots
 system_update_trust_root_view            GET      /v1/system/update/trust-roots/{trust_root_id}
 target_release_update                    PUT      /v1/system/update/target-release
-target_release_view                      GET      /v1/system/update/target-release
 
 API operations found with tag "tokens"
 OPERATION ID                             METHOD   URL PATH

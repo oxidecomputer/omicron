@@ -56,6 +56,7 @@ use nexus_types::internal_api::background::BlueprintRendezvousStatus;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
+use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -89,6 +90,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
+use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
 use support_bundle_viewer::LocalFileAccess;
@@ -96,6 +98,7 @@ use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
 use update_engine::EventBuffer;
 use update_engine::ExecutionStatus;
@@ -137,6 +140,8 @@ enum NexusCommands {
     Blueprints(BlueprintsArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
+    /// fetch an omdb binary associated with an active Nexus
+    FetchOmdb(FetchOmdbArgs),
     /// print information about pending MGS updates
     MgsUpdates,
     /// interact with oximeter read policy
@@ -412,6 +417,12 @@ enum ClickhousePolicyMode {
     ClusterOnly,
     // Run both single-node and clustered clickhouse deployments
     Both,
+}
+
+#[derive(Debug, Args)]
+struct FetchOmdbArgs {
+    /// output path to write the fetched omdb
+    output: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -729,6 +740,10 @@ impl NexusArgs {
                     cmd_nexus_clickhouse_policy_set(&client, args, token).await
                 }
             },
+
+            NexusCommands::FetchOmdb(args) => {
+                cmd_nexus_fetch_omdb(&client, args).await
+            }
 
             NexusCommands::MgsUpdates => cmd_nexus_mgs_updates(&client).await,
 
@@ -1158,6 +1173,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "inventory_collection" => {
             print_task_inventory_collection(details);
         }
+        "inventory_loader" => {
+            print_task_inventory_load(details);
+        }
         "lookup_region_port" => {
             print_task_lookup_region_port(details);
         }
@@ -1296,28 +1314,62 @@ fn print_task_blueprint_planner(details: &serde_json::Value) {
         BlueprintPlannerStatus::Disabled => {
             println!("    blueprint planning explicitly disabled by config!");
         }
+        BlueprintPlannerStatus::LimitReached { limit, report } => {
+            println!(
+                "    blueprint auto-planning disabled because \
+                 current blueprint count >= limit ({limit}); planning report \
+                 contains what would have been stored had the limit not been \
+                 reached",
+            );
+            println!("{report}");
+        }
         BlueprintPlannerStatus::Error(error) => {
             println!("    task did not complete successfully: {error}");
         }
-        BlueprintPlannerStatus::Unchanged { parent_blueprint_id, report } => {
+        BlueprintPlannerStatus::Unchanged {
+            parent_blueprint_id,
+            report,
+            blueprint_count,
+            limit,
+        } => {
             println!("    plan unchanged from parent {parent_blueprint_id}");
+            println!(
+                "    note: {}/{} blueprints in database",
+                blueprint_count, limit
+            );
             println!("{report}");
         }
         BlueprintPlannerStatus::Planned {
             parent_blueprint_id,
             error,
             report,
+            blueprint_count,
+            limit,
         } => {
             println!(
                 "    planned new blueprint from parent {parent_blueprint_id}, \
                      but could not make it the target: {error}"
             );
+            println!(
+                "    note: {}/{} blueprints in database",
+                blueprint_count, limit
+            );
             println!("{report}");
         }
-        BlueprintPlannerStatus::Targeted { blueprint_id, report, .. } => {
+        BlueprintPlannerStatus::Targeted {
+            parent_blueprint_id: _,
+            blueprint_id,
+            report,
+            blueprint_count,
+            limit,
+        } => {
             println!(
                 "    planned new blueprint {blueprint_id}, \
                      and made it the current target"
+            );
+            println!(
+                "    note: {}/{} blueprints in database",
+                blueprint_count, limit,
             );
             println!("{report}");
         }
@@ -1968,6 +2020,37 @@ fn print_task_inventory_collection(details: &serde_json::Value) {
                     .to_rfc3339_opts(SecondsFormat::Secs, true),
             );
         }
+    };
+}
+
+fn print_task_inventory_load(details: &serde_json::Value) {
+    match serde_json::from_value::<InventoryLoadStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => match status {
+            InventoryLoadStatus::Error(error) => {
+                println!("    task did not complete successfully: {error}");
+            }
+            InventoryLoadStatus::NoCollections => {
+                println!("    no collections available to load");
+            }
+            InventoryLoadStatus::Loaded {
+                collection_id,
+                time_started,
+                time_loaded,
+            } => {
+                println!(
+                    "    loaded latest inventory collection as of {}:",
+                    humantime::format_rfc3339_millis(time_loaded.into())
+                );
+                println!(
+                    "        collection {collection_id}, taken at {}",
+                    humantime::format_rfc3339_millis(time_started.into()),
+                );
+            }
+        },
     };
 }
 
@@ -3566,6 +3649,46 @@ async fn cmd_nexus_clickhouse_policy_get(
             }
         }
     }
+
+    Ok(())
+}
+
+async fn cmd_nexus_fetch_omdb(
+    client: &nexus_lockstep_client::Client,
+    args: &FetchOmdbArgs,
+) -> Result<(), anyhow::Error> {
+    // Create the output file.
+    let out = tokio::fs::File::create_new(&args.output)
+        .await
+        .with_context(|| format!("could not create `{}`", args.output))?;
+
+    // Stream the binary from Nexus.
+    let mut out = tokio::io::BufWriter::new(out);
+    let body = client.fetch_omdb().await?;
+    let mut stream = body.into_inner().into_inner();
+    while let Some(maybe_chunk) = stream.next().await {
+        let chunk = maybe_chunk.context("failed reading chunk from Nexus")?;
+        tokio::io::copy(&mut std::io::Cursor::new(chunk), &mut out)
+            .await
+            .with_context(|| format!("failed writing to `{}`", args.output))?;
+    }
+    out.flush().await.with_context(|| {
+        format!("failed flushing data written to `{}`", args.output)
+    })?;
+
+    // Make it executable.
+    let out = out.into_inner();
+    let mut perms = out
+        .metadata()
+        .await
+        .with_context(|| {
+            format!("failed to read metadata of new file `{}`", args.output)
+        })?
+        .permissions();
+    perms.set_mode(0o0700);
+    out.set_permissions(perms).await.with_context(|| {
+        format!("failed to change permissions of new file `{}`", args.output)
+    })?;
 
     Ok(())
 }

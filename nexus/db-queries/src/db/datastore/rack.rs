@@ -19,6 +19,7 @@ use crate::db::model::CrucibleDataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::Rack;
+use crate::db::model::UserProvisionType;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -442,6 +443,15 @@ impl DataStore {
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
     ) -> Result<(), RackInitError> {
+        if !matches!(
+            &recovery_silo.identity_mode,
+            shared::SiloIdentityMode::LocalOnly
+        ) {
+            return Err(RackInitError::Silo(Error::invalid_request(
+                "recovery silo should only use identity mode LocalOnly",
+            )));
+        }
+
         let db_silo = self
             .silo_create_conn(
                 conn,
@@ -460,11 +470,19 @@ impl DataStore {
 
         // Create the first user in the initial Recovery Silo
         let silo_user_id = SiloUserUuid::new_v4();
-        let silo_user = SiloUser::new(
-            db_silo.id(),
-            silo_user_id,
-            recovery_user_id.as_ref().to_owned(),
-        );
+
+        let silo_user = match &db_silo.user_provision_type {
+            UserProvisionType::ApiOnly => SiloUser::new_api_only(
+                db_silo.id(),
+                silo_user_id,
+                recovery_user_id.as_ref().to_owned(),
+            ),
+
+            UserProvisionType::Jit | UserProvisionType::Scim => {
+                unreachable!("match at start of function should prevent this");
+            }
+        };
+
         {
             use nexus_db_schema::schema::silo_user::dsl;
             diesel::insert_into(dsl::silo_user)
@@ -1248,16 +1266,21 @@ mod test {
             )
             .await
             .expect("failed to list users");
+
         assert_eq!(silo_users.len(), 1);
-        assert_eq!(
-            silo_users[0].external_id,
-            rack_init.recovery_user_id.as_ref()
-        );
+
+        let db::datastore::SiloUser::ApiOnly(silo_user) = &silo_users[0] else {
+            panic!("wrong user type {:?}", silo_users[0].user_provision_type());
+        };
+
+        assert_eq!(silo_user.external_id, rack_init.recovery_user_id.as_ref());
+
         let authz_silo_user = authz::SiloUser::new(
             authz_silo,
             silo_users[0].id(),
             LookupType::by_id(silo_users[0].id()),
         );
+
         let hash = datastore
             .silo_user_password_hash_fetch(&opctx, &authz_silo_user)
             .await

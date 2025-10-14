@@ -138,6 +138,7 @@ oximeter-producer.workspace = true
 raw-cpuid = { workspace = true, features = ["std"] }
 rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
+scim2-rs.workspace = true
 update-common.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true

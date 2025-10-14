@@ -171,6 +171,14 @@ pub fn blueprint_internal_dns_config(
     // replicated synchronously or atomically to all instances.  That is: a
     // consumer should be careful when fetching an artifact about whether they
     // really can just pick any backend of this service or not.
+    //
+    // We currently limit the repo depot backends to keep us under current DNS
+    // limits.  See oxidecomputer/omicron#6342.  This number is chosen somewhat
+    // arbitrarily: it's small enough to fit under the DNS limit, but enough
+    // to give some redundancy.  We're implicitly assuming iteration over
+    // `sleds_by_id` will be stable so that we're not thrashing on the DNS
+    // names.
+    let mut nrepo_depots = 6;
     for sled in sleds_by_id {
         if !sled.policy().matches(SledFilter::TufArtifactReplication) {
             continue;
@@ -178,11 +186,14 @@ pub fn blueprint_internal_dns_config(
 
         let dns_sled = dns_builder
             .host_sled(sled.id(), *sled.sled_agent_address().ip())?;
-        dns_builder.service_backend_sled(
-            ServiceName::RepoDepot,
-            &dns_sled,
-            sled.repo_depot_address().port(),
-        )?;
+        if nrepo_depots > 0 {
+            dns_builder.service_backend_sled(
+                ServiceName::RepoDepot,
+                &dns_sled,
+                sled.repo_depot_address().port(),
+            )?;
+            nrepo_depots -= 1;
+        }
     }
 
     Ok(dns_builder.build_zone())

@@ -434,10 +434,10 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "b3cdd095437f388069aa57be5efac4b4fadc7b4f" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
 dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.2.1"
-dropshot-api-manager-types = "0.2.1"
+dropshot-api-manager = "0.2.2"
+dropshot-api-manager-types = "0.2.2"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -794,6 +794,8 @@ zone = { version = "0.3.1", default-features = false, features = ["async"] }
 newtype-uuid = { version = "1.3.1", default-features = false }
 newtype-uuid-macros = "0.1.0"
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
+
+scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs" }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that

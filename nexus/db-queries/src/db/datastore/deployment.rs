@@ -9,8 +9,11 @@ use crate::context::OpContext;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
+use crate::db::raw_query_builder::QueryBuilder;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
@@ -562,6 +565,100 @@ impl DataStore {
         );
 
         Ok(())
+    }
+
+    /// Check whether the given blueprint limit has been reached.
+    ///
+    /// This (necessarily) does a full table scan on the blueprint table up to
+    /// the limit, so `limit` must be relatively small to avoid performance
+    /// issues. Experimentally, on a Gimlet, a limit of a few thousand takes
+    /// under 20ms.
+    pub async fn check_blueprint_limit_reached(
+        &self,
+        opctx: &OpContext,
+        limit: u64,
+    ) -> Result<BlueprintLimitReachedOutput, Error> {
+        // The "full" table scan below is treated as a complex operation. (This
+        // should only be called from the blueprint planner background task,
+        // for which complex operations are allowed.)
+        opctx.check_complex_operations_allowed()?;
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let limit_i64 = i64::try_from(limit).map_err(|e| {
+            Error::invalid_value(
+                "limit",
+                format!("limit cannot be converted to i64: {e}"),
+            )
+        })?;
+
+        let err = OptionalError::new();
+
+        let count = self
+            .transaction_retry_wrapper("blueprint_count")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+
+                async move {
+                    // We need this to call the COUNT(*) query below. But note
+                    // that this isn't really a "full" table scan; the number of
+                    // rows scanned is limited by the LIMIT clause.
+                    conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                        .await
+                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+
+                    // Rather than doing a full table scan, we use a LIMIT
+                    // clause to limit the number of rows returned.
+                    let mut count_star_sql = QueryBuilder::new();
+                    count_star_sql
+                        .sql(
+                            "SELECT COUNT(*) FROM \
+                             (SELECT 1 FROM omicron.public.blueprint \
+                              LIMIT $1)",
+                        )
+                        .bind::<diesel::sql_types::BigInt, _>(limit_i64);
+
+                    let query =
+                        count_star_sql.query::<diesel::sql_types::BigInt>();
+
+                    // query.first_async fails with `the trait bound
+                    // `TypedSqlQuery<BigInt>: diesel::Table` is not satisfied`.
+                    // So we use load_async, knowing that only one row will be
+                    // returned.
+                    let value = query
+                        .load_async::<i64>(&conn)
+                        .await
+                        .map_err(|e| err.bail(TransactionError::Database(e)))?;
+
+                    Ok(value)
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+
+        // There must be exactly one row in the returned result.
+        let count = *count.get(0).ok_or_else(|| {
+            Error::internal_error("error getting blueprint count from database")
+        })?;
+
+        let count = u64::try_from(count).map_err(|_| {
+            Error::internal_error(&format!(
+                "error converting blueprint count {} into \
+                 u64 (how is it negative?)",
+                count
+            ))
+        })?;
+
+        // Note count >= limit (and not count > limit): for a limit of 5000 we
+        // want to fail if it's reached 5000.
+        if count >= limit {
+            Ok(BlueprintLimitReachedOutput::Yes)
+        } else {
+            Ok(BlueprintLimitReachedOutput::No { count })
+        }
     }
 
     /// Read a complete blueprint from the database
@@ -2600,6 +2697,12 @@ async fn insert_pending_mgs_update(
         }
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BlueprintLimitReachedOutput {
+    No { count: u64 },
+    Yes,
 }
 
 // Helper to process BpPendingMgsUpdateComponent rows

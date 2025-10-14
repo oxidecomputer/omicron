@@ -28,7 +28,6 @@ use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use ntp_admin_client::types::TimeSync;
 use omicron_common::address::Ipv6Subnet;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use sled_agent_types::zone_bundle::ZoneBundleCause;
 use sled_agent_types::zone_images::MupdateOverrideReadError;
 use sled_agent_types::zone_images::OmicronZoneImageLocation;
 use sled_agent_types::zone_images::PreparedOmicronZone;
@@ -607,23 +606,6 @@ impl OmicronZone {
         match &self.state {
             ZoneState::Running { running_zone, location: _ } => {
                 info!(log, "shutting down running zone");
-
-                // We only try once to create a zone bundle; if this fails we
-                // move on to the rest of the shutdown process.
-                if let Err(err) = sled_agent_facilities
-                    .zone_bundle_create(
-                        running_zone,
-                        ZoneBundleCause::UnexpectedZone,
-                    )
-                    .await
-                {
-                    warn!(
-                        log,
-                        "Failed to take bundle of zone we're shutting down";
-                        InlineErrorChain::new(err.as_ref()),
-                    );
-                }
-
                 self.resume_shutdown_from_untrack_metrics(
                     sled_agent_facilities,
                     zone_facilities,
@@ -1591,14 +1573,6 @@ mod tests {
             prefix: Ipv6Subnet<SLED_PREFIX>,
         ) {
             self.inner.lock().unwrap().removed_ddm_prefixes.insert(prefix);
-        }
-
-        async fn zone_bundle_create(
-            &self,
-            _zone: &RunningZone,
-            _cause: ZoneBundleCause,
-        ) -> anyhow::Result<()> {
-            Ok(())
         }
     }
 

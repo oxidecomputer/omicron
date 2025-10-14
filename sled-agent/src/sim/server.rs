@@ -24,8 +24,12 @@ use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
 use nexus_client::types as NexusTypes;
-use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use nexus_lockstep_client::types::{
+    AllowedSourceIps, CrucibleDatasetCreateRequest, ExternalPortDiscovery,
+    IpRange, Ipv4Range, Ipv6Range, RackInitializationRequest,
+    RackNetworkConfigV2,
+};
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
@@ -123,7 +127,7 @@ impl Server {
         .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
             dropshot::ClientSpecifiesVersionInHeader::new(
                 omicron_common::api::VERSION_HEADER,
-                sled_agent_api::VERSION_NEWTYPE_UUID_BUMP,
+                sled_agent_api::latest_version(),
             ),
         )))
         .start()
@@ -222,7 +226,7 @@ impl Server {
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id);
 
-            datasets.push(NexusTypes::CrucibleDatasetCreateRequest {
+            datasets.push(CrucibleDatasetCreateRequest {
                 zpool_id,
                 dataset_id,
                 address: address.to_string(),
@@ -269,12 +273,12 @@ impl Server {
 
 async fn handoff_to_nexus(
     log: &Logger,
-    config: &Config,
-    request: &NexusTypes::RackInitializationRequest,
+    nexus_lockstep_address: SocketAddr,
+    request: &RackInitializationRequest,
 ) -> Result<(), anyhow::Error> {
-    let nexus_client = NexusClient::new(
-        &format!("http://{}", config.nexus_address),
-        log.new(o!("component" => "NexusClient")),
+    let nexus_client = nexus_lockstep_client::Client::new(
+        &format!("http://{}", nexus_lockstep_address),
+        log.new(o!("component" => "NexusLockstepClient")),
     );
     let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
 
@@ -324,6 +328,7 @@ pub struct RssArgs {
 /// - Performs handoff to Nexus
 pub async fn run_standalone_server(
     config: &Config,
+    nexus_lockstep_port: u16,
     logging: &dropshot::ConfigLogging,
     rss_args: &RssArgs,
 ) -> Result<(), anyhow::Error> {
@@ -433,7 +438,7 @@ pub async fn run_standalone_server(
                     SocketAddr::V4(_) => panic!("did not expect v4 address"),
                     SocketAddr::V6(a) => a,
                 },
-                lockstep_port: 0,
+                lockstep_port: nexus_lockstep_port,
                 external_ip: from_ipaddr_to_external_floating_ip(ip),
                 nic: nexus_types::inventory::NetworkInterface {
                     id: Uuid::new_v4(),
@@ -543,7 +548,7 @@ pub async fn run_standalone_server(
         for (dataset_id, address) in
             server.sled_agent.get_crucible_datasets(zpool_id)
         {
-            crucible_datasets.push(NexusTypes::CrucibleDatasetCreateRequest {
+            crucible_datasets.push(CrucibleDatasetCreateRequest {
                 zpool_id,
                 dataset_id,
                 address: address.to_string(),
@@ -582,7 +587,7 @@ pub async fn run_standalone_server(
         internal_dns_version,
     )
     .context("could not construct initial blueprint")?;
-    let rack_init_request = NexusTypes::RackInitializationRequest {
+    let rack_init_request = RackInitializationRequest {
         blueprint,
         physical_disks,
         zpools,
@@ -592,10 +597,8 @@ pub async fn run_standalone_server(
         internal_dns_zone_config: dns_config,
         external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
-        external_port_count: NexusTypes::ExternalPortDiscovery::Static(
-            HashMap::new(),
-        ),
-        rack_network_config: NexusTypes::RackNetworkConfigV2 {
+        external_port_count: ExternalPortDiscovery::Static(HashMap::new()),
+        rack_network_config: RackNetworkConfigV2 {
             rack_subnet: Ipv6Net::host_net(Ipv6Addr::LOCALHOST),
             infra_ip_first: Ipv4Addr::LOCALHOST,
             infra_ip_last: Ipv4Addr::LOCALHOST,
@@ -603,10 +606,12 @@ pub async fn run_standalone_server(
             bgp: Vec::new(),
             bfd: Vec::new(),
         },
-        allowed_source_ips: NexusTypes::AllowedSourceIps::Any,
+        allowed_source_ips: AllowedSourceIps::Any,
     };
 
-    handoff_to_nexus(&log, &config, &rack_init_request).await?;
+    let mut nexus_lockstep_address = config.nexus_address;
+    nexus_lockstep_address.set_port(nexus_lockstep_port);
+    handoff_to_nexus(&log, nexus_lockstep_address, &rack_init_request).await?;
     info!(log, "Handoff to Nexus is complete");
 
     server.wait_for_finish().await
