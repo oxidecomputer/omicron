@@ -43,9 +43,6 @@ use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
-use nexus_types::deployment::planning_report::BlockedMgsUpdate;
-use nexus_types::deployment::planning_report::FailedMgsUpdateReason;
-use nexus_types::deployment::planning_report::FailedSpUpdateReason;
 use nexus_types::deployment::{
     NexusGenerationBumpWaitingOn, PlanningAddStepReport,
     PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
@@ -1399,38 +1396,36 @@ impl<'a> Planner<'a> {
         // about to be added.  In dev/test environments, it's common to leave
         // some number of sleds out of the control plane for various reasons.
         // Inventory will still report them, but we don't want to touch them.
-        //
-        // For better or worse, switches and PSCs do not have the same idea of
-        // being adopted into the control plane.  If they're present, they're
-        // part of the system, and we will update them.
-        let mut included_sled_baseboards: BTreeMap<_, _> = self
+        let included_sled_baseboards = self
             .input
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
-            .map(|(sled_id, details)| (&details.baseboard_id, sled_id))
-            .collect();
+            .map(|(sled_id, details)| {
+                UpdateableBoard::Sled(
+                    Arc::new(details.baseboard_id.clone()),
+                    sled_id,
+                )
+            });
 
-        let included_baseboards = self
-            .inventory
-            .sps
-            .iter()
-            .filter_map(|(baseboard_id, sp_state)| match sp_state.sp_type {
-                SpType::Sled => {
-                    // Note that we `remove()` here; if every sled in
-                    // `included_sled_baseboards` is also present in inventory,
-                    // we'll be left with an empty map (what we want and
-                    // expect!). If there are sleds leftover, we'll handle that
-                    // below.
-                    let sled_id = included_sled_baseboards
-                        .remove(baseboard_id.as_ref())?;
-                    Some(UpdateableBoard::Sled(baseboard_id.clone(), sled_id))
-                }
-                SpType::Power => {
-                    Some(UpdateableBoard::Power(baseboard_id.clone()))
-                }
-                SpType::Switch => {
-                    Some(UpdateableBoard::Switch(baseboard_id.clone()))
-                }
-            })
+        // For better or worse, switches and PSCs do not have the same idea of
+        // being adopted into the control plane.  If they're present, they're
+        // part of the system, and we will update them.  Chain them onto the end
+        // of all the sled baseboards we're supposed to update.
+        let included_baseboards = included_sled_baseboards
+            .chain(self.inventory.sps.iter().filter_map(
+                |(baseboard_id, sp_state)| match sp_state.sp_type {
+                    SpType::Sled => {
+                        // Sleds are only updated if they're part of
+                        // `included_sled_baseboards`; skip them here.
+                        None
+                    }
+                    SpType::Power => {
+                        Some(UpdateableBoard::Power(baseboard_id.clone()))
+                    }
+                    SpType::Switch => {
+                        Some(UpdateableBoard::Switch(baseboard_id.clone()))
+                    }
+                },
+            ))
             .collect();
 
         // Compute the new set of PendingMgsUpdates.
@@ -1448,7 +1443,7 @@ impl<'a> Planner<'a> {
         let PlannedMgsUpdates {
             pending_updates,
             pending_host_phase_2_changes,
-            mut blocked_mgs_updates,
+            blocked_mgs_updates,
         } = MgsUpdatePlanner {
             log: &self.log,
             inventory: &self.inventory,
@@ -1473,19 +1468,6 @@ impl<'a> Planner<'a> {
             .apply_pending_host_phase_2_changes(pending_host_phase_2_changes)?;
 
         self.blueprint.pending_mgs_updates_replace_all(pending_updates.clone());
-
-        // There shouldn't be any sleds left in `included_sled_baseboards`; if
-        // there are, those are sleds our planning input says are part of the
-        // system but whose SPs aren't currently in inventory. We have to
-        // consider them "not updated" in terms of planning.
-        for (baseboard_id, _sled_id) in included_sled_baseboards {
-            blocked_mgs_updates.push(BlockedMgsUpdate {
-                baseboard_id: Arc::new(baseboard_id.clone()),
-                reason: FailedMgsUpdateReason::Sp(
-                    FailedSpUpdateReason::SpNotInInventory,
-                ),
-            });
-        }
 
         report.pending_mgs_updates = pending_updates;
         report.blocked_mgs_updates = blocked_mgs_updates;

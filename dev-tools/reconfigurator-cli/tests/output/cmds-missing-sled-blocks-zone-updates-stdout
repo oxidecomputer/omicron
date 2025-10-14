@@ -685,12 +685,13 @@ INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41c
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (found issues), serial_number: serial1, part_number: model1
 INFO ran out of boards for MGS-driven update
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
 blueprint source: planner with report:
 planning report:
 * 1 blocked MGS update:
-  * model1:serial1: failed to plan an SP update: corresponding SP is not in inventory
+  * model1:serial1: failed to plan an RoT bootloader update: corresponding SP is not in inventory
 * waiting for NTP zones to appear in inventory on sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
 * zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
 * waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated

@@ -104,11 +104,16 @@ impl PlannedMgsUpdates {
 
 /// Moral equivalent to `SpType`, but that includes additional information we
 /// need to make planning decisions.
+//
+// Note that the ordering of variants here has visible effects on the update
+// system: we built a `BTreeSet<UpdateableBoard>` to determine what boards to
+// attempt to update, so we'll attempt to update board types in the order
+// these variants are listed. (Within one type, we'll order by `BaseboardId`.)
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum UpdateableBoard {
-    Sled(Arc<BaseboardId>, SledUuid),
     Power(Arc<BaseboardId>),
     Switch(Arc<BaseboardId>),
+    Sled(Arc<BaseboardId>, SledUuid),
 }
 
 impl UpdateableBoard {
@@ -347,7 +352,7 @@ impl<'a> MgsUpdatePlanner<'a> {
                 info!(log, "configuring MGS-driven update"; update);
                 pending_updates.insert(update.clone());
             } else {
-                if blocked_mgs_updates.is_empty() && host_phase_2.is_empty() {
+                if blocked_updates.is_empty() && host_phase_2.is_empty() {
                     info!(
                         log,
                         "skipping board for MGS-driven update \
