@@ -148,8 +148,6 @@ impl IpPool {
     }
 
     /// Create a new IPv4 IP Pool.
-    ///
-    /// The pool is reserved for external customer Silos.
     pub fn new_v4(
         pool_identity: &external::IdentityMetadataCreateParams,
         reservation_type: IpPoolReservationType,
@@ -158,8 +156,6 @@ impl IpPool {
     }
 
     /// Create a new IPv6 IP Pool.
-    ///
-    /// The pool is reserved for external customer Silos.
     pub fn new_v6(
         pool_identity: &external::IdentityMetadataCreateParams,
         reservation_type: IpPoolReservationType,

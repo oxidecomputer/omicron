@@ -528,18 +528,6 @@ impl DataStore {
         }
     }
 
-    /// Unreserve an IP.
-    ///
-    /// TODO(ben) Remove this, use reserve with specific type for everything.
-    pub async fn ip_pool_revoke(
-        &self,
-        _opctx: &OpContext,
-        _authz_pool: &authz::IpPool,
-        _db_pool: &IpPool,
-    ) -> UpdateResult<()> {
-        todo!("remove me");
-    }
-
     /// Return the number of IPs allocated from and the capacity of the provided
     /// IP Pool.
     pub async fn ip_pool_utilization(
