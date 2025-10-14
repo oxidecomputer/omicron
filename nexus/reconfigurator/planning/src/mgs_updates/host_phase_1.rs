@@ -7,6 +7,8 @@
 use super::MgsUpdateStatus;
 use super::MgsUpdateStatusError;
 use crate::mgs_updates::MgsUpdateOutcome;
+use crate::mgs_updates::UpdateableBoard;
+use crate::planner::ZoneSafetyChecks;
 use nexus_types::deployment::BlueprintArtifactVersion;
 use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::PendingMgsUpdate;
@@ -268,21 +270,15 @@ pub(super) fn update_status(
 /// Determine if the given baseboard needs a Host OS update and, if so,
 /// returns it. An error means an update is still necessary but cannot be
 /// completed.
-///
-/// If an update is needed, before attempting to configure and return that
-/// update, will call `unsafe_zone_reason()` and return an error if it returns
-/// `Some(reason)` describing a reason this sled should not be shut down due to
-/// the zones it's running.
-pub(super) fn try_make_update<F>(
+pub(super) fn try_make_update(
     log: &slog::Logger,
-    baseboard_id: &Arc<BaseboardId>,
+    target_board: &UpdateableBoard,
     inventory: &Collection,
     current_artifacts: &TufRepoDescription,
-    unsafe_zone_reason: F,
-) -> Result<MgsUpdateOutcome, FailedHostOsUpdateReason>
-where
-    F: FnOnce() -> Option<String>,
-{
+    zone_safety_checks: &ZoneSafetyChecks,
+) -> Result<MgsUpdateOutcome, FailedHostOsUpdateReason> {
+    let baseboard_id = target_board.baseboard_id();
+
     let Some(sp_info) = inventory.sps.get(baseboard_id) else {
         return Err(FailedHostOsUpdateReason::SpNotInInventory);
     };
@@ -429,10 +425,14 @@ where
         return Ok(MgsUpdateOutcome::NoUpdateNeeded);
     }
 
-    // Make sure the board we're targetting doesn't contain any zones that are
-    // unsafe to shut down
-    if let Some(reason) = unsafe_zone_reason() {
-        return Err(FailedHostOsUpdateReason::UnsafeZoneFound(reason));
+    // If we're targetting a sled, make sure it's not running any zones that are
+    // currently unsafe to shut down.
+    if let Some(sled_id) = target_board.sled_id() {
+        if let Some(reason) =
+            zone_safety_checks.is_sled_unsafe_to_shut_down(&sled_id)
+        {
+            return Err(FailedHostOsUpdateReason::UnsafeZoneFound(reason));
+        }
     }
 
     // Before we can proceed with the phase 1 update, we need sled-agent to

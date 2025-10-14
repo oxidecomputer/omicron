@@ -679,17 +679,6 @@ fn try_make_update(
 ) -> PlannedMgsUpdates {
     let mut pending_actions = PlannedMgsUpdates::new();
 
-    // Helper closure to determine whether this board is safe to restart. We'll
-    // use this when performing an update that will result in a sled reboot (SP
-    // or Host OS).
-    let unsafe_zone_reason = || {
-        // If this board isn't a sled, it's not hosting zones.
-        let sled_id = board.sled_id()?;
-
-        // If the board is a sled, check `zone_safety_checks`.
-        zone_safety_checks.is_sled_unsafe_to_shut_down(&sled_id)
-    };
-
     // We try MGS-driven update components in a hardcoded priority order until
     // any of them returns `Some`.  The order is described in RFD 565 section
     // "Update Sequence".
@@ -718,18 +707,18 @@ fn try_make_update(
             .map_err(|e| e.into()),
             MgsUpdateComponent::Sp => sp::try_make_update(
                 log,
-                board.baseboard_id(),
+                board,
                 inventory,
                 current_artifacts,
-                unsafe_zone_reason,
+                zone_safety_checks,
             )
             .map_err(|e| e.into()),
             MgsUpdateComponent::HostOs => host_phase_1::try_make_update(
                 log,
-                board.baseboard_id(),
+                board,
                 inventory,
                 current_artifacts,
-                unsafe_zone_reason,
+                zone_safety_checks,
             )
             .map_err(|e| e.into()),
         };
