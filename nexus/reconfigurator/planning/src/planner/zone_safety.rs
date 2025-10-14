@@ -71,7 +71,7 @@ impl ZoneSafetyChecks {
 
     /// If the specified zone is unsafe to shut down, returns `Some(reason)`;
     /// otherwise, returns `None`.
-    pub fn is_zone_unsafe_to_shut_down(
+    pub fn zone_unsafe_shutdown_reason(
         &self,
         zone_id: &OmicronZoneUuid,
     ) -> Option<&ZoneUnsafeToShutdown> {
@@ -83,7 +83,7 @@ impl ZoneSafetyChecks {
 
     /// If this sled is hosting any zones that are unsafe to shut down, returns
     /// `Some(reason)`; otherwise, returns `None`.
-    pub fn is_sled_unsafe_to_shut_down(
+    pub fn sled_unsafe_shutdown_reason(
         &self,
         sled_id: &SledUuid,
     ) -> Option<String> {

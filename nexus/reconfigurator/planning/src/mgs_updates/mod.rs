@@ -127,7 +127,7 @@ impl UpdateableBoard {
         }
     }
 
-    // Helper method for tests to generate a complet set of `UpdateableBoard`s
+    // Helper method for tests to generate a complete set of `UpdateableBoard`s
     // from a (fake) collection.
     //
     // In production, the planner builds up this `BTreeSet` based on the

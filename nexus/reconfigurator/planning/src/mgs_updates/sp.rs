@@ -149,7 +149,7 @@ pub(super) fn try_make_update(
     // currently unsafe to shut down.
     if let Some(sled_id) = target_board.sled_id() {
         if let Some(reason) =
-            zone_safety_checks.is_sled_unsafe_to_shut_down(&sled_id)
+            zone_safety_checks.sled_unsafe_shutdown_reason(&sled_id)
         {
             return Err(FailedSpUpdateReason::UnsafeZoneFound(reason));
         }

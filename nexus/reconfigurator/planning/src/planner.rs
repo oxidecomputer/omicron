@@ -1626,7 +1626,7 @@ impl<'a> Planner<'a> {
             .into_iter()
             .filter(|(_, zone, _)| {
                 if let Some(reason) =
-                    zone_safety_checks.is_zone_unsafe_to_shut_down(&zone.id)
+                    zone_safety_checks.zone_unsafe_shutdown_reason(&zone.id)
                 {
                     report.unsafe_zones.insert(zone.id, reason.clone());
                     false
