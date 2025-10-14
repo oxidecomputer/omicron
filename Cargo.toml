@@ -92,7 +92,6 @@ members = [
     "nexus/lockstep-api",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
-    #"nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/cli-integration-tests",
@@ -253,7 +252,6 @@ default-members = [
     "nexus/lockstep-api",
     "nexus/macros-common",
     "nexus/metrics-producer-gc",
-    #"nexus/mgs-updates",
     "nexus/networking",
     "nexus/reconfigurator/blippy",
     "nexus/reconfigurator/cli-integration-tests",
@@ -553,7 +551,6 @@ nexus-lockstep-api = { path = "nexus/lockstep-api" }
 nexus-lockstep-client = { path = "clients/nexus-lockstep-client" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
-#nexus-mgs-updates = { path = "nexus/reconfigurator/execution/mgs-updates" }
 nexus-networking = { path = "nexus/networking" }
 nexus-reconfigurator-blippy = { path = "nexus/reconfigurator/blippy" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }

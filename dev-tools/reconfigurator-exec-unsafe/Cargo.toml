@@ -19,7 +19,6 @@ internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
-#nexus-mgs-updates.workspace = true
 nexus-reconfigurator-execution.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
