@@ -178,11 +178,11 @@ fn print_status_summary(status: UpdateStatus) {
     }
     let table = table
         .build()
-        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Style::psql())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
         .to_string();
 
-    println!("Counts of each component at specific versions:");
+    println!("Count of each component type by system version:");
     println!();
     println!("{table}");
     println!();
