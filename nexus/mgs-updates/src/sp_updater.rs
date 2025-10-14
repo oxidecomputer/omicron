@@ -145,40 +145,6 @@ impl SpComponentUpdateHelperImpl for ReconfiguratorSpUpdater {
         update: &'a PendingMgsUpdate,
     ) -> BoxFuture<'a, Result<(), PostUpdateError>> {
         async move {
-            // At a higher level, post_update is called in a potentially
-            // infinite loop to deal with transient communication problems.
-            // This means we can potentially get stuck resetting the device if
-            // we get lucky enough to constantly get a transient communication
-            // error after resetting. As seen in
-            // https://github.com/oxidecomputer/omicron/issues/9133.
-            //
-            // To avoid such errors, before resetting the SP we check the
-            // current version to see if the component is already at the desired
-            // version. Otherwise, we reset the component.
-
-            // Fetch the caboose from the currently active slot.
-            let caboose = mgs_clients
-                .try_all_serially(log, move |mgs_client| async move {
-                    mgs_client
-                        .sp_component_caboose_get(
-                            &update.sp_type,
-                            update.slot_id,
-                            SpComponent::SP_ITSELF.const_as_str(),
-                            0,
-                        )
-                        .await
-                })
-                .await?
-                .into_inner();
-            debug!(log, "found active slot caboose"; "caboose" => ?caboose);
-
-            // If the version in the currently active slot matches the one we're
-            // trying to set, then there's nothing to do.
-            if caboose.version == update.artifact_version.as_str() {
-                return Ok(());
-            }
-
-            // Otherwise, the update hasn't finished yet, we reset the device.
             mgs_clients
                 .try_all_serially(log, move |mgs_client| async move {
                     debug!(log, "attempting to reset device");
