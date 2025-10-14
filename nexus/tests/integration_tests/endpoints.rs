@@ -749,16 +749,13 @@ pub static DEMO_CERTIFICATE_CREATE: LazyLock<params::CertificateCreate> =
     });
 
 // Multicast groups and members
+// Multicast groups are fleet-scoped (like IP pools), not project-scoped
 pub static DEMO_MULTICAST_GROUP_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-multicast-group".parse().unwrap());
-pub static MULTICAST_GROUPS_URL: LazyLock<String> = LazyLock::new(|| {
-    format!("/v1/multicast-groups?project={}", *DEMO_PROJECT_NAME)
-});
+pub static MULTICAST_GROUPS_URL: LazyLock<String> =
+    LazyLock::new(|| "/v1/multicast-groups".to_string());
 pub static DEMO_MULTICAST_GROUP_URL: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "/v1/multicast-groups/{}?project={}",
-        *DEMO_MULTICAST_GROUP_NAME, *DEMO_PROJECT_NAME
-    )
+    format!("/v1/multicast-groups/{}", *DEMO_MULTICAST_GROUP_NAME)
 });
 pub static DEMO_MULTICAST_GROUP_MEMBERS_URL: LazyLock<String> =
     LazyLock::new(|| {
@@ -3137,11 +3134,15 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
             },
+
             // Multicast groups
+
+            // Multicast groups list allows authenticated users to list (ReadOnly)
+            // so they can discover groups to join their instances to
             VerifyEndpoint {
                 url: &MULTICAST_GROUPS_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Post(
@@ -3151,8 +3152,8 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(
@@ -3161,12 +3162,23 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     AllowedMethod::Delete,
                 ],
             },
+            // Multicast member endpoints have asymmetric authorization:
+            // - GET operations only check fleet-scoped group Read permission (accessible to all authenticated users)
+            // - POST/DELETE operations require project-scoped instance Modify permission
+            //
+            // When unprivileged users try to add/remove instances from inaccessible projects,
+            // the instance lookup fails with 404 (not 403) to prevent information leakage.
+            // This is correct security behavior.
+            //
+            // Configuration: Protected + ReadOnly
+            // - GET: Not tested for unprivileged access here (verified in authorization.rs tests)
+            // - POST/DELETE: Correctly expect 404 when instance is in inaccessible project
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_MEMBERS_URL,
                 visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![
-                    AllowedMethod::Get,
+                    AllowedMethod::GetVolatile,
                     AllowedMethod::Post(
                         serde_json::to_value(&*DEMO_MULTICAST_MEMBER_ADD).unwrap(),
                     ),
@@ -3175,7 +3187,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_MEMBER_URL,
                 visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![
                     AllowedMethod::Delete,
                 ],
@@ -3183,8 +3195,8 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             VerifyEndpoint {
                 url: &DEMO_INSTANCE_MULTICAST_GROUPS_URL,
                 visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
+                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                allowed_methods: vec![AllowedMethod::GetVolatile],
             },
             VerifyEndpoint {
                 url: &DEMO_INSTANCE_MULTICAST_GROUP_JOIN_URL,

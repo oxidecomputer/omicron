@@ -64,6 +64,22 @@ pub(crate) fn mcast_group_members_url(group_name: &str) -> String {
     format!("/v1/multicast-groups/{group_name}/members")
 }
 
+/// Build URL for adding a member to a multicast group.
+///
+/// The `?project=` parameter is required when using instance names (for scoping)
+/// but must NOT be provided when using instance UUIDs (causes 400 Bad Request).
+pub(crate) fn mcast_group_member_add_url(
+    group_name: &str,
+    instance: &NameOrId,
+    project_name: &str,
+) -> String {
+    let base_url = mcast_group_members_url(group_name);
+    match instance {
+        NameOrId::Name(_) => format!("{base_url}?project={project_name}"),
+        NameOrId::Id(_) => base_url,
+    }
+}
+
 /// Utility functions for running multiple async operations in parallel.
 pub(crate) mod ops {
     use std::future::Future;
@@ -513,8 +529,7 @@ pub(crate) async fn multicast_group_attach(
     group_name: &str,
 ) {
     let url = format!(
-        "/v1/instances/{}/multicast-groups/{}?project={project_name}",
-        instance_name, group_name
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
 
     // Use PUT to attach instance to multicast group
@@ -809,8 +824,7 @@ pub(crate) async fn multicast_group_detach(
     group_name: &str,
 ) {
     let url = format!(
-        "/v1/instances/{}/multicast-groups/{}?project={project_name}",
-        instance_name, group_name
+        "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
 
     // Use DELETE to detach instance from multicast group

@@ -93,10 +93,8 @@ async fn test_multicast_enablement() {
     );
 
     // Start the instance - this should also succeed
-    let start_url = format!(
-        "/v1/instances/{}/start?project={}",
-        "test-instance-lifecycle", PROJECT_NAME
-    );
+    let start_url =
+        format!("/v1/instances/test-instance-lifecycle/start?project={PROJECT_NAME}");
     nexus_test_utils::http_testing::NexusRequest::new(
         nexus_test_utils::http_testing::RequestBuilder::new(
             client,
@@ -112,10 +110,8 @@ async fn test_multicast_enablement() {
     .expect("Instance start should succeed even with multicast disabled");
 
     // Simulate the instance to complete the start transition
-    let get_url_for_start_sim = format!(
-        "/v1/instances/{}?project={}",
-        "test-instance-lifecycle", PROJECT_NAME
-    );
+    let get_url_for_start_sim =
+        format!("/v1/instances/test-instance-lifecycle?project={PROJECT_NAME}");
     let instance_for_start_sim: Instance =
         object_get(client, &get_url_for_start_sim).await;
     let instance_id_for_start_sim =
@@ -135,10 +131,8 @@ async fn test_multicast_enablement() {
     );
 
     // Stop the instance - this should also succeed
-    let stop_url = format!(
-        "/v1/instances/{}/stop?project={}",
-        "test-instance-lifecycle", PROJECT_NAME
-    );
+    let stop_url =
+        format!("/v1/instances/test-instance-lifecycle/stop?project={PROJECT_NAME}");
     nexus_test_utils::http_testing::NexusRequest::new(
         nexus_test_utils::http_testing::RequestBuilder::new(
             client,
@@ -153,10 +147,8 @@ async fn test_multicast_enablement() {
     .await
     .expect("Instance stop should succeed even with multicast disabled");
 
-    let get_url_for_sim = format!(
-        "/v1/instances/{}?project={}",
-        "test-instance-lifecycle", PROJECT_NAME
-    );
+    let get_url_for_sim =
+        format!("/v1/instances/test-instance-lifecycle?project={PROJECT_NAME}");
 
     let instance_for_sim: Instance = object_get(client, &get_url_for_sim).await;
     let instance_id_for_sim =
@@ -177,10 +169,8 @@ async fn test_multicast_enablement() {
     );
 
     // Wait for instance to be fully stopped before attempting deletion
-    let get_url = format!(
-        "/v1/instances/{}?project={}",
-        "test-instance-lifecycle", PROJECT_NAME
-    );
+    let get_url =
+        format!("/v1/instances/test-instance-lifecycle?project={PROJECT_NAME}");
     let stopped_instance: Instance = object_get(client, &get_url).await;
     let instance_id =
         InstanceUuid::from_untyped_uuid(stopped_instance.identity.id);
@@ -189,10 +179,8 @@ async fn test_multicast_enablement() {
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Delete the instance - this should now succeed
-    let delete_url = format!(
-        "/v1/instances/{}?project={}",
-        "test-instance-lifecycle", PROJECT_NAME
-    );
+    let delete_url =
+        format!("/v1/instances/test-instance-lifecycle?project={PROJECT_NAME}");
     nexus_test_utils::resource_helpers::object_delete(client, &delete_url)
         .await;
 
@@ -217,10 +205,8 @@ async fn test_multicast_enablement() {
     .await;
 
     // Try to attach to multicast group via API - should succeed
-    let attach_url = format!(
-        "/v1/instances/{}/multicast-groups/{}?project={PROJECT_NAME}",
-        "test-instance-api", GROUP_NAME
-    );
+    let attach_url =
+        format!("/v1/instances/test-instance-api/multicast-groups/{GROUP_NAME}?project={PROJECT_NAME}");
 
     nexus_test_utils::http_testing::NexusRequest::new(
         nexus_test_utils::http_testing::RequestBuilder::new(

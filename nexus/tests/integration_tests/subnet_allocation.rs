@@ -161,6 +161,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             true,
             Default::default(),
             None,
+            Vec::new(),
         )
         .await;
     }

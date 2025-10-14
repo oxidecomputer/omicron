@@ -109,8 +109,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::sync::Arc;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -187,8 +186,7 @@ pub struct ControlPlaneTestContext<N> {
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
-    pub dendrite:
-        RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
+    pub dendrite: RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
@@ -282,10 +280,10 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         let log = &self.logctx.log;
         debug!(log, "Stopping Dendrite for {switch_location}");
 
-        if let Some(mut dendrite) = {
-            let mut guard = self.dendrite.write().unwrap();
-            guard.remove(&switch_location)
-        } {
+        let dendrite_opt = {
+            self.dendrite.write().unwrap().remove(&switch_location)
+        };
+        if let Some(mut dendrite) = dendrite_opt {
             dendrite.cleanup().await.unwrap();
         }
     }
@@ -462,8 +460,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
     pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
-    pub dendrite:
-        RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
+    pub dendrite: RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
@@ -800,12 +797,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .host_zone_switch(
                 sled_id,
                 Ipv6Addr::LOCALHOST,
-                self.dendrite
-                    .read()
-                    .unwrap()
-                    .get(&switch_location)
-                    .unwrap()
-                    .port,
+                self.dendrite.read().unwrap().get(&switch_location).unwrap().port,
                 self.gateway.get(&switch_location).unwrap().port,
                 self.mgd.get(&switch_location).unwrap().port,
             )
@@ -2334,13 +2326,17 @@ async fn wait_for_producer_impl(
 pub fn dpd_client<N: NexusServer>(
     cptestctx: &ControlPlaneTestContext<N>,
 ) -> dpd_client::Client {
-    let dendrite_instances = cptestctx.dendrite.read().unwrap();
-
-    // Get the first available dendrite instance
-    let (switch_location, dendrite_instance) = dendrite_instances
+    // Get the first available dendrite instance and extract the values we need
+    let dendrite_guard = cptestctx.dendrite.read().unwrap();
+    let (switch_location, dendrite_instance) = dendrite_guard
         .iter()
         .next()
         .expect("No dendrite instances running for test");
+
+    // Copy the values we need while the guard is still alive
+    let switch_location = *switch_location;
+    let port = dendrite_instance.port;
+    drop(dendrite_guard);
 
     let client_state = dpd_client::ClientState {
         tag: String::from("nexus-test"),
@@ -2350,8 +2346,6 @@ pub fn dpd_client<N: NexusServer>(
         )),
     };
 
-    dpd_client::Client::new(
-        &format!("http://[::1]:{}", dendrite_instance.port),
-        client_state,
-    )
+    let addr = Ipv6Addr::LOCALHOST;
+    dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
 }

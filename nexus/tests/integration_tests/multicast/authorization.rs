@@ -229,13 +229,14 @@ async fn test_silo_users_can_attach_instances_to_multicast_groups(
     .unwrap();
 
     // Silo user can attach their instance to the fleet-scoped multicast group
-    let member_add_url = format!(
-        "{}?project=user-project",
-        mcast_group_members_url(&group.identity.name.to_string())
-    );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Id(instance.identity.id),
     };
+    let member_add_url = mcast_group_member_add_url(
+        &group.identity.name.to_string(),
+        &member_params.instance,
+        "user-project",
+    );
 
     let member: MulticastGroupMember = NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &member_add_url)
@@ -391,24 +392,26 @@ async fn test_cross_project_instance_attachment_allowed(
     let instance2 = create_instance(client, "project2", "instance2").await;
 
     // Attach instance from project1 to the group
-    let member_add_url1 = format!(
-        "{}?project=project1",
-        mcast_group_members_url(&group.identity.name.to_string())
-    );
     let member_params1 = MulticastGroupMemberAdd {
         instance: NameOrId::Id(instance1.identity.id),
     };
+    let member_add_url1 = mcast_group_member_add_url(
+        &group.identity.name.to_string(),
+        &member_params1.instance,
+        "project1",
+    );
     let member1: MulticastGroupMember =
         object_create(client, &member_add_url1, &member_params1).await;
 
     // Attach instance from project2 to the SAME group - should succeed
-    let member_add_url2 = format!(
-        "{}?project=project2",
-        mcast_group_members_url(&group.identity.name.to_string())
-    );
     let member_params2 = MulticastGroupMemberAdd {
         instance: NameOrId::Id(instance2.identity.id),
     };
+    let member_add_url2 = mcast_group_member_add_url(
+        &group.identity.name.to_string(),
+        &member_params2.instance,
+        "project2",
+    );
     let member2: MulticastGroupMember =
         object_create(client, &member_add_url2, &member_params2).await;
 
@@ -466,4 +469,332 @@ async fn test_unauthenticated_cannot_list_multicast_groups(
         .execute()
         .await
         .expect("Expected 401 Unauthorized for unauthenticated list request");
+}
+
+/// Verify that unauthenticated users cannot access member operations.
+/// This tests that member endpoints (list/add/remove) require authentication.
+#[nexus_test]
+async fn test_unauthenticated_cannot_access_member_operations(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_default_ip_pool(&client).await;
+
+    // Get current silo info
+    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    let silo: Silo = object_get(client, &silo_url).await;
+
+    // Create multicast pool and link to silo
+    create_multicast_ip_pool(&client, "mcast-pool").await;
+    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
+
+    // Create project and instance
+    let project = create_project(client, "test-project").await;
+    let instance = create_instance(client, "test-project", "test-instance").await;
+
+    // Fleet admin creates multicast group
+    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 150));
+    let group_url = "/v1/multicast-groups";
+    let group_params = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "auth-test-group".parse().unwrap(),
+            description: "Group for auth test".to_string(),
+        },
+        multicast_ip: Some(multicast_ip),
+        source_ips: None,
+        pool: Some(NameOrId::Name("mcast-pool".parse().unwrap())),
+        mvlan: None,
+    };
+    let group: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &group_url)
+            .body(Some(&group_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Try to LIST members without authentication - should get 401
+    let members_url = mcast_group_members_url(&group.identity.name.to_string());
+    RequestBuilder::new(client, http::Method::GET, &members_url)
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("Expected 401 Unauthorized for unauthenticated list members request");
+
+    // Try to ADD member without authentication - should get 401
+    let member_params = MulticastGroupMemberAdd {
+        instance: NameOrId::Id(instance.identity.id),
+    };
+    let member_add_url = mcast_group_member_add_url(
+        &group.identity.name.to_string(),
+        &member_params.instance,
+        project.identity.name.as_str(),
+    );
+    RequestBuilder::new(client, http::Method::POST, &member_add_url)
+        .body(Some(&member_params))
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("Expected 401 Unauthorized for unauthenticated add member request");
+
+    // Try to REMOVE member without authentication - should get 401
+    let member_delete_url = format!(
+        "{}/{}?project={}",
+        mcast_group_members_url(&group.identity.name.to_string()),
+        instance.identity.name,
+        project.identity.name.as_str()
+    );
+    RequestBuilder::new(client, http::Method::DELETE, &member_delete_url)
+        .expect_status(Some(StatusCode::UNAUTHORIZED))
+        .execute()
+        .await
+        .expect("Expected 401 Unauthorized for unauthenticated remove member request");
+}
+
+/// Test the asymmetric authorization behavior: unprivileged users CAN list
+/// group members even though they don't have access to the member instances.
+///
+/// This validates that listing members only requires Read permission on the
+/// multicast group (fleet-scoped), NOT permissions on individual instances.
+#[nexus_test]
+async fn test_unprivileged_users_can_list_group_members(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_default_ip_pool(&client).await;
+
+    // Get current silo info
+    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    let silo: Silo = object_get(client, &silo_url).await;
+
+    // Create multicast pool and link to silo
+    create_multicast_ip_pool(&client, "mcast-pool").await;
+    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+    link_ip_pool(&client, "mcast-pool", &silo.identity.id, false).await;
+
+    // Create two regular silo users
+    let privileged_user = create_local_user(
+        client,
+        &silo,
+        &"privileged-user".parse().unwrap(),
+        UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let unprivileged_user = create_local_user(
+        client,
+        &silo,
+        &"unprivileged-user".parse().unwrap(),
+        UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // Grant Silo Collaborator only to privileged user so they can create projects
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Collaborator,
+        privileged_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Privileged user creates their own project
+    let project_url = "/v1/projects";
+    let project_params = ProjectCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "privileged-project".parse().unwrap(),
+            description: "Project owned by privileged user".to_string(),
+        },
+    };
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, project_url)
+            .body(Some(&project_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::SiloUser(privileged_user.id))
+    .execute()
+    .await
+    .unwrap();
+
+    // Fleet admin creates multicast group
+    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 200));
+    let group_url = "/v1/multicast-groups";
+    let group_params = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "asymmetric-test-group".parse().unwrap(),
+            description: "Group for testing asymmetric authorization"
+                .to_string(),
+        },
+        multicast_ip: Some(multicast_ip),
+        source_ips: None,
+        pool: Some(NameOrId::Name("mcast-pool".parse().unwrap())),
+        mvlan: None,
+    };
+    let group: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &group_url)
+            .body(Some(&group_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Privileged user creates instance in their project
+    let instance_url = "/v1/instances?project=privileged-project";
+    let instance_params = InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "privileged-instance".parse().unwrap(),
+            description: "Instance in privileged user's project".to_string(),
+        },
+        ncpus: InstanceCpuCount::try_from(1).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "privileged-instance".parse::<Hostname>().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        multicast_groups: vec![],
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: false,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+    };
+
+    let instance: Instance = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &instance_url)
+            .body(Some(&instance_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::SiloUser(privileged_user.id))
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Privileged user adds their instance to the group
+    let member_params = MulticastGroupMemberAdd {
+        instance: NameOrId::Id(instance.identity.id),
+    };
+    let member_add_url = mcast_group_member_add_url(
+        &group.identity.name.to_string(),
+        &member_params.instance,
+        "privileged-project",
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &member_add_url)
+            .body(Some(&member_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::SiloUser(privileged_user.id))
+    .execute()
+    .await
+    .unwrap();
+
+    // Unprivileged user (who does NOT have access to
+    // privileged-project or privileged-instance) CAN list the group members
+    let members_url = mcast_group_members_url(&group.identity.name.to_string());
+    let members_response: dropshot::ResultsPage<MulticastGroupMember> =
+        NexusRequest::object_get(client, &members_url)
+            .authn_as(AuthnMode::SiloUser(unprivileged_user.id))
+            .execute()
+            .await
+            .expect(
+                "Unprivileged user should be able to list group members (asymmetric authorization)",
+            )
+            .parsed_body()
+            .unwrap();
+
+    let members = members_response.items;
+
+    // Verify unprivileged user can see the member that they don't own
+    assert_eq!(
+        members.len(),
+        1,
+        "Should see 1 member in the group (even though unprivileged user doesn't own it)"
+    );
+    assert_eq!(
+        members[0].instance_id, instance.identity.id,
+        "Should see the privileged user's instance ID in member list"
+    );
+    assert_eq!(
+        members[0].multicast_group_id, group.identity.id,
+        "Member should be associated with the correct group"
+    );
+
+    // Also verify privileged user can list too (sanity check)
+    let privileged_response: dropshot::ResultsPage<MulticastGroupMember> =
+        NexusRequest::object_get(client, &members_url)
+            .authn_as(AuthnMode::SiloUser(privileged_user.id))
+            .execute()
+            .await
+            .expect("Privileged user should also be able to list members")
+            .parsed_body()
+            .unwrap();
+
+    let privileged_members = privileged_response.items;
+    assert_eq!(privileged_members.len(), 1);
+    assert_eq!(privileged_members[0].instance_id, instance.identity.id);
+    assert_eq!(privileged_members[0].multicast_group_id, group.identity.id);
+
+    // Unprivileged user should get 404 (NOT 403) when trying to add/remove
+    // instances from inaccessible projects
+
+    // Try to ADD the instance (should get 404 because unprivileged user
+    // can't see the instance, not 403 which would leak its existence)
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &member_add_url)
+            .body(Some(&member_params))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::SiloUser(unprivileged_user.id))
+    .execute()
+    .await
+    .expect(
+        "Should get 404 when trying to add instance from inaccessible project",
+    );
+
+    // Try to REMOVE the instance (should get 404, not 403)
+    let member_delete_url = format!(
+        "{}/{}?project=privileged-project",
+        mcast_group_members_url(&group.identity.name.to_string()),
+        instance.identity.name
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, &member_delete_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::SiloUser(unprivileged_user.id))
+    .execute()
+    .await
+    .expect("Should get 404 when trying to remove instance from inaccessible project");
+
+    // Verify the member still exists (unauthorized operations didn't modify anything)
+    let final_members: dropshot::ResultsPage<MulticastGroupMember> =
+        NexusRequest::object_get(client, &members_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .unwrap()
+            .parsed_body()
+            .unwrap();
+
+    assert_eq!(
+        final_members.items.len(),
+        1,
+        "Member should still exist after failed unauthorized operations"
+    );
 }

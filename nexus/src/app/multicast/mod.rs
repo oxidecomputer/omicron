@@ -17,19 +17,16 @@
 //!   the same multicast group, enabling collaboration without IP waste.
 //! - **Cross-silo multicast**: Instances from different silos can join the
 //!   same group (when pools are linked to multiple silos).
-//! - **Efficient IP address usage**: One multicast IP serves many projects/silos
-//!   rather than requiring separate groups per project.
 //!
 //! ### Authorization Rules
 //!
 //! - **Creating/modifying/deleting groups**: Requires Fleet::Admin role (fleet admins only)
-//! - **Attaching instances to groups**: Requires only instance modification rights
-//!   (project collaborators can attach their own instances to any fleet-scoped group)
-//! - **Listing groups**: Requires Fleet::Viewer role or higher
-//!
-//! This mirrors the IP pool model where fleet admins create pools, link them to
-//! silos, and then silo users consume IPs from those pools without needing pool
-//! modification rights.
+//! - **Reading/listing groups**: Any authenticated user in the fleet can read and list groups
+//!   (enables discovery of available groups for joining instances)
+//! - **Listing group members**: Only requires Read permission on the group (fleet-scoped),
+//!   not permissions on individual member instances
+//! - **Adding/removing members**: Requires Read on group + Modify on the specific instance
+//!   (project collaborators can attach only their own instances to any fleet-scoped group)
 //!
 //! ### VNI Assignment
 //!
@@ -93,8 +90,10 @@ impl super::Nexus {
         opctx: &OpContext,
         params: &params::MulticastGroupCreate,
     ) -> CreateResult<db::model::ExternalMulticastGroup> {
-        // Multicast groups are fleet-scoped
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        // Authorization: creating multicast groups requires Fleet admin
+        opctx
+            .authorize(authz::Action::CreateChild, &authz::MULTICAST_GROUP_LIST)
+            .await?;
 
         // If an explicit multicast IP is provided, validate ASM/SSM semantics:
         // - ASM IPs must not specify sources
@@ -164,7 +163,7 @@ impl super::Nexus {
         self.db_datastore.multicast_group_lookup_by_ip(opctx, ip_addr).await
     }
 
-    /// List all multicast groups (any authenticated user can list).
+    /// List all multicast groups.
     pub(crate) async fn multicast_groups_list(
         &self,
         opctx: &OpContext,
@@ -373,6 +372,23 @@ impl super::Nexus {
     }
 
     /// List members of a multicast group.
+    ///
+    /// ##  Authorization
+    ///
+    /// This operation only requires "Read" permission on the multicast group
+    /// itself (fleet-scoped). It does NOT check permissions on the individual
+    /// instances that are members of the group.
+    ///
+    /// This asymmetry is intentional:
+    /// - **Listing members**: Allows discovery of which instances are in a group
+    ///   (useful for understanding multicast group membership across projects)
+    /// - **Adding/removing members**: Requires Modify permission on the specific
+    ///   instance (project-scoped), enforcing that users can only manage instances
+    ///   they own
+    ///
+    /// Note: When unauthorized users attempt to add/remove instances they don't
+    /// have access to, the instance lookup fails with 404 (not 403) to prevent
+    /// information leakage about instances in inaccessible projects.
     pub(crate) async fn multicast_group_members_list(
         &self,
         opctx: &OpContext,

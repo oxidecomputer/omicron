@@ -770,6 +770,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         true,
         Default::default(),
         None,
+        Vec::new(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -944,6 +945,7 @@ async fn test_instance_migrate_v2p_and_routes(
         true,
         Default::default(),
         None,
+        Vec::new(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1159,6 +1161,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         true,
         Default::default(),
         Some(InstanceCpuPlatform::AmdMilan),
+        Vec::new(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1348,6 +1351,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         true,
         Default::default(),
         Some(InstanceCpuPlatform::AmdTurin),
+        Vec::new(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1425,6 +1429,7 @@ async fn test_instance_migration_unknown_sled_type(
         true,
         Default::default(),
         None,
+        Vec::new(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1682,6 +1687,7 @@ async fn test_instance_failed_when_on_expunged_sled(
                 true,
                 Some(auto_restart),
                 None,
+                Vec::new(),
             )
             .await;
             let instance_id =
@@ -2032,6 +2038,7 @@ async fn make_forgotten_instance(
         true,
         Some(auto_restart),
         None,
+        Vec::new(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2262,6 +2269,7 @@ async fn test_instance_metrics_with_migration(
         true,
         Default::default(),
         None,
+        Vec::new(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -3683,6 +3691,7 @@ async fn test_instance_update_network_interface_transit_ips(
         false,
         Default::default(),
         None,
+        Vec::new(),
     )
     .await;
 
@@ -7290,6 +7299,7 @@ async fn test_instance_attach_several_external_ips(
         true,
         Default::default(),
         None,
+        Vec::new(),
     )
     .await;
 
@@ -7398,6 +7408,7 @@ async fn create_instance_with_pool(
         true,
         Default::default(),
         None,
+        Vec::new(),
     )
     .await
 }

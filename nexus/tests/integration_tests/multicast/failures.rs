@@ -70,13 +70,14 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
 
     // Add member to make group programmable
     create_instance(client, project_name, instance_name).await;
-    let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={project_name}",
-        group_name
-    );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
     };
+    let member_add_url = mcast_group_member_add_url(
+        group_name,
+        &member_params.instance,
+        project_name,
+    );
     object_create::<_, MulticastGroupMember>(
         client,
         &member_add_url,
@@ -241,8 +242,7 @@ async fn test_dpd_failure_during_creating_state(
     create_instance(client, project_name, instance_name).await;
 
     let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={project_name}",
-        group_name
+        "/v1/multicast-groups/{group_name}/members?project={project_name}"
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
@@ -319,13 +319,14 @@ async fn test_dpd_failure_during_active_state(
 
     // Add member to make group programmable
     create_instance(client, project_name, instance_name).await;
-    let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={project_name}",
-        group_name
-    );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
     };
+    let member_add_url = mcast_group_member_add_url(
+        group_name,
+        &member_params.instance,
+        project_name,
+    );
     object_create::<_, MulticastGroupMember>(
         client,
         &member_add_url,
@@ -417,8 +418,7 @@ async fn test_dpd_failure_during_deleting_state(
     // Add member and let group activate
     create_instance(client, project_name, instance_name).await;
     let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={project_name}",
-        group_name
+        "/v1/multicast-groups/{group_name}/members?project={project_name}"
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
@@ -543,8 +543,7 @@ async fn test_multicast_group_members_during_dpd_failure(
     let instance = create_instance(client, project_name, instance_name).await;
 
     let member_add_url = format!(
-        "/v1/multicast-groups/{}/members?project={project_name}",
-        group_name
+        "/v1/multicast-groups/{group_name}/members?project={project_name}"
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
@@ -558,10 +557,7 @@ async fn test_multicast_group_members_during_dpd_failure(
     .await;
 
     // Verify member is accessible before DPD failure
-    let members_url = format!(
-        "/v1/multicast-groups/{}/members?project={project_name}",
-        group_name
-    );
+    let members_url = format!("/v1/multicast-groups/{group_name}/members");
     let initial_members =
         nexus_test_utils::resource_helpers::objects_list_page_authz::<
             MulticastGroupMember,

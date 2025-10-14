@@ -318,16 +318,17 @@ impl super::Nexus {
     /// Look up an instance by name or UUID.
     ///
     /// The `project` parameter is required for name-based lookup (provides scope)
-    /// and optional for UUID-based lookup (provides authorization context).
+    /// and must NOT be specified for UUID-based lookup.
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
         instance_selector: params::InstanceSelector,
     ) -> LookupResult<lookup::Instance<'a>> {
         match instance_selector {
-            params::InstanceSelector { instance: NameOrId::Id(id), .. } => {
-                // UUID-based lookup: project parameter is optional and used only for
-                // authorization context. The UUID is sufficient for lookup regardless.
+            params::InstanceSelector {
+                instance: NameOrId::Id(id),
+                project: None,
+            } => {
                 let instance =
                     LookupPath::new(opctx, &self.db_datastore).instance_id(id);
                 Ok(instance)
@@ -336,11 +337,15 @@ impl super::Nexus {
                 instance: NameOrId::Name(name),
                 project: Some(project),
             } => {
-                // Name-based lookup: project parameter is required for scoping
                 let instance = self
                     .project_lookup(opctx, params::ProjectSelector { project })?
                     .instance_name_owned(name.into());
                 Ok(instance)
+            }
+            params::InstanceSelector { instance: NameOrId::Id(_), .. } => {
+                Err(Error::invalid_request(
+                    "when providing instance as an ID project should not be specified",
+                ))
             }
             _ => Err(Error::invalid_request(
                 "instance should either be UUID or project should be specified",

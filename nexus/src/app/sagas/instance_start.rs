@@ -1121,26 +1121,19 @@ mod test {
             .expect("unable to update switch1 settings");
 
         // Shutdown one of the switch daemons
-        let port = {
-            // Remove the switch from the map to take ownership and drop the lock
-            // before awaiting. This is intentional - the test later inserts a new
-            // switch instance at this location.
-            let mut switch0_dpd = {
-                let mut dendrite = cptestctx.dendrite.write().unwrap();
-                dendrite
-                    .remove(&SwitchLocation::Switch0)
-                    .expect("there should be at least one dendrite running")
-            };
+        let mut switch0_dpd = cptestctx
+            .dendrite
+            .write()
+            .unwrap()
+            .remove(&SwitchLocation::Switch0)
+            .expect("there should be at least one dendrite running");
 
-            let port = switch0_dpd.port;
+        let switch0_port = switch0_dpd.port;
 
-            switch0_dpd
-                .cleanup()
-                .await
-                .expect("switch0 process should get cleaned up");
-
-            port
-        };
+        switch0_dpd
+            .cleanup()
+            .await
+            .expect("switch0 process should get cleaned up");
 
         let log = &opctx.log;
 
@@ -1154,7 +1147,7 @@ mod test {
         let addr = std::net::Ipv6Addr::LOCALHOST;
 
         let switch_0_dpd_client = dpd_client::Client::new(
-            &format!("http://[{addr}]:{port}"),
+            &format!("http://[{addr}]:{switch0_port}"),
             client_state,
         );
 
@@ -1182,13 +1175,13 @@ mod test {
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
 
-        let port = cptestctx
-            .dendrite
-            .read()
-            .unwrap()
-            .get(&SwitchLocation::Switch1)
-            .expect("two dendrites should be present in test context")
-            .port;
+        let port = {
+            let dendrite_guard = cptestctx.dendrite.read().unwrap();
+            dendrite_guard
+                .get(&SwitchLocation::Switch1)
+                .expect("two dendrites should be present in test context")
+                .port
+        };
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
@@ -1216,14 +1209,7 @@ mod test {
 
         assert_eq!(nat_entries.len(), 1);
 
-        let port = cptestctx
-            .dendrite
-            .read()
-            .unwrap()
-            .get(&SwitchLocation::Switch0)
-            .expect("two dendrites should be present in test context")
-            .port;
-
+        // Reuse the port number from the removed Switch0 to start a new dendrite instance
         let nexus_address = cptestctx.internal_client.bind_address;
         let mgs = cptestctx.gateway.get(&SwitchLocation::Switch0).unwrap();
         let mgs_address =
@@ -1233,18 +1219,14 @@ mod test {
         // Start a new dendrite instance for switch0
         let new_switch0 =
             omicron_test_utils::dev::dendrite::DendriteInstance::start(
-                port,
+                switch0_port,
                 Some(nexus_address),
                 Some(mgs_address),
             )
             .await
             .unwrap();
 
-        cptestctx
-            .dendrite
-            .write()
-            .unwrap()
-            .insert(SwitchLocation::Switch0, new_switch0);
+        cptestctx.dendrite.write().unwrap().insert(SwitchLocation::Switch0, new_switch0);
 
         // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
         // This might take some time while the new dendrite comes online.

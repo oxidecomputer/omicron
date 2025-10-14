@@ -233,8 +233,6 @@ impl DataStore {
     ) -> ListResultVec<ExternalMulticastGroup> {
         use nexus_db_schema::schema::multicast_group::dsl;
 
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
         match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::multicast_group, dsl::id, pagparams)
