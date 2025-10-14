@@ -6,12 +6,12 @@
 //! updates.
 
 use super::MgsClients;
-use crate::host_phase1_updater::ReconfiguratorHostPhase1Updater;
-use crate::mgs_clients::GatewaySpComponentResetError;
-use crate::mgs_clients::RetryableMgsError;
-use crate::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
-use crate::rot_updater::ReconfiguratorRotUpdater;
-use crate::sp_updater::ReconfiguratorSpUpdater;
+use crate::mgs_updates::host_phase1_updater::ReconfiguratorHostPhase1Updater;
+use crate::mgs_updates::mgs_clients::GatewaySpComponentResetError;
+use crate::mgs_updates::mgs_clients::RetryableMgsError;
+use crate::mgs_updates::rot_bootloader_updater::ReconfiguratorRotBootloaderUpdater;
+use crate::mgs_updates::rot_updater::ReconfiguratorRotUpdater;
+use crate::mgs_updates::sp_updater::ReconfiguratorSpUpdater;
 use futures::future::BoxFuture;
 use gateway_types::rot::RotSlot;
 use nexus_types::deployment::ExpectedVersion;

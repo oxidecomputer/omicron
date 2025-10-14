@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::common_sp_update::error_means_caboose_is_invalid;
+use crate::mgs_updates::common_sp_update::error_means_caboose_is_invalid;
 use gateway_client::HostPhase1HashError;
 use gateway_client::SpComponent;
 use gateway_client::types::GetRotBootInfoParams;

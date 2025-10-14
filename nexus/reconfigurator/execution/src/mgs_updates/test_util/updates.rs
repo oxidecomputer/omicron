@@ -7,18 +7,18 @@
 //! These are factored to make it easy to write a variety of different kinds of
 //! tests without having to put together too much boilerplate in each test.
 
-use crate::common_sp_update::SpComponentUpdateHelper;
-use crate::driver::UpdateAttemptStatusUpdater;
-use crate::driver_update::ApplyUpdateError;
-use crate::driver_update::PROGRESS_TIMEOUT;
-use crate::driver_update::SpComponentUpdate;
-use crate::driver_update::apply_update;
-use crate::test_util::cabooses_equal;
-use crate::test_util::host_phase_2_test_state::HostPhase2State;
-use crate::test_util::sp_test_state::SpTestState;
-use crate::test_util::step_through::StepResult;
-use crate::test_util::step_through::StepThrough;
-use crate::test_util::test_artifacts::TestArtifacts;
+use crate::mgs_updates::common_sp_update::SpComponentUpdateHelper;
+use crate::mgs_updates::driver::UpdateAttemptStatusUpdater;
+use crate::mgs_updates::driver_update::ApplyUpdateError;
+use crate::mgs_updates::driver_update::PROGRESS_TIMEOUT;
+use crate::mgs_updates::driver_update::SpComponentUpdate;
+use crate::mgs_updates::driver_update::apply_update;
+use crate::mgs_updates::test_util::cabooses_equal;
+use crate::mgs_updates::test_util::host_phase_2_test_state::HostPhase2State;
+use crate::mgs_updates::test_util::sp_test_state::SpTestState;
+use crate::mgs_updates::test_util::step_through::StepResult;
+use crate::mgs_updates::test_util::step_through::StepThrough;
+use crate::mgs_updates::test_util::test_artifacts::TestArtifacts;
 use futures::FutureExt;
 use gateway_test_utils::setup::GatewayTestContext;
 use gateway_types::component::SpType;

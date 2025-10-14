@@ -4,13 +4,13 @@
 
 //! Concurrent-safe facilities for doing MGS-managed upates
 
-use crate::common_sp_update::PrecheckError;
-use crate::common_sp_update::PrecheckStatus;
-use crate::common_sp_update::STATUS_POLL_INTERVAL;
-use crate::common_sp_update::SpComponentUpdateHelper;
-use crate::driver::UpdateAttemptStatusUpdater;
-use crate::mgs_clients::GatewayClientError;
-use crate::{ArtifactCache, ArtifactCacheError, MgsClients};
+use crate::mgs_updates::common_sp_update::PrecheckError;
+use crate::mgs_updates::common_sp_update::PrecheckStatus;
+use crate::mgs_updates::common_sp_update::STATUS_POLL_INTERVAL;
+use crate::mgs_updates::common_sp_update::SpComponentUpdateHelper;
+use crate::mgs_updates::driver::UpdateAttemptStatusUpdater;
+use crate::mgs_updates::mgs_clients::GatewayClientError;
+use crate::mgs_updates::{ArtifactCache, ArtifactCacheError, MgsClients};
 use gateway_client::SpComponent;
 use gateway_client::types::SpUpdateStatus;
 use gateway_client::types::UpdateAbortBody;
@@ -759,9 +759,9 @@ mod test_host_phase_1;
 #[cfg(test)]
 mod test {
     use super::ApplyUpdateError;
-    use crate::test_util::test_artifacts::TestArtifacts;
-    use crate::test_util::updates::ExpectedSpComponent;
-    use crate::test_util::updates::UpdateDescription;
+    use crate::mgs_updates::test_util::test_artifacts::TestArtifacts;
+    use crate::mgs_updates::test_util::updates::ExpectedSpComponent;
+    use crate::mgs_updates::test_util::updates::UpdateDescription;
     use assert_matches::assert_matches;
     use gateway_messages::SpPort;
     use gateway_test_utils::setup::GatewayTestContext;

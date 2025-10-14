@@ -129,10 +129,10 @@
 //!      and the upgrade will be complete.
 
 use super::MgsClients;
-use crate::SpComponentUpdateHelperImpl;
-use crate::common_sp_update::PostUpdateError;
-use crate::common_sp_update::PrecheckError;
-use crate::common_sp_update::PrecheckStatus;
+use crate::mgs_updates::SpComponentUpdateHelperImpl;
+use crate::mgs_updates::common_sp_update::PostUpdateError;
+use crate::mgs_updates::common_sp_update::PrecheckError;
+use crate::mgs_updates::common_sp_update::PrecheckStatus;
 use futures::FutureExt as _;
 use futures::future::BoxFuture;
 use gateway_client::HostPhase1HashError;

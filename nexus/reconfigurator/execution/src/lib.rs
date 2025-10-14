@@ -41,6 +41,7 @@ mod dns;
 mod omicron_physical_disks;
 mod omicron_sled_config;
 mod omicron_zones;
+pub mod mgs_updates;
 mod sagas;
 mod sled_state;
 #[cfg(test)]

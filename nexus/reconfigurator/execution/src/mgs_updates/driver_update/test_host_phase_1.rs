@@ -5,11 +5,11 @@
 //! Tests for Reconfigurator-based host phase 1 updates.
 
 use super::*;
-use crate::test_util::host_phase_2_test_state::HostPhase2TestContext;
-use crate::test_util::sp_test_state::SpTestState;
-use crate::test_util::test_artifacts::TestArtifacts;
-use crate::test_util::updates::ExpectedSpComponent;
-use crate::test_util::updates::UpdateDescription;
+use crate::mgs_updates::test_util::host_phase_2_test_state::HostPhase2TestContext;
+use crate::mgs_updates::test_util::sp_test_state::SpTestState;
+use crate::mgs_updates::test_util::test_artifacts::TestArtifacts;
+use crate::mgs_updates::test_util::updates::ExpectedSpComponent;
+use crate::mgs_updates::test_util::updates::UpdateDescription;
 use assert_matches::assert_matches;
 use gateway_messages::SpPort;
 use gateway_test_utils::setup::GatewayTestContext;

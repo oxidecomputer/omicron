@@ -5,15 +5,15 @@
 //! Module containing types for updating RoT Bootloaders via MGS.
 
 use super::MgsClients;
-use crate::SpComponentUpdateHelperImpl;
-use crate::common_sp_update::FoundVersion;
-use crate::common_sp_update::PostUpdateError;
-use crate::common_sp_update::PrecheckError;
-use crate::common_sp_update::PrecheckStatus;
-use crate::common_sp_update::error_means_caboose_is_invalid;
-use crate::mgs_clients::GatewayClientError;
-use crate::rot_updater::WAIT_FOR_BOOT_INFO_TIMEOUT;
-use crate::rot_updater::wait_for_boot_info;
+use crate::mgs_updates::SpComponentUpdateHelperImpl;
+use crate::mgs_updates::common_sp_update::FoundVersion;
+use crate::mgs_updates::common_sp_update::PostUpdateError;
+use crate::mgs_updates::common_sp_update::PrecheckError;
+use crate::mgs_updates::common_sp_update::PrecheckStatus;
+use crate::mgs_updates::common_sp_update::error_means_caboose_is_invalid;
+use crate::mgs_updates::mgs_clients::GatewayClientError;
+use crate::mgs_updates::rot_updater::WAIT_FOR_BOOT_INFO_TIMEOUT;
+use crate::mgs_updates::rot_updater::wait_for_boot_info;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use gateway_client::SpComponent;

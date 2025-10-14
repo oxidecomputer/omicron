@@ -4,12 +4,12 @@
 
 //! Drive one or more in-progress MGS-managed updates
 
-use crate::ArtifactCache;
-use crate::common_sp_update::SpComponentUpdateHelper;
-use crate::driver_update::ApplyUpdateError;
-use crate::driver_update::PROGRESS_TIMEOUT;
-use crate::driver_update::SpComponentUpdate;
-use crate::driver_update::apply_update;
+use crate::mgs_updates::ArtifactCache;
+use crate::mgs_updates::common_sp_update::SpComponentUpdateHelper;
+use crate::mgs_updates::driver_update::ApplyUpdateError;
+use crate::mgs_updates::driver_update::PROGRESS_TIMEOUT;
+use crate::mgs_updates::driver_update::SpComponentUpdate;
+use crate::mgs_updates::driver_update::apply_update;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
