@@ -257,8 +257,17 @@ impl PlanningInputFromDb<'_> {
     }
 
     pub fn build(&self) -> Result<PlanningInput, Error> {
-        let service_ip_pool_ranges =
-            self.ip_pool_range_rows.iter().map(IpRange::from).collect();
+        let service_ip_pool_ranges = self
+            .ip_pool_range_rows
+            .iter()
+            .map(|range| {
+                IpRange::try_from(range).map_err(|e| {
+                    Error::internal_error(&format!(
+                        "invalid IP pool range in database: {e:#}"
+                    ))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let policy = Policy {
             service_ip_pool_ranges,
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,

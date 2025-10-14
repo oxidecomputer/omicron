@@ -2270,7 +2270,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_range (
     /* FK into the `ip_pool` table. */
     ip_pool_id UUID NOT NULL,
     /* Tracks child resources, IP addresses allocated out of this range. */
-    rcgen INT8 NOT NULL
+    rcgen INT8 NOT NULL,
+
+    /* Ensure first address is not greater than last address */
+    CONSTRAINT check_address_order CHECK (first_address <= last_address)
 );
 
 /*
