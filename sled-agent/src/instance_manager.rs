@@ -8,13 +8,13 @@ use crate::instance::Instance;
 use crate::instance::VmmStateOwner;
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
+use crate::port_manager::SledAgentPortManager;
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::SledVmmState;
@@ -64,7 +64,7 @@ pub enum Error {
 pub(crate) struct InstanceManagerServices {
     pub nexus_client: NexusClient,
     pub vnic_allocator: VnicAllocator<Etherstub>,
-    pub port_manager: PortManager,
+    pub port_manager: SledAgentPortManager,
     pub zone_bundler: ZoneBundler,
     pub zone_builder_factory: ZoneBuilderFactory,
     pub metrics_queue: MetricsRequestQueue,
@@ -93,7 +93,7 @@ impl InstanceManager {
         log: Logger,
         nexus_client: NexusClient,
         vnic_allocator: VnicAllocator<Etherstub>,
-        port_manager: PortManager,
+        port_manager: SledAgentPortManager,
         currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
         available_datasets_rx: AvailableDatasetsReceiver,
         zone_bundler: ZoneBundler,
@@ -123,7 +123,7 @@ impl InstanceManager {
         log: Logger,
         nexus_client: NexusClient,
         vnic_allocator: VnicAllocator<Etherstub>,
-        port_manager: PortManager,
+        port_manager: SledAgentPortManager,
         currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
         available_datasets_rx: AvailableDatasetsReceiver,
         zone_bundler: ZoneBundler,
@@ -406,7 +406,7 @@ struct InstanceManagerRunner {
     jobs: BTreeMap<PropolisUuid, Instance>,
 
     vnic_allocator: VnicAllocator<Etherstub>,
-    port_manager: PortManager,
+    port_manager: SledAgentPortManager,
     currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
     available_datasets_rx: AvailableDatasetsReceiver,
     zone_bundler: ZoneBundler,

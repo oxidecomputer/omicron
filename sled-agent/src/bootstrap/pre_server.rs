@@ -35,6 +35,7 @@ use illumos_utils::zone::Api;
 use illumos_utils::zone::Zones;
 use omicron_common::FileKv;
 use omicron_common::address::Ipv6Subnet;
+use oximeter_instruments::kstat::KstatSemaphore;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_hardware::DendriteAsic;
 use sled_hardware::SledMode;
@@ -48,6 +49,7 @@ use tokio::sync::oneshot;
 
 pub(super) struct BootstrapAgentStartup {
     pub(super) config: Config,
+    pub(super) semaphore: KstatSemaphore,
     pub(super) global_zone_bootstrap_ip: Ipv6Addr,
     pub(super) base_log: Logger,
     pub(super) startup_log: Logger,
@@ -136,6 +138,8 @@ impl BootstrapAgentStartup {
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
 
+        let semaphore = KstatSemaphore::new();
+
         let service_manager = ServiceManager::new(
             &base_log,
             ddm_reconciler,
@@ -155,6 +159,7 @@ impl BootstrapAgentStartup {
 
         Ok(Self {
             config,
+            semaphore,
             global_zone_bootstrap_ip,
             base_log,
             startup_log: log,

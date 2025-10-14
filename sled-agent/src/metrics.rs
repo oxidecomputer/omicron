@@ -11,6 +11,7 @@ use omicron_common::api::internal::shared::SledIdentifiers;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
 use oximeter_instruments::kstat::KstatSampler;
+use oximeter_instruments::kstat::KstatSemaphore;
 use oximeter_instruments::kstat::TargetId;
 use oximeter_instruments::kstat::link::SledDataLink;
 use oximeter_instruments::kstat::link::SledDataLinkTarget;
@@ -358,10 +359,12 @@ impl MetricsManager {
     /// Construct a new metrics manager.
     pub fn new(
         log: &Logger,
+        semaphore: KstatSemaphore,
         identifiers: SledIdentifiers,
         address: Ipv6Addr,
     ) -> Result<Self, Error> {
-        let sampler = KstatSampler::new(log).map_err(Error::Kstat)?;
+        let sampler =
+            KstatSampler::new(log, semaphore).map_err(Error::Kstat)?;
         let server = start_producer_server(&log, identifiers.sled_id, address)?;
         server
             .registry()

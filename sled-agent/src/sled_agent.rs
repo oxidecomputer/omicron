@@ -15,6 +15,7 @@ use crate::metrics::{MetricsManager, MetricsRequestQueue};
 use crate::nexus::{
     NexusClient, NexusNotifierHandle, NexusNotifierInput, NexusNotifierTask,
 };
+use crate::port_manager::SledAgentPortManager;
 use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager, UnderlayInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
@@ -29,7 +30,6 @@ use derive_more::From;
 use dropshot::HttpError;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zpool::PathInPool;
 use itertools::Itertools as _;
@@ -53,6 +53,7 @@ use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
+use oximeter_instruments::kstat::KstatSemaphore;
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -346,7 +347,7 @@ struct SledAgentInner {
     hardware: HardwareManager,
 
     // Component of Sled Agent responsible for managing OPTE ports.
-    port_manager: PortManager,
+    port_manager: SledAgentPortManager,
 
     // Other Oxide-controlled services running on this Sled.
     services: ServiceManager,
@@ -395,8 +396,10 @@ pub struct SledAgent {
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         config: &Config,
+        semaphore: KstatSemaphore,
         log: Logger,
         nexus_client: NexusClient,
         request: StartSledAgentRequest,
@@ -476,7 +479,9 @@ impl SledAgent {
 
         // Initialize the xde kernel driver with the underlay devices.
         let underlay_nics = underlay::find_nics(&config.data_links).await?;
-        illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
+        semaphore.run(|| {
+            illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)
+        })?;
 
         // Start collecting metric data.
         let baseboard = long_running_task_handles.hardware_manager.baseboard();
@@ -487,8 +492,12 @@ impl SledAgent {
             revision: baseboard.revision(),
             serial: baseboard.identifier().to_string(),
         };
-        let metrics_manager =
-            MetricsManager::new(&log, identifiers.clone(), *sled_address.ip())?;
+        let metrics_manager = MetricsManager::new(
+            &log,
+            semaphore.clone(),
+            identifiers.clone(),
+            *sled_address.ip(),
+        )?;
 
         // Start tracking the underlay physical links.
         for link in underlay::find_chelsio_links(&config.data_links).await? {
@@ -508,8 +517,9 @@ impl SledAgent {
         }
 
         // Create the PortManager to manage all the OPTE ports on the sled.
-        let port_manager = PortManager::new(
+        let port_manager = SledAgentPortManager::new(
             parent_log.new(o!("component" => "PortManager")),
+            semaphore,
             *sled_address.ip(),
         );
 

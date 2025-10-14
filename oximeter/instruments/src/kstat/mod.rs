@@ -94,6 +94,7 @@ mod sampler;
 pub use sampler::CollectionDetails;
 pub use sampler::ExpirationBehavior;
 pub use sampler::KstatSampler;
+pub use sampler::KstatSemaphore;
 pub use sampler::TargetId;
 pub use sampler::TargetStatus;
 

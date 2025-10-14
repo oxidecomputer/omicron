@@ -12,12 +12,13 @@ use crate::instance_manager::{
 };
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
+use crate::port_manager::SledAgentPortManager;
 use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
 use chrono::Utc;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
+use illumos_utils::opte::{DhcpCfg, PortCreateParams};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
@@ -513,7 +514,7 @@ struct InstanceRunner {
 
     // Reference to the port manager for creating OPTE ports when starting the
     // instance
-    port_manager: PortManager,
+    port_manager: SledAgentPortManager,
 
     // Guest NIC and OPTE port information
     requested_nics: Vec<NetworkInterface>,
@@ -2274,6 +2275,7 @@ mod tests {
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::InternalZpoolUuid;
+    use oximeter_instruments::kstat::KstatSemaphore;
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
@@ -2521,8 +2523,9 @@ mod tests {
             Etherstub("mystub".to_string()),
             illumos_utils::fakes::dladm::Dladm::new(),
         );
-        let port_manager = PortManager::new(
+        let port_manager = SledAgentPortManager::new(
             log.new(o!("component" => "PortManager")),
+            KstatSemaphore::new(),
             Ipv6Addr::new(0xfd00, 0x1de, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01),
         );
 

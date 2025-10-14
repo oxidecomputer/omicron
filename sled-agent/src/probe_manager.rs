@@ -1,9 +1,10 @@
 use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
+use crate::port_manager::SledAgentPortManager;
 use anyhow::{Result, anyhow};
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
-use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
+use illumos_utils::opte::{DhcpCfg, PortCreateParams};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use nexus_client::types::{ProbeExternalIp, ProbeInfo};
@@ -59,7 +60,7 @@ pub(crate) struct ProbeManagerInner {
     log: Logger,
     sled_id: Uuid,
     vnic_allocator: VnicAllocator<Etherstub>,
-    port_manager: PortManager,
+    port_manager: SledAgentPortManager,
     metrics_queue: MetricsRequestQueue,
     running_probes: Mutex<RunningProbes>,
     available_datasets_rx: AvailableDatasetsReceiver,
@@ -72,7 +73,7 @@ impl ProbeManager {
         sled_id: Uuid,
         nexus_client: NexusClient,
         etherstub: Etherstub,
-        port_manager: PortManager,
+        port_manager: SledAgentPortManager,
         metrics_queue: MetricsRequestQueue,
         available_datasets_rx: AvailableDatasetsReceiver,
         log: Logger,

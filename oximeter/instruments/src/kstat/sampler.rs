@@ -313,6 +313,37 @@ impl<'a> From<Kstat<'a>> for KstatPath {
 pub(crate) const CREATION_TIME_PRUNE_INTERVAL: Duration =
     Duration::from_secs(60);
 
+/// A semaphore to prevent XDE creations/deletions and kstat reads from
+/// happening in parallel.
+///
+/// This is a semaphore with one permit, and is cheaply cloneable.
+///
+/// This is a temporary workaround for
+/// https://github.com/oxidecomputer/opte/issues/758. See
+/// https://github.com/oxidecomputer/omicron/issues/9211 for more details.
+#[derive(Clone, Debug)]
+pub struct KstatSemaphore {
+    semaphore: Arc<Mutex<()>>,
+}
+
+impl KstatSemaphore {
+    /// Create a new semaphore with one permit.
+    pub fn new() -> Self {
+        Self { semaphore: Arc::new(Mutex::new(())) }
+    }
+
+    /// Run some code guarded by the semaphore.
+    pub fn run<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        let permit = self.semaphore.lock().unwrap();
+        let ret = f();
+        drop(permit);
+        ret
+    }
+}
+
 /// Type which owns the `kstat` chain and samples each target on an interval.
 ///
 /// This type runs in a separate tokio task. As targets are added, it schedules
@@ -323,6 +354,9 @@ pub(crate) const CREATION_TIME_PRUNE_INTERVAL: Duration =
 #[derive(Debug)]
 struct KstatSamplerWorker {
     log: Logger,
+
+    /// The semaphore used to prevent a deadlock within the illumos kernel.
+    semaphore: KstatSemaphore,
 
     /// The kstat chain.
     ctl: Option<Ctl>,
@@ -394,6 +428,7 @@ impl KstatSamplerWorker {
     /// Create a new sampler worker.
     fn new(
         log: Logger,
+        semaphore: KstatSemaphore,
         inbox: mpsc::Receiver<Request>,
         self_stat_queue: broadcast::Sender<Sample>,
         samples: Arc<Mutex<BTreeMap<TargetId, Vec<Sample>>>>,
@@ -402,6 +437,7 @@ impl KstatSamplerWorker {
         let ctl = Some(Ctl::new().map_err(Error::Kstat)?);
         let self_stats = hostname().map(self_stats::SelfStats::new);
         Ok(Self {
+            semaphore,
             ctl,
             log,
             targets: BTreeMap::new(),
@@ -840,19 +876,20 @@ impl KstatSamplerWorker {
 
         // Fetch each interested kstat, and include the data and creation times
         // for each of them.
-        let kstats = ctl
-            .iter()
-            .filter(|kstat| sampled_kstat.target.interested(kstat))
-            .map(|mut kstat| {
-                let data = ctl.read(&mut kstat).map_err(Error::Kstat)?;
-                let creation_time = Self::ensure_kstat_creation_time(
-                    &self.log,
-                    kstat,
-                    &mut self.creation_times,
-                )?;
-                Ok((creation_time, kstat, data))
-            })
-            .collect::<Result<Vec<_>, _>>();
+        let kstats = self.semaphore.run(|| {
+            ctl.iter()
+                .filter(|kstat| sampled_kstat.target.interested(kstat))
+                .map(|mut kstat| {
+                    let data = ctl.read(&mut kstat).map_err(Error::Kstat)?;
+                    let creation_time = Self::ensure_kstat_creation_time(
+                        &self.log,
+                        kstat,
+                        &mut self.creation_times,
+                    )?;
+                    Ok((creation_time, kstat, data))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        });
         match kstats {
             Ok(k) if !k.is_empty() => {
                 sampled_kstat.time_of_last_collection = Some(now());
@@ -1230,13 +1267,14 @@ impl KstatSampler {
     pub const DEFAULT_SAMPLE_LIMIT: usize = 500;
 
     /// Create a new sampler.
-    pub fn new(log: &Logger) -> Result<Self, Error> {
-        Self::with_sample_limit(log, Self::DEFAULT_SAMPLE_LIMIT)
+    pub fn new(log: &Logger, semaphore: KstatSemaphore) -> Result<Self, Error> {
+        Self::with_sample_limit(log, semaphore, Self::DEFAULT_SAMPLE_LIMIT)
     }
 
     /// Create a new sampler with a sample limit.
     pub fn with_sample_limit(
         log: &Logger,
+        semaphore: KstatSemaphore,
         limit: usize,
     ) -> Result<Self, Error> {
         let samples = Arc::new(Mutex::new(BTreeMap::new()));
@@ -1245,6 +1283,7 @@ impl KstatSampler {
         let (outbox, inbox) = mpsc::channel(1);
         let worker = KstatSamplerWorker::new(
             log.new(o!("component" => "kstat-sampler-worker")),
+            semaphore,
             inbox,
             self_stat_tx,
             samples.clone(),
