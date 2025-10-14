@@ -299,9 +299,19 @@ impl DataStore {
         external_ip: OmicronZoneExternalIp,
     ) -> CreateResult<ExternalIp> {
         let version = IpVersion::from(external_ip.ip_version());
-        let (authz_pool, pool) =
-            self.ip_pools_service_lookup(opctx, version).await?;
-        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+
+        // TODO-correctness: We need to figure out which IP Pool this address
+        // actually belongs in, if there are more than one of the same address
+        // version.
+        //
+        // See: https://github.com/oxidecomputer/omicron/issues/8949.
+        let (.., pool) = self
+            .fetch_first_oxide_internal_ip_pool(
+                opctx,
+                authz::Action::CreateChild,
+                Some(version),
+            )
+            .await?;
         let data = IncompleteExternalIp::for_omicron_zone(
             pool.id(),
             external_ip,
@@ -341,11 +351,14 @@ impl DataStore {
         // Note the IP version used here isn't important. It's just for the
         // authz check to list children, and not used for the actual database
         // query below, which filters on is_service to get external IPs from
-        // either pool.
-        let (authz_pool, _pool) =
-            self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
-        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
-
+        // any pool.
+        let _ = self
+            .fetch_first_oxide_internal_ip_pool(
+                opctx,
+                authz::Action::ListChildren,
+                None,
+            )
+            .await?;
         paginated(dsl::external_ip, dsl::id, pagparams)
             .filter(dsl::is_service)
             .filter(dsl::time_deleted.is_null())
@@ -1171,9 +1184,13 @@ mod tests {
         ))
         .unwrap();
         let (service_ip_pool, db_pool) = datastore
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
+            .fetch_first_oxide_internal_ip_pool(
+                opctx,
+                authz::Action::CreateChild,
+                Some(IpVersion::V4),
+            )
             .await
-            .expect("lookup service ip pool");
+            .expect("Failed authz check on delegated IP Pool");
         datastore
             .ip_pool_add_range(opctx, &service_ip_pool, &db_pool, &ip_range)
             .await

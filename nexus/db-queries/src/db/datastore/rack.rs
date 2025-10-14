@@ -8,7 +8,6 @@ use super::DataStore;
 use super::SERVICE_IPV4_POOL_NAME;
 use super::SERVICE_IPV6_POOL_NAME;
 use super::dns::DnsVersionUpdateBuilder;
-use super::ip_pool::ServiceIpPools;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -40,6 +39,8 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::IpPool;
+use nexus_db_model::IpPoolReservationType;
 use nexus_db_model::IpVersion;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
@@ -73,6 +74,7 @@ use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
@@ -535,11 +537,30 @@ impl DataStore {
         Ok(())
     }
 
+    fn find_first_ip_pool_with_version<'a>(
+        log: &'a slog::Logger,
+        ip_pools: &'a [nexus_db_model::IpPool],
+        version: IpVersion,
+    ) -> Result<&'a nexus_db_model::IpPool, Error> {
+        ip_pools.iter().find(|p| p.ip_version == version).ok_or_else(|| {
+            error!(
+                log,
+                "Initializing Rack: No IP Pool with \
+                    version IP{}",
+                version,
+            );
+            Error::internal_error(&format!(
+                "Could not find IP{version} Pool reserved \
+                    for Oxide internal use",
+            ))
+        })
+    }
+
     async fn rack_populate_service_networking_records(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         log: &slog::Logger,
-        service_pools: &ServiceIpPools,
+        service_pools: &BTreeMap<IpRange, (IpPool, authz::IpPool)>,
         zone_config: &BlueprintZoneConfig,
     ) -> Result<(), RackInitError> {
         // For services with external connectivity, we record their
@@ -633,8 +654,17 @@ impl DataStore {
             );
             return Ok(());
         };
-        let service_pool =
-            service_pools.pool_for_version(external_ip.ip_version().into());
+        let service_pool = service_pools
+            .iter()
+            .find(|(range, (_pool, _authz_pool))| {
+                range.version() == external_ip.ip_version()
+            })
+            .ok_or_else(|| {
+                RackInitError::AddingIp(Error::invalid_request(
+                    "Requested external IP address not available",
+                ))
+            })
+            .map(|(_range, (pool, _authz_pool))| pool)?;
         let db_ip = IncompleteExternalIp::for_omicron_zone(
             service_pool.id(),
             external_ip,
@@ -682,6 +712,52 @@ impl DataStore {
         Ok(())
     }
 
+    // List Oxide reserved IP Pools and corresponding authz objects.
+    async fn list_all_service_ip_pools(
+        &self,
+        opctx: &OpContext,
+        rack_init_ranges: &[IpRange],
+    ) -> Result<BTreeMap<IpRange, (IpPool, authz::IpPool)>, Error> {
+        // List all IP Pools first, then find the ones we need to cover the
+        // ranges we're provided at rack-init time.
+        //
+        // This should go away entirely with #8946, since the pools will be
+        // provided at rack-init time too.
+        let service_ip_pools = self
+            .ip_pools_list_batched(
+                &opctx,
+                IpPoolReservationType::OxideInternal,
+                None,
+            )
+            .await?;
+        info!(
+            self.log,
+            "Fetched all Oxide-internal IP Pools";
+            "n_pools" => service_ip_pools.len(),
+        );
+        let mut pools = BTreeMap::new();
+        for range in rack_init_ranges {
+            // Find pool for this version, then lookup authz object.
+            let this_pool = Self::find_first_ip_pool_with_version(
+                &self.log,
+                &service_ip_pools,
+                range.version().into(),
+            )?;
+            let (authz_pool, ..) = self
+                .ip_pool_lookup(opctx, &(this_pool.id().into()))
+                .fetch_for(authz::Action::CreateChild)
+                .await?;
+            debug!(
+                self.log,
+                "Matched IP Pool for rack-initialization IP Range";
+                "range" => ?range,
+                "pool_id" => %this_pool.id(),
+            );
+            pools.insert(*range, (this_pool.clone(), authz_pool));
+        }
+        Ok(pools)
+    }
+
     /// Update a rack to mark that it has been initialized
     pub async fn rack_set_initialized(
         &self,
@@ -694,12 +770,15 @@ impl DataStore {
 
         // The `RackInit` request will eventually be modified to include the
         // full details of the IP Pool(s) delegated to Oxide at RSS time. For
-        // now, we still rely on the pre-populated IP Pools. There's one for
-        // IPv4 and one for IPv6.
+        // now, we still rely on builtin or operator-defined IP Pools reserved
+        // for Oxide internal use, of either version. Look them all up now,
+        // including the authz objects needed, prior to the transaction context
+        // below.
         //
         // See https://github.com/oxidecomputer/omicron/issues/8946.
-        let service_ip_pools =
-            self.ip_pools_service_lookup_both_versions(&opctx).await?;
+        let service_ip_pools = self
+            .list_all_service_ip_pools(opctx, &rack_init.service_ip_pool_ranges)
+            .await?;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
@@ -761,14 +840,26 @@ impl DataStore {
                     //
                     // Which RSS has already allocated during bootstrapping.
 
-                    // Set up the IP pool for internal services.
+                    // Set up the IP pools for internal services.
                     for range in service_ip_pool_ranges {
-                        let service_pool = service_ip_pools.pool_for_range(&range);
+
+                        // Fetch IP Pool for this range and authz object.
+                        let (service_pool, authz_pool) = service_ip_pools
+                            .get(&range)
+                            .ok_or_else(|| {
+                                let message = format!(
+                                    "Failed to find previously-fetched IP{} IP Pool!",
+                                    range.version(),
+                                );
+                                error!(log, "Initializing Rack: {}", message);
+                                err.set(RackInitError::AddingIp(Error::internal_error(&message))).unwrap();
+                                DieselError::RollbackTransaction
+                            })?;
                         Self::ip_pool_add_range_on_connection(
                             &conn,
                             opctx,
-                            &service_pool.authz_pool,
-                            &service_pool.db_pool,
+                            &authz_pool,
+                            &service_pool,
                             &range,
                         )
                         .await
@@ -782,6 +873,12 @@ impl DataStore {
                             err.set(RackInitError::AddingIp(e)).unwrap();
                             DieselError::RollbackTransaction
                         })?;
+                        debug!(
+                            log,
+                            "Added IP Range to Oxide-internal IP Pool";
+                            "range" => ?range,
+                            "pool_id" => %service_pool.id(),
+                        );
                     }
 
                     // Insert the RSS-generated blueprint.
@@ -1004,8 +1101,13 @@ impl DataStore {
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        // Insert an IP Pool for both IP versions, reserved for Oxide internal
-        // use.
+        // Insert a delegated IP Pool for both IP versions.
+        //
+        // TODO: We need to remove these when the full IP Pool definition comes
+        // from RSS, not just the names. After that, the operator has control
+        // over these pools, and they should not be loaded by default.
+        //
+        // See: https://github.com/oxidecomputer/omicron/issues/8946
         for (version, name) in [
             (IpVersion::V4, SERVICE_IPV4_POOL_NAME),
             (IpVersion::V6, SERVICE_IPV6_POOL_NAME),
@@ -1041,9 +1143,11 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use dropshot::PaginationOrder;
     use id_map::IdMap;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+    use nexus_db_model::IpPoolReservationType;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup};
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::system::{
@@ -1684,11 +1788,28 @@ mod test {
         assert_eq!(ntp2_external_ip.last_port.0, 16383);
 
         // Furthermore, we should be able to see that these IP addresses have
-        // been allocated as a part of a service IP pool.
-        let (.., svc_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+        // been allocated as a part of a delegated IP pool.
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: 10.try_into().unwrap(),
+        };
+        let svc_pools = datastore
+            .ip_pools_list_paginated(
+                opctx,
+                IpPoolReservationType::OxideInternal,
+                Some(IpVersion::V4),
+                None,
+                &PaginatedBy::Id(pagparams),
+            )
             .await
             .unwrap();
+        assert_eq!(
+            svc_pools.len(),
+            1,
+            "Expected exactly 1 delegated IPv4 IP Pool"
+        );
+        let svc_pool = &svc_pools[0];
         assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
@@ -1977,10 +2098,27 @@ mod test {
 
         // Furthermore, we should be able to see that this IP addresses have been
         // allocated as a part of a service IP pool.
-        let (.., svc_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: 10.try_into().unwrap(),
+        };
+        let svc_pools = datastore
+            .ip_pools_list_paginated(
+                opctx,
+                IpPoolReservationType::OxideInternal,
+                Some(IpVersion::V4),
+                None,
+                &PaginatedBy::Id(pagparams),
+            )
             .await
             .unwrap();
+        assert_eq!(
+            svc_pools.len(),
+            1,
+            "Expected exactly 1 delegated IPv4 IP Pool"
+        );
+        let svc_pool = &svc_pools[0];
         assert_eq!(svc_pool.name().as_str(), SERVICE_IPV4_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
@@ -2212,10 +2350,27 @@ mod test {
 
         // Furthermore, we should be able to see that this IP address has been
         // allocated as a part of a service IPv6 IP pool.
-        let (.., svc_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V6)
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: 10.try_into().unwrap(),
+        };
+        let svc_pools = datastore
+            .ip_pools_list_paginated(
+                opctx,
+                IpPoolReservationType::OxideInternal,
+                Some(IpVersion::V6),
+                None,
+                &PaginatedBy::Id(pagparams),
+            )
             .await
             .unwrap();
+        assert_eq!(
+            svc_pools.len(),
+            1,
+            "Expected exactly 1 delegated IPv6 IP Pool"
+        );
+        let svc_pool = &svc_pools[0];
         assert_eq!(svc_pool.name().as_str(), SERVICE_IPV6_POOL_NAME);
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;

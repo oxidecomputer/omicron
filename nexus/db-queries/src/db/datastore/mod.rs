@@ -166,9 +166,11 @@ pub use volume::*;
 // TODO: This should likely turn into a configuration option.
 pub const REGION_REDUNDANCY_THRESHOLD: usize = 3;
 
+// TODO-remove: https://github.com/oxidecomputer/omicron/issues/8950
 /// The name of the built-in IPv4 IP pool for Oxide services.
 pub const SERVICE_IPV4_POOL_NAME: &str = "oxide-service-pool-v4";
 
+// TODO-remove: https://github.com/oxidecomputer/omicron/issues/8950
 /// The name of the built-in IPv6 IP pool for Oxide services.
 pub const SERVICE_IPV6_POOL_NAME: &str = "oxide-service-pool-v6";
 

@@ -9,6 +9,8 @@ use futures::StreamExt;
 use nexus_db_model::DbMetadataNexusState;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::Generation;
+use nexus_db_model::IpPoolReservationType;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
@@ -400,19 +402,27 @@ async fn fetch_all_service_ip_pool_ranges(
     datastore: &DataStore,
 ) -> Result<Vec<nexus_db_model::IpPoolRange>, Error> {
     let service_pools = datastore
-        .ip_pools_service_lookup_both_versions(opctx)
+        .ip_pools_list_batched(
+            opctx,
+            IpPoolReservationType::OxideInternal,
+            None,
+        )
         .await
         .internal_context("fetching IP services pools")?;
-    let mut ranges = datastore
-        .ip_pool_list_ranges_batched(opctx, &service_pools.ipv4.authz_pool)
-        .await
-        .internal_context("listing services IPv4 pool ranges")?;
-    let mut v6_ranges = datastore
-        .ip_pool_list_ranges_batched(opctx, &service_pools.ipv6.authz_pool)
-        .await
-        .internal_context("listing services IPv6 pool ranges")?;
-    ranges.append(&mut v6_ranges);
-    Ok(ranges)
+    let mut all_ranges = Vec::new();
+    for pool in service_pools {
+        let (authz_pool, ..) = datastore
+            .ip_pool_lookup(opctx, &(pool.id().into()))
+            .fetch_for(authz::Action::ListChildren)
+            .await
+            .internal_context("fetching authz object for service IP Pool")?;
+        let mut ranges = datastore
+            .ip_pool_list_ranges_batched(opctx, &authz_pool)
+            .await
+            .internal_context("listing services pool ranges")?;
+        all_ranges.append(&mut ranges);
+    }
+    Ok(all_ranges)
 }
 
 /// Loads state for debugging or import into `reconfigurator-cli`

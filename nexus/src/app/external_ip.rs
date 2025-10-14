@@ -118,7 +118,7 @@ impl super::Nexus {
         // resolve NameOrId into authz::IpPool
         let pool = match pool {
             Some(pool) => Some(
-                self.ip_pool_lookup(opctx, &pool)?
+                self.ip_pool_lookup(opctx, &pool)
                     .lookup_for(authz::Action::CreateChild)
                     .await?
                     .0,
