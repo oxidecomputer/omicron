@@ -12756,6 +12756,7 @@ dependencies = [
  "tofino",
  "tokio",
  "uuid",
+ "zone 0.3.1",
 ]
 
 [[package]]

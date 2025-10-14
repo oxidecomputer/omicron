@@ -9,8 +9,6 @@ use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use illumos_utils::contract;
 use illumos_utils::contract::{ContractType, Control, Template, Watcher};
-use illumos_utils::zone;
-use illumos_utils::zone::Api;
 use libnvme::{Nvme, controller::Controller};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
@@ -711,15 +709,26 @@ fn poll_device_tree(
 }
 
 // Block until the switch zone is gone
-async fn block_on_switch_zone() {
-    let zone_api = zone::Zones::real_api();
-
+fn block_on_switch_zone(log: &slog::Logger) {
+    let mut logged = false;
     loop {
-        if let Ok(Some(_zone)) = zone_api.find("oxz_switch").await {
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        } else {
-            return;
+        match zone::Adm::list_blocking() {
+            Ok(zones) => {
+                if !zones.iter().any(|z| z.name == "oxz_switch") {
+                    info!(log, "switch zone gone");
+                    return;
+                }
+            }
+            Err(e) => {
+                error!(log, "failed to get list of zones: {e:?}");
+                break;
+            }
         }
+        if !logged {
+            info!(&log, "Waiting for switch zone to halt");
+            logged = true;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
     }
 }
 
@@ -780,10 +789,7 @@ fn monitor_tofino(
                     // the device to be detached cleanly, which will
                     // subsequently allow the device to be re-attached cleanly
                     // if/when the sidecar is powered back on.
-                    info!(&log, "Waiting for switch zone to halt");
-                    let rt = tokio::runtime::Runtime::new().unwrap();
-                    rt.block_on(block_on_switch_zone());
-                    info!(log, "Switch zone halted.");
+                    block_on_switch_zone(&log);
                     if let Err(e) = ctl.ack(ev.event_id) {
                         error!(&log, "{e:?}");
                     }
