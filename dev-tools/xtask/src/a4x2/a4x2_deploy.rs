@@ -716,7 +716,7 @@ fn collect_sled_logs(
     const LOG_COLLECTION_SCRIPT: &str = r#"
         # we are specifically not setting exit-on-error, so we can lossily get
         # logs even if the presence of errors
-        set -x
+        set -o xtrace
 
         # generate file list of logs. each command in this subshell should print
         # file paths to stdout

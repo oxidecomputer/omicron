@@ -21,6 +21,7 @@ const LIVE_TESTS_EXECUTION_SCRIPT: &str = r#"
     /opt/oxide/omdb/bin/omdb -w nexus blueprints target enable current
 
     TMPDIR=/var/tmp ./cargo-nextest nextest run \
+        --no-fail-fast \
         --profile=live-tests \
         --archive-file live-tests-archive/omicron-live-tests.tar.zst \
         --workspace-remap live-tests-archive
@@ -32,9 +33,10 @@ pub struct A4x2PackageArgs {
     #[clap(long, default_value_t = String::from("https://github.com/oxidecomputer/testbed"))]
     testbed_source: String,
 
-    /// Choose which branch of oxidecomputer/testbed to build into the output.
+    /// Choose which commit or branch of oxidecomputer/testbed to build
+    /// into the output.
     #[clap(long, default_value_t = String::from("main"))]
-    testbed_branch: String,
+    testbed_commit: String,
 
     /// Output package is written here.
     #[clap(long, default_value_t = Utf8PathBuf::from(super::DEFAULT_A4X2_PKG_PATH))]
@@ -104,7 +106,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
     let output_artifact = canonicalize_parent(&args.output)
         .context("finding absolute path to output artifact")?;
 
-    prepare_source(&sh, &env, &args.testbed_source, &args.testbed_branch)
+    prepare_source(&sh, &env, &args.testbed_source, &args.testbed_commit)
         .context("preparing source for builds")?;
     build_end_to_end_tests(&sh, &env).context("building end-to-end tests")?;
     build_live_tests(&sh, &env).context("building live tests")?;
@@ -124,7 +126,7 @@ fn prepare_source(
     sh: &Shell,
     env: &Environment,
     testbed_source: &str,
-    testbed_branch: &str,
+    testbed_commit: &str,
 ) -> Result<()> {
     cmd!(sh, "banner 'prepare'").run()?;
 
@@ -132,11 +134,12 @@ fn prepare_source(
     // our git credentials expiring during the omicron build.
     let testbed_dir = env.work_dir.join("testbed");
     let git = &env.git;
-    cmd!(
-        sh,
-        "{git} clone {testbed_source} --branch {testbed_branch} {testbed_dir}"
-    )
-    .run()?;
+    cmd!(sh, "{git} clone {testbed_source} {testbed_dir}").run()?;
+
+    {
+        let _popdir = sh.push_dir(&testbed_dir);
+        cmd!(sh, "git checkout {testbed_commit}").run()?;
+    }
 
     // We copy the source directory into another work directory to do the build.
     // We do this because a4x2 modifies some files in-place in the omicron tree
@@ -346,7 +349,13 @@ fn build_a4x2(sh: &Shell, env: &Environment) -> Result<()> {
     // A previous attempt bundled only the cargo-bay and config folders.
     // This proved fragile, as an additional directory was later added to
     // testbed that was loadbearing.
+    //
+    // But, we do not need the rustc intermediary artifacts, surely
     let out_dir = &env.out_dir;
+    fs::remove_dir_all(testbed_dir.join("target/debug/build"))?;
+    fs::remove_dir_all(testbed_dir.join("target/debug/deps"))?;
+    fs::remove_dir_all(testbed_dir.join("target/debug/examples"))?;
+    fs::remove_dir_all(testbed_dir.join("target/debug/incremental"))?;
     cmd!(sh, "mv {testbed_dir}/ {out_dir}/testbed").run()?;
 
     Ok(())

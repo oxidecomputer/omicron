@@ -6,6 +6,7 @@
 #: rust_toolchain = true
 #: output_rules = [
 #:  "=/out/a4x2-package.tar.gz"
+#:  "=/out/xtask"
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/testbed",
@@ -99,5 +100,11 @@ banner "prerequisites"
 
 
 
-cargo xtask a4x2 package
+cargo xtask a4x2 package \
+    --testbed-commit 5dcfa349c7dd0953caeb23165db79f38929a0dca
+
+# bundle of everything we need to run a4x2 tests
 mv target/a4x2-package.tar.gz /out/
+
+# xtask has the code to execute the tests
+mv target/debug/xtask /out/

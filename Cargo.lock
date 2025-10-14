@@ -16285,6 +16285,9 @@ dependencies = [
  "tabled 0.15.0",
  "textwrap",
  "toml 0.8.23",
+ "usdt 0.5.0",
+ "walkdir",
+ "xshell",
 ]
 
 [[package]]
