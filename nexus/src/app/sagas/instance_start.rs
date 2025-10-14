@@ -1199,15 +1199,35 @@ mod test {
 
         let log = opctx.log;
 
-        // Check to ensure that the nat entry for the address has made it onto switch1 dendrite
-        let nat_entries = dpd_client
-            .nat_ipv4_list(&std::net::Ipv4Addr::new(10, 0, 0, 0), None, None)
-            .await
-            .unwrap()
-            .items
-            .clone();
+        // Check to ensure that the nat entry for the address has made it onto switch1 dendrite.
+        // Note: ipv4_nat_trigger_update() triggers dendrite's RPW asynchronously and returns
+        // immediately, but dendrite still needs time to process the update and create the NAT
+        // entries. Tests need to poll/wait for entries rather than checking immediately, or
+        // they'll be flaky.
+        let expected_nat_entries = 1; // Instance has 1 external IP
+        let nat_subnet = std::net::Ipv4Addr::new(10, 0, 0, 0);
+        let poll_interval = Duration::from_millis(100);
+        let poll_max = Duration::from_secs(60); // Allow time for RPW to process
 
-        assert_eq!(nat_entries.len(), 1);
+        poll::wait_for_condition(
+            async || {
+                let result =
+                    dpd_client.nat_ipv4_list(&nat_subnet, None, None).await;
+
+                let data =
+                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
+
+                if data.items.len() == expected_nat_entries {
+                    Ok(())
+                } else {
+                    Err(poll::CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .expect("NAT entry should appear on switch1");
 
         // Reuse the port number from the removed Switch0 to start a new dendrite instance
         let nexus_address = cptestctx.internal_client.bind_address;
@@ -1226,7 +1246,11 @@ mod test {
             .await
             .unwrap();
 
-        cptestctx.dendrite.write().unwrap().insert(SwitchLocation::Switch0, new_switch0);
+        cptestctx
+            .dendrite
+            .write()
+            .unwrap()
+            .insert(SwitchLocation::Switch0, new_switch0);
 
         // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
         // This might take some time while the new dendrite comes online.

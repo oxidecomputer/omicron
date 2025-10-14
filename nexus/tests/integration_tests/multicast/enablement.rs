@@ -93,8 +93,9 @@ async fn test_multicast_enablement() {
     );
 
     // Start the instance - this should also succeed
-    let start_url =
-        format!("/v1/instances/test-instance-lifecycle/start?project={PROJECT_NAME}");
+    let start_url = format!(
+        "/v1/instances/test-instance-lifecycle/start?project={PROJECT_NAME}"
+    );
     nexus_test_utils::http_testing::NexusRequest::new(
         nexus_test_utils::http_testing::RequestBuilder::new(
             client,
@@ -131,8 +132,9 @@ async fn test_multicast_enablement() {
     );
 
     // Stop the instance - this should also succeed
-    let stop_url =
-        format!("/v1/instances/test-instance-lifecycle/stop?project={PROJECT_NAME}");
+    let stop_url = format!(
+        "/v1/instances/test-instance-lifecycle/stop?project={PROJECT_NAME}"
+    );
     nexus_test_utils::http_testing::NexusRequest::new(
         nexus_test_utils::http_testing::RequestBuilder::new(
             client,
@@ -205,8 +207,9 @@ async fn test_multicast_enablement() {
     .await;
 
     // Try to attach to multicast group via API - should succeed
-    let attach_url =
-        format!("/v1/instances/test-instance-api/multicast-groups/{GROUP_NAME}?project={PROJECT_NAME}");
+    let attach_url = format!(
+        "/v1/instances/test-instance-api/multicast-groups/{GROUP_NAME}?project={PROJECT_NAME}"
+    );
 
     nexus_test_utils::http_testing::NexusRequest::new(
         nexus_test_utils::http_testing::RequestBuilder::new(

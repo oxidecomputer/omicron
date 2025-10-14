@@ -186,7 +186,8 @@ pub struct ControlPlaneTestContext<N> {
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
-    pub dendrite: RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
+    pub dendrite:
+        RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
@@ -280,9 +281,8 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         let log = &self.logctx.log;
         debug!(log, "Stopping Dendrite for {switch_location}");
 
-        let dendrite_opt = {
-            self.dendrite.write().unwrap().remove(&switch_location)
-        };
+        let dendrite_opt =
+            { self.dendrite.write().unwrap().remove(&switch_location) };
         if let Some(mut dendrite) = dendrite_opt {
             dendrite.cleanup().await.unwrap();
         }
@@ -460,7 +460,8 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
     pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
-    pub dendrite: RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
+    pub dendrite:
+        RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
@@ -797,7 +798,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .host_zone_switch(
                 sled_id,
                 Ipv6Addr::LOCALHOST,
-                self.dendrite.read().unwrap().get(&switch_location).unwrap().port,
+                self.dendrite
+                    .read()
+                    .unwrap()
+                    .get(&switch_location)
+                    .unwrap()
+                    .port,
                 self.gateway.get(&switch_location).unwrap().port,
                 self.mgd.get(&switch_location).unwrap().port,
             )

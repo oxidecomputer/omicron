@@ -491,7 +491,8 @@ async fn test_unauthenticated_cannot_access_member_operations(
 
     // Create project and instance
     let project = create_project(client, "test-project").await;
-    let instance = create_instance(client, "test-project", "test-instance").await;
+    let instance =
+        create_instance(client, "test-project", "test-instance").await;
 
     // Fleet admin creates multicast group
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 150));
@@ -540,7 +541,9 @@ async fn test_unauthenticated_cannot_access_member_operations(
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
-        .expect("Expected 401 Unauthorized for unauthenticated add member request");
+        .expect(
+            "Expected 401 Unauthorized for unauthenticated add member request",
+        );
 
     // Try to REMOVE member without authentication - should get 401
     let member_delete_url = format!(
