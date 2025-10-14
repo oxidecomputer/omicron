@@ -111,7 +111,7 @@ mod switch_port;
 mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
-mod update;
+pub mod update;
 mod user_data_export;
 mod utilization;
 mod v2p_mapping;
@@ -152,6 +152,7 @@ pub use silo_user::SiloUser;
 pub use silo_user::SiloUserApiOnly;
 pub use silo_user::SiloUserJit;
 pub use silo_user::SiloUserLookup;
+pub use silo_user::SiloUserScim;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use support_bundle::SupportBundleExpungementReport;

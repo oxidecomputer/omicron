@@ -13,6 +13,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::SiloGroupLookup;
 use nexus_db_queries::db::datastore::SiloUserJit;
 use nexus_db_queries::db::datastore::SiloUserLookup;
+use nexus_db_queries::db::datastore::SiloUserScim;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Asset;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -784,6 +785,20 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
             existing_silo_user: false,
             expect_user: true,
         },
+        // A silo configured with a "SCIM" user provision type should fetch a
+        // user if it exists already.
+        TestSiloUserProvisionTypes {
+            identity_mode: shared::SiloIdentityMode::SamlScim,
+            existing_silo_user: true,
+            expect_user: true,
+        },
+        // A silo configured with a "SCIM" user provision type should not do any
+        // user management except via the SCIM provisioning client.
+        TestSiloUserProvisionTypes {
+            identity_mode: shared::SiloIdentityMode::SamlScim,
+            existing_silo_user: false,
+            expect_user: false,
+        },
     ];
 
     for test_case in test_cases {
@@ -796,6 +811,7 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                 shared::SiloIdentityMode::SamlJit => {
                     create_jit_user(datastore, &silo, "external-id-com").await;
                 }
+
                 shared::SiloIdentityMode::LocalOnly => {
                     create_local_user(
                         client,
@@ -804,6 +820,10 @@ async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
                         test_params::UserPassword::LoginDisallowed,
                     )
                     .await;
+                }
+
+                shared::SiloIdentityMode::SamlScim => {
+                    create_scim_user(datastore, &silo, "external-id-com").await;
                 }
             };
         }
@@ -1795,6 +1815,32 @@ async fn create_jit_user(
         .into()
 }
 
+/// Create a user in a SamlScim Silo for testing
+async fn create_scim_user(
+    datastore: &db::DataStore,
+    silo: &views::Silo,
+    user_name: &str,
+) -> views::User {
+    assert_eq!(silo.identity_mode, shared::SiloIdentityMode::SamlScim);
+    let silo_id = silo.identity.id;
+    let silo_user_id = SiloUserUuid::new_v4();
+    let authz_silo =
+        authz::Silo::new(authz::FLEET, silo_id, LookupType::ById(silo_id));
+    let silo_user = SiloUserScim::new(
+        silo_id,
+        silo_user_id,
+        user_name.to_owned(),
+        None,
+        None,
+    );
+    datastore
+        .silo_user_create(&authz_silo, silo_user.into())
+        .await
+        .expect("failed to create user in SamlScim Silo")
+        .1
+        .into()
+}
+
 /// Tests that LocalOnly-specific endpoints are not available in SamlJit Silos
 #[nexus_test]
 async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
@@ -1998,7 +2044,7 @@ async fn test_local_silo_constraints(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(
         error.message,
-        "cannot create identity providers in this kind of Silo"
+        "cannot create SAML identity providers in ApiOnly silos"
     );
 
     // The SAML login endpoints should not work, either.

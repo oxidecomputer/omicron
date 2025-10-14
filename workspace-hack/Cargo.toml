@@ -64,6 +64,7 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.16.0", default-features = false, features = ["allocator-api2", "inline-more"] }
+heck = { version = "0.4.1" }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
@@ -141,7 +142,8 @@ toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", featu
 tracing = { version = "0.1.40", features = ["log"] }
 url = { version = "2.5.4", features = ["serde"] }
 usdt = { version = "0.5.0" }
-usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
+usdt-impl-3b31131e45eafb45 = { package = "usdt-impl", version = "0.6.0", default-features = false, features = ["des"] }
+usdt-impl-d8f496e17d97b5cb = { package = "usdt-impl", version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.18.1", features = ["serde", "v4"] }
 winnow-ca01ad9e24f5d932 = { package = "winnow", version = "0.7.13" }
 x509-cert = { version = "0.2.5" }
@@ -199,6 +201,7 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.16.0", default-features = false, features = ["allocator-api2", "inline-more"] }
+heck = { version = "0.4.1" }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
@@ -278,7 +281,8 @@ toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.27", featu
 tracing = { version = "0.1.40", features = ["log"] }
 url = { version = "2.5.4", features = ["serde"] }
 usdt = { version = "0.5.0" }
-usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
+usdt-impl-3b31131e45eafb45 = { package = "usdt-impl", version = "0.6.0", default-features = false, features = ["des"] }
+usdt-impl-d8f496e17d97b5cb = { package = "usdt-impl", version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.18.1", features = ["serde", "v4"] }
 vergen = { version = "9.0.6", features = ["cargo", "rustc"] }
 vergen-lib = { version = "0.1.6", features = ["cargo", "git", "rustc"] }
@@ -293,7 +297,8 @@ zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = 
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-dof = { version = "0.3.0", default-features = false, features = ["des"] }
+dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
+dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
@@ -305,7 +310,8 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-dof = { version = "0.3.0", default-features = false, features = ["des"] }
+dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
+dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
@@ -357,7 +363,8 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.x86_64-unknown-illumos.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-dof = { version = "0.3.0", default-features = false, features = ["des"] }
+dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
+dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
@@ -374,7 +381,8 @@ winnow-3b31131e45eafb45 = { package = "winnow", version = "0.6.26", features = [
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 clang-sys = { version = "1.8.1", default-features = false, features = ["clang_11_0", "runtime"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-dof = { version = "0.3.0", default-features = false, features = ["des"] }
+dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
+dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }

@@ -24,7 +24,7 @@ use nexus_types::{
 use omicron_common::api::external::{
     http_pagination::{
         PaginatedById, PaginatedByName, PaginatedByNameOrId,
-        PaginatedByTimeAndId,
+        PaginatedByTimeAndId, PaginatedByVersion,
     },
     *,
 };
@@ -594,54 +594,71 @@ pub trait NexusExternalApi {
 
     // SAML+SCIM Identity Provider
 
+    /// List SCIM tokens
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = GET,
         path = "/v1/system/scim/tokens",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_get_tokens(
+    async fn scim_token_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<Vec<views::ScimClientBearerToken>>, HttpError>;
 
+    /// Create SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter. Be sure
+    /// to save the bearer token in the response. It will not be retrievable
+    /// later through the token view and list endpoints.
     #[endpoint {
         method = POST,
         path = "/v1/system/scim/tokens",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_create_token(
+    async fn scim_token_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseCreated<views::ScimClientBearerTokenValue>, HttpError>;
 
+    /// Fetch SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = GET,
         path = "/v1/system/scim/tokens/{token_id}",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_get_token_by_id(
+    async fn scim_token_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ScimV2TokenPathParam>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseOk<views::ScimClientBearerToken>, HttpError>;
 
+    /// Delete SCIM token
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/scim/tokens/{token_id}",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_delete_token_by_id(
+    async fn scim_token_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::ScimV2TokenPathParam>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Delete all SCIM tokens
+    ///
+    /// Specify the silo by name or ID using the `silo` query parameter.
     #[endpoint {
         method = DELETE,
         path = "/v1/system/scim/tokens",
         tags = ["system/silos"],
     }]
-    async fn scim_idp_delete_all_tokens(
+    async fn scim_token_delete_all(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
@@ -3166,26 +3183,40 @@ pub trait NexusExternalApi {
     /// System release repositories are verified by the updates trust store.
     #[endpoint {
         method = PUT,
-        path = "/v1/system/update/repository",
+        path = "/v1/system/update/repositories",
         tags = ["system/update"],
         request_body_max_bytes = PUT_UPDATE_REPOSITORY_MAX_BYTES,
     }]
-    async fn system_update_put_repository(
+    async fn system_update_repository_upload(
         rqctx: RequestContext<Self::Context>,
         query: Query<params::UpdatesPutRepositoryParams>,
         body: StreamingBody,
-    ) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError>;
+    ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError>;
 
     /// Fetch system release repository description by version
     #[endpoint {
         method = GET,
-        path = "/v1/system/update/repository/{system_version}",
+        path = "/v1/system/update/repositories/{system_version}",
         tags = ["system/update"],
     }]
-    async fn system_update_get_repository(
+    async fn system_update_repository_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
-    ) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError>;
+    ) -> Result<HttpResponseOk<views::TufRepo>, HttpError>;
+
+    /// List all TUF repositories
+    ///
+    /// Returns a paginated list of all TUF repositories ordered by system
+    /// version (newest first by default).
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/repositories",
+        tags = ["system/update"],
+    }]
+    async fn system_update_repository_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByVersion>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::TufRepo>>, HttpError>;
 
     /// List root roles in the updates trust store
     ///
@@ -3240,27 +3271,13 @@ pub trait NexusExternalApi {
         path_params: Path<params::TufTrustRootPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Get the current target release of the rack's system software
+    /// Set target release
     ///
-    /// This may not correspond to the actual software running on the rack
-    /// at the time of request; it is instead the release that the rack
-    /// reconfigurator should be moving towards as a goal state. After some
-    /// number of planning and execution phases, the software running on the
-    /// rack should eventually correspond to the release described here.
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/update/target-release",
-        tags = ["system/update"],
-    }]
-    async fn target_release_view(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<views::TargetRelease>, HttpError>;
-
-    /// Set the current target release of the rack's system software
-    ///
-    /// The rack reconfigurator will treat the software specified here as
-    /// a goal state for the rack's software, and attempt to asynchronously
-    /// update to that release.
+    /// Set the current target release of the rack's system software. The rack
+    /// reconfigurator will treat the software specified here as a goal state
+    /// for the rack's software, and attempt to asynchronously update to that
+    /// release. Use the update status endpoint to view the current target
+    /// release.
     #[endpoint {
         method = PUT,
         path = "/v1/system/update/target-release",
@@ -3269,7 +3286,20 @@ pub trait NexusExternalApi {
     async fn target_release_update(
         rqctx: RequestContext<Self::Context>,
         params: TypedBody<params::SetTargetReleaseParams>,
-    ) -> Result<HttpResponseCreated<views::TargetRelease>, HttpError>;
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Fetch system update status
+    ///
+    /// Returns information about the current target release and the
+    /// progress of system software updates.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/update/status",
+        tags = ["system/update"],
+    }]
+    async fn system_update_status(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<views::UpdateStatus>, HttpError>;
 
     // Silo users
 

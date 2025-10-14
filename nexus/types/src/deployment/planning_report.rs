@@ -20,7 +20,9 @@ use indent_write::fmt::IndentWriter;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::M2Slot;
+use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -29,6 +31,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -79,7 +82,7 @@ impl PlanningReport {
             expunge: PlanningExpungeStepReport::new(),
             decommission: PlanningDecommissionStepReport::new(),
             noop_image_source: PlanningNoopImageSourceStepReport::new(),
-            mgs_updates: PlanningMgsUpdatesStepReport::empty(),
+            mgs_updates: PlanningMgsUpdatesStepReport::new(),
             add: PlanningAddStepReport::new(),
             zone_updates: PlanningZoneUpdatesStepReport::new(),
             nexus_generation_bump: PlanningNexusGenerationBumpReport::new(),
@@ -225,13 +228,18 @@ pub struct PlanningNoopImageSourceConverted {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlanningNoopImageSourceStepReport {
     pub no_target_release: bool,
-    // Make these maps small to avoid bloating the size of generated test data.
+    // Make these maps and sets small to avoid bloating the size of generated
+    // test data.
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub skipped_sled_zones:
         BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledZonesReason>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub skipped_sled_host_phase_2:
         BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledHostPhase2Reason>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub sled_zones_all_already_artifact: BTreeSet<SledUuid>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub sled_host_phase_2_both_already_artifact: BTreeSet<SledUuid>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub skipped_zones:
         BTreeMap<OmicronZoneUuid, PlanningNoopImageSourceSkipZoneReason>,
@@ -244,7 +252,9 @@ impl PlanningNoopImageSourceStepReport {
         Self {
             no_target_release: false,
             skipped_sled_zones: BTreeMap::new(),
+            sled_zones_all_already_artifact: BTreeSet::new(),
             skipped_sled_host_phase_2: BTreeMap::new(),
+            sled_host_phase_2_both_already_artifact: BTreeSet::new(),
             skipped_zones: BTreeMap::new(),
             converted: BTreeMap::new(),
         }
@@ -266,12 +276,23 @@ impl PlanningNoopImageSourceStepReport {
         self.skipped_sled_zones.insert(sled_id, reason);
     }
 
+    pub fn sled_zones_all_already_artifact(&mut self, sled_id: SledUuid) {
+        self.sled_zones_all_already_artifact.insert(sled_id);
+    }
+
     pub fn skip_sled_host_phase_2(
         &mut self,
         sled_id: SledUuid,
         reason: PlanningNoopImageSourceSkipSledHostPhase2Reason,
     ) {
         self.skipped_sled_host_phase_2.insert(sled_id, reason);
+    }
+
+    pub fn sled_host_phase_2_both_already_artifact(
+        &mut self,
+        sled_id: SledUuid,
+    ) {
+        self.sled_host_phase_2_both_already_artifact.insert(sled_id);
     }
 
     pub fn skip_zone(
@@ -308,6 +329,11 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
             no_target_release,
             skipped_sled_zones,
             skipped_sled_host_phase_2,
+            // We track the sleds that are all already artifact, but don't
+            // display them in the report because that's the steady state of the
+            // system.
+            sled_zones_all_already_artifact: _,
+            sled_host_phase_2_both_already_artifact: _,
             skipped_zones: _,
             converted,
         } = self;
@@ -373,7 +399,6 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum PlanningNoopImageSourceSkipSledZonesReason {
-    AllZonesAlreadyArtifact { num_total: usize },
     SledNotInInventory,
     ErrorRetrievingZoneManifest { error: String },
     RemoveMupdateOverride { id: MupdateOverrideUuid },
@@ -382,9 +407,6 @@ pub enum PlanningNoopImageSourceSkipSledZonesReason {
 impl fmt::Display for PlanningNoopImageSourceSkipSledZonesReason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::AllZonesAlreadyArtifact { num_total } => {
-                write!(f, "all {num_total} zones are already from artifacts")
-            }
             Self::SledNotInInventory => {
                 write!(f, "sled not present in latest inventory collection")
             }
@@ -411,16 +433,12 @@ impl fmt::Display for PlanningNoopImageSourceSkipSledZonesReason {
 #[serde(rename_all = "snake_case", tag = "type")]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub enum PlanningNoopImageSourceSkipSledHostPhase2Reason {
-    BothSlotsAlreadyArtifact,
     SledNotInInventory,
 }
 
 impl fmt::Display for PlanningNoopImageSourceSkipSledHostPhase2Reason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::BothSlotsAlreadyArtifact => {
-                write!(f, "both host phase 2 slots are already from artifacts")
-            }
             Self::SledNotInInventory => {
                 write!(f, "sled not present in latest inventory collection")
             }
@@ -618,6 +636,10 @@ pub enum FailedSpUpdateReason {
     /// The component's corresponding SP was not found in the inventory
     #[error("corresponding SP is not in inventory")]
     SpNotInInventory,
+    /// The component's corresponding sled contains zones that are unsafe to
+    /// shut down
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
 }
 
 /// Describes the reason why a Host OS failed to update
@@ -685,6 +707,10 @@ pub enum FailedHostOsUpdateReason {
     /// details
     #[error("sled agent was unable to retrieve boot disk phase 2 image: {0:?}")]
     UnableToRetrieveBootDiskPhase2Image(String),
+    /// The component's corresponding sled contains zones that are unsafe to
+    /// shut down
+    #[error("sled contains zones that are unsafe to shut down: {0:?}")]
+    UnsafeZoneFound(String),
 }
 
 #[derive(
@@ -711,22 +737,15 @@ impl IdOrdItem for BlockedMgsUpdate {
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct PlanningMgsUpdatesStepReport {
-    pub pending_mgs_updates: PendingMgsUpdates,
     pub blocked_mgs_updates: Vec<BlockedMgsUpdate>,
+    pub pending_mgs_updates: PendingMgsUpdates,
 }
 
 impl PlanningMgsUpdatesStepReport {
-    pub fn new(
-        pending_mgs_updates: PendingMgsUpdates,
-        blocked_mgs_updates: Vec<BlockedMgsUpdate>,
-    ) -> Self {
-        Self { pending_mgs_updates, blocked_mgs_updates }
-    }
-
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         Self {
-            pending_mgs_updates: PendingMgsUpdates::new(),
             blocked_mgs_updates: Vec::new(),
+            pending_mgs_updates: PendingMgsUpdates::new(),
         }
     }
 
@@ -738,7 +757,7 @@ impl PlanningMgsUpdatesStepReport {
 
 impl fmt::Display for PlanningMgsUpdatesStepReport {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Self { pending_mgs_updates, blocked_mgs_updates } = self;
+        let Self { blocked_mgs_updates, pending_mgs_updates } = self;
         if !pending_mgs_updates.is_empty() {
             let n = pending_mgs_updates.len();
             let s = plural(n);
@@ -751,12 +770,18 @@ impl fmt::Display for PlanningMgsUpdatesStepReport {
                 )?;
             }
         }
+
         if !blocked_mgs_updates.is_empty() {
             let n = blocked_mgs_updates.len();
             let s = plural(n);
             writeln!(f, "* {n} blocked MGS update{s}:")?;
             for update in blocked_mgs_updates {
-                writeln!(f, "  * {}: {}", update.baseboard_id, update.reason)?;
+                writeln!(
+                    f,
+                    "  * {}: {}",
+                    update.baseboard_id,
+                    InlineErrorChain::new(&update.reason)
+                )?;
             }
         }
         Ok(())
@@ -1424,11 +1449,19 @@ impl fmt::Display for ZoneUnsafeToShutdown {
             Self::BoundaryNtp {
                 total_boundary_ntp_zones: t,
                 synchronized_count: s,
-            } => write!(f, "only {s}/{t} boundary NTP zones are synchronized"),
+            } => write!(
+                f,
+                "only {s}/{t} boundary NTP zones are synchronized; require at least {}",
+                BOUNDARY_NTP_REDUNDANCY
+            ),
             Self::InternalDns {
                 total_internal_dns_zones: t,
                 synchronized_count: s,
-            } => write!(f, "only {s}/{t} internal DNS zones are synchronized"),
+            } => write!(
+                f,
+                "only {s}/{t} internal DNS zones are synchronized; require at least {}",
+                INTERNAL_DNS_REDUNDANCY
+            ),
         }
     }
 }

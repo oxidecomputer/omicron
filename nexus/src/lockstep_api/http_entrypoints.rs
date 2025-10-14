@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use dropshot::ApiDescription;
 use dropshot::Body;
+use dropshot::ErrorStatusCode;
 use dropshot::Header;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
@@ -21,6 +22,7 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use http::Response;
+use http::StatusCode;
 use nexus_lockstep_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -41,6 +43,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
+use nexus_types::internal_api::params::RackInitializationRequest;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::DemoSaga;
 use nexus_types::internal_api::views::MgsUpdateDriverStatus;
@@ -57,6 +60,7 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_uuid_kinds::*;
 use range_requests::PotentialRange;
+use slog_error_chain::InlineErrorChain;
 
 use crate::app::support_bundles::SupportBundleQueryType;
 use crate::context::ApiContext;
@@ -73,6 +77,60 @@ enum NexusLockstepApiImpl {}
 
 impl NexusLockstepApi for NexusLockstepApiImpl {
     type Context = ApiContext;
+
+    async fn rack_initialization_complete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<RackPathParam>,
+        info: TypedBody<RackInitializationRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let request = info.into_inner();
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+
+        nexus
+            .rack_initialize(
+                &opctx,
+                path.rack_id,
+                request,
+                true, // blueprint_execution_enabled
+            )
+            .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn fetch_omdb(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<Response<Body>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let path = &apictx.omdb_config.bin_path;
+        let f = tokio::fs::File::open(path).await.map_err(|err| {
+            let err = format!(
+                "could not open {path}: {}",
+                InlineErrorChain::new(&err)
+            );
+            // Build an explicit HttpError instead of using
+            // `for_internal_error()` because the latter sends a generic error
+            // message to the client. We want to tell our client more details
+            // about what went wrong.
+            HttpError {
+                status_code: ErrorStatusCode::INTERNAL_SERVER_ERROR,
+                error_code: None,
+                external_message: err.clone(),
+                internal_message: err,
+                headers: None,
+            }
+        })?;
+        let f = hyper_staticfile::vfs::TokioFileAccess::new(f);
+        let f = hyper_staticfile::util::FileBytesStream::new(f);
+        let body = Body::wrap(hyper_staticfile::Body::Full(f));
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, "application/octet-stream")
+            .body(body)?)
+    }
 
     async fn instance_migrate(
         rqctx: RequestContext<Self::Context>,

@@ -769,6 +769,8 @@ table! {
         silo_id -> Uuid,
         external_id -> Nullable<Text>,
         user_provision_type -> crate::enums::UserProvisionTypeEnum,
+        user_name -> Nullable<Text>,
+        active -> Nullable<Bool>,
     }
 }
 
@@ -790,6 +792,8 @@ table! {
         silo_id -> Uuid,
         external_id -> Nullable<Text>,
         user_provision_type -> crate::enums::UserProvisionTypeEnum,
+        display_name -> Nullable<Text>,
+        active -> Nullable<Bool>,
     }
 }
 

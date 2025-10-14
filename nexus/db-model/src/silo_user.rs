@@ -21,18 +21,31 @@ pub struct SiloUser {
 
     /// If the user provision type is ApiOnly or JIT, then the external id is
     /// the identity provider's ID for this user. There is a database constraint
-    /// (`lookup_silo_user_by_silo`) that ensures this field must be non-null
-    /// for those provision types.
+    /// (`external_id_consistency`) that ensures this field must be non-null for
+    /// those provision types.
     ///
     /// For SCIM, this may be null, which would trigger the uniqueness
     /// constraint if that wasn't limited to specific provision types.
     pub external_id: Option<String>,
 
     pub user_provision_type: UserProvisionType,
+
+    /// For SCIM users, user name must be Some. There is a database constraint
+    /// (`user_name_consistency`) that ensures this field is non-null for that
+    /// provision type.
+    pub user_name: Option<String>,
+
+    /// For SCIM users, active describes whether or not the user is allowed to
+    /// have active sessions.
+    ///
+    /// Note this field isn't mandatory for SCIM provisioning clients to
+    /// support. Using an option here lets us determine if the client sent us
+    /// nothing, or of they sent us a value.
+    pub active: Option<bool>,
 }
 
 impl SiloUser {
-    pub fn new_api_only_user(
+    pub fn new_api_only(
         silo_id: Uuid,
         user_id: SiloUserUuid,
         external_id: String,
@@ -43,10 +56,12 @@ impl SiloUser {
             silo_id,
             external_id: Some(external_id),
             user_provision_type: UserProvisionType::ApiOnly,
+            user_name: None,
+            active: None,
         }
     }
 
-    pub fn new_jit_user(
+    pub fn new_jit(
         silo_id: Uuid,
         user_id: SiloUserUuid,
         external_id: String,
@@ -57,6 +72,26 @@ impl SiloUser {
             silo_id,
             external_id: Some(external_id),
             user_provision_type: UserProvisionType::Jit,
+            user_name: None,
+            active: None,
+        }
+    }
+
+    pub fn new_scim(
+        silo_id: Uuid,
+        user_id: SiloUserUuid,
+        user_name: String,
+        external_id: Option<String>,
+        active: Option<bool>,
+    ) -> Self {
+        Self {
+            identity: SiloUserIdentity::new(user_id),
+            time_deleted: None,
+            silo_id,
+            external_id,
+            user_provision_type: UserProvisionType::Scim,
+            user_name: Some(user_name),
+            active,
         }
     }
 }
