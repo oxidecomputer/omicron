@@ -9,6 +9,7 @@ use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::IpPoolReservationType;
 use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
@@ -79,7 +80,11 @@ impl super::Nexus {
                 "IPv6 pools are not yet supported",
             ));
         }
-        let pool = db::model::IpPool::new(&pool_params.identity, ip_version);
+        let pool = db::model::IpPool::new(
+            &pool_params.identity,
+            ip_version,
+            IpPoolReservationType::ExternalSilos,
+        );
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 

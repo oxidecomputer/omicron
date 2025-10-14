@@ -2162,6 +2162,12 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
     'v6'
 );
 
+/* Indicates what an IP Pool is reserved for. */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
+    'external_silos',
+    'oxide_internal'
+);
+
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
  */
@@ -2178,7 +2184,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     rcgen INT8 NOT NULL,
 
     /* The IP version of the ranges contained in this pool. */
-    ip_version omicron.public.ip_version NOT NULL
+    ip_version omicron.public.ip_version NOT NULL,
+
+    /* Indicates what the IP Pool is reserved for. */
+    reservation_type omicron.public.ip_pool_reservation_type NOT NULL
 );
 
 /*
@@ -2207,17 +2216,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
 
     -- resource_type is redundant because resource IDs are globally unique, but
     -- logically it belongs here
-    PRIMARY KEY (ip_pool_id, resource_type, resource_id),
-
-    -- Check that there are no default pools for the internal silo
-    CONSTRAINT internal_silo_has_no_default_pool CHECK (
-        NOT (
-            resource_type = 'silo' AND
-            resource_id = '001de000-5110-4000-8000-000000000001' AND
-            is_default
-        )
-    )
-
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
 );
 
 -- a given resource can only have one default ip pool
@@ -6771,7 +6770,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '197.0.0', NULL)
+    (TRUE, NOW(), NOW(), '198.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
