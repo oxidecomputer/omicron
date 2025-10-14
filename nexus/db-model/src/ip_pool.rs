@@ -23,6 +23,32 @@ use omicron_common::api::external;
 use std::net::IpAddr;
 use uuid::Uuid;
 
+/// Errors that can occur when converting an IP pool range from the database
+/// to the API representation.
+#[derive(Debug, Clone)]
+pub enum IpRangeConversionError {
+    /// The first and last addresses have mismatched IP versions (IPv4 vs IPv6).
+    MismatchedVersions { first: IpAddr, last: IpAddr },
+    /// The IP range is invalid (e.g., last address is less than first address).
+    InvalidRange { msg: String },
+}
+
+impl std::fmt::Display for IpRangeConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MismatchedVersions { first, last } => write!(
+                f,
+                "IP range has mismatched protocol versions: first={first}, last={last}"
+            ),
+            Self::InvalidRange { msg } => {
+                write!(f, "Invalid IP range: {msg}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for IpRangeConversionError {}
+
 impl_enum_type!(
     IpVersionEnum:
 
@@ -279,38 +305,50 @@ impl IpPoolRange {
     }
 }
 
-impl From<IpPoolRange> for views::IpPoolRange {
-    fn from(range: IpPoolRange) -> Self {
-        Self {
+impl TryFrom<IpPoolRange> for views::IpPoolRange {
+    type Error = external::Error;
+
+    fn try_from(range: IpPoolRange) -> Result<Self, Self::Error> {
+        let ip_range = shared::IpRange::try_from(&range).map_err(|e| {
+            external::Error::internal_error(&format!(
+                "Invalid IP range in database (id={}, pool={}, first={}, last={}): {e:#}",
+                range.id, range.ip_pool_id,
+                range.first_address.ip(), range.last_address.ip()
+            ))
+        })?;
+
+        Ok(Self {
             id: range.id,
             ip_pool_id: range.ip_pool_id,
             time_created: range.time_created,
-            range: shared::IpRange::from(&range),
-        }
+            range: ip_range,
+        })
     }
 }
 
-impl From<&IpPoolRange> for shared::IpRange {
-    fn from(range: &IpPoolRange) -> Self {
-        let maybe_range =
-            match (range.first_address.ip(), range.last_address.ip()) {
-                (IpAddr::V4(first), IpAddr::V4(last)) => {
-                    shared::IpRange::try_from((first, last))
-                }
-                (IpAddr::V6(first), IpAddr::V6(last)) => {
-                    shared::IpRange::try_from((first, last))
-                }
-                (first, last) => {
-                    unreachable!(
-                        "Expected first/last address of an IP range to \
-                    both be of the same protocol version, but first = {:?} \
-                    and last = {:?}",
-                        first, last,
-                    );
-                }
-            };
-        maybe_range
-            .expect("Retrieved an out-of-order IP range pair from the database")
+impl TryFrom<&IpPoolRange> for shared::IpRange {
+    type Error = IpRangeConversionError;
+
+    fn try_from(range: &IpPoolRange) -> Result<Self, Self::Error> {
+        match (range.first_address.ip(), range.last_address.ip()) {
+            (IpAddr::V4(first), IpAddr::V4(last)) => {
+                shared::IpRange::try_from((first, last)).map_err(|e| {
+                    IpRangeConversionError::InvalidRange {
+                        msg: format!("Invalid IPv4 range: {e:#}",),
+                    }
+                })
+            }
+            (IpAddr::V6(first), IpAddr::V6(last)) => {
+                shared::IpRange::try_from((first, last)).map_err(|e| {
+                    IpRangeConversionError::InvalidRange {
+                        msg: format!("Invalid IPv6 range: {e:#}"),
+                    }
+                })
+            }
+            (first, last) => {
+                Err(IpRangeConversionError::MismatchedVersions { first, last })
+            }
+        }
     }
 }
 
