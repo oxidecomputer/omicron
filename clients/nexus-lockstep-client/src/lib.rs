@@ -63,6 +63,7 @@ progenitor::generate_api!(
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
         RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         ZoneStatus = nexus_types::internal_api::views::ZoneStatus,
         ZpoolName = omicron_common::zpool_name::ZpoolName,
