@@ -444,7 +444,7 @@ impl DataStore {
             .filter(ip_pool::time_deleted.is_null())
             .select(
                 ip_pool::reservation_type
-                    .ne(IpPoolReservationType::ExternalSilos),
+                    .eq(IpPoolReservationType::OxideInternal),
             )
             .first_async::<bool>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -722,10 +722,9 @@ impl DataStore {
         ip_pool_resource: IpPoolResource,
     ) -> CreateResult<IpPoolResource> {
         if ip_pool_resource.resource_id == INTERNAL_SILO_ID {
-            return Err(Error::internal_error(
-                "IP Pools should not be linked to the internal silo. \
-                    Set the `reservation_type` column to an internal \
-                    variant instead.",
+            return Err(Error::invalid_request(
+                "IP Pools should not be linked to the internal Oxide silo. \
+                    Reserve the Pool for `oxide_internal` use instead.",
             ));
         }
         opctx
