@@ -5,8 +5,8 @@
 #: target = "helios-2.0"
 #: rust_toolchain = true
 #: output_rules = [
-#:  "=/out/a4x2-package.tar.gz"
-#:  "=/out/xtask"
+#:  "=/out/a4x2-package.tar.gz",
+#:  "=/out/xtask",
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/testbed",
