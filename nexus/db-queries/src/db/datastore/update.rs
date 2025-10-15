@@ -546,7 +546,7 @@ async fn insert_impl(
             .await
             .optional()?;
 
-        if let Some(existing_repo) = existing_repo {
+        if let Some(mut existing_repo) = existing_repo {
             // It doesn't matter whether the UUID of the repo matches or not,
             // since it's uniquely generated. But do check the hash.
             if existing_repo.sha256 != desc.repo.sha256 {
@@ -556,6 +556,19 @@ async fn insert_impl(
                     existing: existing_repo.sha256,
                 }));
             }
+
+            // This repo matches a previous record, so reset `time_created` to
+            // now and ensure `time_pruned` is set to NULL.
+            existing_repo.time_created = chrono::Utc::now();
+            existing_repo.time_pruned = None;
+            diesel::update(dsl::tuf_repo)
+                .filter(dsl::id.eq(existing_repo.id))
+                .set((
+                    dsl::time_created.eq(existing_repo.time_created),
+                    dsl::time_pruned.eq(existing_repo.time_pruned),
+                ))
+                .execute_async(&conn)
+                .await?;
 
             // Just return the existing repo along with all of its artifacts.
             let artifacts =
