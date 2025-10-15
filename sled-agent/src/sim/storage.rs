@@ -1229,8 +1229,12 @@ impl Zpool {
 /// Represents a nested dataset
 pub struct NestedDatasetStorage {
     config: NestedDatasetConfig,
-    // in-memory property for whether this dataset is mounted; typically `true`,
-    // but can be explicitly set to false for some tests
+    // In-memory flag for whether this dataset pretends to be mounted; defaults
+    // to true.
+    //
+    // Nothing in the simulated storage implementation acts on this value; it is
+    // merely a sticky bool that remembers the most recent value passed to
+    // `nested_dataset_set_mounted()`.
     mounted: bool,
     // We intentionally store the children before the mountpoint,
     // so they are deleted first.
