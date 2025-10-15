@@ -7330,6 +7330,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "steno",
