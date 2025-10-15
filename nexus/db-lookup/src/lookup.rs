@@ -871,7 +871,7 @@ impl<'a> Project<'a> {
 
         let (db_row, restrict_network_actions): (nexus_db_model::Project, bool) = project_dsl::project
             .filter(project_dsl::time_deleted.is_null())
-            .filter(project_dsl::id.eq(v0.clone()))
+            .filter(project_dsl::id.eq(*v0))
             .inner_join(silo_dsl::silo.on(project_dsl::silo_id.eq(silo_dsl::id)))
             .select((
                 nexus_db_model::Project::as_select(),
@@ -894,7 +894,7 @@ impl<'a> Project<'a> {
         let (authz_silo, _) = Silo::lookup_by_id_no_authz(
             opctx,
             datastore,
-            &db_row.silo_id.into(),
+            &db_row.silo_id,
         )
         .await?;
         let authz_project = authz::Project::with_primary_key(
