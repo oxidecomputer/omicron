@@ -483,6 +483,7 @@ impl ReconcilerTask {
                 &resolver_status,
                 &internal_disks,
                 sled_agent_facilities,
+                self.former_zone_roots_tx.clone(),
                 &self.log,
             )
             .await;
@@ -559,6 +560,7 @@ impl ReconcilerTask {
                         sled_agent_facilities,
                         timesync_status.is_synchronized(),
                         &self.datasets,
+                        self.former_zone_roots_tx.clone(),
                         &self.log,
                     )
                     .await;
