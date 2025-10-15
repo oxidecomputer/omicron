@@ -30,6 +30,9 @@ mod sysconf;
 
 pub use partitions::{NvmeFormattingError, ensure_partition_layout};
 
+const PFEXEC: &'static str = "/usr/bin/pfexec";
+const ZONEADM: &'static str = "/usr/sbin/zoneadm";
+
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("Failed to access devinfo: {0}")]
@@ -708,15 +711,31 @@ fn poll_device_tree(
     Ok(())
 }
 
+// The list() operation in the zone crate returns all the installed zones, when
+// we really only care about whether the switch zone is running.
+fn get_running_zones() -> Result<Vec<String>, zone::ZoneError> {
+    let zoneadm_output = std::process::Command::new(PFEXEC)
+        .env_clear()
+        .arg(ZONEADM)
+        .arg("list")
+        .arg("-p")
+        .output()
+        .map_err(zone::ZoneError::Command)?;
+    Ok(zone::Adm::parse_list_output(&zoneadm_output)?
+        .iter()
+        .map(|z| z.name.to_string())
+        .collect::<Vec<String>>())
+}
+
 // Block until the switch zone is gone
 fn block_on_switch_zone(log: &slog::Logger) {
     let mut logged = false;
     loop {
-        match zone::Adm::list_blocking() {
+        match get_running_zones() {
             Ok(zones) => {
-                if !zones.iter().any(|z| z.name == "oxz_switch") {
+                if !zones.iter().any(|name| name == "oxz_switch") {
                     info!(log, "switch zone gone");
-                    return;
+                    break;
                 }
             }
             Err(e) => {
@@ -806,7 +825,7 @@ fn monitor_tofino(
     }
 }
 
-async fn hardware_tracking_task(
+fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
     nonsled_observed_disks: Vec<UnparsedDisk>,
@@ -821,7 +840,7 @@ async fn hardware_tracking_task(
                 warn!(log, "Failed to query device tree: {err}");
             }
         }
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
 
@@ -917,14 +936,13 @@ impl HardwareManager {
         let log2 = log.clone();
         let inner2 = inner.clone();
         let tx2 = tx.clone();
-        tokio::task::spawn_blocking(move || monitor_tofino(log2, inner2, tx2));
+        std::thread::spawn(move || monitor_tofino(log2, inner2, tx2));
 
         let log2 = log.clone();
         let inner2 = inner.clone();
         let tx2 = tx.clone();
-        tokio::task::spawn(async move {
+        std::thread::spawn(move || {
             hardware_tracking_task(log2, inner2, nonsled_observed_disks, tx2)
-                .await
         });
 
         Ok(Self { log, inner, tx })
