@@ -1046,11 +1046,7 @@ impl Project {
     ///
     /// If `restrict_network_actions` is not provided, it defaults to `false`.
     /// Use `with_network_restrictions()` to populate it with the actual Silo value.
-    pub fn new(
-        parent: Silo,
-        key: Uuid,
-        lookup_type: LookupType,
-    ) -> Project {
+    pub fn new(parent: Silo, key: Uuid, lookup_type: LookupType) -> Project {
         Project {
             parent,
             key,
@@ -1077,7 +1073,10 @@ impl Project {
 
     /// Update this Project with the actual restrict_network_actions value from the Silo.
     /// This should be called after construction to populate the correct value.
-    pub fn with_network_restrictions(mut self, restrict_network_actions: bool) -> Self {
+    pub fn with_network_restrictions(
+        mut self,
+        restrict_network_actions: bool,
+    ) -> Self {
         self.restrict_network_actions = restrict_network_actions;
         self
     }

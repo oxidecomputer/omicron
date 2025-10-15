@@ -92,7 +92,7 @@ async fn test_iam_prep(
                 admin_group_name: None,
                 tls_certificates: vec![],
                 mapped_fleet_roles: Default::default(),
-                restrict_network_actions: None,  // Default: no restrictions
+                restrict_network_actions: None, // Default: no restrictions
             },
             &[],
             DnsVersionUpdateBuilder::new(
