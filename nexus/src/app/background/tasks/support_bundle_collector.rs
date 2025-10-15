@@ -688,7 +688,7 @@ impl BundleCollection {
         .await?;
 
         // Collect reconfigurator state
-        const NMAX_BLUEPRINTS: usize = 25;
+        const NMAX_BLUEPRINTS: usize = 300;
         match reconfigurator_state_load(
             &self.opctx,
             &self.datastore,
@@ -697,15 +697,21 @@ impl BundleCollection {
         .await
         {
             Ok(state) => {
-                let json = serde_json::to_string_pretty(&state).with_context(
-                    || "failed to serialize reconfigurator state",
+                let file_path = dir.path().join("reconfigurator_state.json");
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&file_path)
+                    .with_context(|| format!("failed to open {}", file_path))?;
+                serde_json::to_writer_pretty(&file, &state).with_context(
+                    || {
+                        format!(
+                            "failed to serialize reconfigurator state to {}",
+                            file_path
+                        )
+                    },
                 )?;
-                tokio::fs::write(
-                    dir.path().join("reconfigurator_state.json"),
-                    json,
-                )
-                .await
-                .with_context(|| "failed to write reconfigurator_state.json")?;
                 info!(
                     log,
                     "Support bundle: collected reconfigurator state";
