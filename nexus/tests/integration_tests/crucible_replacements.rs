@@ -546,9 +546,12 @@ mod region_replacement {
             //
             // If `wait_for_request_state` has the same expected start and end
             // state (as it does above), it's possible to exit that function
-            // having not yet started the saga yet, and this requires an
-            // additional `wait_for_condition` to wait for the expected recorded
-            // step.
+            // having not yet started the saga yet. To check the saga has
+            // started, we'll wait for the replacement request step to be
+            // created by it. If the saga is still in progress, the step may be
+            // recorded while the saga is still `Driving`, so we wait for the
+            // saga to return to `Running` as evidence the step has been fully
+            // driven.
 
             let most_recent_step = wait_for_condition(
                 || {
@@ -565,12 +568,34 @@ mod region_replacement {
                             .await
                             .unwrap()
                         {
-                            Some(step) => Ok(step),
+                            Some(step) => {
+                                // The saga has either started or completed. To
+                                // tell if it's completed and we can move on,
+                                // check on the replacement state again. If
+                                // we're not `Running`, the saga is still in
+                                // progress.
+                                let state = datastore
+                                    .get_region_replacement_request_by_id(
+                                        &opctx,
+                                        replacement_request_id,
+                                    )
+                                    .await
+                                    .unwrap()
+                                    .replacement_state;
+
+                                if state == RegionReplacementState::Running {
+                                    Ok(step)
+                                } else {
+                                    // The replacement step is in progress, but
+                                    // not done yet. We're still waiting, but
+                                    // probably not for long.
+                                    Err(CondCheckError::<()>::NotYet)
+                                }
+                            }
 
                             None => {
-                                // The saga either has not started yet or is
-                                // still running - see the comment before this
-                                // check for more info.
+                                // The saga has not started, so we're not done
+                                // waiting.
                                 Err(CondCheckError::<()>::NotYet)
                             }
                         }
