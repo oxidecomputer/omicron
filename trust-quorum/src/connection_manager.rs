@@ -17,7 +17,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
-use tokio::io::{Interest, Ready};
+use tokio::io::{
+    AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf,
+    split,
+};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -46,9 +49,9 @@ const PING_INTERVAL: Duration = Duration::from_secs(1);
 const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// An error returned from the `ConnMgr`
+/// An error returned from `ConnMgr::accept`
 #[derive(Debug, thiserror::Error, SlogInlineError)]
-pub enum ConnMgrError {
+pub enum AcceptError {
     #[error("Accepted connection from IPv4 address {addr}. Only IPv6 allowed.")]
     Ipv4Accept { addr: SocketAddrV4 },
 
@@ -222,11 +225,11 @@ impl ConnMgr {
     pub async fn accept(
         &mut self,
         corpus: Vec<Utf8PathBuf>,
-    ) -> Result<(), ConnMgrError> {
+    ) -> Result<(), AcceptError> {
         let acceptor = self.server.accept(corpus).await?;
         let addr = match acceptor.addr() {
             SocketAddr::V4(addr) => {
-                return Err(ConnMgrError::Ipv4Accept { addr });
+                return Err(AcceptError::Ipv4Accept { addr });
             }
             SocketAddr::V6(addr) => addr,
         };
@@ -265,7 +268,7 @@ impl ConnMgr {
                     conn.run().await;
                 }
                 Err(err) => {
-                    error!(log, "Failed to accept a connection: {err:?}");
+                    error!(log, "Failed to accept a connection"; &err);
                 }
             }
             task_id
@@ -302,11 +305,19 @@ impl ConnMgr {
     }
 }
 
+/// An error from within an `EstablishedConn`
+///
+/// Also a great movie
+enum ConnErr {
+    Close,
+}
+
 // Container for code running in its own task per sprockets connection
 struct EstablishedConn {
     peer_id: BaseboardId,
     task_id: TaskId,
-    stream: sprockets_tls::Stream<TcpStream>,
+    reader: ReadHalf<sprockets_tls::Stream<TcpStream>>,
+    writer: WriteHalf<sprockets_tls::Stream<TcpStream>>,
     main_tx: mpsc::Sender<ConnToMainMsg>,
     rx: mpsc::Receiver<MainToConnMsg>,
     log: Logger,
@@ -337,10 +348,12 @@ impl EstablishedConn {
         rx: mpsc::Receiver<MainToConnMsg>,
         log: Logger,
     ) -> EstablishedConn {
+        let (reader, writer) = split(stream);
         EstablishedConn {
             peer_id,
             task_id,
-            stream,
+            reader,
+            writer,
             main_tx,
             rx,
             log,
@@ -360,65 +373,34 @@ impl EstablishedConn {
         //
         // Continuously process messages until the connection closes
         loop {
-            let mut interest = Interest::READABLE;
             if !self.current_write.has_remaining()
                 && !self.write_queue.is_empty()
             {
                 self.current_write =
                     Cursor::new(self.write_queue.pop_front().unwrap());
-
-                // Only register write interest if there is something to
-                // write. Otherwise this task will just keep getting woken up
-                // unnecessarily.
-                interest |= Interest::WRITABLE;
             }
 
-            tokio::select! {
+            let res = tokio::select! {
                 _ = interval.tick() => {
-                    self.ping().await;
+                    self.ping().await
                 }
                 Some(msg) = self.rx.recv() => {
-                    self.on_msg_from_main(msg).await;
+                    self.on_msg_from_main(msg).await
                 }
-                res = self.stream.inner().get_ref().0.ready(interest) => {
-                    match res {
-                        Ok(ready) => {
-                            if let Err(_) = self.read_or_write_sock(ready).await {
-                                // Specific error logged in `read_or_write_sock`
-                                return;
-                            }
-
-                        },
-                        Err(err) => {
-                            error!(self.log, "Failed to poll stream: {err}");
-                            return;
-                        }
-
-                    }
-
+                res = self.read_sock.read(&mut self.read_buf[self.total_read..]) => {
+                    self.on_read(res).await
                 }
+                res = self.write_sock.write_buf(&mut self.current_write),
+                   if self.current_write.has_remaining() =>
+                {
+                   self.check_write_result(res).await
+                }
+            };
+
+            if let Err(err) = res {
+                warn!(self.log, "Closing connection"; %err);
             }
         }
-    }
-
-    async fn read_or_write_sock(&mut self, ready: Ready) -> Result<(), ()> {
-        if ready.is_readable() {
-            self.try_read().await?;
-        }
-
-        if ready.is_writable() && self.current_write.has_remaining() {
-            self.try_write().await?;
-        }
-
-        Ok(())
-    }
-
-    async fn try_read(&mut self) -> Result<(), ()> {
-        todo!()
-    }
-
-    async fn try_write(&mut self) -> Result<(), ()> {
-        todo!()
     }
 
     async fn on_msg_from_main(&mut self, msg: MainToConnMsg) {}
