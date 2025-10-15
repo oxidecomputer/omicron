@@ -12,5 +12,5 @@ pub mod config;
 pub mod dataset;
 pub mod disk;
 pub(crate) mod keyfile;
-pub mod manager;
+pub mod nested_dataset;
 pub mod pool;
