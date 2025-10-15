@@ -113,7 +113,7 @@ mod switch_port;
 mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
-mod update;
+pub mod update;
 mod user_data_export;
 mod utilization;
 mod v2p_mapping;
