@@ -8662,6 +8662,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "zeroize",
+ "zfs-test-harness",
  "zip 4.2.0",
  "zone 0.3.1",
 ]
@@ -16478,6 +16479,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "zfs-test-harness"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "illumos-utils",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
 ]
 
 [[package]]

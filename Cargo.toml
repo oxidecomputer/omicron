@@ -138,6 +138,7 @@ members = [
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
+    "sled-storage/zfs-test-harness",
     "sp-sim",
     "test-utils",
     "trust-quorum",
@@ -299,6 +300,7 @@ default-members = [
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
+    "sled-storage/zfs-test-harness",
     "sp-sim",
     "trust-quorum",
     "trust-quorum/gfss",
@@ -783,6 +785,7 @@ wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
 zerocopy = "0.8.26"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
+zfs-test-harness = { path = "sled-storage/zfs-test-harness" }
 zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 

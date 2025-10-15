@@ -1,0 +1,17 @@
+[package]
+name = "zfs-test-harness"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+camino.workspace = true
+camino-tempfile.workspace = true
+illumos-utils.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+sled-storage.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
