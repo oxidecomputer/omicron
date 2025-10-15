@@ -17,7 +17,6 @@ use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
-use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
@@ -158,8 +157,11 @@ pub trait LocalStorage: Sync {
     // implementation, then a "missing function" dispatches to the trait instead
     // and results in infinite recursion.
 
-    /// Returns all configured datasets
-    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error>;
+    /// Returns the config of a particular dataset
+    async fn dyn_dataset_config(
+        &self,
+        dataset_id: &DatasetUuid,
+    ) -> Result<DatasetConfig, Error>;
 
     /// Returns properties about a dataset
     async fn dyn_dataset_get(
@@ -196,23 +198,18 @@ pub trait LocalStorage: Sync {
 /// This implementation is effectively a pass-through to the real methods
 #[async_trait]
 impl LocalStorage for ConfigReconcilerHandle {
-    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        // TODO-cleanup This is super gross; add a better API (maybe fetch a
-        // single dataset by ID, since that's what our caller wants?)
+    async fn dyn_dataset_config(
+        &self,
+        dataset_id: &DatasetUuid,
+    ) -> Result<DatasetConfig, Error> {
+        // This gives us a local clone of the sled config; we call
+        // `remove(dataset_id)` below to avoid having to also clone the dataset
+        // config we want to return.
         let sled_config =
             self.ledgered_sled_config().map_err(Error::LedgeredSledConfig)?;
-        let sled_config = match sled_config {
-            Some(config) => config,
-            None => return Ok(DatasetsConfig::default()),
-        };
-        Ok(DatasetsConfig {
-            generation: sled_config.generation,
-            datasets: sled_config
-                .datasets
-                .into_iter()
-                .map(|d| (d.id, d))
-                .collect(),
-        })
+        sled_config
+            .and_then(|mut sled_config| sled_config.datasets.remove(dataset_id))
+            .ok_or(Error::DatasetNotFound)
     }
 
     async fn dyn_dataset_get(
@@ -282,8 +279,15 @@ impl LocalStorage for ConfigReconcilerHandle {
 /// This implementation allows storage bundles to be stored on simulated storage
 #[async_trait]
 impl LocalStorage for crate::sim::Storage {
-    async fn dyn_datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        self.lock().datasets_config_list().map_err(|err| err.into())
+    async fn dyn_dataset_config(
+        &self,
+        dataset_id: &DatasetUuid,
+    ) -> Result<DatasetConfig, Error> {
+        // This gives us a local clone of the datasets config; we call
+        // `remove(dataset_id)` below to avoid having to also clone the dataset
+        // config we want to return.
+        let mut config = self.lock().datasets_config_list()?;
+        config.datasets.remove(dataset_id).ok_or(Error::DatasetNotFound)
     }
 
     async fn dyn_dataset_get(
@@ -491,11 +495,7 @@ impl<'a> SupportBundleManager<'a> {
         zpool_id: ZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<DatasetConfig, Error> {
-        let datasets_config = self.storage.dyn_datasets_config_list().await?;
-        let dataset = datasets_config
-            .datasets
-            .get(&dataset_id)
-            .ok_or_else(|| Error::DatasetNotFound)?;
+        let dataset = self.storage.dyn_dataset_config(&dataset_id).await?;
 
         let dataset_props =
             self.storage.dyn_dataset_get(&dataset.name.full_name()).await?;
