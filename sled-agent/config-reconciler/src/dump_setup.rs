@@ -303,19 +303,21 @@ impl DumpSetup {
         let mut m2_core_datasets = Vec::new();
         let mount_config = self.mount_config.clone();
         for disk in disks {
-            if disk.is_synthetic() {
-                // We only setup dump devices on real disks
-                continue;
-            }
             match disk.variant() {
                 DiskVariant::M2 => {
-                    match disk.dump_device_devfs_path(false) {
-                        Ok(path) => m2_dump_slices.push(DumpSlicePath(path)),
-                        Err(err) => {
-                            warn!(
-                                log,
-                                "Error getting dump device devfs path: {err:?}"
-                            );
+                    // We only setup dump devices on real disks
+                    if !disk.is_synthetic() {
+                        match disk.dump_device_devfs_path(false) {
+                            Ok(path) => {
+                                m2_dump_slices.push(DumpSlicePath(path))
+                            }
+                            Err(err) => {
+                                warn!(
+                                    log,
+                                    "Error getting dump device devfs path: \
+                                     {err:?}"
+                                );
+                            }
                         }
                     }
                     let name = disk.zpool_name();
