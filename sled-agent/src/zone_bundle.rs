@@ -2025,10 +2025,7 @@ mod illumos_tests {
         // If this needs to change, go modify the "add_vdevs" call in
         // "setup_storage".
         assert!(
-            TEST_QUOTA
-                < ZfsTestHarness::DEFAULT_VDEV_SIZE
-                    .try_into()
-                    .unwrap(),
+            TEST_QUOTA < ZfsTestHarness::DEFAULT_VDEV_SIZE.try_into().unwrap(),
             "Quota larger than underlying device (quota: {:?}, device size: {})",
             TEST_QUOTA,
             ZfsTestHarness::DEFAULT_VDEV_SIZE,

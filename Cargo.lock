@@ -12742,6 +12742,7 @@ dependencies = [
  "slog",
  "thiserror 2.0.17",
  "tokio",
+ "zfs-test-harness",
  "zip 4.2.0",
 ]
 
@@ -16485,14 +16486,18 @@ dependencies = [
 name = "zfs-test-harness"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
  "camino",
  "camino-tempfile",
  "illumos-utils",
+ "key-manager",
  "omicron-common",
  "omicron-uuid-kinds",
  "sled-storage",
  "slog",
  "slog-error-chain",
+ "tokio",
 ]
 
 [[package]]

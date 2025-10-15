@@ -7,11 +7,15 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
 illumos-utils.workspace = true
+key-manager.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 sled-storage.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
+tokio.workspace = true
