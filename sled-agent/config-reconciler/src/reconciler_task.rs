@@ -492,11 +492,6 @@ impl ReconcilerTask {
         // Finally, remove any "orphaned" datasets (i.e., datasets of a kind
         // that we ought to be managing that exist on disks we're managing but
         // don't have entries in our current config).
-        //
-        // Note: this doesn't actually delete them yet! We only report the
-        // orphans; after some bake time where we build confidence this won't
-        // remove datasets it shouldn't, we'll change this to actually remove
-        // them. https://github.com/oxidecomputer/omicron/issues/6177
         self.datasets
             .remove_datasets_if_needed(
                 &sled_config.datasets,
