@@ -929,12 +929,14 @@ pub const DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
 pub static DEMO_IP_POOL_NAME: LazyLock<Name> =
     LazyLock::new(|| "default".parse().unwrap());
 pub static DEMO_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
-    LazyLock::new(|| params::IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DEMO_IP_POOL_NAME.clone(),
-            description: String::from("an IP pool"),
-        },
-        ip_version: IpVersion::V4,
+    LazyLock::new(|| {
+        params::IpPoolCreate::new(
+            IdentityMetadataCreateParams {
+                name: DEMO_IP_POOL_NAME.clone(),
+                description: String::from("an IP pool"),
+            },
+            IpVersion::V4,
+        )
     });
 pub static DEMO_IP_POOL_PROJ_URL: LazyLock<String> = LazyLock::new(|| {
     format!(

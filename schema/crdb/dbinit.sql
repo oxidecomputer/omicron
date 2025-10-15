@@ -2171,6 +2171,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
 );
 
 /*
+ * IP pool types for unicast vs multicast pools
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_type AS ENUM (
+    'unicast',
+    'multicast'
+);
+
+/*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
  */
 CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
@@ -2189,7 +2197,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     ip_version omicron.public.ip_version NOT NULL,
 
     /* Indicates what the IP Pool is reserved for. */
-    reservation_type omicron.public.ip_pool_reservation_type NOT NULL
+    reservation_type omicron.public.ip_pool_reservation_type NOT NULL,
+
+    /* Pool type for unicast (default) vs multicast pools. */
+    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast'
 );
 
 /*
@@ -2197,6 +2208,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
  */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_by_name ON omicron.public.ip_pool (
     name
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index on pool type for efficient filtering of unicast vs multicast pools.
+ */
+CREATE INDEX IF NOT EXISTS lookup_ip_pool_by_type ON omicron.public.ip_pool (
+    pool_type
 ) WHERE
     time_deleted IS NULL;
 
@@ -2252,7 +2271,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_range (
     /* FK into the `ip_pool` table. */
     ip_pool_id UUID NOT NULL,
     /* Tracks child resources, IP addresses allocated out of this range. */
-    rcgen INT8 NOT NULL
+    rcgen INT8 NOT NULL,
+
+    /* Ensure first address is not greater than last address */
+    CONSTRAINT check_address_order CHECK (first_address <= last_address)
 );
 
 /*

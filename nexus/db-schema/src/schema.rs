@@ -631,6 +631,7 @@ table! {
         ip_version -> crate::enums::IpVersionEnum,
         rcgen -> Int8,
         reservation_type -> crate::enums::IpPoolReservationTypeEnum,
+        pool_type -> crate::enums::IpPoolTypeEnum,
     }
 }
 

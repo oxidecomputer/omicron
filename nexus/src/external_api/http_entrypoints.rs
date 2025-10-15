@@ -1775,7 +1775,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
-            Ok(HttpResponseCreated(IpPool::from(pool)))
+            Ok(HttpResponseCreated(pool.into()))
         };
         apictx
             .context
@@ -2048,8 +2048,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .ip_pool_list_ranges(&opctx, &pool_lookup, &pag_params)
                 .await?
                 .into_iter()
-                .map(|range| range.into())
-                .collect();
+                .map(|range| range.try_into())
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(HttpResponseOk(ResultsPage::new(
                 ranges,
                 &EmptyScanParams {},
@@ -2080,7 +2080,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
             let out =
                 nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
-            Ok(HttpResponseCreated(out.into()))
+            Ok(HttpResponseCreated(out.try_into()?))
         };
         apictx
             .context
@@ -2135,8 +2135,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .ip_pool_service_list_ranges(&opctx, &pag_params)
                 .await?
                 .into_iter()
-                .map(|range| range.into())
-                .collect();
+                .map(|range| range.try_into())
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(HttpResponseOk(ResultsPage::new(
                 ranges,
                 &EmptyScanParams {},
@@ -2163,7 +2163,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let range = range_params.into_inner();
             let out = nexus.ip_pool_service_add_range(&opctx, &range).await?;
-            Ok(HttpResponseCreated(out.into()))
+            Ok(HttpResponseCreated(out.try_into()?))
         };
         apictx
             .context
