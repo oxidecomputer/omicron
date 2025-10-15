@@ -14,7 +14,6 @@ use dropshot::HttpError;
 use futures::Stream;
 use futures::StreamExt;
 use illumos_utils::zfs::DatasetProperties;
-use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
@@ -85,9 +84,6 @@ pub enum Error {
     TryFromInt(#[from] std::num::TryFromIntError),
 
     #[error(transparent)]
-    Storage(#[from] sled_storage::error::Error),
-
-    #[error(transparent)]
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
@@ -132,7 +128,6 @@ impl From<Error> for HttpError {
             Error::NotAFile => {
                 HttpError::for_bad_request(None, "Not a file".to_string())
             }
-            Error::Storage(err) => HttpError::from(ExternalError::from(err)),
             Error::Zip(err) => match err {
                 ZipError::FileNotFound => HttpError::for_not_found(
                     None,
