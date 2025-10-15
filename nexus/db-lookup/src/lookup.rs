@@ -891,12 +891,9 @@ impl<'a> Project<'a> {
                 )
             })?;
 
-        let (authz_silo, _) = Silo::lookup_by_id_no_authz(
-            opctx,
-            datastore,
-            &db_row.silo_id,
-        )
-        .await?;
+        let (authz_silo, _) =
+            Silo::lookup_by_id_no_authz(opctx, datastore, &db_row.silo_id)
+                .await?;
         let authz_project = authz::Project::with_primary_key(
             authz_silo.clone(),
             db_row.id(),
