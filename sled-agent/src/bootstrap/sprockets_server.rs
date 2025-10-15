@@ -59,22 +59,33 @@ impl SprocketsServer {
     /// which is cancel-safe. Note that cancelling this
     /// server does not necessarily cancel any outstanding requests that it has
     /// already received (and which may still be executing).
-    pub(super) async fn run(mut self) {
+    pub(super) async fn run(self) {
         loop {
             // Sprockets actually _uses_ the key here!
-            let (stream, remote_addr) = match self.listener.accept().await {
-                Ok(conn) => conn,
+            // TODO: Once we have a corpus, use it.
+            // Will we ever have one at RSS time?
+            let corpus = vec![];
+            let acceptor = match self.listener.accept(corpus).await {
+                Ok(acceptor) => acceptor,
                 Err(err) => {
-                    error!(self.log, "accept() failed"; "err" => #%err);
+                    error!(self.log, "accept() failed"; &err);
                     continue;
                 }
             };
 
-            let log = self.log.new(o!("remote_addr" => remote_addr));
-            info!(log, "Accepted connection");
-
+            let log = self.log.new(o!("remote_addr" => acceptor.addr()));
+            info!(log, "TCP connection accepted");
             let tx_requests = self.tx_requests.clone();
             tokio::spawn(async move {
+                let stream = match acceptor.handshake().await {
+                    Ok((stream, _)) => stream,
+                    Err(err) => {
+                        error!(log, "Sprockets handshake failed"; &err);
+                        return;
+                    }
+                };
+                info!(log, "Sprockets handshake completed");
+
                 match handle_start_sled_agent_request(stream, tx_requests, &log)
                     .await
                 {
