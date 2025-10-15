@@ -160,14 +160,14 @@ pub struct IpPool {
     pub identity: IpPoolIdentity,
     /// The IP version of the pool.
     pub ip_version: IpVersion,
-    /// Pool type for unicast (default) vs multicast pools.
-    pub pool_type: IpPoolType,
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
 
     /// Indicates what the pool is reserved for.
     pub reservation_type: IpPoolReservationType,
+    /// Pool type for unicast (default) vs multicast pools.
+    pub pool_type: IpPoolType,
 }
 
 impl IpPool {
