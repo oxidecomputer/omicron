@@ -59,6 +59,7 @@ define_enums! {
     IpKindEnum => "ip_kind",
     IpPoolReservationTypeEnum => "ip_pool_reservation_type",
     IpPoolResourceTypeEnum => "ip_pool_resource_type",
+    IpPoolTypeEnum => "ip_pool_type",
     IpVersionEnum => "ip_version",
     MigrationStateEnum => "migration_state",
     NetworkInterfaceKindEnum => "network_interface_kind",
