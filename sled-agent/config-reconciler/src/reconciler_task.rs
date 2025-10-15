@@ -82,6 +82,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
         Arc::clone(&mount_config),
         currently_managed_zpools_tx,
         external_disks_tx,
+        former_zone_roots_tx.clone(),
     );
     let datasets = OmicronDatasets::new(dataset_task);
     let zones = OmicronZones::new(mount_config, time_sync_config);

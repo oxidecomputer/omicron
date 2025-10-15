@@ -7,9 +7,12 @@
 //! There is no separate tokio task here; our parent reconciler task owns this
 //! set of disks and is able to mutate it in place during reconciliation.
 
+use crate::dump_setup::FormerZoneRootRequest;
+use anyhow::Context;
 use futures::future;
 use id_map::IdMap;
 use id_map::IdMappable;
+use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
@@ -20,12 +23,15 @@ use omicron_common::disk::DiskVariant;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use rand::distr::{Alphanumeric, SampleString};
 use sled_storage::config::MountConfig;
 use sled_storage::dataset::DatasetError;
+use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
 use sled_storage::disk::DiskError;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
+use slog::error;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
@@ -34,6 +40,8 @@ use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::OnceLock;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 
 use crate::disks_common::MaybeUpdatedDisk;
@@ -229,6 +237,9 @@ pub(super) struct ExternalDisks {
     // Output channel for the raw disks we're managing. This is only consumed
     // within this crate by `DumpSetupTask` (for managing dump devices).
     external_disks_tx: watch::Sender<HashSet<Disk>>,
+
+    // Channel for submitting requests to archive former zone root directories.
+    archive_tx: mpsc::Sender<FormerZoneRootRequest>,
 }
 
 impl ExternalDisks {
@@ -236,12 +247,14 @@ impl ExternalDisks {
         mount_config: Arc<MountConfig>,
         currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
         external_disks_tx: watch::Sender<HashSet<Disk>>,
+        archive_tx: mpsc::Sender<FormerZoneRootRequest>,
     ) -> Self {
         Self {
             disks: IdMap::default(),
             mount_config,
             currently_managed_zpools_tx,
             external_disks_tx,
+            archive_tx,
         }
     }
 
@@ -378,11 +391,12 @@ impl ExternalDisks {
         key_requester: &StorageKeyRequester,
         log: &Logger,
     ) {
+        let archive_tx = self.archive_tx.clone();
         self.start_managing_if_needed_with_disk_adopter(
             raw_disks,
             config,
             log,
-            &RealDiskAdopter { key_requester },
+            &RealDiskAdopter { key_requester, archive_tx },
         )
         .await
     }
@@ -613,6 +627,7 @@ trait DiskAdopter {
 
 struct RealDiskAdopter<'a> {
     key_requester: &'a StorageKeyRequester,
+    archive_tx: mpsc::Sender<FormerZoneRootRequest>,
 }
 
 impl DiskAdopter for RealDiskAdopter<'_> {
@@ -623,7 +638,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
         pool_id: ZpoolUuid,
         log: &Logger,
     ) -> Result<Disk, DiskManagementError> {
-        Disk::new(
+        let disk = Disk::new(
             log,
             mount_config,
             raw_disk,
@@ -642,8 +657,170 @@ impl DiskAdopter for RealDiskAdopter<'_> {
                 }
                 _ => DiskManagementError::Other(err_string),
             }
-        })
+        })?;
+
+        // Attempt to archive and then wipe the contents of the zones dataset.
+        //
+        // There's a chain of design goals and compromises here:
+        //
+        // In general, across the control plane, we want to carefully manage
+        // persistent storage in a way that will ensure the system's fault
+        // tolerance.  Important data generally needs to be stored in
+        // CockroachDB or some other replicated storage, not the local
+        // filesystem.  We want some guard rails to prevent developers from
+        // accidentally using the local filesystem to store important data that
+        // really ought to be replicated.
+        //
+        // In an ideal world, we might make the root filesystem read-only
+        // altogether or at least isolate the parts that really need to be
+        // writeable (e.g., for logging) from the rest of it.  But that's a fair
+        // bit of work we haven't done yet.
+        //
+        // Instead, we make zone root filesystems transient, which is to say
+        // that their contents are not preserved after every kind of restart.
+        // But we still need to put the data somewhere, and it should be on disk
+        // rather than in memory, so we still use these ZFS pools for them.
+        // That means we have to wipe that data at some point.  And before
+        // wiping it, we want to archive any log files for debugging.
+        //
+        // So, when should we archive and wipe zone root filesystems?  In an
+        // ideal world, we'd do it each time the zone starts (to make sure we
+        // wipe them even if the sled reboots unexpectedly) as well as when the
+        // zone halts (to make sure we archive files from zones that will never
+        // start again).  See oxidecomputer/omicron#8316.  But this too is
+        // tricky and we haven't done this work yet.
+        //
+        // So instead, we take a pretty blunt hammer: the first time we adopt
+        // any disk in the lifetime of this sled agent process, we archive and
+        // destroy all the zone root filesystems on it.
+        //
+        // To determine whether we've already done this, we construct a unique
+        // value once in the lifetime of each sled agent process.  After we
+        // destroy and re-create the dataset, we'll set this property.
+        static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
+        let agent_local_value = AGENT_LOCAL_VALUE
+            .get_or_init(|| Alphanumeric.sample_string(&mut rand::rng(), 20));
+
+        let zpool_name = disk.zpool_name();
+        let zone_dataset_name = format!("{}/{}", zpool_name, ZONE_DATASET);
+        match Zfs::get_oxide_value(&zone_dataset_name, "agent").await {
+            Ok(v) if &v == agent_local_value => {
+                info!(
+                    log,
+                    "Skipping automatic archive/wipe of dataset: {}",
+                    zone_dataset_name
+                );
+            }
+            Ok(_) | Err(_) => {
+                info!(
+                    log,
+                    "Automatically archiving/wipe of dataset: {}",
+                    zone_dataset_name
+                );
+                archive_and_destroy_child_datasets(
+                    log,
+                    mount_config,
+                    &self.archive_tx,
+                    &zpool_name,
+                    &zone_dataset_name,
+                )
+                .await?;
+                Zfs::set_oxide_value(
+                    &zone_dataset_name,
+                    "agent",
+                    agent_local_value,
+                )
+                .await
+                .context("setting \"agent\" dataset property")
+                .map_err(|error| {
+                    DiskManagementError::Other(
+                        InlineErrorChain::new(&*error).to_string(),
+                    )
+                })?;
+            }
+        };
+
+        Ok(disk)
     }
+}
+
+async fn archive_and_destroy_child_datasets(
+    log: &Logger,
+    mount_config: &MountConfig,
+    archive_tx: &mpsc::Sender<FormerZoneRootRequest>,
+    zpool_name: &ZpoolName,
+    zone_dataset_name: &str,
+) -> Result<(), DiskManagementError> {
+    let child_datasets = Zfs::list_datasets(zone_dataset_name)
+        .await
+        .context("listing datasets")
+        .map_err(|error| {
+            DiskManagementError::Other(
+                InlineErrorChain::new(&*error).to_string(),
+            )
+        })?;
+
+    for child_dataset in child_datasets {
+        // This is just a sanity check.  There's no way this should ever be
+        // wrong, but the risk of destroying the wrong dataset is just so high
+        // that we want to be really sure.
+        if !child_dataset.starts_with(zone_dataset_name)
+            || !child_dataset.contains(ZONE_DATASET)
+        {
+            error!(
+                log,
+                "too afraid to delete dataset (this should be impossible)";
+                "dataset_name" => child_dataset,
+            );
+            continue;
+        }
+
+        // Attempt to archive it.  This is best-effort.
+        let mountpoint =
+            zpool_name.dataset_mountpoint(&mount_config.root, &child_dataset);
+        info!(
+            log,
+            "attempting to archive logs from path";
+            "path" => %mountpoint
+        );
+        let (done_rx, request) =
+            match FormerZoneRootRequest::for_prod_path(&mountpoint) {
+                Ok(r) => r,
+                Err(error) => {
+                    // This should be impossible.  Log it and ignore this
+                    // dataset.
+                    error!(
+                        log,
+                        "unable to parse path as zone root (not deleting it)";
+                        "path" => %mountpoint,
+                        InlineErrorChain::new(&error),
+                    );
+                    continue;
+                }
+            };
+        if let Err(error) = archive_tx.send(request).await {
+            warn!(
+                log,
+                "archival completion channel closed (1)";
+                InlineErrorChain::new(&error)
+            );
+        }
+        if let Err(error) = done_rx.await {
+            warn!(
+                log,
+                "archival completion channel closed (2)";
+                InlineErrorChain::new(&error)
+            );
+        }
+
+        Zfs::destroy_dataset(&child_dataset).await.map_err(|error| {
+            DiskManagementError::Other(
+                InlineErrorChain::new(&error).to_string(),
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -775,10 +952,12 @@ mod tests {
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
+        let (archive_tx, _) = mpsc::channel(1);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
+            archive_tx,
         );
 
         // There should be no disks to start.
@@ -887,10 +1066,12 @@ mod tests {
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
+        let (archive_tx, _) = mpsc::channel(1);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
+            archive_tx,
         );
 
         // There should be no disks to start.
@@ -974,10 +1155,12 @@ mod tests {
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
+        let (archive_tx, _) = mpsc::channel(1);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
+            archive_tx,
         );
 
         // There should be no disks to start.
@@ -1096,10 +1279,12 @@ mod tests {
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
+        let (archive_tx, _) = mpsc::channel(1);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
+            archive_tx,
         );
 
         // There should be no disks to start.
