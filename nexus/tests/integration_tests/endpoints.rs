@@ -2537,16 +2537,21 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 ],
             },
             VerifyEndpoint {
-                url: "/v1/system/update/repository?file_name=demo-repo.zip",
+                url: "/v1/system/update/repositories?file_name=demo-repo.zip",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Put(
-                    // In reality this is the contents of a zip file.
-                    serde_json::Value::Null,
-                )],
+                allowed_methods: vec![
+                    // the query param is only relevant to the put
+                    AllowedMethod::Put(
+                        // In reality this is the contents of a zip file.
+                        serde_json::Value::Null,
+                    ),
+                    // get doesn't use the query param but it doesn't break if it's there
+                    AllowedMethod::Get
+                ],
             },
             VerifyEndpoint {
-                url: "/v1/system/update/repository/1.0.0",
+                url: "/v1/system/update/repositories/1.0.0",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
@@ -2556,10 +2561,17 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
                     ),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/status",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
                 ],
             },
             /* Metrics */

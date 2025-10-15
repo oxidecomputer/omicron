@@ -197,3 +197,8 @@ sp_ereport_ingester.period_secs = 30
 # we only have one sled in the test environment, so we need to use the
 # `Random` strategy, instead of `RandomWithDistinctSleds`
 type = "random"
+
+[omdb]
+# In production omdb is shipped alongside Nexus in its zone; this doesn't happen
+# (and isn't needed) in tests.
+bin_path = "/cannot/fetch/omdb/in/test/suite"

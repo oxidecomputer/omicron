@@ -12,7 +12,6 @@ use nexus_db_model::Generation;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
-use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
@@ -57,6 +56,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
 use slog::error;
 use slog_error_chain::InlineErrorChain;
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -415,12 +415,13 @@ async fn fetch_all_service_ip_pool_ranges(
     Ok(ranges)
 }
 
-/// Loads state for import into `reconfigurator-cli`
+/// Loads state for debugging or import into `reconfigurator-cli`
 ///
-/// This is only to be used in omdb or tests.
+/// This is used in omdb, tests, and in Nexus to collect support bundles
 pub async fn reconfigurator_state_load(
     opctx: &OpContext,
     datastore: &DataStore,
+    nmax_blueprints: usize,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
     let planner_config = datastore
@@ -429,8 +430,11 @@ pub async fn reconfigurator_state_load(
         .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
     let planning_input =
         PlanningInputFromDb::assemble(opctx, datastore, planner_config).await?;
+
+    // We'll grab the most recent several inventory collections.
+    const NCOLLECTIONS: u8 = 5;
     let collection_ids = datastore
-        .inventory_collections()
+        .inventory_collections_latest(opctx, NCOLLECTIONS)
         .await
         .context("listing collections")?
         .into_iter()
@@ -448,11 +452,13 @@ pub async fn reconfigurator_state_load(
         .collect::<Vec<Collection>>()
         .await;
 
+    // Grab the latest target blueprint.
     let target_blueprint = datastore
         .blueprint_target_get_current(opctx)
         .await
         .context("failed to read current target blueprint")?;
 
+    // Paginate through the list of all blueprints.
     let mut blueprint_ids = Vec::new();
     let mut paginator = Paginator::new(
         SQL_BATCH_SIZE,
@@ -469,6 +475,13 @@ pub async fn reconfigurator_state_load(
         blueprint_ids.extend(batch.into_iter());
     }
 
+    // We'll only grab the most recent blueprints that fit within the limit that
+    // we were given.  This is a heuristic intended to grab what's most likely
+    // to be useful even when the system has a large number of blueprints.  But
+    // the intent is that callers provide a limit that should be large enough to
+    // cover everything.
+    blueprint_ids.sort_by_key(|bpm| Reverse(bpm.time_created));
+    let blueprint_ids = blueprint_ids.into_iter().take(nmax_blueprints);
     let blueprints = futures::stream::iter(blueprint_ids)
         .filter_map(|bpm| async move {
             let blueprint_id = bpm.id.into_untyped_uuid();

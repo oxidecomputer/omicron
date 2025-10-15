@@ -107,6 +107,7 @@ only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
   "omicron-nexus.tar.gz",
+  "omicron-omdb.tar.gz",
   "zone-setup.tar.gz",
   "zone-network-install.tar.gz",
   "opte-interface-setup.tar.gz",
@@ -695,8 +696,8 @@ output.intermediate_only = true
 service_name = "lldp"
 source.type = "prebuilt"
 source.repo = "lldp"
-source.commit = "53f4254b1ce7f13e23fdb54180015760b5f44d55"
-source.sha256 = "8ef356ec9ca4d261c35d6051d087d17e8757778114eb314d7a011e0927b006cd"
+source.commit = "61479b6922f9112fbe1e722414d2b8055212cb12"
+source.sha256 = "8f988c0b0fa3ad4121ab0e825298601035e56c5c054bdc3a1dfb4d6c8fd5b300"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -735,8 +736,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "19e744e1afaff49bbb8402d6519f63283250c93a"
-source.sha256 = "ddc69d9e38abd1f7db594b130027719d5f6607569763708d5f979c97b032c9b5"
+source.commit = "cc8e02a0800034c431c8cf96b889ea638da3d194"
+source.sha256 = "edc5fe4bc4e7f091cd886d37a1adedaa7f646971b7d235ea1000623fde8c6648"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -762,8 +763,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "19e744e1afaff49bbb8402d6519f63283250c93a"
-source.sha256 = "542e2f784cda4c5e2c864bcf49ae0174e21ca84e0e550cae8882c8e7735fc715"
+source.commit = "cc8e02a0800034c431c8cf96b889ea638da3d194"
+source.sha256 = "31f8daf167cd647728b62e35d802c39c118c9b39fa6f3419c6c2eafd4094f172"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -782,8 +783,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "19e744e1afaff49bbb8402d6519f63283250c93a"
-source.sha256 = "8f31afa74591965ea34f25ae4228f74f3968d19abe437e765d0f21f5bcc6757c"
+source.commit = "cc8e02a0800034c431c8cf96b889ea638da3d194"
+source.sha256 = "c27a07a4406739994d6fb68f0d8e7125091743881f1f3e82790ab1099f4f2f4c"
 output.type = "zone"
 output.intermediate_only = true
 

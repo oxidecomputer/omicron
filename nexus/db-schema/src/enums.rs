@@ -57,6 +57,7 @@ define_enums! {
     InvZoneManifestSourceEnum => "inv_zone_manifest_source",
     IpAttachStateEnum => "ip_attach_state",
     IpKindEnum => "ip_kind",
+    IpPoolReservationTypeEnum => "ip_pool_reservation_type",
     IpPoolResourceTypeEnum => "ip_pool_resource_type",
     IpPoolTypeEnum => "ip_pool_type",
     IpVersionEnum => "ip_version",

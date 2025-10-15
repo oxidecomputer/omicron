@@ -10,6 +10,7 @@ use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::IpPool;
+use nexus_db_model::IpPoolReservationType;
 use nexus_db_model::IpPoolType;
 use nexus_db_model::IpPoolUpdate;
 use nexus_db_model::IpVersion;
@@ -89,12 +90,16 @@ impl super::Nexus {
         }
 
         let pool = match pool_params.pool_type.clone() {
-            shared::IpPoolType::Unicast => {
-                IpPool::new(&pool_params.identity, ip_version)
-            }
-            shared::IpPoolType::Multicast => {
-                IpPool::new_multicast(&pool_params.identity, ip_version)
-            }
+            shared::IpPoolType::Unicast => IpPool::new(
+                &pool_params.identity,
+                ip_version,
+                IpPoolReservationType::ExternalSilos,
+            ),
+            shared::IpPoolType::Multicast => IpPool::new_multicast(
+                &pool_params.identity,
+                ip_version,
+                IpPoolReservationType::ExternalSilos,
+            ),
         };
 
         self.db_datastore.ip_pool_create(opctx, pool).await
