@@ -31,6 +31,13 @@ pub(crate) struct ZoneSafetyChecks {
     // Helper to look up specific zones by ID; each zone in this map will also
     // be present in `sleds_with_unsafe_zones()`, under the sled stored in
     // this map.
+    //
+    // NOTE: An invariant of this type is that for every sled ID in
+    // `sleds_with_unsafe_zones`, all of the zone IDs it points to are also
+    // present as keys in this map pointing back to the sled ID. The (private)
+    // `insert()` method handles this invariant correctly; any changes to the
+    // fields of this type or the way it's constructed need to take this into
+    // account.
     zone_to_sled: BTreeMap<OmicronZoneUuid, SledUuid>,
 }
 
@@ -44,11 +51,6 @@ impl ZoneSafetyChecks {
     /// total level of redundancy should be high enough to protect us against
     /// making a decision that it's okay to shut down one node while
     /// simulateously losing another one.)
-    //
-    // TODO-john This type should really be constructed after the
-    // expunge/decommission planning steps. Should we take a
-    // `&PlanningDecommissionStepReport` argument (that we don't actually use)
-    // as a token to ensure that statically?
     pub fn new(
         blueprint: &BlueprintBuilder<'_>,
         inventory: &Collection,
@@ -214,9 +216,10 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
             }
         }
 
-        // TODO-john Should this be looking at the `PlanningInput`'s policy
-        // instead of the hard coded constant we use for the default policy?
-        // (Same question for the other *_REDUNDANCY constants in this file.)
+        // TODO-correctness This should be looking at the input policy target
+        // redundancy, not the `BOUNDARY_NTP_REDUNDANCY` constant. (Same for the
+        // other redundancy checks in this file.)
+        // <https://github.com/oxidecomputer/omicron/issues/9220>
         if synchronized_boundary_ntp_count < BOUNDARY_NTP_REDUNDANCY {
             return Some(ZoneUnsafeToShutdown::BoundaryNtp {
                 total_boundary_ntp_zones: self.boundary_ntp_zones.len(),
@@ -262,11 +265,6 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
                     reason: NotEnoughLiveNodes { live_nodes },
                 });
             }
-
-            // TODO-john Should we also check the number of cockroach nodes in
-            // `self.blueprint` like we do for boundary NTP and internal DNS?
-            // Inventory could have 5 live nodes, but if we've just expunged
-            // one, we know that's out of date.
         }
         None
     }
