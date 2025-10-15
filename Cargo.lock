@@ -16494,6 +16494,7 @@ dependencies = [
  "key-manager",
  "omicron-common",
  "omicron-uuid-kinds",
+ "omicron-workspace-hack",
  "sled-storage",
  "slog",
  "slog-error-chain",

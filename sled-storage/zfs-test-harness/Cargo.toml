@@ -19,3 +19,4 @@ sled-storage.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 tokio.workspace = true
+omicron-workspace-hack.workspace = true
