@@ -761,12 +761,12 @@ async fn archive_and_destroy_child_datasets(
         })?;
 
     for child_dataset in child_datasets {
+        let child_dataset = format!("{}/{}", zone_dataset_name, child_dataset);
+
         // This is just a sanity check.  There's no way this should ever be
         // wrong, but the risk of destroying the wrong dataset is just so high
         // that we want to be really sure.
-        if !child_dataset.starts_with(zone_dataset_name)
-            || !child_dataset.contains(ZONE_DATASET)
-        {
+        if !child_dataset.contains(ZONE_DATASET) {
             error!(
                 log,
                 "too afraid to delete dataset (this should be impossible)";
