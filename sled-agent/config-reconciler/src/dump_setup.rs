@@ -134,16 +134,20 @@ struct DebugDataset(Utf8PathBuf);
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
 struct CoreDataset(Utf8PathBuf);
 
-#[derive(Debug, Clone)]
-pub struct FormerZoneRoot {
+#[derive(Debug)]
+pub struct FormerZoneRootRequest {
     path: Utf8PathBuf,
     zone_name: String,
+    completion_tx: oneshot::Sender<()>,
 }
 
-impl FormerZoneRoot {
+impl FormerZoneRootRequest {
     pub fn for_prod_path<'a>(
         path: &'a Utf8Path,
-    ) -> Result<FormerZoneRoot, FormerZoneRootPathError<'a>> {
+    ) -> Result<
+        (oneshot::Receiver<()>, FormerZoneRootRequest),
+        FormerZoneRootPathError<'a>,
+    > {
         let file_name = path.file_name().ok_or_else(|| {
             FormerZoneRootPathError { path, reason: "path has no file name" }
         })?;
@@ -155,10 +159,16 @@ impl FormerZoneRoot {
             });
         }
 
-        Ok(FormerZoneRoot {
-            path: path.to_owned(),
-            zone_name: file_name.to_string(),
-        })
+        let (completion_tx, completion_rx) = oneshot::channel();
+
+        Ok((
+            completion_rx,
+            FormerZoneRootRequest {
+                path: path.to_owned(),
+                zone_name: file_name.to_string(),
+                completion_tx,
+            },
+        ))
     }
 }
 
@@ -222,9 +232,8 @@ trait GetMountpoint: AsRef<ZpoolName> {
 
 #[derive(Debug)]
 enum DumpSetupCmd {
-    ArchiveFormerZoneRoots {
-        zone_roots: Vec<FormerZoneRoot>,
-        completion_tx: oneshot::Sender<()>,
+    ArchiveFormerZoneRoot {
+        request: FormerZoneRootRequest,
     },
     UpdateDumpdevSetup {
         dump_slices: Vec<DumpSlicePath>,
@@ -368,50 +377,26 @@ impl DumpSetup {
         }
     }
 
-    /// Perform log archival from the specified directories, which are assumed
+    /// Perform log archival from the specified directory, which is assumed
     /// to correspond to zones that are no longer running.
     ///
     /// Unlike typical log file archival, this includes non-rotated log files.
     ///
     /// This makes a best-effort and does not report failures to the caller.
-    pub async fn archive_former_zone_roots(
+    pub async fn archive_former_zone_root(
         &self,
-        zone_roots: Vec<FormerZoneRoot>,
+        zone_root: FormerZoneRootRequest,
     ) {
         let log = &self.log;
 
-        info!(
-            log,
-            "archive_former_zone_roots: start";
-            "zone_roots" => ?zone_roots
-        );
-
-        // XXX-dap commonize with previous function
-        let (completion_tx, completion_rx) = oneshot::channel();
+        info!(log, "archive_former_zone_root"; "zone_root" => ?zone_root);
         if let Err(_) = self
             .tx
-            .send(DumpSetupCmd::ArchiveFormerZoneRoots {
-                zone_roots: zone_roots.clone(),
-                completion_tx,
-            })
+            .send(DumpSetupCmd::ArchiveFormerZoneRoot { request: zone_root })
             .await
         {
             error!(log, "DumpSetup channel closed");
         }
-
-        if let Err(err) = completion_rx.await {
-            error!(
-                log,
-                "DumpSetup failed to await archive_former_zone_roots";
-                InlineErrorChain::new(&err)
-            );
-        }
-
-        info!(
-            log,
-            "archive_former_zone_roots: done";
-            "zone_roots" => ?zone_roots,
-        );
     }
 }
 
@@ -672,29 +657,18 @@ impl DumpSetupWorker {
                         core_datasets,
                     );
                 }
-                Ok(Some(DumpSetupCmd::ArchiveFormerZoneRoots {
-                    zone_roots,
-                    completion_tx,
-                })) => {
+                Ok(Some(DumpSetupCmd::ArchiveFormerZoneRoot { request })) => {
                     if let Err(error) =
-                        self.archive_extra_former_zone_roots(&zone_roots).await
+                        self.archive_former_zone_root(request).await
                     {
                         if !matches!(error, ArchiveLogsError::NoDebugDirYet) {
                             error!(
                                 self.log,
                                 "Failure while trying to archive extra \
-                                 zone roots";
+                                 zone root";
                                 InlineErrorChain::new(&error),
                             );
                         }
-                    }
-
-                    if let Err(()) = completion_tx.send(()) {
-                        warn!(
-                            self.log,
-                            "failed to notify archive_former_zone_roots() \
-                             (channel closed)"
-                        );
                     }
                 }
                 Ok(None) => {
@@ -1128,26 +1102,31 @@ impl DumpSetupWorker {
         Ok(())
     }
 
-    async fn archive_extra_former_zone_roots(
+    async fn archive_former_zone_root(
         &self,
-        zone_roots: &[FormerZoneRoot],
+        zone_root: FormerZoneRootRequest,
     ) -> Result<(), ArchiveLogsError> {
         let debug_dir = self
             .chosen_debug_dir
             .as_ref()
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
-        for zone_root in zone_roots {
-            let logdir = zone_root.path.join("root/var/svc/log");
-            let zone_name = &zone_root.zone_name;
-            self.archive_logs_from_zone_path(
+        let logdir = zone_root.path.join("root/var/svc/log");
+        let zone_name = &zone_root.zone_name;
+        let rv = self
+            .archive_logs_from_zone_path(
                 debug_dir,
                 logdir.into(),
                 zone_name,
                 true,
             )
-            .await?;
+            .await;
+        if let Err(()) = zone_root.completion_tx.send(()) {
+            warn!(
+                self.log,
+                "archive_former_zone_root: failed to report completion"
+            );
         }
-        Ok(())
+        rv
     }
 
     async fn archive_logs_from_zone_path(

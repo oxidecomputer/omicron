@@ -7,6 +7,7 @@
 
 use crate::InternalDisksReceiver;
 use crate::dump_setup::DumpSetup;
+use crate::dump_setup::FormerZoneRootRequest;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
 use slog::Logger;
@@ -14,11 +15,13 @@ use slog::error;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 
 pub(crate) fn spawn(
     internal_disks_rx: InternalDisksReceiver,
     external_disks_rx: watch::Receiver<HashSet<Disk>>,
+    former_zone_roots_tx: mpsc::Receiver<FormerZoneRootRequest>,
     mount_config: Arc<MountConfig>,
     base_log: &Logger,
 ) {
@@ -26,6 +29,7 @@ pub(crate) fn spawn(
         DumpSetupTask::new(
             internal_disks_rx,
             external_disks_rx,
+            former_zone_roots_tx,
             mount_config,
             base_log,
         )
@@ -37,6 +41,8 @@ struct DumpSetupTask {
     // Input channels on which we receive updates about disk changes.
     internal_disks_rx: InternalDisksReceiver,
     external_disks_rx: watch::Receiver<HashSet<Disk>>,
+    // Input channel on which we receive requests to archive zone roots.
+    former_zone_roots_rx: mpsc::Receiver<FormerZoneRootRequest>,
 
     // Invokes dumpadm(8) and savecore(8) when new disks are encountered
     dump_setup: DumpSetup,
@@ -51,12 +57,14 @@ impl DumpSetupTask {
     fn new(
         internal_disks_rx: InternalDisksReceiver,
         external_disks_rx: watch::Receiver<HashSet<Disk>>,
+        former_zone_roots_rx: mpsc::Receiver<FormerZoneRootRequest>,
         mount_config: Arc<MountConfig>,
         base_log: &Logger,
     ) -> Self {
         Self {
             internal_disks_rx,
             external_disks_rx,
+            former_zone_roots_rx,
             dump_setup: DumpSetup::new(base_log, mount_config),
             last_disks_used: HashSet::new(),
             log: base_log.new(slog::o!("component" => "DumpSetupTask")),
@@ -64,10 +72,10 @@ impl DumpSetupTask {
     }
 
     async fn run(mut self) {
-        loop {
-            self.update_setup_if_needed().await;
+        self.update_setup_if_needed().await;
 
-            // Wait for changes on either input channel. Exit if either channel
+        loop {
+            // Wait for changes on any input channel. Exit if either channel
             // is closed, which should never happen in production.
             tokio::select! {
                 // Cancel-safe per docs on `changed()`
@@ -79,6 +87,8 @@ impl DumpSetupTask {
                         );
                         return;
                     }
+
+                    self.update_setup_if_needed().await;
                 }
 
                 // Cancel-safe per docs on `changed()`
@@ -90,6 +100,17 @@ impl DumpSetupTask {
                         );
                         return;
                     }
+
+                    self.update_setup_if_needed().await;
+                }
+
+                // Cancel-safe per docs on `recv()`
+                // If this returns `None`, we'll stop polling it until the next
+                // iteration of the loop.  That's good because it means the
+                // channel is closed.
+                Some(request) = self.former_zone_roots_rx.recv() => {
+                    // XXX-dap completion reporting
+                    self.dump_setup.archive_former_zone_root(request).await;
                 }
             }
         }

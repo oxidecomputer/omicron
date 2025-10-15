@@ -35,6 +35,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
 
 use crate::InternalDisksReceiver;
@@ -58,6 +59,7 @@ pub use self::external_disks::CurrentlyManagedZpools;
 pub use self::external_disks::CurrentlyManagedZpoolsReceiver;
 pub use self::zones::TimeSyncError;
 pub use self::zones::TimeSyncStatus;
+use crate::dump_setup::FormerZoneRootRequest;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
@@ -70,6 +72,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     internal_disks_rx: InternalDisksReceiver,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
+    former_zone_roots_tx: mpsc::Sender<FormerZoneRootRequest>,
     raw_disks_rx: RawDisksReceiver,
     sled_agent_facilities: T,
     sled_agent_artifact_store: U,
@@ -92,6 +95,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
             raw_disks_rx,
             internal_disks_rx,
             external_disks,
+            former_zone_roots_tx,
             datasets,
             zones,
             boot_partitions,
@@ -271,6 +275,7 @@ struct ReconcilerTask {
     raw_disks_rx: RawDisksReceiver,
     internal_disks_rx: InternalDisksReceiver,
     external_disks: ExternalDisks,
+    former_zone_roots_tx: mpsc::Sender<FormerZoneRootRequest>,
     datasets: OmicronDatasets,
     zones: OmicronZones,
     boot_partitions: BootPartitionReconciler,
