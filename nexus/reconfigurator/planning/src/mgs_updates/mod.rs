@@ -736,6 +736,7 @@ mod test {
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use strum::IntoEnumIterator;
+    use sled_hardware_types::GIMLET_SLED_MODEL;
 
     // Confirm our behaviour for skipped updates
     #[test]
@@ -932,7 +933,7 @@ mod test {
         // each of the sled boards, and report no pending updates
         let mut expected_blocked_updates = Vec::new();
         for baseboard_id in &collection.baseboards {
-            if baseboard_id.part_number == "913-0000019" {
+            if baseboard_id.part_number == GIMLET_SLED_MODEL {
                 expected_blocked_updates.push(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
                     reason: FailedMgsUpdateReason::HostOs(

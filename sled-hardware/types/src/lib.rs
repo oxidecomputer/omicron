@@ -8,6 +8,9 @@ use std::ops::RangeInclusive;
 
 pub mod underlay;
 
+pub const GIMLET_SLED_MODEL: &str = "913-0000019";
+pub const COSMO_SLED_MODEL: &str = "913-0000023";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OxideSled {
     Gimlet,
@@ -27,8 +30,8 @@ impl OxideSled {
 
     pub fn try_from_model(model: &str) -> Option<Self> {
         match model {
-            "913-0000023" => Some(Self::Cosmo),
-            "913-0000019" | "913-0000006" => Some(Self::Gimlet),
+            COSMO_SLED_MODEL => Some(Self::Cosmo),
+            GIMLET_SLED_MODEL | "913-0000006" => Some(Self::Gimlet),
             _ => None,
         }
     }

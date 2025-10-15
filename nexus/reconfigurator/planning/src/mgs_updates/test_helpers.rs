@@ -52,6 +52,7 @@ use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
+use sled_hardware_types::GIMLET_SLED_MODEL;
 
 use crate::mgs_updates::PendingHostPhase2Changes;
 
@@ -966,7 +967,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             let sp_state = SpState {
                 // We assume a valid model ID for sleds
                 model: match sp_id.type_ {
-                    SpType::Sled => "913-0000019".to_string(),
+                    SpType::Sled => GIMLET_SLED_MODEL.to_string(),
                     _ => format!("dummy_{}", sp_id.type_),
                 },
                 serial_number: serial.to_string(),

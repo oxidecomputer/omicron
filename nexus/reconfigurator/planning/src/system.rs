@@ -82,6 +82,7 @@ use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
+use sled_hardware_types::GIMLET_SLED_MODEL;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
@@ -1271,7 +1272,7 @@ impl Sled {
     ) -> Sled {
         use typed_rng::TypedUuidRng;
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
-        let model = "913-0000019".to_string();
+        let model = GIMLET_SLED_MODEL.to_string();
         let serial = format!("serial{}", unique);
         let revision = 0;
         let mut zpool_rng = TypedUuidRng::from_seed(
