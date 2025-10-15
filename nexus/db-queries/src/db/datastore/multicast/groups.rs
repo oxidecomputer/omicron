@@ -698,8 +698,8 @@ mod tests {
     use crate::db::datastore::LookupType;
     use crate::db::model::IpPool;
     use crate::db::model::{
-        Generation, InstanceRuntimeState, IpPoolResource,
-        IpPoolReservationType, IpPoolResourceType, IpVersion,
+        Generation, InstanceRuntimeState, IpPoolReservationType,
+        IpPoolResource, IpPoolResourceType, IpVersion,
         MulticastGroupMemberState,
     };
     use crate::db::pub_test_utils::helpers::{

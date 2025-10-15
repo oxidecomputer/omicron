@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use nexus_db_model::MulticastGroupState;
 use nexus_db_model::{
-    IncompleteVpc, IpPool, IpPoolResource, IpPoolResourceType,
-    IpPoolReservationType, IpVersion,
+    IncompleteVpc, IpPool, IpPoolReservationType, IpPoolResource,
+    IpPoolResourceType, IpVersion,
 };
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::{IpRange, Ipv4Range};
