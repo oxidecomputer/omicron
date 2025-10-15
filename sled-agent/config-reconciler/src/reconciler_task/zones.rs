@@ -957,7 +957,7 @@ trait ZoneFacilities {
         addrobj: AddrObject,
     ) -> Result<(), ZoneShutdownError>;
 
-    async fn archive_zone_root<'a>(&self, path: &'a Utf8Path, log: &Logger);
+    async fn archive_zone_root(&self, path: &Utf8Path, log: &Logger);
 }
 
 struct RealZoneFacilities<'a> {
@@ -1018,7 +1018,7 @@ impl ZoneFacilities for RealZoneFacilities<'_> {
             .map_err(ZoneShutdownError::DeleteGzAddrObj)
     }
 
-    async fn archive_zone_root<'a>(&self, path: &'a Utf8Path, log: &Logger) {
+    async fn archive_zone_root(&self, path: &Utf8Path, log: &Logger) {
         // Aside from validation, this is always best-effort.
         // We do not return non-validation errors.  We just log them.
         let (done_rx, request) =
@@ -1499,12 +1499,7 @@ mod tests {
             Ok(())
         }
 
-        async fn archive_zone_root<'a>(
-            &self,
-            _path: &'a Utf8Path,
-            _log: &Logger,
-        ) {
-        }
+        async fn archive_zone_root(&self, _path: &Utf8Path, _log: &Logger) {}
     }
 
     const BOOT_DISK_PATH: &str = "/test/boot/disk";

@@ -1139,7 +1139,7 @@ impl DumpSetupWorker {
         let mut rotated_log_files = Vec::new();
         if include_live {
             let pattern = logdir
-                .join(format!("*.log"))
+                .join("*.log")
                 .to_str()
                 .ok_or_else(|| ArchiveLogsError::Utf8(zone_name.to_string()))?
                 .to_string();
