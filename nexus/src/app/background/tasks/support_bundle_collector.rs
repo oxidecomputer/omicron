@@ -2712,13 +2712,12 @@ mod test {
             "Should have target blueprint"
         );
         assert!(
-            state
+            !state
                 .get("blueprints")
                 .expect("missing blueprints")
                 .as_array()
                 .expect("blueprints should be an array")
-                .len()
-                > 0,
+                .is_empty(),
             "Should have blueprints"
         );
     }
