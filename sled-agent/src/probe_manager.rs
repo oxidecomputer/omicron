@@ -6,9 +6,7 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use nexus_client::types::{
-    BackgroundTasksActivateRequest, ProbeExternalIp, ProbeInfo,
-};
+use nexus_client::types::{ProbeExternalIp, ProbeInfo};
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
     VpcFirewallRuleStatus,
@@ -247,12 +245,7 @@ impl ProbeManagerInner {
                 // If we have created some new probes, we may need the control plane
                 // to provide us with valid routes for the VPC the probe belongs to.
                 if n_added > 0 {
-                    if let Err(e) = self
-                        .nexus_client
-                        .bgtask_activate(&BackgroundTasksActivateRequest {
-                            bgtask_names: vec!["vpc_route_manager".into()],
-                        })
-                        .await
+                    if let Err(e) = self.nexus_client.refresh_vpc_routes().await
                     {
                         error!(self.log, "get routes for probe: {e}");
                     }

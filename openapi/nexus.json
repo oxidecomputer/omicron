@@ -11669,14 +11669,72 @@
         }
       }
     },
-    "/v1/system/update/repository": {
+    "/v1/system/update/repositories": {
+      "get": {
+        "tags": [
+          "system/update"
+        ],
+        "summary": "List all TUF repositories",
+        "description": "Returns a paginated list of all TUF repositories ordered by system version (newest first by default).",
+        "operationId": "system_update_repository_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/VersionSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TufRepoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
       "put": {
         "tags": [
           "system/update"
         ],
         "summary": "Upload system release repository",
         "description": "System release repositories are verified by the updates trust store.",
-        "operationId": "system_update_put_repository",
+        "operationId": "system_update_repository_upload",
         "parameters": [
           {
             "in": "query",
@@ -11705,7 +11763,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TufRepoInsertResponse"
+                  "$ref": "#/components/schemas/TufRepoUpload"
                 }
               }
             }
@@ -11719,13 +11777,13 @@
         }
       }
     },
-    "/v1/system/update/repository/{system_version}": {
+    "/v1/system/update/repositories/{system_version}": {
       "get": {
         "tags": [
           "system/update"
         ],
         "summary": "Fetch system release repository description by version",
-        "operationId": "system_update_get_repository",
+        "operationId": "system_update_repository_view",
         "parameters": [
           {
             "in": "path",
@@ -11744,7 +11802,35 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TufRepoGetResponse"
+                  "$ref": "#/components/schemas/TufRepo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/update/status": {
+      "get": {
+        "tags": [
+          "system/update"
+        ],
+        "summary": "Fetch system update status",
+        "description": "Returns information about the current target release and the progress of system software updates.",
+        "operationId": "system_update_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
                 }
               }
             }
@@ -11759,38 +11845,12 @@
       }
     },
     "/v1/system/update/target-release": {
-      "get": {
-        "tags": [
-          "system/update"
-        ],
-        "summary": "Get the current target release of the rack's system software",
-        "description": "This may not correspond to the actual software running on the rack at the time of request; it is instead the release that the rack reconfigurator should be moving towards as a goal state. After some number of planning and execution phases, the software running on the rack should eventually correspond to the release described here.",
-        "operationId": "target_release_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TargetRelease"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
       "put": {
         "tags": [
           "system/update"
         ],
-        "summary": "Set the current target release of the rack's system software",
-        "description": "The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release.",
+        "summary": "Set target release",
+        "description": "Set the current target release of the rack's system software. The rack reconfigurator will treat the software specified here as a goal state for the rack's software, and attempt to asynchronously update to that release. Use the update status endpoint to view the current target release.",
         "operationId": "target_release_update",
         "requestBody": {
           "content": {
@@ -11803,15 +11863,8 @@
           "required": true
         },
         "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TargetRelease"
-                }
-              }
-            }
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -15358,29 +15411,6 @@
             ]
           }
         }
-      },
-      "ArtifactId": {
-        "description": "An identifier for an artifact.",
-        "type": "object",
-        "properties": {
-          "kind": {
-            "description": "The kind of artifact this is.",
-            "type": "string"
-          },
-          "name": {
-            "description": "The artifact's name.",
-            "type": "string"
-          },
-          "version": {
-            "description": "The artifact's version.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "name",
-          "version"
-        ]
       },
       "AuditLogEntry": {
         "description": "Audit log entry",
@@ -21982,54 +22012,6 @@
           "items"
         ]
       },
-      "IoCount": {
-        "description": "A count of bytes / rows accessed during a query.",
-        "type": "object",
-        "properties": {
-          "bytes": {
-            "description": "The number of bytes accessed.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "rows": {
-            "description": "The number of rows accessed.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "bytes",
-          "rows"
-        ]
-      },
-      "IoSummary": {
-        "description": "Summary of the I/O resources used by a query.",
-        "type": "object",
-        "properties": {
-          "read": {
-            "description": "The bytes and rows read by the query.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IoCount"
-              }
-            ]
-          },
-          "written": {
-            "description": "The bytes and rows written by the query.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IoCount"
-              }
-            ]
-          }
-        },
-        "required": [
-          "read",
-          "written"
-        ]
-      },
       "IpNet": {
         "x-rust-type": {
           "crate": "oxnet",
@@ -23453,14 +23435,6 @@
         "description": "The result of a successful OxQL query.",
         "type": "object",
         "properties": {
-          "query_summaries": {
-            "nullable": true,
-            "description": "Summaries of queries run against ClickHouse.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OxqlQuerySummary"
-            }
-          },
           "tables": {
             "description": "Tables resulting from the query, each containing timeseries.",
             "type": "array",
@@ -23471,41 +23445,6 @@
         },
         "required": [
           "tables"
-        ]
-      },
-      "OxqlQuerySummary": {
-        "description": "Basic metadata about the resource usage of a single ClickHouse SQL query.",
-        "type": "object",
-        "properties": {
-          "elapsed_ms": {
-            "description": "The total duration of the ClickHouse query (network plus execution).",
-            "type": "integer",
-            "format": "uint",
-            "minimum": 0
-          },
-          "id": {
-            "description": "The database-assigned query ID.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "io_summary": {
-            "description": "Summary of the data read and written.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IoSummary"
-              }
-            ]
-          },
-          "query": {
-            "description": "The raw ClickHouse SQL query.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "elapsed_ms",
-          "id",
-          "io_summary",
-          "query"
         ]
       },
       "OxqlTable": {
@@ -26832,72 +26771,23 @@
         ]
       },
       "TargetRelease": {
-        "description": "View of a system software target release.",
+        "description": "View of a system software target release",
         "type": "object",
         "properties": {
-          "generation": {
-            "description": "The target-release generation number.",
-            "type": "integer",
-            "format": "int64"
-          },
-          "release_source": {
-            "description": "The source of the target release.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TargetReleaseSource"
-              }
-            ]
-          },
           "time_requested": {
-            "description": "The time it was set as the target release.",
+            "description": "Time this was set as the target release",
             "type": "string",
             "format": "date-time"
+          },
+          "version": {
+            "description": "The specified release of the rack's system software",
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
           }
         },
         "required": [
-          "generation",
-          "release_source",
-          "time_requested"
-        ]
-      },
-      "TargetReleaseSource": {
-        "description": "Source of a system software target release.",
-        "oneOf": [
-          {
-            "description": "Unspecified or unknown source (probably MUPdate).",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "unspecified"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "The specified release of the rack's system software.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "system_version"
-                ]
-              },
-              "version": {
-                "type": "string",
-                "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-              }
-            },
-            "required": [
-              "type",
-              "version"
-            ]
-          }
+          "time_requested",
+          "version"
         ]
       },
       "Timeseries": {
@@ -26945,11 +26835,6 @@
         "description": "A timeseries query string, written in the Oximeter query language.",
         "type": "object",
         "properties": {
-          "include_summaries": {
-            "description": "Whether to include ClickHouse query summaries in the response.",
-            "default": false,
-            "type": "boolean"
-          },
           "query": {
             "description": "A timeseries query string, written in the Oximeter query language.",
             "type": "string"
@@ -27027,164 +26912,26 @@
           "items"
         ]
       },
-      "TufArtifactMeta": {
-        "description": "Metadata about an individual TUF artifact.\n\nFound within a `TufRepoDescription`.",
-        "type": "object",
-        "properties": {
-          "board": {
-            "nullable": true,
-            "description": "Contents of the `BORD` field of a Hubris archive caboose. Only applicable to artifacts that are Hubris archives.\n\nThis field should always be `Some(_)` if `sign` is `Some(_)`, but the opposite is not true (SP images will have a `board` but not a `sign`).",
-            "type": "string"
-          },
-          "hash": {
-            "description": "The hash of the artifact.",
-            "type": "string",
-            "format": "hex string (32 bytes)"
-          },
-          "id": {
-            "description": "The artifact ID.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ArtifactId"
-              }
-            ]
-          },
-          "sign": {
-            "nullable": true,
-            "description": "Contents of the `SIGN` field of a Hubris archive caboose, i.e., an identifier for the set of valid signing keys. Currently only applicable to RoT image and bootloader artifacts, where it will be an LPC55 Root Key Table Hash (RKTH).",
-            "type": "array",
-            "items": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0
-            }
-          },
-          "size": {
-            "description": "The size of the artifact in bytes.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "hash",
-          "id",
-          "size"
-        ]
-      },
-      "TufRepoDescription": {
-        "description": "A description of an uploaded TUF repository.",
-        "type": "object",
-        "properties": {
-          "artifacts": {
-            "description": "Information about the artifacts present in the repository.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TufArtifactMeta"
-            }
-          },
-          "repo": {
-            "description": "Information about the repository.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TufRepoMeta"
-              }
-            ]
-          }
-        },
-        "required": [
-          "artifacts",
-          "repo"
-        ]
-      },
-      "TufRepoGetResponse": {
-        "description": "Data about a successful TUF repo get from Nexus.",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "The description of the repository.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TufRepoDescription"
-              }
-            ]
-          }
-        },
-        "required": [
-          "description"
-        ]
-      },
-      "TufRepoInsertResponse": {
-        "description": "Data about a successful TUF repo import into Nexus.",
-        "type": "object",
-        "properties": {
-          "recorded": {
-            "description": "The repository as present in the database.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TufRepoDescription"
-              }
-            ]
-          },
-          "status": {
-            "description": "Whether this repository already existed or is new.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TufRepoInsertStatus"
-              }
-            ]
-          }
-        },
-        "required": [
-          "recorded",
-          "status"
-        ]
-      },
-      "TufRepoInsertStatus": {
-        "description": "Status of a TUF repo import.\n\nPart of `TufRepoInsertResponse`.",
-        "oneOf": [
-          {
-            "description": "The repository already existed in the database.",
-            "type": "string",
-            "enum": [
-              "already_exists"
-            ]
-          },
-          {
-            "description": "The repository did not exist, and was inserted into the database.",
-            "type": "string",
-            "enum": [
-              "inserted"
-            ]
-          }
-        ]
-      },
-      "TufRepoMeta": {
-        "description": "Metadata about a TUF repository.\n\nFound within a `TufRepoDescription`.",
+      "TufRepo": {
+        "description": "Metadata about a TUF repository",
         "type": "object",
         "properties": {
           "file_name": {
-            "description": "The file name of the repository.\n\nThis is purely used for debugging and may not always be correct (e.g. with wicket, we read the file contents from stdin so we don't know the correct file name).",
+            "description": "The file name of the repository, as reported by the client that uploaded it\n\nThis is intended for debugging. The file name may not match any particular pattern, and even if it does, it may not be accurate since it's just what the client reported.",
             "type": "string"
           },
           "hash": {
-            "description": "The hash of the repository.\n\nThis is a slight abuse of `ArtifactHash`, since that's the hash of individual artifacts within the repository. However, we use it here for convenience.",
+            "description": "The hash of the repository",
             "type": "string",
             "format": "hex string (32 bytes)"
           },
           "system_version": {
-            "description": "The system version in artifacts.json.",
+            "description": "The system version for this repository\n\nThe system version is a top-level version number applied to all the software in the repository.",
             "type": "string",
             "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
           },
-          "targets_role_version": {
-            "description": "The version of the targets role.",
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          },
-          "valid_until": {
-            "description": "The time until which the repo is valid.",
+          "time_created": {
+            "description": "Time the repository was uploaded",
             "type": "string",
             "format": "date-time"
           }
@@ -27193,8 +26940,62 @@
           "file_name",
           "hash",
           "system_version",
-          "targets_role_version",
-          "valid_until"
+          "time_created"
+        ]
+      },
+      "TufRepoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TufRepo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "TufRepoUpload": {
+        "type": "object",
+        "properties": {
+          "repo": {
+            "$ref": "#/components/schemas/TufRepo"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TufRepoUploadStatus"
+          }
+        },
+        "required": [
+          "repo",
+          "status"
+        ]
+      },
+      "TufRepoUploadStatus": {
+        "description": "Whether the uploaded TUF repo already existed or was new and had to be inserted. Part of `TufRepoUpload`.",
+        "oneOf": [
+          {
+            "description": "The repository already existed in the database",
+            "type": "string",
+            "enum": [
+              "already_exists"
+            ]
+          },
+          {
+            "description": "The repository did not exist, and was inserted into the database",
+            "type": "string",
+            "enum": [
+              "inserted"
+            ]
+          }
         ]
       },
       "TxEqConfig": {
@@ -27359,6 +27160,44 @@
               "rpm"
             ]
           }
+        ]
+      },
+      "UpdateStatus": {
+        "type": "object",
+        "properties": {
+          "components_by_release_version": {
+            "description": "Count of components running each release version\n\nKeys will be either:\n\n* Semver-like release version strings * \"install dataset\", representing the initial rack software before any updates * \"unknown\", which means there is no TUF repo uploaded that matches the software running on the component)",
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "suspended": {
+            "description": "Whether automatic update is suspended due to manual update activity\n\nAfter a manual support procedure that changes the system software, automatic update activity is suspended to avoid undoing the change. To resume automatic update, first upload the TUF repository matching the manually applied update, then set that as the target release.",
+            "type": "boolean"
+          },
+          "target_release": {
+            "nullable": true,
+            "description": "Current target release of the system software\n\nThis may not correspond to the actual system software running at the time of request; it is instead the release that the system should be moving towards as a goal state. The system asynchronously updates software to match this target release.\n\nWill only be null if a target release has never been set. In that case, the system is not automatically attempting to manage software versions.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TargetRelease"
+              }
+            ]
+          },
+          "time_last_step_planned": {
+            "description": "Time of most recent update planning activity\n\nThis is intended as a rough indicator of the last time something happened in the update planner.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "components_by_release_version",
+          "suspended",
+          "target_release",
+          "time_last_step_planned"
         ]
       },
       "UpdatesTrustRoot": {
@@ -29123,6 +28962,25 @@
         "enum": [
           "ascending",
           "descending"
+        ]
+      },
+      "VersionSortMode": {
+        "description": "Supported sort modes when scanning by semantic version",
+        "oneOf": [
+          {
+            "description": "Sort in increasing semantic version order (oldest first)",
+            "type": "string",
+            "enum": [
+              "version_ascending"
+            ]
+          },
+          {
+            "description": "Sort in decreasing semantic version order (newest first)",
+            "type": "string",
+            "enum": [
+              "version_descending"
+            ]
+          }
         ]
       },
       "NameSortMode": {

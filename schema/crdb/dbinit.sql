@@ -2162,25 +2162,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
     'v6'
 );
 
--- Add IP pool type for unicast vs multicast pools
-CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_type AS ENUM (
-    'unicast',
-    'multicast'
-);
 
--- Multicast group state for RPW
-CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_state AS ENUM (
-    'creating',
-    'active',
-    'deleting',
-    'deleted'
-);
-
--- Multicast group member state for RPW
-CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_state AS ENUM (
-    'joining',
-    'joined',
-    'left'
+/* Indicates what an IP Pool is reserved for. */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
+    'external_silos',
+    'oxide_internal'
 );
 
 /*
@@ -2210,7 +2196,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     ip_version omicron.public.ip_version NOT NULL,
 
     /* Pool type for unicast (default) vs multicast pools. */
-    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast'
+    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast',
+
+    /* Indicates what the IP Pool is reserved for. */
+    reservation_type omicron.public.ip_pool_reservation_type NOT NULL
 );
 
 /*
@@ -2247,17 +2236,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
 
     -- resource_type is redundant because resource IDs are globally unique, but
     -- logically it belongs here
-    PRIMARY KEY (ip_pool_id, resource_type, resource_id),
-
-    -- Check that there are no default pools for the internal silo
-    CONSTRAINT internal_silo_has_no_default_pool CHECK (
-        NOT (
-            resource_type = 'silo' AND
-            resource_id = '001de000-5110-4000-8000-000000000001' AND
-            is_default
-        )
-    )
-
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
 );
 
 -- a given resource can only have one default ip pool
@@ -6809,6 +6788,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_db_metadata_nexus_by_state on omicron.p
 /* Create versioning sequence for multicast group changes */
 CREATE SEQUENCE IF NOT EXISTS omicron.public.multicast_group_version START 1 INCREMENT 1;
 
+-- Multicast group state for RPW
+CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_state AS ENUM (
+    'creating',
+    'active',
+    'deleting',
+    'deleted'
+);
+
+-- Multicast group member state for RPW pattern
+CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_state AS ENUM (
+    'joining',
+    'joined',
+    'left'
+);
+
 /*
  * External multicast groups (customer-facing, allocated from IP pools)
  * Following the bifurcated design from RFD 488
@@ -7160,7 +7154,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '199.0.0', NULL)
+    (TRUE, NOW(), NOW(), '200.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

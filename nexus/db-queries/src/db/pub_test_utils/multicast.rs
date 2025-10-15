@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use nexus_db_model::MulticastGroupState;
 use nexus_db_model::{
-    IncompleteVpc, IpPool, IpPoolResource, IpPoolResourceType, IpVersion,
+    IncompleteVpc, IpPool, IpPoolResource, IpPoolResourceType,
+    IpPoolReservationType, IpVersion,
 };
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::{IpRange, Ipv4Range};
@@ -98,7 +99,11 @@ pub async fn create_test_setup_with_range(
     let ip_pool = datastore
         .ip_pool_create(
             &opctx,
-            IpPool::new_multicast(&pool_identity, IpVersion::V4),
+            IpPool::new_multicast(
+                &pool_identity,
+                IpVersion::V4,
+                IpPoolReservationType::ExternalSilos,
+            ),
         )
         .await
         .expect("Should create multicast IP pool");

@@ -698,8 +698,9 @@ mod tests {
     use crate::db::datastore::LookupType;
     use crate::db::model::IpPool;
     use crate::db::model::{
-        Generation, InstanceRuntimeState, IpPoolResource, IpPoolResourceType,
-        IpVersion, MulticastGroupMemberState,
+        Generation, InstanceRuntimeState, IpPoolResource,
+        IpPoolReservationType, IpPoolResourceType, IpVersion,
+        MulticastGroupMemberState,
     };
     use crate::db::pub_test_utils::helpers::{
         SledUpdateBuilder, create_project,
@@ -729,7 +730,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -847,7 +852,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -1009,7 +1018,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -1106,7 +1119,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -1518,7 +1535,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -1704,7 +1725,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -1908,7 +1933,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2022,7 +2051,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2166,7 +2199,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2282,7 +2319,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2394,7 +2435,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");
@@ -2537,7 +2582,11 @@ mod tests {
         let ip_pool = datastore
             .ip_pool_create(
                 &opctx,
-                IpPool::new_multicast(&pool_identity, IpVersion::V4),
+                IpPool::new_multicast(
+                    &pool_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
             )
             .await
             .expect("Should create multicast IP pool");

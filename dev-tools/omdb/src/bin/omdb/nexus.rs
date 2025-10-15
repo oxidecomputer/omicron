@@ -90,6 +90,7 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs::OpenOptions;
+use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
 use support_bundle_viewer::LocalFileAccess;
@@ -97,6 +98,7 @@ use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
 use tabled::settings::Padding;
 use tabled::settings::object::Columns;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::OnceCell;
 use update_engine::EventBuffer;
 use update_engine::ExecutionStatus;
@@ -138,6 +140,8 @@ enum NexusCommands {
     Blueprints(BlueprintsArgs),
     /// interact with clickhouse policy
     ClickhousePolicy(ClickhousePolicyArgs),
+    /// fetch an omdb binary associated with an active Nexus
+    FetchOmdb(FetchOmdbArgs),
     /// print information about pending MGS updates
     MgsUpdates,
     /// interact with oximeter read policy
@@ -154,7 +158,7 @@ enum NexusCommands {
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
     /// show running artifact versions
-    UpdateStatus,
+    UpdateStatus(UpdateStatusArgs),
 }
 
 #[derive(Debug, Args)]
@@ -416,6 +420,12 @@ enum ClickhousePolicyMode {
 }
 
 #[derive(Debug, Args)]
+struct FetchOmdbArgs {
+    /// output path to write the fetched omdb
+    output: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
 struct OximeterReadPolicyArgs {
     #[command(subcommand)]
     command: OximeterReadPolicyCommands,
@@ -602,6 +612,13 @@ struct SupportBundleInspectArgs {
     path: Option<Utf8PathBuf>,
 }
 
+#[derive(Debug, Args)]
+struct UpdateStatusArgs {
+    /// Show full details of all updateable components.
+    #[arg(long)]
+    details: bool,
+}
+
 impl NexusArgs {
     /// Run a `omdb nexus` subcommand.
     pub(crate) async fn run_cmd(
@@ -731,6 +748,10 @@ impl NexusArgs {
                 }
             },
 
+            NexusCommands::FetchOmdb(args) => {
+                cmd_nexus_fetch_omdb(&client, args).await
+            }
+
             NexusCommands::MgsUpdates => cmd_nexus_mgs_updates(&client).await,
 
             NexusCommands::OximeterReadPolicy(OximeterReadPolicyArgs {
@@ -831,8 +852,8 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Inspect(args),
             }) => cmd_nexus_support_bundles_inspect(&client, args).await,
-            NexusCommands::UpdateStatus => {
-                cmd_nexus_update_status(&client).await
+            NexusCommands::UpdateStatus(args) => {
+                cmd_nexus_update_status(&client, args).await
             }
         }
     }
@@ -3635,6 +3656,46 @@ async fn cmd_nexus_clickhouse_policy_get(
             }
         }
     }
+
+    Ok(())
+}
+
+async fn cmd_nexus_fetch_omdb(
+    client: &nexus_lockstep_client::Client,
+    args: &FetchOmdbArgs,
+) -> Result<(), anyhow::Error> {
+    // Create the output file.
+    let out = tokio::fs::File::create_new(&args.output)
+        .await
+        .with_context(|| format!("could not create `{}`", args.output))?;
+
+    // Stream the binary from Nexus.
+    let mut out = tokio::io::BufWriter::new(out);
+    let body = client.fetch_omdb().await?;
+    let mut stream = body.into_inner().into_inner();
+    while let Some(maybe_chunk) = stream.next().await {
+        let chunk = maybe_chunk.context("failed reading chunk from Nexus")?;
+        tokio::io::copy(&mut std::io::Cursor::new(chunk), &mut out)
+            .await
+            .with_context(|| format!("failed writing to `{}`", args.output))?;
+    }
+    out.flush().await.with_context(|| {
+        format!("failed flushing data written to `{}`", args.output)
+    })?;
+
+    // Make it executable.
+    let out = out.into_inner();
+    let mut perms = out
+        .metadata()
+        .await
+        .with_context(|| {
+            format!("failed to read metadata of new file `{}`", args.output)
+        })?
+        .permissions();
+    perms.set_mode(0o0700);
+    out.set_permissions(perms).await.with_context(|| {
+        format!("failed to change permissions of new file `{}`", args.output)
+    })?;
 
     Ok(())
 }

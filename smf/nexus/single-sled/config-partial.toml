@@ -104,3 +104,7 @@ multicast_group_reconciler.period_secs = 60
 # by default, allocate without requirement for distinct sleds.
 # seed is omitted so a new seed will be chosen with every allocation.
 type = "random"
+
+[omdb]
+# Path to the omdb binary shipped in the Nexus zone.
+bin_path = "/opt/oxide/omdb/bin/omdb"

@@ -50,6 +50,37 @@ impl std::fmt::Display for IpRangeConversionError {
 impl std::error::Error for IpRangeConversionError {}
 
 impl_enum_type!(
+    IpPoolReservationTypeEnum:
+
+    #[derive(
+        AsExpression,
+        Clone,
+        Copy,
+        Debug,
+        Eq,
+        FromSqlRow,
+        PartialEq,
+        schemars::JsonSchema,
+        serde::Deserialize,
+        serde::Serialize,
+    )]
+    pub enum IpPoolReservationType;
+
+    ExternalSilos => b"external_silos"
+    OxideInternal => b"oxide_internal"
+);
+
+impl ::std::fmt::Display for IpPoolReservationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            IpPoolReservationType::ExternalSilos => "external_silos",
+            IpPoolReservationType::OxideInternal => "oxide_internal",
+        };
+        f.write_str(s)
+    }
+}
+
+impl_enum_type!(
     IpVersionEnum:
 
     #[derive(
@@ -120,7 +151,9 @@ impl From<IpPoolType> for shared::IpPoolType {
 /// IP pools can be external or internal. External IP pools can be associated
 /// with a silo or project so that instance IP allocation draws from that pool
 /// instead of a system pool.
-#[derive(Queryable, Insertable, Selectable, Clone, Debug, Resource)]
+#[derive(
+    Queryable, Insertable, Selectable, Clone, Debug, Resource, PartialEq,
+)]
 #[diesel(table_name = ip_pool)]
 pub struct IpPool {
     #[diesel(embed)]
@@ -132,13 +165,19 @@ pub struct IpPool {
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
+
+    /// Indicates what the pool is reserved for.
+    pub reservation_type: IpPoolReservationType,
 }
 
 impl IpPool {
-    /// Creates a new unicast (default) IP pool.
+    /// Create a new IP Pool.
+    ///
+    /// The pool is reserved for external customer Silos by default (unicast pool).
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
+        reservation_type: IpPoolReservationType,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
@@ -148,6 +187,7 @@ impl IpPool {
             ip_version,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
+            reservation_type,
         }
     }
 
@@ -155,6 +195,7 @@ impl IpPool {
     pub fn new_multicast(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
+        reservation_type: IpPoolReservationType,
     ) -> Self {
         Self {
             identity: IpPoolIdentity::new(
@@ -164,19 +205,24 @@ impl IpPool {
             ip_version,
             pool_type: IpPoolType::Multicast,
             rcgen: 0,
+            reservation_type,
         }
     }
 
+    /// Create a new IPv4 IP Pool.
     pub fn new_v4(
         pool_identity: &external::IdentityMetadataCreateParams,
+        reservation_type: IpPoolReservationType,
     ) -> Self {
-        Self::new(pool_identity, IpVersion::V4)
+        Self::new(pool_identity, IpVersion::V4, reservation_type)
     }
 
+    /// Create a new IPv6 IP Pool.
     pub fn new_v6(
         pool_identity: &external::IdentityMetadataCreateParams,
+        reservation_type: IpPoolReservationType,
     ) -> Self {
-        Self::new(pool_identity, IpVersion::V6)
+        Self::new(pool_identity, IpVersion::V6, reservation_type)
     }
 }
 

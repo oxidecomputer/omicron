@@ -178,8 +178,8 @@ pub enum ApplyUpdateError {
     StuckUpdating { update_id: Uuid, timeout: Duration },
     #[error("failed to abort in-progress SP update")]
     SpUpdateAbortFailed(#[from] AbortError),
-    #[error("SP reports that reset failed: {0:?}")]
-    SpResetFailed(String),
+    #[error("SP component reports that reset failed: {0:?}")]
+    SpComponentResetFailed(String),
 
     #[error("failed waiting for artifact delivery")]
     DeliveryWaitError(#[from] DeliveryWaitError),
@@ -413,17 +413,29 @@ pub(crate) async fn apply_update(
     status.update(UpdateAttemptStatus::PostUpdate);
 
     if try_reset {
-        // We retry this until we get some error *other* than a communication
-        // error or some other transient error.  There is intentionally no
-        // timeout here.  If we've staged an update but not managed to reset
-        // the device, there's no point where we'd want to stop trying to do so.
+        // We retry this until the component update has been successfully
+        // updated, or we get some error *other* than a communication error or
+        // some other transient error.  There is intentionally no timeout here.
+        // If we've staged an update but not managed to reset the device,
+        // there's no point where we'd want to stop trying to do so.
         while let Err(error) =
             update_helper.post_update(log, &mut mgs_clients, update).await
         {
             if error.is_fatal() {
                 let error = InlineErrorChain::new(&error);
                 error!(log, "post_update failed"; &error);
-                return Err(ApplyUpdateError::SpResetFailed(error.to_string()));
+                return Err(ApplyUpdateError::SpComponentResetFailed(
+                    error.to_string(),
+                ));
+            }
+
+            // We only care whether the update has completed. We ignore all
+            // pre-check errors because they could all be transient if a reset
+            // is in the process of happening.
+            if let Ok(PrecheckStatus::UpdateComplete) =
+                update_helper.precheck(log, &mut mgs_clients, update).await
+            {
+                break;
             }
 
             tokio::time::sleep(RESET_DELAY_INTERVAL).await;

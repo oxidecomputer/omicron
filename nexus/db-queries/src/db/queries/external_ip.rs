@@ -879,6 +879,7 @@ mod tests {
     use nexus_db_model::ByteCount;
     use nexus_db_model::Instance;
     use nexus_db_model::InstanceCpuCount;
+    use nexus_db_model::IpPoolReservationType;
     use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::IpVersion;
@@ -927,6 +928,7 @@ mod tests {
                     description: format!("ip pool {}", name),
                 },
                 IpVersion::V4,
+                IpPoolReservationType::ExternalSilos,
             );
 
             self.db
