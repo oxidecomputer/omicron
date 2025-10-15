@@ -293,7 +293,7 @@ pub trait IncompleteOnConflictExt {
     /// [the `filter` method]:
     ///     https://docs.rs/diesel/2.1.4/diesel/query_dsl/methods/trait.FilterDsl.html#tymethod.filter
     /// [`filter_target` method]:
-    ///    https://docs.rs/diesel/2.1.4/diesel/query_dsl/trait.FilterTarget.html#tymethod.filter_targehttps://docs.rs/diesel/2.1.4/diesel/upsert/trait.DecoratableTarget.html#tymethod.filter_targett
+    ///     https://docs.rs/diesel/2.1.4/diesel/upsert/trait.DecoratableTarget.html#tymethod.filter_target
     /// [`disallowed_methods`]:
     ///     https://rust-lang.github.io/rust-clippy/master/index.html#disallowed_methods
     /// [principle of explosion]:

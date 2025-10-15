@@ -915,6 +915,8 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError>;
 
     /// Create IP pool
+    ///
+    /// IPv6 is not yet supported for unicast pools.
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools",
@@ -1063,9 +1065,16 @@ pub trait NexusExternalApi {
         query_params: Query<IpPoolRangePaginationParams>,
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolRange>>, HttpError>;
 
-    /// Add range to IP pool
+    /// Add range to IP pool.
     ///
-    /// IPv6 ranges are not allowed yet.
+    /// IPv6 ranges are not allowed yet for unicast pools.
+    ///
+    /// For multicast pools, all ranges must be either Any-Source Multicast (ASM)
+    /// or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM
+    /// ranges in the same pool is not allowed.
+    ///
+    /// ASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3
+    /// SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools/{pool}/ranges/add",

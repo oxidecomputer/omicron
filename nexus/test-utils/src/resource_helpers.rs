@@ -268,20 +268,17 @@ pub async fn create_ip_pool(
     pool_name: &str,
     ip_range: Option<IpRange>,
 ) -> (IpPool, IpPoolRange) {
-    let pool = object_create(
-        client,
-        "/v1/system/ip-pools",
-        &params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
-                name: pool_name.parse().unwrap(),
-                description: String::from("an ip pool"),
-            },
-            ip_version: ip_range
-                .map(|r| r.version())
-                .unwrap_or_else(views::IpVersion::v4),
+    let pool_params = params::IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: pool_name.parse().unwrap(),
+            description: String::from("an ip pool"),
         },
-    )
-    .await;
+        ip_range
+            .as_ref()
+            .map(|r| r.version())
+            .unwrap_or_else(views::IpVersion::v4),
+    );
+    let pool = object_create(client, "/v1/system/ip-pools", &pool_params).await;
 
     let ip_range = ip_range.unwrap_or_else(|| {
         use std::net::Ipv4Addr;
