@@ -22,6 +22,36 @@ pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
+// Multicast constants
+
+/// IPv4 Source-Specific Multicast (SSM) subnet as defined in RFC 4607:
+/// <https://tools.ietf.org/html/rfc4607>.
+///
+/// RFC 4607 Section 3 allocates 232.0.0.0/8 as the IPv4 SSM address range.
+/// This is a single contiguous block, unlike IPv6 which has per-scope ranges.
+pub const IPV4_SSM_SUBNET: oxnet::Ipv4Net =
+    oxnet::Ipv4Net::new_unchecked(Ipv4Addr::new(232, 0, 0, 0), 8);
+
+/// IPv6 Source-Specific Multicast (SSM) subnet as defined in RFC 4607:
+/// <https://tools.ietf.org/html/rfc4607>.
+///
+/// RFC 4607 Section 3 specifies "FF3x::/32 for each scope x" - meaning one
+/// /32 block per scope (FF30::/32, FF31::/32, ..., FF3F::/32).
+///
+/// We use /12 as an implementation convenience to match all these blocks with
+/// a single subnet. This works because all SSM addresses share the same first
+/// 12 bits:
+/// - Bits 0-7:  11111111 (0xFF, multicast prefix)
+/// - Bits 8-11: 0011 (flag field = 3, indicating SSM)
+/// - Bits 12-15: xxxx (scope field, any value 0-F)
+///
+/// Thus FF30::/12 efficiently matches FF30:: through FF3F:FFFF:...:FFFF,
+/// covering all SSM scopes.
+pub const IPV6_SSM_SUBNET: oxnet::Ipv6Net = oxnet::Ipv6Net::new_unchecked(
+    Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 0),
+    12,
+);
+
 /// maximum possible value for a tcp or udp port
 pub const MAX_PORT: u16 = u16::MAX;
 

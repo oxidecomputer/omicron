@@ -17,12 +17,37 @@ use nexus_db_schema::schema::ip_pool_range;
 use nexus_db_schema::schema::ip_pool_resource;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use std::net::IpAddr;
 use uuid::Uuid;
+
+/// Errors that can occur when converting an IP pool range from the database
+/// to the API representation.
+#[derive(Debug, Clone)]
+pub enum IpRangeConversionError {
+    /// The first and last addresses have mismatched IP versions (IPv4 vs IPv6).
+    MismatchedVersions { first: IpAddr, last: IpAddr },
+    /// The IP range is invalid (e.g., last address is less than first address).
+    InvalidRange { msg: String },
+}
+
+impl std::fmt::Display for IpRangeConversionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MismatchedVersions { first, last } => write!(
+                f,
+                "IP range has mismatched protocol versions: first={first}, last={last}"
+            ),
+            Self::InvalidRange { msg } => {
+                write!(f, "Invalid IP range: {msg}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for IpRangeConversionError {}
 
 impl_enum_type!(
     IpPoolReservationTypeEnum:
@@ -103,6 +128,24 @@ impl From<IpVersion> for shared::IpVersion {
     }
 }
 
+impl From<shared::IpPoolType> for IpPoolType {
+    fn from(value: shared::IpPoolType) -> Self {
+        match value {
+            shared::IpPoolType::Unicast => Self::Unicast,
+            shared::IpPoolType::Multicast => Self::Multicast,
+        }
+    }
+}
+
+impl From<IpPoolType> for shared::IpPoolType {
+    fn from(value: IpPoolType) -> Self {
+        match value {
+            IpPoolType::Unicast => Self::Unicast,
+            IpPoolType::Multicast => Self::Multicast,
+        }
+    }
+}
+
 /// An IP Pool is a collection of IP addresses external to the rack.
 ///
 /// IP pools can be external or internal. External IP pools can be associated
@@ -115,22 +158,22 @@ impl From<IpVersion> for shared::IpVersion {
 pub struct IpPool {
     #[diesel(embed)]
     pub identity: IpPoolIdentity,
-
     /// The IP version of the pool.
     pub ip_version: IpVersion,
-
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
 
     /// Indicates what the pool is reserved for.
     pub reservation_type: IpPoolReservationType,
+    /// Pool type for unicast (default) vs multicast pools.
+    pub pool_type: IpPoolType,
 }
 
 impl IpPool {
     /// Create a new IP Pool.
     ///
-    /// The pool is reserved for external customer Silos.
+    /// The pool is reserved for external customer Silos by default (unicast pool).
     pub fn new(
         pool_identity: &external::IdentityMetadataCreateParams,
         ip_version: IpVersion,
@@ -142,6 +185,25 @@ impl IpPool {
                 pool_identity.clone(),
             ),
             ip_version,
+            pool_type: IpPoolType::Unicast,
+            rcgen: 0,
+            reservation_type,
+        }
+    }
+
+    /// Creates a new multicast IP pool.
+    pub fn new_multicast(
+        pool_identity: &external::IdentityMetadataCreateParams,
+        ip_version: IpVersion,
+        reservation_type: IpPoolReservationType,
+    ) -> Self {
+        Self {
+            identity: IpPoolIdentity::new(
+                Uuid::new_v4(),
+                pool_identity.clone(),
+            ),
+            ip_version,
+            pool_type: IpPoolType::Multicast,
             rcgen: 0,
             reservation_type,
         }
@@ -166,11 +228,21 @@ impl IpPool {
 
 impl From<IpPool> for views::IpPool {
     fn from(pool: IpPool) -> Self {
-        Self { identity: pool.identity(), ip_version: pool.ip_version.into() }
+        let identity = pool.identity();
+        let pool_type = pool.pool_type;
+
+        Self {
+            identity,
+            pool_type: pool_type.into(),
+            ip_version: pool.ip_version.into(),
+        }
     }
 }
 
-/// A set of updates to an IP Pool
+/// A set of updates to an IP Pool.
+///
+/// We do not modify the pool type after creation (e.g. unicast -> multicast or
+/// vice versa), as that would require a migration of all associated resources.
 #[derive(AsChangeset)]
 #[diesel(table_name = ip_pool)]
 pub struct IpPoolUpdate {
@@ -197,6 +269,25 @@ impl_enum_type!(
 
     Silo => b"silo"
 );
+
+impl_enum_type!(
+    IpPoolTypeEnum:
+
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+    pub enum IpPoolType;
+
+    Unicast => b"unicast"
+    Multicast => b"multicast"
+);
+
+impl std::fmt::Display for IpPoolType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IpPoolType::Unicast => write!(f, "unicast"),
+            IpPoolType::Multicast => write!(f, "multicast"),
+        }
+    }
+}
 
 #[derive(Queryable, Insertable, Selectable, Clone, Copy, Debug, PartialEq)]
 #[diesel(table_name = ip_pool_resource)]
@@ -237,7 +328,7 @@ pub struct IpPoolRange {
 }
 
 impl IpPoolRange {
-    pub fn new(range: &IpRange, ip_pool_id: Uuid) -> Self {
+    pub fn new(range: &shared::IpRange, ip_pool_id: Uuid) -> Self {
         let now = Utc::now();
         let first_address = range.first_address();
         let last_address = range.last_address();
@@ -260,38 +351,50 @@ impl IpPoolRange {
     }
 }
 
-impl From<IpPoolRange> for views::IpPoolRange {
-    fn from(range: IpPoolRange) -> Self {
-        Self {
+impl TryFrom<IpPoolRange> for views::IpPoolRange {
+    type Error = external::Error;
+
+    fn try_from(range: IpPoolRange) -> Result<Self, Self::Error> {
+        let ip_range = shared::IpRange::try_from(&range).map_err(|e| {
+            external::Error::internal_error(&format!(
+                "Invalid IP range in database (id={}, pool={}, first={}, last={}): {e:#}",
+                range.id, range.ip_pool_id,
+                range.first_address.ip(), range.last_address.ip()
+            ))
+        })?;
+
+        Ok(Self {
             id: range.id,
             ip_pool_id: range.ip_pool_id,
             time_created: range.time_created,
-            range: IpRange::from(&range),
-        }
+            range: ip_range,
+        })
     }
 }
 
-impl From<&IpPoolRange> for IpRange {
-    fn from(range: &IpPoolRange) -> Self {
-        let maybe_range =
-            match (range.first_address.ip(), range.last_address.ip()) {
-                (IpAddr::V4(first), IpAddr::V4(last)) => {
-                    IpRange::try_from((first, last))
-                }
-                (IpAddr::V6(first), IpAddr::V6(last)) => {
-                    IpRange::try_from((first, last))
-                }
-                (first, last) => {
-                    unreachable!(
-                        "Expected first/last address of an IP range to \
-                    both be of the same protocol version, but first = {:?} \
-                    and last = {:?}",
-                        first, last,
-                    );
-                }
-            };
-        maybe_range
-            .expect("Retrieved an out-of-order IP range pair from the database")
+impl TryFrom<&IpPoolRange> for shared::IpRange {
+    type Error = IpRangeConversionError;
+
+    fn try_from(range: &IpPoolRange) -> Result<Self, Self::Error> {
+        match (range.first_address.ip(), range.last_address.ip()) {
+            (IpAddr::V4(first), IpAddr::V4(last)) => {
+                shared::IpRange::try_from((first, last)).map_err(|e| {
+                    IpRangeConversionError::InvalidRange {
+                        msg: format!("Invalid IPv4 range: {e:#}",),
+                    }
+                })
+            }
+            (IpAddr::V6(first), IpAddr::V6(last)) => {
+                shared::IpRange::try_from((first, last)).map_err(|e| {
+                    IpRangeConversionError::InvalidRange {
+                        msg: format!("Invalid IPv6 range: {e:#}"),
+                    }
+                })
+            }
+            (first, last) => {
+                Err(IpRangeConversionError::MismatchedVersions { first, last })
+            }
+        }
     }
 }
 
