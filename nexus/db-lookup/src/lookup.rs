@@ -15,7 +15,7 @@
 
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
-use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use diesel::{ExpressionMethods, JoinOnDsl, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
 use nexus_auth::authn;
 use nexus_auth::authz;
@@ -597,12 +597,323 @@ lookup_resource! {
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
-lookup_resource! {
-    name = "Project",
-    ancestors = [ "Silo" ],
-    lookup_by_name = true,
-    soft_deletes = true,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+// Project lookup is hand-written (instead of using the macro) so we can fetch
+// restrict_network_actions from the Silo table during lookup
+pub enum Project<'a> {
+    Error(Root<'a>, Error),
+    Name(Silo<'a>, &'a Name),
+    OwnedName(Silo<'a>, Name),
+    PrimaryKey(Root<'a>, Uuid),
+}
+
+impl<'a> Project<'a> {
+    pub async fn fetch(
+        &self,
+    ) -> LookupResult<(authz::Silo, authz::Project, nexus_db_model::Project)> {
+        self.fetch_for(authz::Action::Read).await
+    }
+
+    pub async fn optional_fetch(
+        &self,
+    ) -> LookupResult<Option<(authz::Silo, authz::Project, nexus_db_model::Project)>> {
+        self.optional_fetch_for(authz::Action::Read).await
+    }
+
+    pub async fn fetch_for(
+        &self,
+        action: authz::Action,
+    ) -> LookupResult<(authz::Silo, authz::Project, nexus_db_model::Project)> {
+        let lookup = self.lookup_root();
+        let opctx = &lookup.opctx;
+        let datastore = lookup.datastore;
+        match &self {
+            Project::Error(_, error) => Err(error.clone()),
+            Project::Name(parent, &ref name) | Project::OwnedName(parent, ref name) => {
+                let (authz_silo,) = parent.lookup().await?;
+                let (authz_project, db_row) = Self::fetch_by_name_for(
+                        opctx,
+                        datastore,
+                        &authz_silo,
+                        name,
+                        action,
+                    )
+                    .await?;
+                Ok((authz_silo, authz_project, db_row))
+            }
+            Project::PrimaryKey(_, v0) => {
+                Self::fetch_by_id_for(opctx, datastore, v0, action).await
+            }
+        }
+            .and_then(|input| {
+                let (ref authz_silo, .., ref authz_project, ref _db_row) = &input;
+                Self::silo_check(opctx, authz_silo, authz_project)?;
+                Ok(input)
+            })
+    }
+
+    pub async fn optional_fetch_for(
+        &self,
+        action: authz::Action,
+    ) -> LookupResult<Option<(authz::Silo, authz::Project, nexus_db_model::Project)>> {
+        let result = self.fetch_for(action).await;
+        match result {
+            Err(Error::ObjectNotFound { type_name: _, lookup_type: _ }) => Ok(None),
+            _ => Ok(Some(result?)),
+        }
+    }
+
+    pub async fn lookup_for(
+        &self,
+        action: authz::Action,
+    ) -> LookupResult<(authz::Silo, authz::Project)> {
+        let lookup = self.lookup_root();
+        let opctx = &lookup.opctx;
+        let (authz_silo, authz_project) = self.lookup().await?;
+        opctx.authorize(action, &authz_project).await?;
+        Ok((authz_silo, authz_project))
+            .and_then(|input| {
+                let (ref authz_silo, .., ref authz_project) = &input;
+                Self::silo_check(opctx, authz_silo, authz_project)?;
+                Ok(input)
+            })
+    }
+
+    pub async fn optional_lookup_for(
+        &self,
+        action: authz::Action,
+    ) -> LookupResult<Option<(authz::Silo, authz::Project)>> {
+        let result = self.lookup_for(action).await;
+        match result {
+            Err(Error::ObjectNotFound { type_name: _, lookup_type: _ }) => Ok(None),
+            _ => Ok(Some(result?)),
+        }
+    }
+
+    async fn lookup(&self) -> LookupResult<(authz::Silo, authz::Project)> {
+        let lookup = self.lookup_root();
+        let opctx = &lookup.opctx;
+        let datastore = lookup.datastore;
+        match &self {
+            Project::Error(_, error) => Err(error.clone()),
+            Project::Name(parent, &ref name) | Project::OwnedName(parent, ref name) => {
+                let (authz_silo,) = parent.lookup().await?;
+                let (authz_project, _) = Self::lookup_by_name_no_authz(
+                        opctx,
+                        datastore,
+                        &authz_silo,
+                        name,
+                    )
+                    .await?;
+                Ok((authz_silo, authz_project))
+            }
+            Project::PrimaryKey(_, v0) => {
+                let (authz_silo, authz_project, _) = Self::lookup_by_id_no_authz(
+                        opctx,
+                        datastore,
+                        v0,
+                    )
+                    .await?;
+                Ok((authz_silo, authz_project))
+            }
+        }
+    }
+
+    fn lookup_root(&self) -> &LookupPath<'a> {
+        match &self {
+            Project::Error(root, ..) => root.lookup_root(),
+            Project::Name(parent, _) | Project::OwnedName(parent, _) => {
+                parent.lookup_root()
+            }
+            Project::PrimaryKey(root, ..) => root.lookup_root(),
+        }
+    }
+
+    fn silo_check(
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        authz_project: &authz::Project,
+    ) -> Result<(), Error> {
+        let log = &opctx.log;
+        let actor_silo_id = match opctx
+            .authn
+            .silo_or_builtin()
+            .internal_context("siloed resource check")
+        {
+            Ok(Some(silo)) => silo.id(),
+            Ok(None) => {
+                trace!(
+                    log,
+                    "successful lookup of siloed resource {:?} \
+                            using built-in user",
+                    "Project",
+                );
+                return Ok(());
+            }
+            Err(error) => {
+                error!(
+                    log,
+                    "unexpected successful lookup of siloed resource \
+                            {:?} with no actor in OpContext",
+                    "Project",
+                );
+                return Err(error);
+            }
+        };
+        let resource_silo_id = authz_silo.id();
+        if resource_silo_id != actor_silo_id {
+            use nexus_auth::authz::ApiResource;
+            error!(
+                log,
+                "unexpected successful lookup of siloed resource \
+                        {:?} in a different Silo from current actor (resource \
+                        Silo {}, actor Silo {})",
+                "Project", resource_silo_id, actor_silo_id,
+            );
+            Err(authz_project.not_found())
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn fetch_by_name_for(
+        opctx: &OpContext,
+        datastore: &dyn LookupDataStore,
+        authz_silo: &authz::Silo,
+        name: &Name,
+        action: authz::Action,
+    ) -> LookupResult<(authz::Project, nexus_db_model::Project)> {
+        let (authz_project, db_row) = Self::lookup_by_name_no_authz(
+                opctx,
+                datastore,
+                authz_silo,
+                name,
+            )
+            .await?;
+        opctx.authorize(action, &authz_project).await?;
+        Ok((authz_project, db_row))
+    }
+
+    // CUSTOM: This function is customized to JOIN with the silo table to fetch restrict_network_actions
+    async fn lookup_by_name_no_authz(
+        opctx: &OpContext,
+        datastore: &dyn LookupDataStore,
+        authz_silo: &authz::Silo,
+        name: &Name,
+    ) -> LookupResult<(authz::Project, nexus_db_model::Project)> {
+        use nexus_db_schema::schema::project::dsl as project_dsl;
+        use nexus_db_schema::schema::silo::dsl as silo_dsl;
+
+        let (db_row, restrict_network_actions): (nexus_db_model::Project, bool) = project_dsl::project
+            .filter(project_dsl::time_deleted.is_null())
+            .filter(project_dsl::name.eq(name.clone()))
+            .filter(project_dsl::silo_id.eq(authz_silo.id()))
+            .inner_join(silo_dsl::silo.on(project_dsl::silo_id.eq(silo_dsl::id)))
+            .select((
+                nexus_db_model::Project::as_select(),
+                silo_dsl::restrict_network_actions,
+            ))
+            .get_result_async(&*datastore.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Project,
+                        LookupType::ByName(name.as_str().to_string()),
+                    ),
+                )
+            })?;
+
+        let authz_project = authz::Project::with_primary_key(
+            authz_silo.clone(),
+            db_row.id(),
+            LookupType::ByName(name.as_str().to_string())
+        )
+        .with_network_restrictions(restrict_network_actions);
+
+        Ok((authz_project, db_row))
+    }
+
+    async fn fetch_by_id_for(
+        opctx: &OpContext,
+        datastore: &dyn LookupDataStore,
+        v0: &Uuid,
+        action: authz::Action,
+    ) -> LookupResult<(authz::Silo, authz::Project, nexus_db_model::Project)> {
+        let (authz_silo, authz_project, db_row) = Self::lookup_by_id_no_authz(
+                opctx,
+                datastore,
+                v0,
+            )
+            .await?;
+        opctx.authorize(action, &authz_project).await?;
+        Ok((authz_silo, authz_project, db_row))
+    }
+
+    // CUSTOM: This function is customized to JOIN with the silo table to fetch restrict_network_actions
+    async fn lookup_by_id_no_authz(
+        opctx: &OpContext,
+        datastore: &dyn LookupDataStore,
+        v0: &Uuid,
+    ) -> LookupResult<(authz::Silo, authz::Project, nexus_db_model::Project)> {
+        use nexus_db_schema::schema::project::dsl as project_dsl;
+        use nexus_db_schema::schema::silo::dsl as silo_dsl;
+
+        let (db_row, restrict_network_actions): (nexus_db_model::Project, bool) = project_dsl::project
+            .filter(project_dsl::time_deleted.is_null())
+            .filter(project_dsl::id.eq(v0.clone()))
+            .inner_join(silo_dsl::silo.on(project_dsl::silo_id.eq(silo_dsl::id)))
+            .select((
+                nexus_db_model::Project::as_select(),
+                silo_dsl::restrict_network_actions,
+            ))
+            .get_result_async(&*datastore.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Project,
+                        LookupType::ById(
+                            ::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*v0),
+                        ),
+                    ),
+                )
+            })?;
+
+        let (authz_silo, _) = Silo::lookup_by_id_no_authz(
+                opctx,
+                datastore,
+                &db_row.silo_id.into(),
+            )
+            .await?;
+        let authz_project = authz::Project::with_primary_key(
+            authz_silo.clone(),
+            db_row.id(),
+            LookupType::ById(::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*v0)),
+        )
+        .with_network_restrictions(restrict_network_actions);
+
+        Ok((authz_silo, authz_project, db_row))
+    }
+}
+
+// Child selector functions for Silo
+impl<'a> Silo<'a> {
+    pub fn project_name<'b, 'c>(self, name: &'b Name) -> Project<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        Project::Name(self, name)
+    }
+
+    pub fn project_name_owned<'c>(self, name: Name) -> Project<'c>
+    where
+        'a: 'c,
+    {
+        Project::OwnedName(self, name)
+    }
 }
 
 lookup_resource! {

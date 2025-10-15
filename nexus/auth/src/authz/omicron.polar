@@ -710,10 +710,13 @@ has_relation(fleet: Fleet, "parent_fleet", collection: AlertClassList)
 # For silos with this restriction, only Silo Admins can perform networking create/modify/delete actions,
 # while read/list actions remain available to all project collaborators.
 
-# Helper predicate with explicit OR logic
+# Determine if the actor has permissions to modify networking resources
 can_modify_networking_resource(actor: AuthenticatedActor, project: Project) if
-    (has_role(actor, "collaborator", project) and not project.silo.restricts_networking()) or
-    has_role(actor, "admin", project.silo);
+	# Always allow silo admins to update networking resources
+	has_role(actor, "admin", project.silo) or
+	# Allow project admins to update networking resources if the project's silo allows it
+	# Note that the restriction is configured at the silo level, but affects the projects on the silo
+    (has_role(actor, "collaborator", project) and not project.restricts_networking());
 
 # Apply networking restrictions to all networking resources
 # VPCs (project path: vpc.project)
