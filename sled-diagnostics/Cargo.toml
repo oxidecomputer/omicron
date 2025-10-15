@@ -10,6 +10,7 @@ workspace = true
 anyhow.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
+chrono.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 illumos-utils.workspace = true
@@ -25,7 +26,7 @@ serde.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-zip = { workspace = true, features = ["zstd"] }
+zip = { workspace = true, features = ["chrono","zstd"] }
 
 [dev-dependencies]
 omicron-common.workspace = true

@@ -10,6 +10,7 @@ use std::{
     sync::LazyLock,
 };
 
+use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use fs_err::File;
 use illumos_utils::zfs::{
@@ -715,10 +716,24 @@ fn write_log_to_zip<W: Write + Seek>(
     };
 
     let mut src = File::open(&snapshot_logfile)?;
+
+    let mtime = get_log_mtime(snapshot_logfile)
+        .inspect_err(|e| {
+            warn!(
+                logger,
+                "sled-diagnostics unable to get mtime for logfile";
+                "error" => %e,
+                "logfile" => %snapshot_logfile,
+            );
+        })
+        .ok()
+        .unwrap_or_else(zip::DateTime::default_for_write);
+
     let zip_path = format!("{service}/{logtype}/{log_name}");
     zip.start_file_from_path(
         zip_path,
         FullFileOptions::default()
+            .last_modified_time(mtime)
             .compression_method(zip::CompressionMethod::Zstd)
             .compression_level(Some(3))
             // NB: From the docs
@@ -744,6 +759,17 @@ fn write_log_to_zip<W: Write + Seek>(
     };
 
     Ok(())
+}
+
+fn get_log_mtime(log_path: &Utf8Path) -> anyhow::Result<zip::DateTime> {
+    let mtime = log_path
+        .metadata()
+        .and_then(|s| s.modified())
+        .context("failed to stat path")?;
+
+    let datetime: chrono::DateTime<chrono::Utc> = mtime.into();
+    zip::DateTime::try_from(datetime.naive_utc())
+        .context("failed to convert file mtime to zip-compatible time")
 }
 
 /// A log file that is found in oxlog's "extra" bucket of service logs.
@@ -1202,6 +1228,12 @@ mod illumos_tests {
             let mut logfile_handle =
                 fs_err::tokio::File::create_new(&logfile).await.unwrap();
             logfile_handle.write_all(data.as_bytes()).await.unwrap();
+
+            // 2025-10-15T00:00:00
+            let mtime = std::time::SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(1760486400);
+            let std_file = logfile_handle.into_std().await.into_file();
+            std_file.set_modified(mtime).unwrap();
         }
 
         // Populate some file with similar names that should be skipped over
@@ -1237,12 +1269,20 @@ mod illumos_tests {
 
             zip.finish().unwrap();
 
-            // Confirm the zip has our file and data
+            let expected_zip_mtime =
+                zip::DateTime::from_date_and_time(2025, 10, 15, 0, 0, 0)
+                    .unwrap();
+
+            // Confirm the zip has our file and data with the right mtime
             let mut archive =
                 ZipArchive::new(File::open(zipfile_path).unwrap()).unwrap();
             for (name, data) in logfile_to_data {
                 let mut file_in_zip =
                     archive.by_name(&format!("mg-ddm/current/{name}")).unwrap();
+
+                let mtime = file_in_zip.last_modified().unwrap();
+                assert_eq!(mtime, expected_zip_mtime, "file mtime matches");
+
                 let mut contents = String::new();
                 file_in_zip.read_to_string(&mut contents).unwrap();
 

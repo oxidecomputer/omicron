@@ -143,7 +143,7 @@ update-common.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
-zip.workspace = true
+zip = { workspace = true, features = ["chrono"] }
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true

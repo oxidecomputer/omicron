@@ -12721,6 +12721,7 @@ dependencies = [
  "anyhow",
  "camino",
  "cfg-if",
+ "chrono",
  "fs-err 3.1.1",
  "futures",
  "illumos-utils",
@@ -16500,6 +16501,7 @@ checksum = "95ab361742de920c5535880f89bbd611ee62002bf11341d16a5f057bb8ba6899"
 dependencies = [
  "arbitrary",
  "bzip2 0.5.2",
+ "chrono",
  "crc32fast",
  "flate2",
  "indexmap 2.11.4",
