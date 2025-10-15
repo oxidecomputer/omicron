@@ -6,6 +6,7 @@
 
 use std::net::Ipv4Addr;
 
+use crate::integration_tests::instances::create_project_and_pool;
 use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
@@ -20,6 +21,7 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
+use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
@@ -43,6 +45,7 @@ use nexus_types::external_api::params::IpPoolCreate;
 use nexus_types::external_api::params::IpPoolLinkSilo;
 use nexus_types::external_api::params::IpPoolSiloUpdate;
 use nexus_types::external_api::params::IpPoolUpdate;
+use nexus_types::external_api::shared::IpPoolType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
@@ -101,13 +104,13 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Create the pool, verify we can get it back by either listing or fetching
     // directly
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
@@ -125,13 +128,13 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let error = object_create_error(
         client,
         ip_pools_url,
-        &params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
+        &params::IpPoolCreate::new(
+            IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: String::new(),
             },
-            ip_version: IpVersion::V4,
-        },
+            IpVersion::V4,
+        ),
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -584,6 +587,100 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     object_delete(client, "/v1/system/ip-pools/p1").await;
 }
 
+#[nexus_test]
+async fn cannot_unlink_ip_pool_with_outstanding_instance_ips(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+
+    // Create a project and add a default IP Pool.
+    const POOL_NAME: &str = "default";
+    let proj = create_project_and_pool(client).await;
+
+    // Create an instance, which allocates an IP address.
+    const INSTANCE_NAME: &str = "myinst";
+    let instance =
+        create_instance(client, proj.name().as_str(), INSTANCE_NAME).await;
+
+    // We cannot delete the link between the silo and pool until the instance is
+    // gone.
+    let url = format!(
+        "/v1/system/ip-pools/{}/silos/{}",
+        POOL_NAME,
+        DEFAULT_SILO.name().as_str()
+    );
+    object_delete_error(client, &url, StatusCode::BAD_REQUEST).await;
+
+    // Stop the instance and wait until it's actually stopped.
+    let instance_stop_url = format!(
+        "/v1/instances/{}/stop?project={}",
+        INSTANCE_NAME,
+        proj.name().as_str(),
+    );
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instance_stop_url)
+            .body(None as Option<&serde_json::Value>)
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to stop instance");
+
+    // Simulate the transition, wait until it is in fact stopped.
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should be on a sled");
+    info.sled_client.vmm_finish_transition(info.propolis_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    // Now that it's stopped, delete the instance, and then assert that we can
+    // actually unlink the IP Pool from the Silo.
+    object_delete(client, &format!("/v1/instances/{}", instance_id)).await;
+    object_delete(client, &url).await;
+}
+
+#[nexus_test]
+async fn cannot_unlink_ip_pool_with_outstanding_floating_ips(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a project and add a default IP Pool.
+    const POOL_NAME: &str = "default";
+    let proj = create_project_and_pool(client).await;
+
+    // Create a floating IP from the pool.
+    let fip = create_floating_ip(
+        client,
+        "fip",
+        proj.name().as_str(),
+        None,
+        Some(POOL_NAME),
+    )
+    .await;
+
+    // We cannot delete the link between the silo and pool until the floating IP
+    // has been deleted.
+    let url = format!(
+        "/v1/system/ip-pools/{}/silos/{}",
+        POOL_NAME,
+        DEFAULT_SILO.name().as_str()
+    );
+    object_delete_error(client, &url, StatusCode::BAD_REQUEST).await;
+
+    // Now delete the FIP.
+    object_delete(client, &format!("/v1/floating-ips/{}", fip.id())).await;
+
+    // Now we can do the dew.
+    object_delete(client, &url).await;
+}
+
 /// Non-discoverable silos can be linked to a pool, but they do not show up
 /// in the list of silos for that pool, just as they do not show up in the
 /// top-level list of silos
@@ -821,13 +918,13 @@ async fn create_pool(
     name: &str,
     ip_version: IpVersion,
 ) -> IpPool {
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
             name: Name::try_from(name.to_string()).unwrap(),
             description: "".to_string(),
         },
         ip_version,
-    };
+    );
     NexusRequest::objects_post(client, "/v1/system/ip-pools", &params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -889,6 +986,7 @@ async fn test_ipv6_ip_pool_utilization_total(
             nexus_db_model::IpPool::new(
                 &identity,
                 nexus_db_model::IpVersion::V6,
+                nexus_db_model::IpPoolReservationType::ExternalSilos,
             ),
         )
         .await
@@ -948,13 +1046,14 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
     // Create the pool, verify basic properties
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
+
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
@@ -1107,13 +1206,13 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
     // Create the pool, verify basic properties
-    let params = IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        ip_version: IpVersion::V4,
-    };
+        IpVersion::V4,
+    );
     let created_pool: IpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
@@ -1522,4 +1621,25 @@ fn assert_ranges_eq(first: &IpPoolRange, second: &IpPoolRange) {
     assert_eq!(first.time_created, second.time_created);
     assert_eq!(first.range.first_address(), second.range.first_address());
     assert_eq!(first.range.last_address(), second.range.last_address());
+}
+
+#[nexus_test]
+async fn test_ip_pool_unicast_defaults(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    // Test that regular IP pool creation uses unicast defaults
+    let pool = create_pool(client, "unicast-test", IpVersion::V4).await;
+    assert_eq!(pool.pool_type, IpPoolType::Unicast);
+
+    // Test that explicitly creating with default type still works
+    let params = IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: "explicit-unicast".parse().unwrap(),
+            description: "Explicit unicast pool".to_string(),
+        },
+        IpVersion::V4,
+    );
+    let pool: IpPool =
+        object_create(client, "/v1/system/ip-pools", &params).await;
+    assert_eq!(pool.pool_type, IpPoolType::Unicast);
 }

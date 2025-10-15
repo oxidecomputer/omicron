@@ -2162,6 +2162,20 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
     'v6'
 );
 
+/* Indicates what an IP Pool is reserved for. */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
+    'external_silos',
+    'oxide_internal'
+);
+
+/*
+ * IP pool types for unicast vs multicast pools
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_type AS ENUM (
+    'unicast',
+    'multicast'
+);
+
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
  */
@@ -2178,7 +2192,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     rcgen INT8 NOT NULL,
 
     /* The IP version of the ranges contained in this pool. */
-    ip_version omicron.public.ip_version NOT NULL
+    ip_version omicron.public.ip_version NOT NULL,
+
+    /* Indicates what the IP Pool is reserved for. */
+    reservation_type omicron.public.ip_pool_reservation_type NOT NULL,
+
+    /* Pool type for unicast (default) vs multicast pools. */
+    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast'
 );
 
 /*
@@ -2186,6 +2206,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
  */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_by_name ON omicron.public.ip_pool (
     name
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index on pool type for efficient filtering of unicast vs multicast pools.
+ */
+CREATE INDEX IF NOT EXISTS lookup_ip_pool_by_type ON omicron.public.ip_pool (
+    pool_type
 ) WHERE
     time_deleted IS NULL;
 
@@ -2207,17 +2235,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
 
     -- resource_type is redundant because resource IDs are globally unique, but
     -- logically it belongs here
-    PRIMARY KEY (ip_pool_id, resource_type, resource_id),
-
-    -- Check that there are no default pools for the internal silo
-    CONSTRAINT internal_silo_has_no_default_pool CHECK (
-        NOT (
-            resource_type = 'silo' AND
-            resource_id = '001de000-5110-4000-8000-000000000001' AND
-            is_default
-        )
-    )
-
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
 );
 
 -- a given resource can only have one default ip pool
@@ -2251,7 +2269,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_range (
     /* FK into the `ip_pool` table. */
     ip_pool_id UUID NOT NULL,
     /* Tracks child resources, IP addresses allocated out of this range. */
-    rcgen INT8 NOT NULL
+    rcgen INT8 NOT NULL,
+
+    /* Ensure first address is not greater than last address */
+    CONSTRAINT check_address_order CHECK (first_address <= last_address)
 );
 
 /*
@@ -6771,7 +6792,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '197.0.0', NULL)
+    (TRUE, NOW(), NOW(), '199.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

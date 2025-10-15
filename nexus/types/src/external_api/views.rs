@@ -395,6 +395,8 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
     /// The IP version for the pool.
     pub ip_version: IpVersion,
+    /// Type of IP pool (unicast or multicast)
+    pub pool_type: shared::IpPoolType,
 }
 
 /// The utilization of IP addresses in a pool.
@@ -1124,14 +1126,14 @@ impl From<oxql_types::Table> for OxqlTable {
     }
 }
 
-/// Basic metadata about the resource usage of a single ClickHouse SQL query.
+/// Basic metadata about the resource usage of a query.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct OxqlQuerySummary {
     /// The database-assigned query ID.
     pub id: Uuid,
-    /// The raw ClickHouse SQL query.
+    /// The raw query.
     pub query: String,
-    /// The total duration of the ClickHouse query (network plus execution).
+    /// The total duration of the query (network plus execution).
     pub elapsed_ms: usize,
     /// Summary of the data read and written.
     pub io_summary: oxql_types::IoSummary,
@@ -1153,7 +1155,10 @@ impl From<oxql_types::QuerySummary> for OxqlQuerySummary {
 pub struct OxqlQueryResult {
     /// Tables resulting from the query, each containing timeseries.
     pub tables: Vec<OxqlTable>,
-    /// Summaries of queries run against ClickHouse.
+    /// Summaries of queries run against ClickHouse. Note: we omit this field
+    /// from the generated docs, since it is not intended for consumption by
+    /// customers.
+    #[schemars(skip)]
     pub query_summaries: Option<Vec<OxqlQuerySummary>>,
 }
 

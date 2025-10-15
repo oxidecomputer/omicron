@@ -263,6 +263,8 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["nexus", "blueprints", "diff", &initial_blueprint_id],
         // reconfigurator config: show and set
         &["nexus", "reconfigurator-config", "show", "current"],
+        &["nexus", "update-status"],
+        &["nexus", "update-status", "--details"],
         // NOTE: Enabling the planner here _may_ cause Nexus to start creating
         // new blueprints; any commands whose output is only stable if the set
         // of blueprints is stable must come before this command to avoid being

@@ -158,7 +158,7 @@ enum NexusCommands {
     #[command(visible_alias = "sb")]
     SupportBundles(SupportBundleArgs),
     /// show running artifact versions
-    UpdateStatus,
+    UpdateStatus(UpdateStatusArgs),
 }
 
 #[derive(Debug, Args)]
@@ -612,6 +612,13 @@ struct SupportBundleInspectArgs {
     path: Option<Utf8PathBuf>,
 }
 
+#[derive(Debug, Args)]
+struct UpdateStatusArgs {
+    /// Show full details of all updateable components.
+    #[arg(long)]
+    details: bool,
+}
+
 impl NexusArgs {
     /// Run a `omdb nexus` subcommand.
     pub(crate) async fn run_cmd(
@@ -845,8 +852,8 @@ impl NexusArgs {
             NexusCommands::SupportBundles(SupportBundleArgs {
                 command: SupportBundleCommands::Inspect(args),
             }) => cmd_nexus_support_bundles_inspect(&client, args).await,
-            NexusCommands::UpdateStatus => {
-                cmd_nexus_update_status(&client).await
+            NexusCommands::UpdateStatus(args) => {
+                cmd_nexus_update_status(&client, args).await
             }
         }
     }
