@@ -6,8 +6,6 @@
 
 This is a very rough introduction to how networking works within the Oxide system and particularly the control plane (Omicron).  Much more information is available in various RFDs, particularly <<rfd63>>.
 
-See also: link:../notes/multicast-architecture.adoc[Multicast Architecture: VLAN Scope]
-
 == IPv6: the least you need to know
 
 While IPv4 can be used for connectivity between Omicron and the outside world, everything else in the system uses IPv6.  This section provides a _very_ cursory introduction to IPv6 for people only familiar with IPv4.  You can skip this if you know IPv6.  If you want slightly more detail than what's here, see https://www.roesen.org/files/ipv6_cheat_sheet.pdf[this cheat sheet].
