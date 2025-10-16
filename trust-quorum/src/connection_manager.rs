@@ -498,7 +498,54 @@ impl ConnMgr {
         }
     }
 
-    async fn on_task_exit(&mut self, task_id: TaskId) {}
+    /// Remove any references to the given task
+    async fn on_task_exit(&mut self, task_id: TaskId) {
+        // We're most likely to find the task as established so we start with that
+        if let Some((id, handle)) = self
+            .established
+            .iter()
+            .find(|(_, handle)| handle.task_id == task_id)
+        {
+            info!(
+                self.log,
+                "Established connection task exited";
+                "task_id" => ?task_id,
+                "remote_addr" => handle.addr().to_string(),
+                "remote_peer_id" => id.to_string(),
+            );
+            // probably a better way to avoid borrowck issues
+            let id = id.clone();
+            self.established.remove(&id);
+        } else if let Some((addr, handle)) =
+            self.accepting.iter().find(|(_, handle)| handle.task_id == task_id)
+        {
+            info!(
+                self.log,
+                "Accepting task exited";
+                "task_id" => ?task_id,
+                "remote_addr" => handle.addr().to_string(),
+            );
+            let addr = *addr;
+            self.accepting.remove(&addr);
+        } else if let Some((addr, handle)) =
+            self.connecting.iter().find(|(_, handle)| handle.task_id == task_id)
+        {
+            info!(
+                self.log,
+                "Connecting task exited";
+                "task_id" => ?task_id,
+                "remote_addr" => handle.addr().to_string(),
+            );
+            let addr = *addr;
+            self.connecting.remove(&addr);
+        } else {
+            info!(
+                self.log,
+                "Task exited. No cleanup required.";
+                "task_id" => ?task_id
+            );
+        }
+    }
 }
 
 fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
