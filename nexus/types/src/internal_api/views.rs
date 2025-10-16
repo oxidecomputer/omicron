@@ -626,6 +626,14 @@ impl HostPhase2Status {
         }
     }
 
+    pub fn boot_disk_version(&self) -> TufRepoVersion {
+        match &self.boot_disk {
+            Ok(M2Slot::A) => self.slot_a_version.clone(),
+            Ok(M2Slot::B) => self.slot_b_version.clone(),
+            Err(err) => TufRepoVersion::Error(err.clone()),
+        }
+    }
+
     fn slot_version(
         old: &TargetReleaseDescription,
         new: &TargetReleaseDescription,
@@ -656,10 +664,37 @@ impl IdOrdItem for SledAgentUpdateStatus {
     id_upcast!();
 }
 
+impl SledAgentUpdateStatus {
+    /// Update status suitable for a given sled ID that isn't present in
+    /// inventory.
+    pub fn unknown(sled_id: SledUuid) -> Self {
+        Self {
+            sled_id,
+            zones: IdOrdMap::new(),
+            host_phase_2: HostPhase2Status {
+                boot_disk: Err("unknown".to_string()),
+                slot_a_version: TufRepoVersion::Unknown,
+                slot_b_version: TufRepoVersion::Unknown,
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RotBootloaderStatus {
     pub stage0_version: TufRepoVersion,
     pub stage0_next_version: TufRepoVersion,
+}
+
+impl RotBootloaderStatus {
+    /// Update status suitable for an RoT bootloader that isn't present in
+    /// inventory.
+    pub fn unknown() -> Self {
+        Self {
+            stage0_version: TufRepoVersion::Unknown,
+            stage0_next_version: TufRepoVersion::Unknown,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -669,10 +704,39 @@ pub struct RotStatus {
     pub slot_b_version: TufRepoVersion,
 }
 
+impl RotStatus {
+    /// Update status suitable for an RoT that isn't present in inventory.
+    pub fn unknown() -> Self {
+        Self {
+            active_slot: None,
+            slot_a_version: TufRepoVersion::Unknown,
+            slot_b_version: TufRepoVersion::Unknown,
+        }
+    }
+
+    pub fn active_slot_version(&self) -> TufRepoVersion {
+        match self.active_slot {
+            Some(RotSlot::A) => self.slot_a_version.clone(),
+            Some(RotSlot::B) => self.slot_b_version.clone(),
+            None => TufRepoVersion::Unknown,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SpStatus {
     pub slot0_version: TufRepoVersion,
     pub slot1_version: TufRepoVersion,
+}
+
+impl SpStatus {
+    /// Update status suitable for an RoT that isn't present in inventory.
+    pub fn unknown() -> Self {
+        Self {
+            slot0_version: TufRepoVersion::Unknown,
+            slot1_version: TufRepoVersion::Unknown,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -682,11 +746,42 @@ pub enum HostPhase1Status {
     /// it's a PSC or switch).
     NotASled,
     Sled {
-        sled_id: Option<SledUuid>,
+        sled_id: SledUuid,
         active_slot: Option<M2Slot>,
         slot_a_version: TufRepoVersion,
         slot_b_version: TufRepoVersion,
     },
+}
+
+impl HostPhase1Status {
+    /// Update status suitable for a given sled ID that isn't present in
+    /// inventory.
+    pub fn unknown(sled_id: SledUuid) -> Self {
+        Self::Sled {
+            sled_id,
+            active_slot: None,
+            slot_a_version: TufRepoVersion::Unknown,
+            slot_b_version: TufRepoVersion::Unknown,
+        }
+    }
+
+    /// Returns `Some(version)` if `self` is `HostPhase1Status::Sled { .. }`, or
+    /// `None` otherwise.
+    pub fn active_slot_version(&self) -> Option<TufRepoVersion> {
+        match self {
+            HostPhase1Status::NotASled => None,
+            HostPhase1Status::Sled {
+                active_slot,
+                slot_a_version,
+                slot_b_version,
+                ..
+            } => Some(match active_slot {
+                Some(M2Slot::A) => slot_a_version.clone(),
+                Some(M2Slot::B) => slot_b_version.clone(),
+                None => TufRepoVersion::Unknown,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -701,21 +796,24 @@ pub struct MgsDrivenUpdateStatus {
 }
 
 impl MgsDrivenUpdateStatus {
+    /// `expected_sleds` is the set of sleds that should be included in an
+    /// update status report. Returns `None` if `sp_type` indicates this is a
+    /// sled and `baseboard` is not present in `sled_ids`.
     fn new(
         inventory: &Collection,
         baseboard_id: &BaseboardId,
         sp_type: SpType,
         old: &TargetReleaseDescription,
         new: &TargetReleaseDescription,
-        sled_ids: &BTreeMap<&BaseboardId, SledUuid>,
-    ) -> Self {
+        expected_sleds: &BTreeMap<BaseboardId, SledUuid>,
+    ) -> Option<Self> {
         MgsDrivenUpdateStatusBuilder {
             inventory,
             baseboard_id,
             sp_type,
             old,
             new,
-            sled_ids,
+            expected_sleds,
         }
         .build()
     }
@@ -737,25 +835,31 @@ struct MgsDrivenUpdateStatusBuilder<'a> {
     sp_type: SpType,
     old: &'a TargetReleaseDescription,
     new: &'a TargetReleaseDescription,
-    sled_ids: &'a BTreeMap<&'a BaseboardId, SledUuid>,
+    expected_sleds: &'a BTreeMap<BaseboardId, SledUuid>,
 }
 
 impl MgsDrivenUpdateStatusBuilder<'_> {
-    fn build(&self) -> MgsDrivenUpdateStatus {
+    fn build(&self) -> Option<MgsDrivenUpdateStatus> {
         let host_os_phase_1 = match self.sp_type {
             SpType::Power | SpType::Switch => HostPhase1Status::NotASled,
-            SpType::Sled => HostPhase1Status::Sled {
-                sled_id: self.sled_ids.get(self.baseboard_id).copied(),
-                active_slot: self
-                    .inventory
-                    .host_phase_1_active_slot_for(self.baseboard_id)
-                    .map(|s| s.slot),
-                slot_a_version: self.version_for_host_phase_1(M2Slot::A),
-                slot_b_version: self.version_for_host_phase_1(M2Slot::B),
-            },
+            SpType::Sled => {
+                // If we don't have a sled ID, skip this sled - it isn't part of
+                // the control plane.
+                let sled_id =
+                    self.expected_sleds.get(self.baseboard_id).copied()?;
+                HostPhase1Status::Sled {
+                    sled_id,
+                    active_slot: self
+                        .inventory
+                        .host_phase_1_active_slot_for(self.baseboard_id)
+                        .map(|s| s.slot),
+                    slot_a_version: self.version_for_host_phase_1(M2Slot::A),
+                    slot_b_version: self.version_for_host_phase_1(M2Slot::B),
+                }
+            }
         };
 
-        MgsDrivenUpdateStatus {
+        Some(MgsDrivenUpdateStatus {
             baseboard_description: self.baseboard_id.to_string(),
             rot_bootloader: RotBootloaderStatus {
                 stage0_version: self.version_for_caboose(CabooseWhich::Stage0),
@@ -777,7 +881,7 @@ impl MgsDrivenUpdateStatusBuilder<'_> {
                 slot1_version: self.version_for_caboose(CabooseWhich::SpSlot1),
             },
             host_os_phase_1,
-        }
+        })
     }
 
     fn version_for_host_phase_1(&self, slot: M2Slot) -> TufRepoVersion {
@@ -859,28 +963,52 @@ pub struct UpdateStatus {
 }
 
 impl UpdateStatus {
+    /// Construct an `UpdateStatus` by comparing the versions reported in
+    /// `inventory` against the `old` and `new` target releases.
+    ///
+    /// `sleds_by_baseboard` should contain all sleds expected to be part of the
+    /// cluster. Any sleds present in `sleds_by_baseboard` but not `inventory`
+    /// will be reported as running "unknown" versions, and any sleds present in
+    /// `inventory` but not `sleds_by_baseboard` will be ignored.
+    // TODO-correctness We should also take a list of "expected switches" and
+    // "expected sidecars" to similarly handle differences between what we
+    // expect and what's present in `inventory`, but the control plane doesn't
+    // track those today. We can only report what happens to be in inventory,
+    // and we have to assume any switches or PSCs should be reported.
     pub fn new(
         old: &TargetReleaseDescription,
         new: &TargetReleaseDescription,
+        sleds_by_baseboard: &BTreeMap<BaseboardId, SledUuid>,
         inventory: &Collection,
     ) -> UpdateStatus {
-        let sleds = inventory
+        let mut sleds = inventory
             .sled_agents
             .iter()
-            .map(|sa| {
+            .filter_map(|sa| {
+                // Filter out systems that aren't present in
+                // `sleds_by_baseboard`.
+                //
+                // Production systems should always have a baseboard, which lets
+                // us do a fast lookup here. If for some reason we don't have
+                // one, search the values of `sleds_by_baseboard` instead.
+                if let Some(baseboard) = sa.baseboard_id.as_deref() {
+                    if !sleds_by_baseboard.contains_key(baseboard) {
+                        return None;
+                    }
+                } else {
+                    if !sleds_by_baseboard
+                        .values()
+                        .any(|sled_id| *sled_id == sa.sled_id)
+                    {
+                        return None;
+                    }
+                }
+
                 let Some(inv) = sa.last_reconciliation.as_ref() else {
-                    return SledAgentUpdateStatus {
-                        sled_id: sa.sled_id,
-                        zones: IdOrdMap::new(),
-                        host_phase_2: HostPhase2Status {
-                            boot_disk: Err("unknown".to_string()),
-                            slot_a_version: TufRepoVersion::Unknown,
-                            slot_b_version: TufRepoVersion::Unknown,
-                        },
-                    };
+                    return Some(SledAgentUpdateStatus::unknown(sa.sled_id));
                 };
 
-                SledAgentUpdateStatus {
+                Some(SledAgentUpdateStatus {
                     sled_id: sa.sled_id,
                     zones: inv
                         .reconciled_omicron_zones()
@@ -900,36 +1028,44 @@ impl UpdateStatus {
                         old,
                         new,
                     ),
-                }
+                })
             })
-            .collect();
+            .collect::<IdOrdMap<_>>();
 
-        // Build a map so we can look up the sled ID for a given baseboard (when
-        // collecting the MGS-driven update status below, all we have is the
-        // baseboard).
-        let sled_ids_by_baseboard: BTreeMap<&BaseboardId, SledUuid> = inventory
-            .sled_agents
-            .iter()
-            .filter_map(|sa| {
-                let baseboard_id = sa.baseboard_id.as_deref()?;
-                Some((baseboard_id, sa.sled_id))
-            })
-            .collect();
-
-        let mgs_driven = inventory
+        let mut mgs_driven = inventory
             .sps
             .iter()
-            .map(|(baseboard_id, sp)| {
+            .filter_map(|(baseboard_id, sp)| {
                 MgsDrivenUpdateStatus::new(
                     inventory,
                     baseboard_id,
                     sp.sp_type,
                     old,
                     new,
-                    &sled_ids_by_baseboard,
+                    &sleds_by_baseboard,
                 )
             })
             .collect::<IdOrdMap<_>>();
+
+        // Insert "unknown" statuses for any sleds we expected to see but
+        // didn't.
+        for (baseboard_id, sled_id) in sleds_by_baseboard {
+            if !sleds.contains_key(sled_id) {
+                sleds
+                    .insert_overwrite(SledAgentUpdateStatus::unknown(*sled_id));
+            }
+
+            let baseboard_description = baseboard_id.to_string();
+            if !mgs_driven.contains_key(baseboard_description.as_str()) {
+                mgs_driven.insert_overwrite(MgsDrivenUpdateStatus {
+                    baseboard_description,
+                    rot_bootloader: RotBootloaderStatus::unknown(),
+                    rot: RotStatus::unknown(),
+                    sp: SpStatus::unknown(),
+                    host_os_phase_1: HostPhase1Status::unknown(*sled_id),
+                });
+            }
+        }
 
         UpdateStatus { sleds, mgs_driven }
     }

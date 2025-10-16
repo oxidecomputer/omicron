@@ -1205,14 +1205,10 @@ mod tests {
                     service, expected_result
                 );
 
-                // For other results, we want to catch situations where a packet
-                // is fragmented. Add a short timeout (5s) for this.
-                let lookup_fut = tokio::time::timeout(
-                    Duration::from_secs(5),
-                    resolver.lookup_all_socket_v6(service),
-                );
-                match (lookup_fut.await, expected_result) {
-                    (Ok(Ok(addrs)), Ok(())) => {
+                let lookup_result =
+                    resolver.lookup_all_socket_v6(service).await;
+                match (lookup_result, expected_result) {
+                    (Ok(addrs), Ok(())) => {
                         if addrs.is_empty() {
                             mismatched.insert(
                                 service,
@@ -1220,10 +1216,9 @@ mod tests {
                             );
                         }
 
-                        // TODO: add assertions on the returned addresses.
                         eprintln!("*** lookup successful: {addrs:?}");
                     }
-                    (Ok(Ok(addrs)), Err(e)) => {
+                    (Ok(addrs), Err(e)) => {
                         mismatched.insert(
                             service,
                             anyhow!(
@@ -1231,14 +1226,14 @@ mod tests {
                             ),
                         );
                     }
-                    (Ok(Err(e)), Ok(())) => {
+                    (Err(e), Ok(())) => {
                         mismatched.insert(
                             service,
                             anyhow!(e)
                                 .context("expected Ok(()), but got an error"),
                         );
                     }
-                    (Ok(Err(e)), Err(QueryError::NoRecordsFound)) => {
+                    (Err(e), Err(QueryError::NoRecordsFound)) => {
                         // "No records found" is returned as a hickory ProtoError.
                         if let ResolveError::Resolve(resolve_error) = &e {
                             if let ResolveErrorKind::Proto(proto_error) =
@@ -1274,13 +1269,6 @@ mod tests {
                     }
                     (_, Err(QueryError::PacketFragmented)) => {
                         unreachable!("we don't query PacketFragmented")
-                    }
-                    (Err(e), _) => {
-                        mismatched.insert(
-                            service,
-                            anyhow!(e).context("got unexpected timeout"),
-                        );
-                        continue;
                     }
                 }
             }
@@ -1321,10 +1309,11 @@ mod tests {
                 let mut srv_resolver = resolver.for_service(service);
                 let mut monitor_rx = srv_resolver.monitor();
 
-                // Wait for at least one result to be returned. Like above, we
-                // don't want to wait forever, so set a reasonable timeout.
+                // Wait for at least one result to be returned. We don't want to
+                // wait forever, so set a reasonable timeout. (15s matches the
+                // internal timeout within the simple DNS resolver.)
                 let backends = match tokio::time::timeout(
-                    Duration::from_secs(5),
+                    Duration::from_secs(15),
                     monitor_rx.wait_for(|backends| !backends.is_empty()),
                 )
                 .await
@@ -1340,7 +1329,6 @@ mod tests {
                     }
                 };
 
-                // TODO: add assertions on the returned addresses.
                 eprintln!("*** qorb lookup successful: {:?}", &**backends);
             }
         }
@@ -1348,97 +1336,72 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    /// Returns the list of DNS service names expected in an example system.
+    /// Returns the list of potential DNS service names in an example system,
+    /// along with whether we expect a successful or error response for each of
+    /// them.
     fn service_names_to_query(
         blueprint: &Blueprint,
     ) -> BTreeMap<ServiceName, Result<(), QueryError>> {
         let mut out = BTreeMap::new();
 
-        out.insert(ServiceName::Clickhouse, Ok(()));
-
-        // ClickhouseAdminKeeper and ClickhouseAdminServer are not currently
-        // part of the example system
-        out.insert(
-            ServiceName::ClickhouseAdminKeeper,
-            Err(QueryError::NoRecordsFound),
-        );
-        out.insert(
-            ServiceName::ClickhouseAdminServer,
-            Err(QueryError::NoRecordsFound),
-        );
-
-        out.insert(ServiceName::ClickhouseAdminSingleServer, Ok(()));
-        out.insert(ServiceName::ClickhouseNative, Ok(()));
-
-        // ClickhouseClusterNative, ClickhouseKeeper and ClickhouseServer
-        // are not currently part of the example system
-        out.insert(
-            ServiceName::ClickhouseClusterNative,
-            Err(QueryError::NoRecordsFound),
-        );
-        out.insert(
-            ServiceName::ClickhouseKeeper,
-            Err(QueryError::NoRecordsFound),
-        );
-        out.insert(
-            ServiceName::ClickhouseServer,
-            Err(QueryError::NoRecordsFound),
-        );
-
-        // Cockroach is not currently part of the example system
-        out.insert(ServiceName::Cockroach, Err(QueryError::NoRecordsFound));
-
-        // ExternalDns is not currently part of the example system
-        out.insert(ServiceName::ExternalDns, Err(QueryError::NoRecordsFound));
-
-        out.insert(ServiceName::InternalDns, Ok(()));
-        out.insert(ServiceName::Nexus, Ok(()));
-        out.insert(ServiceName::NexusLockstep, Ok(()));
-
-        // Oximeter is not currently part of the example system
-        out.insert(ServiceName::Oximeter, Err(QueryError::NoRecordsFound));
-
-        out.insert(ServiceName::OximeterReader, Ok(()));
-
-        // ManagementGatewayService is not currently part of the example
-        // system
-        out.insert(
-            ServiceName::ManagementGatewayService,
-            Err(QueryError::NoRecordsFound),
-        );
-
-        out.insert(ServiceName::RepoDepot, Ok(()));
-
-        // Wicketd is not currently part of the example system
-        out.insert(ServiceName::Wicketd, Err(QueryError::NoRecordsFound));
-
-        // Dendrite and Tfport are not currently part of the example system
-        out.insert(ServiceName::Dendrite, Err(QueryError::NoRecordsFound));
-        out.insert(ServiceName::Tfport, Err(QueryError::NoRecordsFound));
-
-        out.insert(ServiceName::CruciblePantry, Ok(()));
-
-        // XXX the SledAgent service name doesn't appear to be used?
-        //
-        // Crucible is handled below
-        //
-        // BoundaryNtp is not currently part of the example system
-        out.insert(ServiceName::BoundaryNtp, Err(QueryError::NoRecordsFound));
-
-        // InternalNtp is too large to fit in a single DNS packet and times
-        // out, but DNS lookups for it aren't used anywhere.
-        out.insert(ServiceName::InternalNtp, Err(QueryError::PacketFragmented));
-
-        // Maghemite and Mgd are not currently part of the example system
-        out.insert(ServiceName::Maghemite, Err(QueryError::NoRecordsFound));
-        out.insert(ServiceName::Mgd, Err(QueryError::NoRecordsFound));
-
-        // Each Crucible zone should be queryable.
-        for (_, zone) in
-            blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        {
-            if zone.kind() == ZoneKind::Crucible {
-                out.insert(ServiceName::Crucible(zone.id), Ok(()));
+        for service in ServiceName::iter() {
+            match service {
+                // Services that exist in the example system.
+                ServiceName::Clickhouse
+                | ServiceName::ClickhouseAdminSingleServer
+                | ServiceName::ClickhouseNative
+                | ServiceName::InternalDns
+                | ServiceName::Nexus
+                | ServiceName::NexusLockstep
+                | ServiceName::OximeterReader
+                | ServiceName::RepoDepot
+                | ServiceName::CruciblePantry => {
+                    out.insert(service, Ok(()));
+                }
+                // Services that are not currently part of the example system.
+                ServiceName::ClickhouseAdminKeeper
+                | ServiceName::ClickhouseAdminServer
+                | ServiceName::ClickhouseClusterNative
+                | ServiceName::ClickhouseKeeper
+                | ServiceName::ClickhouseServer
+                | ServiceName::Cockroach
+                | ServiceName::ExternalDns
+                | ServiceName::Oximeter
+                | ServiceName::ManagementGatewayService
+                | ServiceName::Wicketd
+                | ServiceName::Dendrite
+                | ServiceName::Tfport
+                | ServiceName::BoundaryNtp
+                | ServiceName::Maghemite
+                | ServiceName::Mgd => {
+                    out.insert(service, Err(QueryError::NoRecordsFound));
+                }
+                // InternalNtp is too large to fit in a single DNS packet and
+                // therefore times out, but DNS lookups for it aren't used
+                // anywhere. See #9178.
+                ServiceName::InternalNtp => {
+                    out.insert(service, Err(QueryError::PacketFragmented));
+                }
+                ServiceName::SledAgent(_) => {
+                    // Sled Agent DNS records don't currently exist. (Maybe they
+                    // should?)
+                    for sled_id in blueprint.sleds() {
+                        out.insert(
+                            ServiceName::SledAgent(sled_id),
+                            Err(QueryError::NoRecordsFound),
+                        );
+                    }
+                }
+                ServiceName::Crucible(_) => {
+                    // Each Crucible zone should be queryable.
+                    for (_, zone) in blueprint.all_omicron_zones(
+                        BlueprintZoneDisposition::is_in_service,
+                    ) {
+                        if zone.kind() == ZoneKind::Crucible {
+                            out.insert(ServiceName::Crucible(zone.id), Ok(()));
+                        }
+                    }
+                }
             }
         }
 
@@ -1449,44 +1412,6 @@ mod tests {
     enum QueryError {
         NoRecordsFound,
         PacketFragmented,
-    }
-
-    #[expect(unused)]
-    fn match_service_names(service: ServiceName) {
-        // Add a match statement here to ensure that new service names that get
-        // added are considered.
-        //
-        // When adding a new variant, ensure that it is covered by
-        // service_names_to_query above.
-        match service {
-            ServiceName::Clickhouse => {}
-            ServiceName::ClickhouseAdminKeeper => {}
-            ServiceName::ClickhouseAdminServer => {}
-            ServiceName::ClickhouseAdminSingleServer => {}
-            ServiceName::ClickhouseNative => {}
-            ServiceName::ClickhouseClusterNative => {}
-            ServiceName::ClickhouseKeeper => {}
-            ServiceName::ClickhouseServer => {}
-            ServiceName::Cockroach => {}
-            ServiceName::InternalDns => {}
-            ServiceName::ExternalDns => {}
-            ServiceName::Nexus => {}
-            ServiceName::NexusLockstep => {}
-            ServiceName::Oximeter => {}
-            ServiceName::OximeterReader => {}
-            ServiceName::ManagementGatewayService => {}
-            ServiceName::RepoDepot => {}
-            ServiceName::Wicketd => {}
-            ServiceName::Dendrite => {}
-            ServiceName::Tfport => {}
-            ServiceName::CruciblePantry => {}
-            ServiceName::SledAgent(_) => {}
-            ServiceName::Crucible(_) => {}
-            ServiceName::BoundaryNtp => {}
-            ServiceName::InternalNtp => {}
-            ServiceName::Maghemite => {}
-            ServiceName::Mgd => {}
-        }
     }
 
     fn blueprint_zones_of_kind(
