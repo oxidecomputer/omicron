@@ -35,13 +35,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use tokio::sync::mpsc;
 use tokio::sync::watch;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dump_setup_task::FormerZoneRootArchiver;
 use crate::host_phase_2::BootPartitionReconciler;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
@@ -59,7 +59,6 @@ pub use self::external_disks::CurrentlyManagedZpools;
 pub use self::external_disks::CurrentlyManagedZpoolsReceiver;
 pub use self::zones::TimeSyncError;
 pub use self::zones::TimeSyncStatus;
-use crate::dump_setup::FormerZoneRootRequest;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
@@ -72,7 +71,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     internal_disks_rx: InternalDisksReceiver,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
-    former_zone_roots_tx: mpsc::Sender<FormerZoneRootRequest>,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
     sled_agent_facilities: T,
     sled_agent_artifact_store: U,
@@ -82,7 +81,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
         Arc::clone(&mount_config),
         currently_managed_zpools_tx,
         external_disks_tx,
-        former_zone_roots_tx.clone(),
+        former_zone_root_archiver.clone(),
     );
     let datasets = OmicronDatasets::new(dataset_task);
     let zones = OmicronZones::new(mount_config, time_sync_config);
@@ -96,7 +95,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
             raw_disks_rx,
             internal_disks_rx,
             external_disks,
-            former_zone_roots_tx,
+            former_zone_root_archiver,
             datasets,
             zones,
             boot_partitions,
@@ -276,7 +275,7 @@ struct ReconcilerTask {
     raw_disks_rx: RawDisksReceiver,
     internal_disks_rx: InternalDisksReceiver,
     external_disks: ExternalDisks,
-    former_zone_roots_tx: mpsc::Sender<FormerZoneRootRequest>,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     datasets: OmicronDatasets,
     zones: OmicronZones,
     boot_partitions: BootPartitionReconciler,
@@ -483,7 +482,7 @@ impl ReconcilerTask {
                 &resolver_status,
                 &internal_disks,
                 sled_agent_facilities,
-                self.former_zone_roots_tx.clone(),
+                self.former_zone_root_archiver.clone(),
                 &self.log,
             )
             .await;
@@ -560,7 +559,7 @@ impl ReconcilerTask {
                         sled_agent_facilities,
                         timesync_status.is_synchronized(),
                         &self.datasets,
-                        self.former_zone_roots_tx.clone(),
+                        self.former_zone_root_archiver.clone(),
                         &self.log,
                     )
                     .await;

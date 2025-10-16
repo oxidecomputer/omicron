@@ -89,7 +89,6 @@
 use async_trait::async_trait;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use debug_ignore::DebugIgnore;
 use derive_more::{AsRef, From};
 use illumos_utils::ExecutionError;
 use illumos_utils::coreadm::{CoreAdm, CoreFileOption};
@@ -134,51 +133,6 @@ struct DumpSlicePath(Utf8PathBuf);
 struct DebugDataset(Utf8PathBuf);
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
 struct CoreDataset(Utf8PathBuf);
-
-#[derive(Debug)]
-pub struct FormerZoneRootRequest {
-    path: Utf8PathBuf,
-    zone_name: String,
-    completion_tx: DebugIgnore<oneshot::Sender<()>>,
-}
-
-impl FormerZoneRootRequest {
-    pub fn for_prod_path<'a>(
-        path: &'a Utf8Path,
-    ) -> Result<
-        (oneshot::Receiver<()>, FormerZoneRootRequest),
-        FormerZoneRootPathError<'a>,
-    > {
-        let file_name = path.file_name().ok_or_else(|| {
-            FormerZoneRootPathError { path, reason: "path has no file name" }
-        })?;
-
-        if !file_name.starts_with("oxz_") {
-            return Err(FormerZoneRootPathError {
-                path,
-                reason: "file name does not start with \"oxz_\"",
-            });
-        }
-
-        let (completion_tx, completion_rx) = oneshot::channel();
-
-        Ok((
-            completion_rx,
-            FormerZoneRootRequest {
-                path: path.to_owned(),
-                zone_name: file_name.to_string(),
-                completion_tx: DebugIgnore(completion_tx),
-            },
-        ))
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("unable to parse zone name from path {path:?}: {reason}")]
-pub struct FormerZoneRootPathError<'a> {
-    path: &'a Utf8Path,
-    reason: &'static str,
-}
 
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct CoreZpool {
@@ -234,7 +188,9 @@ trait GetMountpoint: AsRef<ZpoolName> {
 #[derive(Debug)]
 enum DumpSetupCmd {
     ArchiveFormerZoneRoot {
-        request: FormerZoneRootRequest,
+        zone_root: Utf8PathBuf,
+        zone_name: String,
+        completion_tx: oneshot::Sender<()>,
     },
     UpdateDumpdevSetup {
         dump_slices: Vec<DumpSlicePath>,
@@ -380,25 +336,64 @@ impl DumpSetup {
         }
     }
 
-    /// Perform log archival from the specified directory, which is assumed
-    /// to correspond to zones that are no longer running.
+    /// Request archive of logs from the specified directory, which is assumed
+    /// to correspond to the root filesystem of a zone that are no longer
+    /// running.
     ///
     /// Unlike typical log file archival, this includes non-rotated log files.
     ///
-    /// This makes a best-effort and does not report failures to the caller.
+    /// This makes a best-effort and logs failures rather than reporting them to
+    /// the caller.
+    ///
+    /// When this future completes, the request has only been enqueued.  To know
+    /// when archival has completed, you must wait on the receive side of
+    /// `completion_tx`.
     pub async fn archive_former_zone_root(
         &self,
-        zone_root: FormerZoneRootRequest,
+        zone_root: &Utf8Path,
+        completion_tx: oneshot::Sender<()>,
     ) {
-        let log = &self.log;
+        let log = self.log.new(o!("zone_root" => zone_root.to_string()));
 
-        info!(log, "archive_former_zone_root"; "zone_root" => ?zone_root);
-        if let Err(_) = self
-            .tx
-            .send(DumpSetupCmd::ArchiveFormerZoneRoot { request: zone_root })
-            .await
-        {
-            error!(log, "DumpSetup channel closed");
+        // Validate the path that we were given.  We're only ever given zone
+        // root filesystems, whose basename is always a zonename, and we always
+        // prefix our zone names with `oxz_`.  If that's not what we find here,
+        // log an error and bail out.  These error cases should be impossible to
+        // hit in practice.
+        let Some(file_name) = zone_root.file_name() else {
+            // This should be impossible.  We're never
+            error!(
+                log,
+                "cannot archive former zone root";
+                "error" => "path has no filename part",
+            );
+            return;
+        };
+
+        if !file_name.starts_with("oxz_") {
+            error!(
+                log,
+                "cannot archive former zone root";
+                "error" => "filename does not start with \"oxz_\"",
+            );
+            return;
+        }
+
+        info!(log, "requesting archive of former zone root");
+        let zone_root = zone_root.to_owned();
+        let zone_name = file_name.to_string();
+        let cmd = DumpSetupCmd::ArchiveFormerZoneRoot {
+            zone_root,
+            zone_name,
+            completion_tx,
+        };
+        if let Err(_) = self.tx.send(cmd).await {
+            error!(
+                log,
+                "failed to request archive of former zone root";
+                "error" => "DumpSetup channel closed"
+            );
+            return;
         }
     }
 }
@@ -660,18 +655,25 @@ impl DumpSetupWorker {
                         core_datasets,
                     );
                 }
-                Ok(Some(DumpSetupCmd::ArchiveFormerZoneRoot { request })) => {
-                    if let Err(error) =
-                        self.archive_former_zone_root(request).await
+                Ok(Some(DumpSetupCmd::ArchiveFormerZoneRoot {
+                    zone_root,
+                    zone_name,
+                    completion_tx,
+                })) => {
+                    if let Err(error) = self
+                        .do_archive_former_zone_root(
+                            &zone_root,
+                            &zone_name,
+                            completion_tx,
+                        )
+                        .await
                     {
-                        if !matches!(error, ArchiveLogsError::NoDebugDirYet) {
-                            error!(
-                                self.log,
-                                "Failure while trying to archive extra \
-                                 zone root";
-                                InlineErrorChain::new(&error),
-                            );
-                        }
+                        error!(
+                            self.log,
+                            "Failed to archive former zone root";
+                            "zone_root" => %zone_root,
+                            InlineErrorChain::new(&error),
+                        );
                     }
                 }
                 Ok(None) => {
@@ -1105,16 +1107,17 @@ impl DumpSetupWorker {
         Ok(())
     }
 
-    async fn archive_former_zone_root(
+    async fn do_archive_former_zone_root(
         &self,
-        zone_root: FormerZoneRootRequest,
+        zone_root: &Utf8Path,
+        zone_name: &str,
+        completion_tx: oneshot::Sender<()>,
     ) -> Result<(), ArchiveLogsError> {
         let debug_dir = self
             .chosen_debug_dir
             .as_ref()
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
-        let logdir = zone_root.path.join("root/var/svc/log");
-        let zone_name = &zone_root.zone_name;
+        let logdir = zone_root.join("root/var/svc/log");
         let rv = self
             .archive_logs_from_zone_path(
                 debug_dir,
@@ -1123,10 +1126,14 @@ impl DumpSetupWorker {
                 true,
             )
             .await;
-        if let Err(()) = zone_root.completion_tx.0.send(()) {
+        if let Err(()) = completion_tx.send(()) {
+            // This is very surprising unless the runtime is shutting down, as
+            // in the test suite.  Anyway, it's not a failure to archive the
+            // logs.
             warn!(
                 self.log,
-                "archive_former_zone_root: failed to report completion"
+                "Failed to report completion of former zone root archival";
+                "error" => "completion channel closed",
             );
         }
         rv

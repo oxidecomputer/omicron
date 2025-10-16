@@ -11,8 +11,8 @@ use crate::InternalDisks;
 use crate::ResolverStatusExt;
 use crate::SledAgentFacilities;
 use crate::TimeSyncConfig;
-use crate::dump_setup::FormerZoneRootRequest;
-use camino::Utf8Path;
+use crate::dump_setup_task::FormerZoneRootArchiver;
+use camino::Utf8PathBuf;
 use futures::FutureExt as _;
 use futures::future;
 use id_map::IdMap;
@@ -45,7 +45,6 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 use super::OmicronDatasets;
 use super::datasets::ZoneDatasetDependencyError;
@@ -146,13 +145,13 @@ impl OmicronZones {
         resolver_status: &ResolverStatus,
         internal_disks: &InternalDisks,
         sled_agent_facilities: &T,
-        archive_tx: mpsc::Sender<FormerZoneRootRequest>,
+        archiver: FormerZoneRootArchiver,
         log: &Logger,
     ) -> Result<(), NonZeroUsize> {
         self.shut_down_zones_if_needed_impl(
             desired_zones,
             sled_agent_facilities,
-            &RealZoneFacilities { resolver_status, internal_disks, archive_tx },
+            &RealZoneFacilities { resolver_status, internal_disks, archiver },
             log,
         )
         .await
@@ -308,13 +307,13 @@ impl OmicronZones {
         sled_agent_facilities: &T,
         is_time_synchronized: bool,
         datasets: &OmicronDatasets,
-        archive_tx: mpsc::Sender<FormerZoneRootRequest>,
+        archiver: FormerZoneRootArchiver,
         log: &Logger,
     ) {
         self.start_zones_if_needed_impl(
             desired_zones,
             sled_agent_facilities,
-            &RealZoneFacilities { resolver_status, internal_disks, archive_tx },
+            &RealZoneFacilities { resolver_status, internal_disks, archiver },
             is_time_synchronized,
             datasets,
             log,
@@ -713,7 +712,9 @@ impl OmicronZone {
 
         // Make a best effort to archive the zone.
         if let Some(zone_dataset_root) = running_zone.root().parent() {
-            zone_facilities.archive_zone_root(zone_dataset_root, log).await;
+            zone_facilities
+                .archive_zone_root(zone_dataset_root.to_owned())
+                .await;
         } else {
             // This should be impossible.
             warn!(log, "Failed to archive zone root: non-existent parent");
@@ -962,13 +963,13 @@ trait ZoneFacilities {
         addrobj: AddrObject,
     ) -> Result<(), ZoneShutdownError>;
 
-    async fn archive_zone_root(&self, path: &Utf8Path, log: &Logger);
+    async fn archive_zone_root(&self, path: Utf8PathBuf);
 }
 
 struct RealZoneFacilities<'a> {
     resolver_status: &'a ResolverStatus,
     internal_disks: &'a InternalDisks,
-    archive_tx: mpsc::Sender<FormerZoneRootRequest>,
+    archiver: FormerZoneRootArchiver,
 }
 
 impl ZoneFacilities for RealZoneFacilities<'_> {
@@ -1023,35 +1024,8 @@ impl ZoneFacilities for RealZoneFacilities<'_> {
             .map_err(ZoneShutdownError::DeleteGzAddrObj)
     }
 
-    async fn archive_zone_root(&self, path: &Utf8Path, log: &Logger) {
-        // Aside from validation, this is always best-effort.
-        // We do not return non-validation errors.  We just log them.
-        let (done_rx, request) =
-            match FormerZoneRootRequest::for_prod_path(path) {
-                Ok(tuple) => tuple,
-                Err(error) => {
-                    warn!(
-                        log,
-                        "failed to archive zone root";
-                        InlineErrorChain::new(&error),
-                    );
-                    return;
-                }
-            };
-
-        if let Err(error) = self.archive_tx.send(request).await {
-            warn!(
-                log,
-                "failed to archive zone root: cannot send on closed channel";
-                InlineErrorChain::new(&error)
-            );
-        } else if let Err(error) = done_rx.await {
-            warn!(
-                log,
-                "failed to archive zone root: cannot recv on closed channel";
-                InlineErrorChain::new(&error)
-            );
-        }
+    async fn archive_zone_root(&self, path: Utf8PathBuf) {
+        self.archiver.archive_former_zone_root(path).await
     }
 }
 
@@ -1504,7 +1478,7 @@ mod tests {
             Ok(())
         }
 
-        async fn archive_zone_root(&self, _path: &Utf8Path, _log: &Logger) {}
+        async fn archive_zone_root(&self, _path: Utf8PathBuf) {}
     }
 
     const BOOT_DISK_PATH: &str = "/test/boot/disk";

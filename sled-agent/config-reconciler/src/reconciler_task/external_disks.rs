@@ -7,9 +7,9 @@
 //! There is no separate tokio task here; our parent reconciler task owns this
 //! set of disks and is able to mutate it in place during reconciliation.
 
-use crate::dump_setup::FormerZoneRootRequest;
 use anyhow::Context;
 use futures::future;
+use id_map::Entry;
 use id_map::IdMap;
 use id_map::IdMappable;
 use illumos_utils::zfs::Zfs;
@@ -41,13 +41,12 @@ use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use tokio::sync::mpsc;
 use tokio::sync::watch;
 
 use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
+use crate::dump_setup_task::FormerZoneRootArchiver;
 use crate::raw_disks::RawDiskWithId;
-use id_map::Entry;
 
 /// Set of currently managed zpools.
 ///
@@ -239,8 +238,8 @@ pub(super) struct ExternalDisks {
     // within this crate by `DumpSetupTask` (for managing dump devices).
     external_disks_tx: watch::Sender<HashSet<Disk>>,
 
-    // Channel for submitting requests to archive former zone root directories.
-    archive_tx: mpsc::Sender<FormerZoneRootRequest>,
+    // For requesting archival of former zone root directories.
+    archiver: FormerZoneRootArchiver,
 }
 
 impl ExternalDisks {
@@ -248,14 +247,14 @@ impl ExternalDisks {
         mount_config: Arc<MountConfig>,
         currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
         external_disks_tx: watch::Sender<HashSet<Disk>>,
-        archive_tx: mpsc::Sender<FormerZoneRootRequest>,
+        archiver: FormerZoneRootArchiver,
     ) -> Self {
         Self {
             disks: IdMap::default(),
             mount_config,
             currently_managed_zpools_tx,
             external_disks_tx,
-            archive_tx,
+            archiver,
         }
     }
 
@@ -472,7 +471,7 @@ impl ExternalDisks {
                     let new_state = vacant.insert(disk_state);
                     match &new_state.state {
                         DiskState::Managed(disk) => {
-                            Some(disk.zpool_name().clone())
+                            Some(*disk.zpool_name())
                         }
                         DiskState::FailedToManage(..) => None,
                     }
@@ -486,7 +485,7 @@ impl ExternalDisks {
                         (
                             DiskState::FailedToManage(_),
                             DiskState::Managed(disk),
-                        ) => Some(disk.zpool_name().clone()),
+                        ) => Some(*disk.zpool_name()),
                     }
                 }
             };
@@ -692,7 +691,7 @@ impl ExternalDisks {
                 archive_and_destroy_child_datasets(
                     log,
                     mount_config,
-                    &self.archive_tx,
+                    &self.archiver,
                     &zpool_name,
                     &zone_dataset_name,
                 )
@@ -800,7 +799,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
 async fn archive_and_destroy_child_datasets(
     log: &Logger,
     mount_config: &MountConfig,
-    archive_tx: &mpsc::Sender<FormerZoneRootRequest>,
+    archiver: &FormerZoneRootArchiver,
     zpool_name: &ZpoolName,
     zone_dataset_name: &str,
 ) -> Result<(), DiskManagementError> {
@@ -836,36 +835,7 @@ async fn archive_and_destroy_child_datasets(
             "attempting to archive logs from path";
             "path" => %mountpoint
         );
-        let (done_rx, request) =
-            match FormerZoneRootRequest::for_prod_path(&mountpoint) {
-                Ok(r) => r,
-                Err(error) => {
-                    // This should be impossible.  Log it and ignore this
-                    // dataset.
-                    error!(
-                        log,
-                        "unable to parse path as zone root (not deleting it)";
-                        "path" => %mountpoint,
-                        InlineErrorChain::new(&error),
-                    );
-                    continue;
-                }
-            };
-        if let Err(error) = archive_tx.send(request).await {
-            warn!(
-                log,
-                "archival completion channel closed (1)";
-                InlineErrorChain::new(&error)
-            );
-        }
-        if let Err(error) = done_rx.await {
-            warn!(
-                log,
-                "archival completion channel closed (2)";
-                InlineErrorChain::new(&error)
-            );
-        }
-
+        archiver.archive_former_zone_root(mountpoint).await;
         Zfs::destroy_dataset(&child_dataset).await.map_err(|error| {
             DiskManagementError::Other(
                 InlineErrorChain::new(&error).to_string(),
@@ -1005,12 +975,12 @@ mod tests {
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
-        let (archive_tx, _) = mpsc::channel(1);
+        let archiver = FormerZoneRootArchiver::noop(&logctx.log);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
-            archive_tx,
+            archiver,
         );
 
         // There should be no disks to start.
@@ -1119,12 +1089,12 @@ mod tests {
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
-        let (archive_tx, _) = mpsc::channel(1);
+        let archiver = FormerZoneRootArchiver::noop(&logctx.log);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
-            archive_tx,
+            archiver,
         );
 
         // There should be no disks to start.
@@ -1208,12 +1178,12 @@ mod tests {
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
-        let (archive_tx, _) = mpsc::channel(1);
+        let archiver = FormerZoneRootArchiver::noop(&logctx.log);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
-            archive_tx,
+            archiver,
         );
 
         // There should be no disks to start.
@@ -1332,12 +1302,12 @@ mod tests {
 
         let (currently_managed_zpools_tx, _rx) = watch::channel(Arc::default());
         let (external_disks_tx, _rx) = watch::channel(HashSet::default());
-        let (archive_tx, _) = mpsc::channel(1);
+        let archiver = FormerZoneRootArchiver::noop(&logctx.log);
         let mut external_disks = ExternalDisks::new(
             nonexistent_mount_config(),
             currently_managed_zpools_tx,
             external_disks_tx,
-            archive_tx,
+            archiver,
         );
 
         // There should be no disks to start.
