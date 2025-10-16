@@ -324,6 +324,13 @@ impl ConnMgr {
         peer_id: BaseboardId,
     ) {
         if let Some(task_handle) = self.accepting.remove(&addr) {
+            info!(
+                self.log,
+                "Established server connection";
+                "task_id" => ?task_id,
+                "remote_addr" => %addr,
+                "remote_peer_id" => peer_id.to_string()
+            );
             let already_established =
                 self.established.insert(peer_id, task_handle);
             assert!(already_established.is_none());
@@ -337,9 +344,46 @@ impl ConnMgr {
         peer_id: BaseboardId,
     ) {
         if let Some(task_handle) = self.connecting.remove(&addr) {
+            info!(
+                self.log,
+                "Established client connection";
+                "task_id" => ?task_id,
+                "remote_addr" => %addr,
+                "remote_peer_id" => peer_id.to_string()
+            );
             let already_established =
                 self.established.insert(peer_id, task_handle);
+
             assert!(already_established.is_none());
+        }
+    }
+
+    /// Initiate connections if a corresponding task doesn't already exist. This
+    /// must be called periodically to handle transient disconnections which
+    /// cause tasks to exit.
+    pub async fn reconnect(&mut self, corpus: Vec<Utf8PathBuf>) {
+        let mut to_connect = vec![];
+        for addr in
+            self.bootstrap_addrs.iter().filter(|&&addr| self.listen_addr > addr)
+        {
+            if self.connecting.contains_key(addr) {
+                continue;
+            }
+
+            if self
+                .established
+                .values()
+                .any(|task_handle| task_handle.addr() == *addr)
+            {
+                continue;
+            }
+
+            to_connect.push(addr.clone());
+        }
+
+        for addr in to_connect {
+            // We don't have an existing connection
+            self.connect_client(corpus.clone(), addr).await
         }
     }
 
