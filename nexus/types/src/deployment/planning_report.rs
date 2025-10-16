@@ -711,6 +711,9 @@ pub enum FailedHostOsUpdateReason {
     /// shut down
     #[error("sled contains zones that are unsafe to shut down: {0:?}")]
     UnsafeZoneFound(String),
+    /// The sled model could not be determined
+    #[error("unable to determine the sled model {0:?}")]
+    UnableToDetermineSledModel(String),
 }
 
 #[derive(
