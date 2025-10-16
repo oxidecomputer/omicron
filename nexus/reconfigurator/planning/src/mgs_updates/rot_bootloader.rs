@@ -201,12 +201,14 @@ mod tests {
     use crate::mgs_updates::ImpossibleUpdatePolicy;
     use crate::mgs_updates::MgsUpdatePlanner;
     use crate::mgs_updates::PlannedMgsUpdates;
+    use crate::mgs_updates::UpdateableBoard;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH;
     use crate::mgs_updates::test_helpers::ARTIFACT_VERSION_1;
     use crate::mgs_updates::test_helpers::ARTIFACT_VERSION_1_5;
     use crate::mgs_updates::test_helpers::ARTIFACT_VERSION_2;
     use crate::mgs_updates::test_helpers::TestBoards;
+    use crate::planner::ZoneSafetyChecks;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingLevel;
     use dropshot::test_util::LogContext;
@@ -216,7 +218,6 @@ mod tests {
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::TargetReleaseDescription;
     use nexus_types::inventory::SpType;
-    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
 
     // Short hand-rolled update sequence that exercises some basic behavior for
@@ -237,7 +238,8 @@ mod tests {
             .collection_builder()
             .stage0_version_exception(SpType::Sled, 0, ARTIFACT_VERSION_1)
             .build();
-        let current_boards = &collection.baseboards;
+        let current_boards = UpdateableBoard::all_from_collection(&collection);
+        let current_boards = &current_boards;
         let initial_updates = PendingMgsUpdates::new();
         let nmax_updates = 1;
         let impossible_update_policy = ImpossibleUpdatePolicy::Reevaluate;
@@ -246,7 +248,7 @@ mod tests {
                 log,
                 inventory: &collection,
                 current_boards,
-                unsafe_zone_boards: &BTreeMap::new(),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &initial_updates,
                 current_artifacts: &TargetReleaseDescription::Initial,
                 nmax_updates,
@@ -263,7 +265,7 @@ mod tests {
                 log,
                 inventory: &collection,
                 current_boards,
-                unsafe_zone_boards: &BTreeMap::new(),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &initial_updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -291,7 +293,7 @@ mod tests {
                 log,
                 inventory: &collection,
                 current_boards,
-                unsafe_zone_boards: &BTreeMap::new(),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -315,7 +317,7 @@ mod tests {
                 log,
                 inventory: &later_collection,
                 current_boards,
-                unsafe_zone_boards: &BTreeMap::new(),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -343,7 +345,7 @@ mod tests {
                 log,
                 inventory: &later_collection,
                 current_boards,
-                unsafe_zone_boards: &BTreeMap::new(),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -373,7 +375,7 @@ mod tests {
                 log,
                 inventory: &updated_collection,
                 current_boards,
-                unsafe_zone_boards: &BTreeMap::new(),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &later_updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -395,7 +397,7 @@ mod tests {
                 log,
                 inventory: &collection,
                 current_boards: &BTreeSet::new(),
-                unsafe_zone_boards: &BTreeMap::new(),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &PendingMgsUpdates::new(),
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -409,8 +411,10 @@ mod tests {
             MgsUpdatePlanner {
                 log,
                 inventory: &collection,
-                current_boards: &collection.baseboards,
-                unsafe_zone_boards: &BTreeMap::new(),
+                current_boards: &UpdateableBoard::all_from_collection(
+                    &collection,
+                ),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &PendingMgsUpdates::new(),
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -456,8 +460,10 @@ mod tests {
             MgsUpdatePlanner {
                 log,
                 inventory: &collection,
-                current_boards: &collection.baseboards,
-                unsafe_zone_boards: &BTreeMap::new(),
+                current_boards: &UpdateableBoard::all_from_collection(
+                    &collection,
+                ),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
@@ -501,8 +507,10 @@ mod tests {
             MgsUpdatePlanner {
                 log,
                 inventory: &collection,
-                current_boards: &collection.baseboards,
-                unsafe_zone_boards: &BTreeMap::new(),
+                current_boards: &UpdateableBoard::all_from_collection(
+                    &collection,
+                ),
+                zone_safety_checks: &ZoneSafetyChecks::empty(),
                 current_updates: &updates,
                 current_artifacts: &TargetReleaseDescription::TufRepo(
                     repo.clone(),
