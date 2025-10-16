@@ -47,6 +47,7 @@ use tokio::sync::watch;
 use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
 use crate::raw_disks::RawDiskWithId;
+use id_map::Entry;
 
 /// Set of currently managed zpools.
 ///
@@ -391,12 +392,11 @@ impl ExternalDisks {
         key_requester: &StorageKeyRequester,
         log: &Logger,
     ) {
-        let archive_tx = self.archive_tx.clone();
         self.start_managing_if_needed_with_disk_adopter(
             raw_disks,
             config,
             log,
-            &RealDiskAdopter { key_requester, archive_tx },
+            &RealDiskAdopter { key_requester },
         )
         .await
     }
@@ -458,15 +458,62 @@ impl ExternalDisks {
         // Run all the disk management futures concurrently...
         let disk_states = future::join_all(try_ensure_managed_futures).await;
 
-        // Then record the new states for each disk in `config`.
-        for disk_state in disk_states {
-            self.disks.insert(disk_state);
-        }
+        // Then record the new states for each disk in `config`, keeping track
+        // of which disks are newly-adopted so that we can archive and destroy
+        // any zone root datasets that we find on those.
         for disk_state in failed_disk_states {
             self.disks.insert(disk_state);
         }
 
+        let mut newly_adopted = Vec::new();
+        for disk_state in disk_states {
+            let newly_adopted_disk = match self.disks.entry(disk_state.id()) {
+                Entry::Vacant(vacant) => {
+                    let new_state = vacant.insert(disk_state);
+                    match &new_state.state {
+                        DiskState::Managed(disk) => {
+                            Some(disk.zpool_name().clone())
+                        }
+                        DiskState::FailedToManage(..) => None,
+                    }
+                }
+                Entry::Occupied(mut occupied) => {
+                    let old_state = &occupied.insert(disk_state).state;
+                    let new_state = &occupied.get().state;
+                    match (old_state, new_state) {
+                        (DiskState::Managed(_), _) => None,
+                        (_, DiskState::FailedToManage(_)) => None,
+                        (
+                            DiskState::FailedToManage(_),
+                            DiskState::Managed(disk),
+                        ) => Some(disk.zpool_name().clone()),
+                    }
+                }
+            };
+
+            if let Some(disk_ref) = newly_adopted_disk {
+                newly_adopted.push(disk_ref);
+            }
+        }
+
         self.update_output_watch_channels();
+
+        // For any newly-adopted disks, attempt to archive and destroy any zone
+        // root datasets that we find on them.
+        for zpool_name in newly_adopted {
+            if let Err(error) = self
+                .archive_and_destroy_former_zone_roots(&zpool_name, log)
+                .await
+            {
+                // XXX-dap what if anything can we do about this?
+                error!(
+                    log,
+                    "failed to destroy former zone roots on pool";
+                    "pool" => %zpool_name,
+                    InlineErrorChain::new(&*error),
+                );
+            }
+        }
     }
 
     async fn try_ensure_disk_managed<T: DiskAdopter>(
@@ -577,6 +624,96 @@ impl ExternalDisks {
             }
         }
     }
+
+    async fn archive_and_destroy_former_zone_roots(
+        &self,
+        zpool_name: &ZpoolName,
+        log: &Logger,
+    ) -> Result<(), anyhow::Error> {
+        let mount_config = &self.mount_config;
+
+        // Attempt to archive and then wipe the contents of the zones dataset.
+        //
+        // There's a chain of design goals and compromises here:
+        //
+        // In general, across the control plane, we want to carefully manage
+        // persistent storage in a way that will ensure the system's fault
+        // tolerance.  Important data generally needs to be stored in
+        // CockroachDB or some other replicated storage, not the local
+        // filesystem.  We want some guard rails to prevent developers from
+        // accidentally using the local filesystem to store important data that
+        // really ought to be replicated.
+        //
+        // In an ideal world, we might make the root filesystem read-only
+        // altogether or at least isolate the parts that really need to be
+        // writeable (e.g., for logging) from the rest of it.  But that's a fair
+        // bit of work we haven't done yet.
+        //
+        // Instead, we make zone root filesystems transient, which is to say
+        // that their contents are not preserved after every kind of restart.
+        // But we still need to put the data somewhere, and it should be on disk
+        // rather than in memory, so we still use these ZFS pools for them.
+        // That means we have to wipe that data at some point.  And before
+        // wiping it, we want to archive any log files for debugging.
+        //
+        // So, when should we archive and wipe zone root filesystems?  In an
+        // ideal world, we'd do it each time the zone starts (to make sure we
+        // wipe them even if the sled reboots unexpectedly) as well as when the
+        // zone halts (to make sure we archive files from zones that will never
+        // start again).  See oxidecomputer/omicron#8316.  But this too is
+        // tricky and we haven't done this work yet.
+        //
+        // So instead, we take a pretty blunt hammer: the first time we adopt
+        // any disk in the lifetime of this sled agent process, we archive and
+        // destroy all the zone root filesystems on it.
+        //
+        // To determine whether we've already done this, we construct a unique
+        // value once in the lifetime of each sled agent process.  After we
+        // destroy and re-create the dataset, we'll set this property.
+        static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
+        let agent_local_value = AGENT_LOCAL_VALUE
+            .get_or_init(|| Alphanumeric.sample_string(&mut rand::rng(), 20));
+
+        let zone_dataset_name = format!("{}/{}", zpool_name, ZONE_DATASET);
+        match Zfs::get_oxide_value(&zone_dataset_name, "agent").await {
+            Ok(v) if &v == agent_local_value => {
+                info!(
+                    log,
+                    "Skipping automatic archive/wipe of dataset: {}",
+                    zone_dataset_name
+                );
+            }
+            Ok(_) | Err(_) => {
+                info!(
+                    log,
+                    "Automatically archiving/wipe of dataset: {}",
+                    zone_dataset_name
+                );
+                archive_and_destroy_child_datasets(
+                    log,
+                    mount_config,
+                    &self.archive_tx,
+                    &zpool_name,
+                    &zone_dataset_name,
+                )
+                .await?;
+                Zfs::set_oxide_value(
+                    &zone_dataset_name,
+                    "agent",
+                    agent_local_value,
+                )
+                .await
+                .context("setting \"agent\" dataset property")
+                .map_err(|error| {
+                    DiskManagementError::Other(
+                        InlineErrorChain::new(&*error).to_string(),
+                    )
+                })?;
+            }
+        };
+
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -627,7 +764,6 @@ trait DiskAdopter {
 
 struct RealDiskAdopter<'a> {
     key_requester: &'a StorageKeyRequester,
-    archive_tx: mpsc::Sender<FormerZoneRootRequest>,
 }
 
 impl DiskAdopter for RealDiskAdopter<'_> {
@@ -638,7 +774,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
         pool_id: ZpoolUuid,
         log: &Logger,
     ) -> Result<Disk, DiskManagementError> {
-        let disk = Disk::new(
+        Disk::new(
             log,
             mount_config,
             raw_disk,
@@ -657,90 +793,7 @@ impl DiskAdopter for RealDiskAdopter<'_> {
                 }
                 _ => DiskManagementError::Other(err_string),
             }
-        })?;
-
-        // Attempt to archive and then wipe the contents of the zones dataset.
-        //
-        // There's a chain of design goals and compromises here:
-        //
-        // In general, across the control plane, we want to carefully manage
-        // persistent storage in a way that will ensure the system's fault
-        // tolerance.  Important data generally needs to be stored in
-        // CockroachDB or some other replicated storage, not the local
-        // filesystem.  We want some guard rails to prevent developers from
-        // accidentally using the local filesystem to store important data that
-        // really ought to be replicated.
-        //
-        // In an ideal world, we might make the root filesystem read-only
-        // altogether or at least isolate the parts that really need to be
-        // writeable (e.g., for logging) from the rest of it.  But that's a fair
-        // bit of work we haven't done yet.
-        //
-        // Instead, we make zone root filesystems transient, which is to say
-        // that their contents are not preserved after every kind of restart.
-        // But we still need to put the data somewhere, and it should be on disk
-        // rather than in memory, so we still use these ZFS pools for them.
-        // That means we have to wipe that data at some point.  And before
-        // wiping it, we want to archive any log files for debugging.
-        //
-        // So, when should we archive and wipe zone root filesystems?  In an
-        // ideal world, we'd do it each time the zone starts (to make sure we
-        // wipe them even if the sled reboots unexpectedly) as well as when the
-        // zone halts (to make sure we archive files from zones that will never
-        // start again).  See oxidecomputer/omicron#8316.  But this too is
-        // tricky and we haven't done this work yet.
-        //
-        // So instead, we take a pretty blunt hammer: the first time we adopt
-        // any disk in the lifetime of this sled agent process, we archive and
-        // destroy all the zone root filesystems on it.
-        //
-        // To determine whether we've already done this, we construct a unique
-        // value once in the lifetime of each sled agent process.  After we
-        // destroy and re-create the dataset, we'll set this property.
-        static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
-        let agent_local_value = AGENT_LOCAL_VALUE
-            .get_or_init(|| Alphanumeric.sample_string(&mut rand::rng(), 20));
-
-        let zpool_name = disk.zpool_name();
-        let zone_dataset_name = format!("{}/{}", zpool_name, ZONE_DATASET);
-        match Zfs::get_oxide_value(&zone_dataset_name, "agent").await {
-            Ok(v) if &v == agent_local_value => {
-                info!(
-                    log,
-                    "Skipping automatic archive/wipe of dataset: {}",
-                    zone_dataset_name
-                );
-            }
-            Ok(_) | Err(_) => {
-                info!(
-                    log,
-                    "Automatically archiving/wipe of dataset: {}",
-                    zone_dataset_name
-                );
-                archive_and_destroy_child_datasets(
-                    log,
-                    mount_config,
-                    &self.archive_tx,
-                    &zpool_name,
-                    &zone_dataset_name,
-                )
-                .await?;
-                Zfs::set_oxide_value(
-                    &zone_dataset_name,
-                    "agent",
-                    agent_local_value,
-                )
-                .await
-                .context("setting \"agent\" dataset property")
-                .map_err(|error| {
-                    DiskManagementError::Other(
-                        InlineErrorChain::new(&*error).to_string(),
-                    )
-                })?;
-            }
-        };
-
-        Ok(disk)
+        })
     }
 }
 

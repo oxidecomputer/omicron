@@ -712,7 +712,12 @@ impl OmicronZone {
         }
 
         // Make a best effort to archive the zone.
-        zone_facilities.archive_zone_root(&running_zone.root(), log).await;
+        if let Some(zone_dataset_root) = running_zone.root().parent() {
+            zone_facilities.archive_zone_root(zone_dataset_root, log).await;
+        } else {
+            // This should be impossible.
+            warn!(log, "Failed to archive zone root: non-existent parent");
+        }
 
         resume_shutdown_from_stop(
             &self.config,

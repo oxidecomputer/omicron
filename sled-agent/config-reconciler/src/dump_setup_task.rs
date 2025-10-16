@@ -109,7 +109,13 @@ impl DumpSetupTask {
                 // iteration of the loop.  That's good because it means the
                 // channel is closed.
                 Some(request) = self.former_zone_roots_rx.recv() => {
-                    // XXX-dap completion reporting
+                    // One of the cases where we're asked to archive former zone
+                    // roots is that we've just imported a disk.  That disk may
+                    // also have the only debug datasets that we can use for
+                    // archival.  So before we send the request to archive the
+                    // former zone root, update the disk information.
+                    self.update_setup_if_needed().await;
+
                     self.dump_setup.archive_former_zone_root(request).await;
                 }
             }

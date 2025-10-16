@@ -89,6 +89,7 @@
 use async_trait::async_trait;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use debug_ignore::DebugIgnore;
 use derive_more::{AsRef, From};
 use illumos_utils::ExecutionError;
 use illumos_utils::coreadm::{CoreAdm, CoreFileOption};
@@ -138,7 +139,7 @@ struct CoreDataset(Utf8PathBuf);
 pub struct FormerZoneRootRequest {
     path: Utf8PathBuf,
     zone_name: String,
-    completion_tx: oneshot::Sender<()>,
+    completion_tx: DebugIgnore<oneshot::Sender<()>>,
 }
 
 impl FormerZoneRootRequest {
@@ -166,7 +167,7 @@ impl FormerZoneRootRequest {
             FormerZoneRootRequest {
                 path: path.to_owned(),
                 zone_name: file_name.to_string(),
-                completion_tx,
+                completion_tx: DebugIgnore(completion_tx),
             },
         ))
     }
@@ -1122,7 +1123,7 @@ impl DumpSetupWorker {
                 true,
             )
             .await;
-        if let Err(()) = zone_root.completion_tx.send(()) {
+        if let Err(()) = zone_root.completion_tx.0.send(()) {
             warn!(
                 self.log,
                 "archive_former_zone_root: failed to report completion"
