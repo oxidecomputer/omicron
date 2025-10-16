@@ -732,11 +732,11 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::SpType;
     use omicron_test_utils::dev::LogContext;
+    use sled_hardware_types::GIMLET_SLED_MODEL;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use strum::IntoEnumIterator;
-    use sled_hardware_types::GIMLET_SLED_MODEL;
 
     // Confirm our behaviour for skipped updates
     #[test]

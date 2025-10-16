@@ -48,11 +48,11 @@ use omicron_common::api::external::TufRepoMeta;
 use omicron_common::disk::M2Slot;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::SledUuid;
+use sled_hardware_types::GIMLET_SLED_MODEL;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
-use sled_hardware_types::GIMLET_SLED_MODEL;
 
 use crate::mgs_updates::PendingHostPhase2Changes;
 
