@@ -129,7 +129,6 @@ pub struct ConnToMainMsg {
 pub enum ConnToMainMsgInner {
     Accepted { addr: SocketAddrV6, peer_id: BaseboardId },
     Connected { addr: SocketAddrV6, peer_id: BaseboardId },
-    Disconnected { peer_id: BaseboardId },
     Received { from: BaseboardId, msg: PeerMsg },
     ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
 }
@@ -160,6 +159,13 @@ impl ConnectionType {
     }
 }
 
+/// A structure to manage all sprockets connections to peer nodes
+///
+/// Each sprockets connection runs in its own task which communicates with the
+/// main `NodeTask`. All methods on the `ConnMgr` run inside the main `NodeTask`
+/// as `ConnMgr` is a member field of `NodeTask`. This allows isolating the
+/// connection management logic from the main node message handling logic
+/// without adding yet another task.
 pub struct ConnMgr {
     log: Logger,
 

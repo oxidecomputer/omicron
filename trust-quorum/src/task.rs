@@ -149,7 +149,6 @@ impl NodeTask {
                     .client_handshake_completed(task_id, addr, peer_id)
                     .await;
             }
-            ConnToMainMsgInner::Disconnected { peer_id } => {}
             ConnToMainMsgInner::Received { from, msg } => {}
             ConnToMainMsgInner::ReceivedNetworkConfig { from, config } => {}
         }
