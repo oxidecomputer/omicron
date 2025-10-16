@@ -5,8 +5,9 @@
 //! Implementation of queries for Oximeter collectors and producers.
 
 use crate::db::column_walker::AllColumnsOf;
-use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
-use diesel::pg::Pg;
+use crate::db::raw_query_builder::{
+    QueryBuilder, SelectableSql, TypedSqlQuery,
+};
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{OximeterInfo, ProducerKind, SqlU16};
@@ -16,9 +17,6 @@ use uuid::Uuid;
 
 type AllColumnsOfOximeterInfo =
     AllColumnsOf<nexus_db_schema::schema::oximeter::table>;
-type SelectableSql<T> = <
-    <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
->::SqlType;
 
 /// Upsert a metric producer.
 ///
