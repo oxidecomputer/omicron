@@ -178,6 +178,11 @@ impl ReplicaConfig {
         <flush_on_crash>false</flush_on_crash>
     </asynchronous_metric_log>
 
+    <part_log>
+        <database>system</database>
+        <table>part_log</table>
+    </part_log>
+
     <tmp_path>{temp_files_path}</tmp_path>
     <user_files_path>{user_files_path}</user_files_path>
     <default_profile>default</default_profile>
