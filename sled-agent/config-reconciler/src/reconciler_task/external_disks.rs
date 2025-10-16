@@ -466,11 +466,14 @@ impl ExternalDisks {
 
         let mut newly_adopted = Vec::new();
         for disk_state in disk_states {
-            let newly_adopted_disk = match self.disks.entry(disk_state.id()) {
+            let disk_id = disk_state.id();
+            let newly_adopted_disk = match self.disks.entry(disk_id) {
                 Entry::Vacant(vacant) => {
                     let new_state = vacant.insert(disk_state);
                     match &new_state.state {
-                        DiskState::Managed(disk) => Some(*disk.zpool_name()),
+                        DiskState::Managed(disk) => {
+                            Some((disk_id, *disk.zpool_name()))
+                        }
                         DiskState::FailedToManage(..) => None,
                     }
                 }
@@ -483,33 +486,69 @@ impl ExternalDisks {
                         (
                             DiskState::FailedToManage(_),
                             DiskState::Managed(disk),
-                        ) => Some(*disk.zpool_name()),
+                        ) => Some((disk_id, *disk.zpool_name())),
                     }
                 }
             };
 
-            if let Some(disk_ref) = newly_adopted_disk {
-                newly_adopted.push(disk_ref);
+            if let Some(info) = newly_adopted_disk {
+                newly_adopted.push(info);
             }
         }
 
+        // Update the output channels now.  This is important to do before
+        // cleaning up former zone root datasets because that step will require
+        // that the archival task (DumpSetup) has seen the new disks and added
+        // any debug datasets found on them.
         self.update_output_watch_channels();
 
-        // For any newly-adopted disks, attempt to archive and destroy any zone
-        // root datasets that we find on them.
-        for zpool_name in newly_adopted {
+        // For any newly-adopted disks, clean up any former zone root datasets
+        // that we find on them.
+        let mut failed = Vec::new();
+        for (disk_id, zpool_name) in newly_adopted {
             if let Err(error) = self
                 .archive_and_destroy_former_zone_roots(&zpool_name, log)
                 .await
             {
-                // XXX-dap what if anything can we do about this?
+                // This situation is really unfortunate.  We adopted the disk,
+                // but couldn't clean up its zone root.  We now want to go back
+                // and un-adopt it.
+                //
+                // You might ask: why didn't we do this step during adoption so
+                // that we could have failed at that point?  We can't: this
+                // process (archival and cleanup) depends on having already
+                // adopted some disks in order to use their debug datasets.
+                //
+                // The right long-term answer is to destroy these zone roots not
+                // here, during adoption, but when starting zones.  See
+                // oxidecomputer/omicron#8316.  This too is complicated.
+                //
+                // Fortunately, this case should be nearly impossible in
+                // practice.  But if we get here, mark the disk accordingly.
+                let error = InlineErrorChain::new(&*error);
                 error!(
                     log,
                     "failed to destroy former zone roots on pool";
                     "pool" => %zpool_name,
-                    InlineErrorChain::new(&*error),
+                    &error,
+                );
+                failed.push((disk_id, error.to_string()));
+            }
+        }
+
+        // Attempt to un-adopt any disks that we failed to clean up.
+        if !failed.is_empty() {
+            for (disk_id, message) in failed {
+                // unwrap(): We got these diskids from entries in the map
+                // above.
+                let mut disk = self.disks.get_mut(&disk_id).unwrap();
+                *disk = ExternalDiskState::failed(
+                    disk.config.clone(),
+                    DiskManagementError::Other(message),
                 );
             }
+
+            self.update_output_watch_channels();
         }
     }
 
@@ -686,12 +725,11 @@ impl ExternalDisks {
                     "Automatically archiving/wipe of dataset: {}",
                     zone_dataset_name
                 );
-                archive_and_destroy_child_datasets(
+                cleanup_former_zone_roots(
                     log,
                     mount_config,
                     &self.archiver,
                     &zpool_name,
-                    &zone_dataset_name,
                 )
                 .await?;
                 Zfs::set_oxide_value(
@@ -794,14 +832,18 @@ impl DiskAdopter for RealDiskAdopter<'_> {
     }
 }
 
-async fn archive_and_destroy_child_datasets(
+/// Given a pool name, find any zone root filesystems, attempt to archive their
+/// log files, and destroy them.
+async fn cleanup_former_zone_roots(
     log: &Logger,
     mount_config: &MountConfig,
     archiver: &FormerZoneRootArchiver,
     zpool_name: &ZpoolName,
-    zone_dataset_name: &str,
 ) -> Result<(), DiskManagementError> {
-    let child_datasets = Zfs::list_datasets(zone_dataset_name)
+    // Within each pool, ZONE_DATASET is the name of the dataset that's the
+    // parent of all the zone root filesystems' datasets.
+    let parent_dataset_name = format!("{}/{}", zpool_name, ZONE_DATASET);
+    let child_datasets = Zfs::list_datasets(&parent_dataset_name)
         .await
         .context("listing datasets")
         .map_err(|error| {
@@ -810,31 +852,38 @@ async fn archive_and_destroy_child_datasets(
             )
         })?;
 
-    for child_dataset in child_datasets {
-        let child_dataset = format!("{}/{}", zone_dataset_name, child_dataset);
+    for child_name in child_datasets {
+        // Determine the mountpoint of the child dataset.
+        // `dataset_mountpoint()` expects a path relative to the root of the
+        // pool.  We could chop off the zpool_name from `parent_dataset_name`,
+        // or (what we do here) construct the name we need directly.
+        //
+        // This works only because ZONE_DATASET itself is relative to the root
+        // of the pool.
+        let child_dataset_relative_to_pool =
+            format!("{}/{}", ZONE_DATASET, child_name);
+        let mountpoint = zpool_name.dataset_mountpoint(
+            &mount_config.root,
+            &child_dataset_relative_to_pool,
+        );
 
-        // This is just a sanity check.  There's no way this should ever be
-        // wrong, but the risk of destroying the wrong dataset is just so high
-        // that we want to be really sure.
-        if !child_dataset.contains(ZONE_DATASET) {
-            error!(
-                log,
-                "too afraid to delete dataset (this should be impossible)";
-                "dataset_name" => child_dataset,
-            );
-            continue;
-        }
-
-        // Attempt to archive it.  This is best-effort.
-        let mountpoint =
-            zpool_name.dataset_mountpoint(&mount_config.root, &child_dataset);
+        // Attempt to archive this zone as though it's a zone name.
+        // This is best-effort.
         info!(
             log,
-            "attempting to archive logs from path";
+            "archiving logs from former zone root";
             "path" => %mountpoint
         );
         archiver.archive_former_zone_root(mountpoint).await;
-        Zfs::destroy_dataset(&child_dataset).await.map_err(|error| {
+
+        let child_dataset_name =
+            format!("{}/{}", parent_dataset_name, child_name);
+        info!(
+            log,
+            "destroying former zone root";
+            "dataset_name" => &child_dataset_name,
+        );
+        Zfs::destroy_dataset(&child_dataset_name).await.map_err(|error| {
             DiskManagementError::Other(
                 InlineErrorChain::new(&error).to_string(),
             )

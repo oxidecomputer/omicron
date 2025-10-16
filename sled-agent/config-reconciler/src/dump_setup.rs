@@ -658,7 +658,7 @@ impl DumpSetupWorker {
                     zone_name,
                     completion_tx,
                 })) => {
-                    if let Err(error) = self
+                    match self
                         .do_archive_former_zone_root(
                             &zone_root,
                             &zone_name,
@@ -666,12 +666,21 @@ impl DumpSetupWorker {
                         )
                         .await
                     {
-                        error!(
-                            self.log,
-                            "Failed to archive former zone root";
-                            "zone_root" => %zone_root,
-                            InlineErrorChain::new(&error),
-                        );
+                        Ok(()) => {
+                            info!(
+                                self.log,
+                                "Archived logs from former zone root";
+                                "zone_root" => %zone_root
+                            );
+                        }
+                        Err(error) => {
+                            error!(
+                                self.log,
+                                "Failed to archive former zone root";
+                                "zone_root" => %zone_root,
+                                InlineErrorChain::new(&error),
+                            );
+                        }
                     }
                 }
                 Ok(None) => {
