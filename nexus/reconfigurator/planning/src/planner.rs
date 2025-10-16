@@ -192,16 +192,62 @@ impl<'a> Planner<'a> {
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
-        let checked = self.check_input_validity()?;
+        let checked = self.check_policy_validity()?;
         let report = self.do_plan(checked)?;
         Ok(self.blueprint.build(BlueprintSource::Planner(Arc::new(report))))
     }
 
-    fn check_input_validity(&self) -> Result<InputChecked, Error> {
+    /// Plans while confirming input validity checks fail.
+    ///
+    /// This may result in unsafe planning behavior, but can be useful for
+    /// tests.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the input validity check passes.
+    /// This would imply [Self::plan] should be called instead.
+    #[cfg(test)]
+    #[track_caller]
+    fn plan_with_invalid_policy(mut self) -> Result<Blueprint, Error> {
+        self.check_policy_validity()
+            .map(|_| ())
+            .expect_err("Should have failed input validity check");
+
+        let report = self.do_plan(InputChecked)?;
+        Ok(self.blueprint.build(BlueprintSource::Planner(Arc::new(report))))
+    }
+
+    fn check_policy_validity(&self) -> Result<InputChecked, Error> {
+        // This check verifies that we have enough internal DNS servers
+        // to tolerate failures across upgrades.
+        if self.input.target_internal_dns_zone_count() < INTERNAL_DNS_REDUNDANCY
+        {
+            return Err(Error::PolicySpecifiesNotEnoughInternalDnsServers);
+        }
+        // We're somewhat artificially capping the number of internal DNS
+        // servers because our clients are hard-coded to access a specific set
+        // of reserved IP addresses.
+        //
+        // If:
+        // - Clients could more flexibly access a broader set of Internal DNS
+        // addresses
+        // - We can guarantee that internal DNS subnets don't get re-used (see:
+        // <https://github.com/oxidecomputer/omicron/pull/7589>)
+        //
+        // Then we could remove this constraint.
         if self.input.target_internal_dns_zone_count() > INTERNAL_DNS_REDUNDANCY
         {
             return Err(Error::PolicySpecifiesTooManyInternalDnsServers);
         }
+
+        // TODO: Validate that the other "target zone count" inputs are
+        // appropriate, and won't result in unsafe system behavior.
+        //
+        // This is desirable (e.g., we should not allow a caller to plan for
+        // "zero nexuses or zero CRDBs" - this would cause the system to
+        // destroy itself), but we have many tests which explicitly violate
+        // these expectations, and will need to be converted.
+
         Ok(InputChecked)
     }
 
@@ -2565,6 +2611,37 @@ pub(crate) mod test {
         assert_eq!(summary.diff.sleds.modified().count(), 0);
     }
 
+    #[track_caller]
+    pub(crate) fn assert_planning_makes_no_changes_with_invalid_policy(
+        log: &Logger,
+        blueprint: &Blueprint,
+        input: &PlanningInput,
+        collection: &Collection,
+        test_name: &'static str,
+    ) {
+        let planner = Planner::new_based_on(
+            log.clone(),
+            &blueprint,
+            &input,
+            test_name,
+            &collection,
+            PlannerRng::from_entropy(),
+        )
+        .expect("created planner");
+        let child_blueprint = planner
+            .plan_with_invalid_policy()
+            .expect("planning should have succeded");
+        verify_blueprint(&child_blueprint);
+        let summary = child_blueprint.diff_since_blueprint(&blueprint);
+        eprintln!(
+            "diff between blueprints (expected no changes):\n{}",
+            summary.display()
+        );
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
+    }
+
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
     fn test_basic_add_sled() {
@@ -2827,7 +2904,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("failed to plan");
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
@@ -2860,7 +2937,7 @@ pub(crate) mod test {
         }
 
         // Test a no-op planning iteration.
-        assert_planning_makes_no_changes(
+        assert_planning_makes_no_changes_with_invalid_policy(
             &logctx.log,
             &blueprint2,
             &input,
@@ -3486,7 +3563,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("failed to plan");
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
@@ -3509,7 +3586,7 @@ pub(crate) mod test {
         assert_eq!(summary.total_datasets_modified(), 0);
 
         // Test a no-op planning iteration.
-        assert_planning_makes_no_changes(
+        assert_planning_makes_no_changes_with_invalid_policy(
             &logctx.log,
             &blueprint2,
             &input,
@@ -3574,7 +3651,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("failed to plan");
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
@@ -3867,7 +3944,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("failed to plan");
 
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
@@ -3954,7 +4031,7 @@ pub(crate) mod test {
         );
 
         // Test a no-op planning iteration.
-        assert_planning_makes_no_changes(
+        assert_planning_makes_no_changes_with_invalid_policy(
             &logctx.log,
             &blueprint2,
             &input,
@@ -4223,7 +4300,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("failed to create planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("failed to plan");
 
         // Define a time_created for consistent output across runs.
@@ -4994,7 +5071,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("plan");
 
         assert_eq!(
@@ -5035,7 +5112,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp4")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("plan");
 
         let diff = blueprint4.diff_since_blueprint(&blueprint3);
@@ -5084,7 +5161,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp5")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("plan");
 
         let diff = blueprint5.diff_since_blueprint(&blueprint4);
@@ -5131,7 +5208,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp6")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("plan");
 
         let diff = blueprint6.diff_since_blueprint(&blueprint5);
@@ -5168,7 +5245,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp7")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("plan");
 
         let bp7_config = blueprint7.clickhouse_cluster_config.as_ref().unwrap();
@@ -5211,7 +5288,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp8")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("plan");
 
         let bp8_config = blueprint8.clickhouse_cluster_config.as_ref().unwrap();
@@ -5543,7 +5620,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("plan");
 
         // We should have expunged our single-node clickhouse zone
@@ -5571,7 +5648,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp4")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("plan");
 
         let diff = blueprint4.diff_since_blueprint(&blueprint3);
@@ -5672,7 +5749,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp2")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("planned");
 
         // Mark the disk we expected as "ready for cleanup"; this isn't what
@@ -5733,7 +5810,7 @@ pub(crate) mod test {
         // * new config is reconciled, but zone is in an error state (expect
         //   no changes)
         eprintln!("planning with no inventory change...");
-        assert_planning_makes_no_changes(
+        assert_planning_makes_no_changes_with_invalid_policy(
             &logctx.log,
             &blueprint2,
             &input,
@@ -5741,7 +5818,7 @@ pub(crate) mod test {
             TEST_NAME,
         );
         eprintln!("planning with config ledgered but not reconciled...");
-        assert_planning_makes_no_changes(
+        assert_planning_makes_no_changes_with_invalid_policy(
             &logctx.log,
             &blueprint2,
             &input,
@@ -5760,7 +5837,7 @@ pub(crate) mod test {
             "planning with config ledgered but \
              zones failed to shut down..."
         );
-        assert_planning_makes_no_changes(
+        assert_planning_makes_no_changes_with_invalid_policy(
             &logctx.log,
             &blueprint2,
             &input,
@@ -5819,7 +5896,7 @@ pub(crate) mod test {
             PlannerRng::from_seed((TEST_NAME, "bp3")),
         )
         .expect("created planner")
-        .plan()
+        .plan_with_invalid_policy()
         .expect("planned");
 
         assert_eq!(
@@ -5837,7 +5914,7 @@ pub(crate) mod test {
             bp2_sled_config.generation
         );
 
-        assert_planning_makes_no_changes(
+        assert_planning_makes_no_changes_with_invalid_policy(
             &logctx.log,
             &blueprint3,
             &input,

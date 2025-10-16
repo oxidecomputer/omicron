@@ -142,6 +142,10 @@ pub enum Error {
     AllocateInternalDnsSubnet(#[from] NoAvailableDnsSubnets),
     #[error("error allocating external networking resources")]
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
+    #[error(
+        "must have at least {INTERNAL_DNS_REDUNDANCY} internal DNS servers"
+    )]
+    PolicySpecifiesNotEnoughInternalDnsServers,
     #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
     PolicySpecifiesTooManyInternalDnsServers,
     #[error("zone is already up-to-date and should not be updated")]
