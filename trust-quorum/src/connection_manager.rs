@@ -443,19 +443,12 @@ impl EstablishedConn {
             if end > self.total_read {
                 return Ok(());
             }
-            let msg: WireMsg = match ciborium::from_reader(
-                &self.read_buf[FRAME_HEADER_SIZE..end],
-            ) {
-                Ok(msg) => {
-                    // Move any remaining bytes to the beginning of the buffer.
-                    self.read_buf.copy_within(end..self.total_read, 0);
-                    self.total_read = self.total_read - end;
-                    msg
-                }
-                Err(e) => {
-                    return Err(ConnErr::DeserializeWireMsg(e));
-                }
-            };
+            let msg: WireMsg =
+                ciborium::from_reader(&self.read_buf[FRAME_HEADER_SIZE..end])?;
+            // Move any remaining bytes to the beginning of the buffer.
+            self.read_buf.copy_within(end..self.total_read, 0);
+            self.total_read = self.total_read - end;
+
             self.last_received_msg = Instant::now();
             debug!(self.log, "Received {msg:?}");
             match msg {
