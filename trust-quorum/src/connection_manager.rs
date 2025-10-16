@@ -131,7 +131,6 @@ pub enum ConnToMainMsgInner {
     Connected { addr: SocketAddrV6, peer_id: BaseboardId },
     Disconnected { peer_id: BaseboardId },
     Received { from: BaseboardId, msg: PeerMsg },
-    //  FailedAcceptorHandshake { addr: SocketAddrV6 },
     ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
 }
 
@@ -151,6 +150,9 @@ pub struct ConnMgr {
 
     /// A channel for sending messages from a connection task to the main task
     main_tx: mpsc::Sender<ConnToMainMsg>,
+
+    /// The sprockets config
+    config: SprocketsConfig,
 
     /// The sprockets server
     server: sprockets_tls::Server,
@@ -197,6 +199,7 @@ impl ConnMgr {
         let log = log.new(o!(
             "component" => "trust-quorum-conn-mgr"));
 
+        let config = sprockets_config.clone();
         let server = sprockets_tls::Server::new(
             sprockets_config,
             listen_addr,
@@ -208,6 +211,7 @@ impl ConnMgr {
         ConnMgr {
             log,
             main_tx,
+            config,
             server,
             listen_addr,
             next_task_id: TaskId::new(0),
@@ -255,15 +259,34 @@ impl ConnMgr {
                     info!(log, "Accepted sprockets connection"; "addr" => %addr);
 
                     let mut conn = EstablishedConn::new(
-                        baseboard_id,
+                        baseboard_id.clone(),
                         task_id,
                         stream,
-                        main_tx,
+                        main_tx.clone(),
                         rx,
-                        log,
+                        log.clone(),
                     );
 
-                    conn.run().await;
+                    // Inform the main task that accepted connection is established
+                    if let Err(e) = main_tx
+                        .send(ConnToMainMsg {
+                            task_id: task_id,
+                            msg: ConnToMainMsgInner::Accepted {
+                                addr,
+                                peer_id: baseboard_id,
+                            },
+                        })
+                        .await
+                    {
+                        // The system is shutting down
+                        // Just bail from this task
+                        warn!(
+                            log,
+                            "Failed to send 'accepted' msg to main task: {e:?}"
+                        );
+                    } else {
+                        conn.run().await;
+                    }
                 }
                 Err(err) => {
                     error!(log, "Failed to accept a connection"; &err);
@@ -277,7 +300,14 @@ impl ConnMgr {
     }
 
     /// The set of known addresses on the bootstrap network has changed
-    pub fn update_bootstrap_addrs(&mut self, addrs: BTreeSet<SocketAddrV6>) {
+    ///
+    /// We need to connect to peers with addresses less than our own
+    /// and tear down any connections that no longer exist in `addrs`.
+    pub fn update_bootstrap_connections(
+        &mut self,
+        addrs: BTreeSet<SocketAddrV6>,
+        corpus: Vec<Utf8PathBuf>,
+    ) {
         if self.bootstrap_addrs == addrs {
             return;
         }
@@ -300,6 +330,84 @@ impl ConnMgr {
             .filter(|&&addr| self.listen_addr > addr)
             .cloned()
             .collect();
+
+        self.bootstrap_addrs = addrs;
+
+        for addr in to_connect {
+            let task_id = self.next_task_id.inc();
+            let (tx, rx) = mpsc::channel(CHANNEL_BOUND);
+            let task_handle = TaskHandle {
+                task_id,
+                tx,
+                conn_type: ConnectionType::Connected(addr),
+            };
+            info!(self.log, "Initiating connection to new peer: {addr}");
+            let main_tx = self.main_tx.clone();
+            let log = self.log.clone();
+            let config = self.config.clone();
+            let corpus = corpus.clone();
+            let join_handle = tokio::spawn(async move {
+                match sprockets_tls::Client::connect(
+                    config,
+                    addr,
+                    corpus.clone(),
+                    log.clone(),
+                )
+                .await
+                {
+                    Ok(stream) => {
+                        let platform_id =
+                            stream.peer_platform_id().as_str().unwrap();
+                        let baseboard_id =
+                            platform_id_to_baseboard_id(platform_id);
+
+                        // TODO: Conversion between `PlatformId` and `BaseboardId` should
+                        // happen in `sled-agent-types`. This is waiting on an update
+                        // to the `dice-mfg-msgs` crate.
+                        let log = log.new(
+                            o!("baseboard_id" => baseboard_id.to_string()),
+                        );
+                        info!(log, "Sprockets connection established"; "addr" => %addr);
+
+                        let mut conn = EstablishedConn::new(
+                            baseboard_id.clone(),
+                            task_id,
+                            stream,
+                            main_tx.clone(),
+                            rx,
+                            log.clone(),
+                        );
+                        // Inform the main task that the client connection is
+                        // established.
+                        if let Err(e) = main_tx
+                            .send(ConnToMainMsg {
+                                task_id: task_id,
+                                msg: ConnToMainMsgInner::Connected {
+                                    addr,
+                                    peer_id: baseboard_id,
+                                },
+                            })
+                            .await
+                        {
+                            // The system is shutting down
+                            // Just bail from this task
+                            warn!(
+                                log,
+                                "Failed to send 'connected' msg to main task: {e:?}"
+                            );
+                        } else {
+                            conn.run().await;
+                        }
+                    }
+                    Err(err) => {
+                        error!(log, "Failed to connect"; &err);
+                    }
+                }
+                task_id
+            });
+            self.join_handles.push(join_handle);
+            self.connecting.insert(addr, task_handle);
+        }
     }
 }
 
