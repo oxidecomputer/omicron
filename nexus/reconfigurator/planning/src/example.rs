@@ -962,8 +962,11 @@ mod tests {
 
     use anyhow::anyhow;
     use chrono::{DateTime, Utc};
+    use hickory_resolver::ResolveErrorKind;
+    use hickory_resolver::proto::ProtoErrorKind;
     use iddqd::IdOrdMap;
     use internal_dns_resolver::QorbResolver;
+    use internal_dns_resolver::ResolveError;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::names::ServiceName;
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
@@ -1187,42 +1190,104 @@ mod tests {
             )
             .expect("created DNS resolver");
 
-            // Ensure that all service names can be looked up via the resolver.
-            let mut service_names_with_errors = BTreeMap::new();
-            for service in service_names_to_query(&blueprint) {
-                eprintln!("*** looking up DNS for {:?}", service);
+            let mut mismatched = BTreeMap::new();
+            for (service, expected_result) in service_names_to_query(&blueprint)
+            {
                 // Large packets can be fragmented which would cause lookups to
-                // timeout. Add a short timeout (5s) to catch this.
-                let addrs = match tokio::time::timeout(
-                    Duration::from_secs(5),
-                    resolver.lookup_all_socket_v6(service),
-                )
-                .await
-                {
-                    Ok(Ok(addrs)) => addrs,
-                    Ok(Err(e)) => {
-                        service_names_with_errors.insert(service, anyhow!(e));
-                        continue;
-                    }
-                    Err(e) => {
-                        service_names_with_errors.insert(service, anyhow!(e));
-                        continue;
-                    }
-                };
+                // timeout. Don't query services that we expect to have
+                // fragmented packets.
+                if expected_result == Err(QueryError::PacketFragmented) {
+                    continue;
+                }
 
-                assert!(
-                    !addrs.is_empty(),
-                    "service name {:?} should return at least one address",
-                    service
+                eprintln!(
+                    "** looking up DNS for {:?} (expected: {:?})",
+                    service, expected_result
                 );
 
-                // TODO: add assertions on the returned addresses.
-                eprintln!("*** lookup successful: {:?}", addrs);
+                // For other results, we want to catch situations where a packet
+                // is fragmented. Add a short timeout (5s) for this.
+                let lookup_fut = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    resolver.lookup_all_socket_v6(service),
+                );
+                match (lookup_fut.await, expected_result) {
+                    (Ok(Ok(addrs)), Ok(())) => {
+                        if addrs.is_empty() {
+                            mismatched.insert(
+                                service,
+                                anyhow!("no addresses returned"),
+                            );
+                        }
+
+                        // TODO: add assertions on the returned addresses.
+                        eprintln!("*** lookup successful: {addrs:?}");
+                    }
+                    (Ok(Ok(addrs)), Err(e)) => {
+                        mismatched.insert(
+                            service,
+                            anyhow!(
+                                "expected Err({e:?}), but got Ok({addrs:?})"
+                            ),
+                        );
+                    }
+                    (Ok(Err(e)), Ok(())) => {
+                        mismatched.insert(
+                            service,
+                            anyhow!(e)
+                                .context("expected Ok(()), but got an error"),
+                        );
+                    }
+                    (Ok(Err(e)), Err(QueryError::NoRecordsFound)) => {
+                        // "No records found" is returned as a hickory ProtoError.
+                        if let ResolveError::Resolve(resolve_error) = &e {
+                            if let ResolveErrorKind::Proto(proto_error) =
+                                resolve_error.kind()
+                            {
+                                if let ProtoErrorKind::NoRecordsFound {
+                                    ..
+                                } = proto_error.kind()
+                                {
+                                    // This is the expected error case.
+                                    eprintln!(
+                                        "*** no records found as expected"
+                                    )
+                                } else {
+                                    mismatched.insert(
+                                        service,
+                                        anyhow!(
+                                            "expected NoRecordsFound error, \
+                                             but got a different proto error: {e:?}"
+                                        ),
+                                    );
+                                }
+                            } else {
+                                mismatched.insert(
+                                    service,
+                                    anyhow!(
+                                        "expected Proto error with NoRecordsFound, \
+                                        but got a different resolve error: {e:?}"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    (_, Err(QueryError::PacketFragmented)) => {
+                        unreachable!("we don't query PacketFragmented")
+                    }
+                    (Err(e), _) => {
+                        mismatched.insert(
+                            service,
+                            anyhow!(e).context("got unexpected timeout"),
+                        );
+                        continue;
+                    }
+                }
             }
 
-            if !service_names_with_errors.is_empty() {
+            if !mismatched.is_empty() {
                 let mut errors = Vec::new();
-                for (service, error) in service_names_with_errors {
+                for (service, error) in mismatched {
                     errors.push(format!(
                         "{:?}: {}",
                         service,
@@ -1230,7 +1295,7 @@ mod tests {
                     ));
                 }
                 panic!(
-                    "DNS lookup errors for some service names:\n{}",
+                    "unexpected DNS lookup results for some services:\n{}",
                     errors.join("\n"),
                 );
             }
@@ -1241,10 +1306,17 @@ mod tests {
             let resolver =
                 QorbResolver::new(vec![dns.dns_server.local_address()]);
 
-            // Ensure that all service names can be looked up via the qorb
-            // resolver.
-            let mut service_names_with_errors = BTreeMap::new();
-            for service in service_names_to_query(&blueprint) {
+            // Ensure that service names can be looked up via the qorb resolver.
+            let mut services_with_errors = BTreeMap::new();
+            for (service, expected_result) in service_names_to_query(&blueprint)
+            {
+                // We can't really use qorb to query error cases, since those
+                // are handled internally by the resolver. Just query the
+                // success cases.
+                if expected_result.is_err() {
+                    continue;
+                }
+
                 eprintln!("*** using qorb to look up DNS for {:?}", service);
                 let mut srv_resolver = resolver.for_service(service);
                 let mut monitor_rx = srv_resolver.monitor();
@@ -1259,11 +1331,11 @@ mod tests {
                 {
                     Ok(Ok(backends)) => backends,
                     Ok(Err(e)) => {
-                        service_names_with_errors.insert(service, anyhow!(e));
+                        services_with_errors.insert(service, anyhow!(e));
                         continue;
                     }
                     Err(e) => {
-                        service_names_with_errors.insert(service, anyhow!(e));
+                        services_with_errors.insert(service, anyhow!(e));
                         continue;
                     }
                 };
@@ -1277,53 +1349,106 @@ mod tests {
     }
 
     /// Returns the list of DNS service names expected in an example system.
-    fn service_names_to_query(blueprint: &Blueprint) -> Vec<ServiceName> {
-        let mut out = vec![
-            ServiceName::Clickhouse,
-            // ClickhouseAdminKeeper and ClickhouseAdminServer are not currently
-            // part of the example system
-            ServiceName::ClickhouseAdminSingleServer,
-            ServiceName::ClickhouseNative,
-            // ClickhouseClusterNative, ClickhouseKeeper and ClickhouseServer
-            // are not currently part of the example system
-            //
-            // Cockroach is not currently part of the example system
-            //
-            // ExternalDns is not currently part of the example system
-            ServiceName::InternalDns,
-            ServiceName::Nexus,
-            ServiceName::NexusLockstep,
-            // Oximeter is not currently part of the example system
-            ServiceName::OximeterReader,
-            // ManagementGatewayService is not currently part of the example
-            // system
-            ServiceName::RepoDepot,
-            // Wicketd is not currently part of the example system
-            //
-            // Dendrite and Tfport are not currently part of the example system
-            ServiceName::CruciblePantry,
-            // XXX the SledAgent service name doesn't appear to be used?
-            //
-            // Crucible is handled below
-            //
-            // BoundaryNtp is not currently part of the example system
-            //
-            // InternalNtp is too large to fit in a single DNS packet and times
-            // out, but DNS lookups for it aren't used anywhere.
-            //
-            // Maghemite and Mgda are not currently part of the example system
-        ];
+    fn service_names_to_query(
+        blueprint: &Blueprint,
+    ) -> BTreeMap<ServiceName, Result<(), QueryError>> {
+        let mut out = BTreeMap::new();
+
+        out.insert(ServiceName::Clickhouse, Ok(()));
+
+        // ClickhouseAdminKeeper and ClickhouseAdminServer are not currently
+        // part of the example system
+        out.insert(
+            ServiceName::ClickhouseAdminKeeper,
+            Err(QueryError::NoRecordsFound),
+        );
+        out.insert(
+            ServiceName::ClickhouseAdminServer,
+            Err(QueryError::NoRecordsFound),
+        );
+
+        out.insert(ServiceName::ClickhouseAdminSingleServer, Ok(()));
+        out.insert(ServiceName::ClickhouseNative, Ok(()));
+
+        // ClickhouseClusterNative, ClickhouseKeeper and ClickhouseServer
+        // are not currently part of the example system
+        out.insert(
+            ServiceName::ClickhouseClusterNative,
+            Err(QueryError::NoRecordsFound),
+        );
+        out.insert(
+            ServiceName::ClickhouseKeeper,
+            Err(QueryError::NoRecordsFound),
+        );
+        out.insert(
+            ServiceName::ClickhouseServer,
+            Err(QueryError::NoRecordsFound),
+        );
+
+        // Cockroach is not currently part of the example system
+        out.insert(ServiceName::Cockroach, Err(QueryError::NoRecordsFound));
+
+        // ExternalDns is not currently part of the example system
+        out.insert(ServiceName::ExternalDns, Err(QueryError::NoRecordsFound));
+
+        out.insert(ServiceName::InternalDns, Ok(()));
+        out.insert(ServiceName::Nexus, Ok(()));
+        out.insert(ServiceName::NexusLockstep, Ok(()));
+
+        // Oximeter is not currently part of the example system
+        out.insert(ServiceName::Oximeter, Err(QueryError::NoRecordsFound));
+
+        out.insert(ServiceName::OximeterReader, Ok(()));
+
+        // ManagementGatewayService is not currently part of the example
+        // system
+        out.insert(
+            ServiceName::ManagementGatewayService,
+            Err(QueryError::NoRecordsFound),
+        );
+
+        out.insert(ServiceName::RepoDepot, Ok(()));
+
+        // Wicketd is not currently part of the example system
+        out.insert(ServiceName::Wicketd, Err(QueryError::NoRecordsFound));
+
+        // Dendrite and Tfport are not currently part of the example system
+        out.insert(ServiceName::Dendrite, Err(QueryError::NoRecordsFound));
+        out.insert(ServiceName::Tfport, Err(QueryError::NoRecordsFound));
+
+        out.insert(ServiceName::CruciblePantry, Ok(()));
+
+        // XXX the SledAgent service name doesn't appear to be used?
+        //
+        // Crucible is handled below
+        //
+        // BoundaryNtp is not currently part of the example system
+        out.insert(ServiceName::BoundaryNtp, Err(QueryError::NoRecordsFound));
+
+        // InternalNtp is too large to fit in a single DNS packet and times
+        // out, but DNS lookups for it aren't used anywhere.
+        out.insert(ServiceName::InternalNtp, Err(QueryError::PacketFragmented));
+
+        // Maghemite and Mgd are not currently part of the example system
+        out.insert(ServiceName::Maghemite, Err(QueryError::NoRecordsFound));
+        out.insert(ServiceName::Mgd, Err(QueryError::NoRecordsFound));
 
         // Each Crucible zone should be queryable.
         for (_, zone) in
             blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         {
             if zone.kind() == ZoneKind::Crucible {
-                out.push(ServiceName::Crucible(zone.id));
+                out.insert(ServiceName::Crucible(zone.id), Ok(()));
             }
         }
 
         out
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum QueryError {
+        NoRecordsFound,
+        PacketFragmented,
     }
 
     #[expect(unused)]
@@ -1332,8 +1457,7 @@ mod tests {
         // added are considered.
         //
         // When adding a new variant, ensure that it is covered by
-        // service_names_to_query above, either by adding it to the list of
-        // services to query, or by explaining why it isn't included.
+        // service_names_to_query above.
         match service {
             ServiceName::Clickhouse => {}
             ServiceName::ClickhouseAdminKeeper => {}

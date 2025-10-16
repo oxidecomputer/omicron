@@ -7035,6 +7035,7 @@ dependencies = [
  "gateway-client",
  "gateway-types",
  "hex-literal",
+ "hickory-resolver 0.25.2",
  "id-map",
  "iddqd",
  "illumos-utils",
