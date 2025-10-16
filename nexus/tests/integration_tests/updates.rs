@@ -727,7 +727,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &15);
+    assert_eq!(counts.get("unknown").unwrap(), &11);
 
     // hold onto this to compare it to later values
     let time_last_step_planned = status.time_last_step_planned;
@@ -754,7 +754,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &15);
+    assert_eq!(counts.get("unknown").unwrap(), &11);
 
     // do it again so there are two, so both versions are associated with tuf repos
     let v2 = Version::new(2, 0, 0);
@@ -786,7 +786,7 @@ async fn test_update_status() -> Result<()> {
 
     let counts = status.components_by_release_version;
     assert_eq!(counts.get("install dataset").unwrap(), &7);
-    assert_eq!(counts.get("unknown").unwrap(), &15);
+    assert_eq!(counts.get("unknown").unwrap(), &11);
 
     cptestctx.teardown().await;
     Ok(())

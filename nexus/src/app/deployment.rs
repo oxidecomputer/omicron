@@ -19,6 +19,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::SledFilter;
 use nexus_types::internal_api::views::UpdateStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::CreateResult;
@@ -30,6 +31,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
@@ -226,9 +228,25 @@ impl super::Nexus {
         let inventory = planning_context.inventory.ok_or_else(|| {
             Error::internal_error("no recent inventory collection found")
         })?;
+
+        // Build a map of sleds we want to consider in the update status. This
+        // may be different from what's available in inventory in either
+        // direction:
+        //
+        // * We might have a sled we expect to be present but that is physically
+        //   missing (or otherwise missing from inventory).
+        // * We might have sleds present from which we can collect inventory but
+        //   which are not members of the control plane.
+        let sleds_by_baseboard: BTreeMap<_, _> = planning_context
+            .planning_input
+            .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
+            .map(|(sled_id, details)| (details.baseboard_id.clone(), sled_id))
+            .collect();
+
         let new = planning_context.planning_input.tuf_repo().description();
         let old = planning_context.planning_input.old_repo().description();
-        let status = UpdateStatus::new(old, new, &inventory);
+        let status =
+            UpdateStatus::new(old, new, &sleds_by_baseboard, &inventory);
 
         Ok(status)
     }

@@ -158,12 +158,17 @@ impl Server {
                             repo_depot_port,
                             role: NexusTypes::SledRole::Scrimlet,
                             baseboard: NexusTypes::Baseboard {
-                                serial: format!(
-                                    "sim-{}",
-                                    &config.id.to_string()[0..8]
-                                ),
-                                part: String::from("Unknown"),
-                                revision: 0,
+                                serial: config
+                                    .hardware
+                                    .baseboard
+                                    .identifier()
+                                    .to_string(),
+                                part: config
+                                    .hardware
+                                    .baseboard
+                                    .model()
+                                    .to_string(),
+                                revision: config.hardware.baseboard.revision(),
                             },
                             usable_hardware_threads: config
                                 .hardware
