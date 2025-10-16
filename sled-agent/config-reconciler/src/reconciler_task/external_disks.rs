@@ -706,6 +706,15 @@ impl ExternalDisks {
         // To determine whether we've already done this, we construct a unique
         // value once in the lifetime of each sled agent process.  After we
         // destroy and re-create the dataset, we'll set this property.
+        //
+        // ---
+        //
+        // It is also worth noting that it's conceivable that we find a zoneroot
+        // here for a zone that is still running.  This could happen if we're
+        // doing the first adoption of disks after sled agent restarts.  In that
+        // case, we will wind up archiving (and deleting) its log files out from
+        // under it.  We deem this okay because in this case, we're about to
+        // restart that zone anyway.
         static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
         let agent_local_value = AGENT_LOCAL_VALUE
             .get_or_init(|| Alphanumeric.sample_string(&mut rand::rng(), 20));
