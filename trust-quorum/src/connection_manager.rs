@@ -349,80 +349,89 @@ impl ConnMgr {
         self.bootstrap_addrs = addrs;
 
         for addr in to_connect {
-            let task_id = self.next_task_id.inc();
-            let (tx, rx) = mpsc::channel(CHANNEL_BOUND);
-            let task_handle = TaskHandle {
-                task_id,
-                tx,
-                conn_type: ConnectionType::Connected(addr),
-            };
-            info!(self.log, "Initiating connection to new peer: {addr}");
-            let main_tx = self.main_tx.clone();
-            let log = self.log.clone();
-            let config = self.config.clone();
-            let corpus = corpus.clone();
-            let join_handle = tokio::spawn(async move {
-                match sprockets_tls::Client::connect(
-                    config,
-                    addr,
-                    corpus.clone(),
-                    log.clone(),
-                )
-                .await
-                {
-                    Ok(stream) => {
-                        let platform_id =
-                            stream.peer_platform_id().as_str().unwrap();
-                        let baseboard_id =
-                            platform_id_to_baseboard_id(platform_id);
+            self.connect_client(corpus.clone(), addr).await;
+        }
 
-                        // TODO: Conversion between `PlatformId` and `BaseboardId` should
-                        // happen in `sled-agent-types`. This is waiting on an update
-                        // to the `dice-mfg-msgs` crate.
-                        let log = log.new(
-                            o!("baseboard_id" => baseboard_id.to_string()),
-                        );
-                        info!(log, "Sprockets connection established"; "addr" => %addr);
+        for addr in to_disconnect {
+            self.disconnect_client(addr).await;
+        }
+    }
 
-                        let mut conn = EstablishedConn::new(
-                            baseboard_id.clone(),
-                            task_id,
-                            stream,
-                            main_tx.clone(),
-                            rx,
-                            log.clone(),
+    async fn connect_client(
+        &mut self,
+        corpus: Vec<Utf8PathBuf>,
+        addr: SocketAddrV6,
+    ) {
+        let task_id = self.next_task_id.inc();
+        let (tx, rx) = mpsc::channel(CHANNEL_BOUND);
+        let task_handle = TaskHandle {
+            task_id,
+            tx,
+            conn_type: ConnectionType::Connected(addr),
+        };
+        info!(self.log, "Initiating connection to new peer: {addr}");
+        let main_tx = self.main_tx.clone();
+        let log = self.log.clone();
+        let config = self.config.clone();
+        let join_handle = tokio::spawn(async move {
+            match sprockets_tls::Client::connect(
+                config,
+                addr,
+                corpus.clone(),
+                log.clone(),
+            )
+            .await
+            {
+                Ok(stream) => {
+                    let platform_id =
+                        stream.peer_platform_id().as_str().unwrap();
+                    let baseboard_id = platform_id_to_baseboard_id(platform_id);
+
+                    // TODO: Conversion between `PlatformId` and `BaseboardId` should
+                    // happen in `sled-agent-types`. This is waiting on an update
+                    // to the `dice-mfg-msgs` crate.
+                    let log =
+                        log.new(o!("baseboard_id" => baseboard_id.to_string()));
+                    info!(log, "Sprockets connection established"; "addr" => %addr);
+
+                    let mut conn = EstablishedConn::new(
+                        baseboard_id.clone(),
+                        task_id,
+                        stream,
+                        main_tx.clone(),
+                        rx,
+                        log.clone(),
+                    );
+                    // Inform the main task that the client connection is
+                    // established.
+                    if let Err(e) = main_tx
+                        .send(ConnToMainMsg {
+                            task_id: task_id,
+                            msg: ConnToMainMsgInner::Connected {
+                                addr,
+                                peer_id: baseboard_id,
+                            },
+                        })
+                        .await
+                    {
+                        // The system is shutting down
+                        // Just bail from this task
+                        warn!(
+                            log,
+                            "Failed to send 'connected' msg to main task: {e:?}"
                         );
-                        // Inform the main task that the client connection is
-                        // established.
-                        if let Err(e) = main_tx
-                            .send(ConnToMainMsg {
-                                task_id: task_id,
-                                msg: ConnToMainMsgInner::Connected {
-                                    addr,
-                                    peer_id: baseboard_id,
-                                },
-                            })
-                            .await
-                        {
-                            // The system is shutting down
-                            // Just bail from this task
-                            warn!(
-                                log,
-                                "Failed to send 'connected' msg to main task: {e:?}"
-                            );
-                        } else {
-                            conn.run().await;
-                        }
-                    }
-                    Err(err) => {
-                        error!(log, "Failed to connect"; &err);
+                    } else {
+                        conn.run().await;
                     }
                 }
-                task_id
-            });
-            self.join_handles.push(join_handle);
-            self.connecting.insert(addr, task_handle);
-        }
+                Err(err) => {
+                    error!(log, "Failed to connect"; &err);
+                }
+            }
+            task_id
+        });
+        self.join_handles.push(join_handle);
+        self.connecting.insert(addr, task_handle);
     }
 
     /// Remove any information about a sprockets client connection and inform
@@ -430,7 +439,7 @@ impl ConnMgr {
     ///
     /// We don't tear down server connections this way as we don't know their
     /// listen port, just the ephemeral port.
-    async fn disconnect_clients(&mut self, addr: SocketAddrV6) {
+    async fn disconnect_client(&mut self, addr: SocketAddrV6) {
         if let Some(handle) = self.connecting.remove(&addr) {
             // The connection has not yet completed its handshake
             info!(
