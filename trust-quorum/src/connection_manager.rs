@@ -9,11 +9,13 @@ use crate::{BaseboardId, PeerMsg};
 use crate::established_conn::EstablishedConn;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
+use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
+use sprockets_tls::server::SprocketsAcceptor;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use tokio::sync::mpsc;
@@ -176,12 +178,6 @@ pub struct ConnMgr {
     /// All tasks with an accepted TCP connnection performing a sprockets handshake
     accepting: BTreeMap<SocketAddrV6, TaskHandle>,
 
-    // All tasks that have moved from `Connecting` to `Established`
-    // This is separate from `Established` because established nodes contain
-    // accepted connections also, and we don't know the canonical address since
-    // they use an ephemeral port.
-    connected: BTreeMap<SocketAddrV6, TaskId>,
-
     /// All tasks containing established connections that can be used to communicate
     /// with other nodes.
     established: BTreeMap<BaseboardId, TaskHandle>,
@@ -217,16 +213,40 @@ impl ConnMgr {
             bootstrap_addrs: BTreeSet::new(),
             connecting: BTreeMap::new(),
             accepting: BTreeMap::new(),
-            connected: BTreeMap::new(),
             established: BTreeMap::new(),
+        }
+    }
+
+    /// Perform any polling related operations that the connection
+    /// manager must perform concurrently.
+    pub async fn step(
+        &mut self,
+        corpus: Vec<Utf8PathBuf>,
+    ) -> Result<(), AcceptError> {
+        loop {
+            tokio::select! {
+                acceptor = self.server.accept(corpus.clone()) => {
+                    self.accept(acceptor?).await?;
+                }
+                Some(res) = self.join_handles.next() => {
+                    match res {
+                        Ok(task_id) => {
+                            self.on_task_exit(task_id).await;
+                        }
+                        Err(err) => {
+                            error!(self.log, "Connection task panic: {}", err);
+                        }
+
+                    }
+                }
+            }
         }
     }
 
     pub async fn accept(
         &mut self,
-        corpus: Vec<Utf8PathBuf>,
+        acceptor: SprocketsAcceptor,
     ) -> Result<(), AcceptError> {
-        let acceptor = self.server.accept(corpus).await?;
         let addr = match acceptor.addr() {
             SocketAddr::V4(addr) => {
                 return Err(AcceptError::Ipv4Accept { addr });
@@ -303,7 +323,11 @@ impl ConnMgr {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
-        todo!()
+        if let Some(task_handle) = self.accepting.remove(&addr) {
+            let already_established =
+                self.established.insert(peer_id, task_handle);
+            assert!(already_established.is_none());
+        }
     }
 
     pub async fn client_handshake_completed(
@@ -312,7 +336,11 @@ impl ConnMgr {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
-        todo!()
+        if let Some(task_handle) = self.connecting.remove(&addr) {
+            let already_established =
+                self.established.insert(peer_id, task_handle);
+            assert!(already_established.is_none());
+        }
     }
 
     /// The set of known addresses on the bootstrap network has changed
@@ -469,6 +497,8 @@ impl ConnMgr {
             }
         }
     }
+
+    async fn on_task_exit(&mut self, task_id: TaskId) {}
 }
 
 fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
