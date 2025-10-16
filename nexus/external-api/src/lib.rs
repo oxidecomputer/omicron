@@ -1067,10 +1067,10 @@ pub trait NexusExternalApi {
     /// Ranges are ordered by their first address.
     #[endpoint {
         method = GET,
-        path = "/v1/system/ip-pools/{pool}/ranges",
-        tags = ["system/ip-pools"],
+        path = "/v1/ip-pools/{pool}/ranges",
+        tags = ["projects"],
     }]
-    async fn system_ip_pool_range_list(
+    async fn ip_pool_range_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
         query_params: Query<IpPoolRangePaginationParams>,

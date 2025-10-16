@@ -322,7 +322,7 @@ async fn rack_prepare(
 
     let pool = api_retry!(
         oxide
-            .system_ip_pool_range_list()
+            .ip_pool_range_list()
             .limit(u32::MAX)
             .pool(Name::try_from("default").unwrap())
             .send()

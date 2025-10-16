@@ -2030,7 +2030,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn system_ip_pool_range_list(
+    async fn ip_pool_range_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
         query_params: Query<IpPoolRangePaginationParams>,

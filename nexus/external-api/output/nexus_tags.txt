@@ -127,6 +127,7 @@ system_policy_view                       GET      /v1/system/policy
 API operations found with tag "projects"
 OPERATION ID                             METHOD   URL PATH
 ip_pool_list                             GET      /v1/ip-pools
+ip_pool_range_list                       GET      /v1/ip-pools/{pool}/ranges
 ip_pool_view                             GET      /v1/ip-pools/{pool}
 project_create                           POST     /v1/projects
 project_delete                           DELETE   /v1/projects/{project}
@@ -209,7 +210,6 @@ system_ip_pool_create                    POST     /v1/system/ip-pools
 system_ip_pool_delete                    DELETE   /v1/system/ip-pools/{pool}
 system_ip_pool_list                      GET      /v1/system/ip-pools
 system_ip_pool_range_add                 POST     /v1/system/ip-pools/{pool}/ranges/add
-system_ip_pool_range_list                GET      /v1/system/ip-pools/{pool}/ranges
 system_ip_pool_range_remove              POST     /v1/system/ip-pools/{pool}/ranges/remove
 system_ip_pool_reserve                   POST     /v1/system/ip-pools/{pool}/reserve
 system_ip_pool_silo_link                 POST     /v1/system/ip-pools/{pool}/silos
