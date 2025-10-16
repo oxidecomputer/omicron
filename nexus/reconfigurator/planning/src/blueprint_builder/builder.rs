@@ -696,6 +696,10 @@ impl<'a> BlueprintBuilder<'a> {
         self.new_blueprint_id
     }
 
+    pub fn planning_input(&self) -> &PlanningInput {
+        &self.input
+    }
+
     fn resource_allocator(
         &mut self,
     ) -> Result<&mut BlueprintResourceAllocator, Error> {
