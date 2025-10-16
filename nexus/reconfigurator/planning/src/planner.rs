@@ -58,7 +58,6 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::M2Slot;
-use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -114,9 +113,6 @@ mod zone_safety;
 /// multiple sleds as long as they don't have overlapping control plane
 /// services, etc.).
 const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
-
-/// A receipt that `check_input_validity` has been run prior to planning.
-struct InputChecked;
 
 // Details of how a zone's status differs between the blueprint and the sled
 // inventory
@@ -192,23 +188,11 @@ impl<'a> Planner<'a> {
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
-        let checked = self.check_input_validity()?;
-        let report = self.do_plan(checked)?;
+        let report = self.do_plan()?;
         Ok(self.blueprint.build(BlueprintSource::Planner(Arc::new(report))))
     }
 
-    fn check_input_validity(&self) -> Result<InputChecked, Error> {
-        if self.input.target_internal_dns_zone_count() > INTERNAL_DNS_REDUNDANCY
-        {
-            return Err(Error::PolicySpecifiesTooManyInternalDnsServers);
-        }
-        Ok(InputChecked)
-    }
-
-    fn do_plan(
-        &mut self,
-        _checked: InputChecked,
-    ) -> Result<PlanningReport, Error> {
+    fn do_plan(&mut self) -> Result<PlanningReport, Error> {
         // Run the planning steps, recording their step reports as we go.
         let expunge = self.do_plan_expunge()?;
         let decommission = self.do_plan_decommission()?;
@@ -2493,6 +2477,7 @@ pub(crate) mod test {
     use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
     use omicron_common::policy::COCKROACHDB_REDUNDANCY;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
+    use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev::test_setup_log;
@@ -2995,7 +2980,7 @@ pub(crate) mod test {
         }
 
         // Try to run the planner with a high number of internal DNS zones;
-        // it will fail because the target is > MAX_DNS_REDUNDANCY.
+        // it will fail because the target is > INTERNAL_DNS_REDUNDANCY.
         {
             let mut builder = example
                 .system
@@ -3018,8 +3003,7 @@ pub(crate) mod test {
                 Err(err) => {
                     let err = InlineErrorChain::new(&err).to_string();
                     assert!(
-                        err.contains("can only have ")
-                            && err.contains(" internal DNS servers"),
+                        err.contains("error allocating internal DNS"),
                         "unexpected error: {err}"
                     );
                 }
