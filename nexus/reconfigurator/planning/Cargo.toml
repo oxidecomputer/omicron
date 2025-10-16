@@ -55,9 +55,11 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+dns-server.workspace = true
 dropshot.workspace = true
 expectorate.workspace = true
 hex-literal.workspace = true
+internal-dns-types.workspace = true
 maplit.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true

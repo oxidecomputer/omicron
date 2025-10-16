@@ -957,11 +957,26 @@ pub fn extract_tuf_repo_description(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    use anyhow::anyhow;
     use chrono::{DateTime, Utc};
+    use iddqd::IdOrdMap;
+    use internal_dns_resolver::QorbResolver;
+    use internal_dns_resolver::Resolver;
+    use internal_dns_types::names::ServiceName;
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::execution::blueprint_internal_dns_config;
+    use nexus_types::deployment::execution::overridables;
+    use nexus_types::internal_api::params::DnsConfigParams;
+    use omicron_common::address::REPO_DEPOT_PORT;
+    use omicron_common::address::get_sled_address;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use slog_error_chain::InlineErrorChain;
 
     use super::*;
 
@@ -1101,6 +1116,253 @@ mod tests {
         );
 
         logctx.cleanup_successful();
+    }
+
+    /// Test that services set up by the example system are reachable via DNS.
+    ///
+    /// This test catches issues like #9176, where a too-large DNS response can
+    /// cause packet fragmentation and queries to be lost.
+    #[tokio::test]
+    async fn dns_resolution_works() {
+        static TEST_NAME: &str = "dns_resolution_works";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Build a somewhat exaggerated, fully populated system with twice the
+        // number of Nexuses as a system in typical use.
+        let (example, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(32)
+                .nexus_count(6)
+                .build();
+        let sleds_by_id = blueprint
+            .sleds
+            .keys()
+            .map(|sled_id| {
+                let sled_details = example
+                    .input
+                    .sled_lookup(SledFilter::Commissioned, *sled_id)
+                    .unwrap();
+                let sled_agent =
+                    example.collection.sled_agents.get(sled_id).unwrap_or_else(
+                        || panic!("sled {} not found in collection", sled_id),
+                    );
+                nexus_types::deployment::execution::Sled::new(
+                    *sled_id,
+                    sled_details.policy,
+                    get_sled_address(sled_details.resources.subnet),
+                    REPO_DEPOT_PORT,
+                    sled_agent.sled_role,
+                )
+            })
+            .collect::<IdOrdMap<_>>();
+
+        let dns_config = blueprint_internal_dns_config(
+            &blueprint,
+            &sleds_by_id,
+            Generation::new(),
+            &overridables::DEFAULT,
+        )
+        .expect("built DNS configuration");
+        eprintln!("DNS config: {dns_config:#?}");
+        let params = DnsConfigParams {
+            generation: Generation::new().next(),
+            serial: 0,
+            time_created: Utc::now(),
+            zones: vec![dns_config],
+        };
+
+        // Initialize a DNS server.
+        let dns = dns_server::TransientServer::new(&logctx.log)
+            .await
+            .expect("created DNS server");
+        dns.initialize_with_config(&logctx.log, &params)
+            .await
+            .expect("initialized DNS server");
+
+        // Query with the simple DNS resolver.
+        {
+            let resolver = Resolver::new_from_addrs(
+                logctx.log.clone(),
+                &[dns.dns_server.local_address()],
+            )
+            .expect("created DNS resolver");
+
+            // Ensure that all service names can be looked up via the resolver.
+            let mut service_names_with_errors = BTreeMap::new();
+            for service in service_names_to_query(&blueprint) {
+                eprintln!("*** looking up DNS for {:?}", service);
+                // Large packets can be fragmented which would cause lookups to
+                // timeout. Add a short timeout (5s) to catch this.
+                let addrs = match tokio::time::timeout(
+                    Duration::from_secs(5),
+                    resolver.lookup_all_socket_v6(service),
+                )
+                .await
+                {
+                    Ok(Ok(addrs)) => addrs,
+                    Ok(Err(e)) => {
+                        service_names_with_errors.insert(service, anyhow!(e));
+                        continue;
+                    }
+                    Err(e) => {
+                        service_names_with_errors.insert(service, anyhow!(e));
+                        continue;
+                    }
+                };
+
+                assert!(
+                    !addrs.is_empty(),
+                    "service name {:?} should return at least one address",
+                    service
+                );
+
+                // TODO: add assertions on the returned addresses.
+                eprintln!("*** lookup successful: {:?}", addrs);
+            }
+
+            if !service_names_with_errors.is_empty() {
+                let mut errors = Vec::new();
+                for (service, error) in service_names_with_errors {
+                    errors.push(format!(
+                        "{:?}: {}",
+                        service,
+                        InlineErrorChain::new(error.as_ref())
+                    ));
+                }
+                panic!(
+                    "DNS lookup errors for some service names:\n{}",
+                    errors.join("\n"),
+                );
+            }
+        }
+
+        // Query with the qorb DNS resolver.
+        {
+            let resolver =
+                QorbResolver::new(vec![dns.dns_server.local_address()]);
+
+            // Ensure that all service names can be looked up via the qorb
+            // resolver.
+            let mut service_names_with_errors = BTreeMap::new();
+            for service in service_names_to_query(&blueprint) {
+                eprintln!("*** using qorb to look up DNS for {:?}", service);
+                let mut srv_resolver = resolver.for_service(service);
+                let mut monitor_rx = srv_resolver.monitor();
+
+                // Wait for at least one result to be returned. Like above, we
+                // don't want to wait forever, so set a reasonable timeout.
+                let backends = match tokio::time::timeout(
+                    Duration::from_secs(5),
+                    monitor_rx.wait_for(|backends| !backends.is_empty()),
+                )
+                .await
+                {
+                    Ok(Ok(backends)) => backends,
+                    Ok(Err(e)) => {
+                        service_names_with_errors.insert(service, anyhow!(e));
+                        continue;
+                    }
+                    Err(e) => {
+                        service_names_with_errors.insert(service, anyhow!(e));
+                        continue;
+                    }
+                };
+
+                // TODO: add assertions on the returned addresses.
+                eprintln!("*** qorb lookup successful: {:?}", &**backends);
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Returns the list of DNS service names expected in an example system.
+    fn service_names_to_query(blueprint: &Blueprint) -> Vec<ServiceName> {
+        let mut out = vec![
+            ServiceName::Clickhouse,
+            // ClickhouseAdminKeeper and ClickhouseAdminServer are not currently
+            // part of the example system
+            ServiceName::ClickhouseAdminSingleServer,
+            ServiceName::ClickhouseNative,
+            // ClickhouseClusterNative, ClickhouseKeeper and ClickhouseServer
+            // are not currently part of the example system
+            //
+            // Cockroach is not currently part of the example system
+            //
+            // ExternalDns is not currently part of the example system
+            ServiceName::InternalDns,
+            ServiceName::Nexus,
+            ServiceName::NexusLockstep,
+            // Oximeter is not currently part of the example system
+            ServiceName::OximeterReader,
+            // ManagementGatewayService is not currently part of the example
+            // system
+            ServiceName::RepoDepot,
+            // Wicketd is not currently part of the example system
+            //
+            // Dendrite and Tfport are not currently part of the example system
+            ServiceName::CruciblePantry,
+            // XXX the SledAgent service name doesn't appear to be used?
+            //
+            // Crucible is handled below
+            //
+            // BoundaryNtp is not currently part of the example system
+            //
+            // InternalNtp is too large to fit in a single DNS packet and times
+            // out, but DNS lookups for it aren't used anywhere.
+            //
+            // Maghemite and Mgda are not currently part of the example system
+        ];
+
+        // Each Crucible zone should be queryable.
+        for (_, zone) in
+            blueprint.all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        {
+            if zone.kind() == ZoneKind::Crucible {
+                out.push(ServiceName::Crucible(zone.id));
+            }
+        }
+
+        out
+    }
+
+    #[expect(unused)]
+    fn match_service_names(service: ServiceName) {
+        // Add a match statement here to ensure that new service names that get
+        // added are considered.
+        //
+        // When adding a new variant, ensure that it is covered by
+        // service_names_to_query above, either by adding it to the list of
+        // services to query, or by explaining why it isn't included.
+        match service {
+            ServiceName::Clickhouse => {}
+            ServiceName::ClickhouseAdminKeeper => {}
+            ServiceName::ClickhouseAdminServer => {}
+            ServiceName::ClickhouseAdminSingleServer => {}
+            ServiceName::ClickhouseNative => {}
+            ServiceName::ClickhouseClusterNative => {}
+            ServiceName::ClickhouseKeeper => {}
+            ServiceName::ClickhouseServer => {}
+            ServiceName::Cockroach => {}
+            ServiceName::InternalDns => {}
+            ServiceName::ExternalDns => {}
+            ServiceName::Nexus => {}
+            ServiceName::NexusLockstep => {}
+            ServiceName::Oximeter => {}
+            ServiceName::OximeterReader => {}
+            ServiceName::ManagementGatewayService => {}
+            ServiceName::RepoDepot => {}
+            ServiceName::Wicketd => {}
+            ServiceName::Dendrite => {}
+            ServiceName::Tfport => {}
+            ServiceName::CruciblePantry => {}
+            ServiceName::SledAgent(_) => {}
+            ServiceName::Crucible(_) => {}
+            ServiceName::BoundaryNtp => {}
+            ServiceName::InternalNtp => {}
+            ServiceName::Maghemite => {}
+            ServiceName::Mgd => {}
+        }
     }
 
     fn blueprint_zones_of_kind(
