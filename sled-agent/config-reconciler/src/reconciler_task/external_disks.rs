@@ -470,9 +470,7 @@ impl ExternalDisks {
                 Entry::Vacant(vacant) => {
                     let new_state = vacant.insert(disk_state);
                     match &new_state.state {
-                        DiskState::Managed(disk) => {
-                            Some(*disk.zpool_name())
-                        }
+                        DiskState::Managed(disk) => Some(*disk.zpool_name()),
                         DiskState::FailedToManage(..) => None,
                     }
                 }
