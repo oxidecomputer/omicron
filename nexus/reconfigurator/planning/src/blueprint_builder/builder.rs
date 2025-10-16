@@ -757,12 +757,13 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn current_zones<F>(
         &'a self,
         filter: F,
-    ) -> impl Iterator<Item = &'a BlueprintZoneConfig>
+    ) -> impl Iterator<Item = (SledUuid, &'a BlueprintZoneConfig)>
     where
         F: FnMut(BlueprintZoneDisposition) -> bool + Clone,
     {
         self.sled_ids_with_zones().flat_map(move |sled_id| {
             self.current_sled_zones(sled_id, filter.clone())
+                .map(move |config| (sled_id, config))
         })
     }
 
