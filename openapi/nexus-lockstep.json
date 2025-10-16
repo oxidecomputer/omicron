@@ -4776,12 +4776,7 @@
                 ]
               },
               "sled_id": {
-                "nullable": true,
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/SledUuid"
-                  }
-                ]
+                "$ref": "#/components/schemas/SledUuid"
               },
               "slot_a_version": {
                 "$ref": "#/components/schemas/TufRepoVersion"
@@ -4792,6 +4787,7 @@
             },
             "required": [
               "kind",
+              "sled_id",
               "slot_a_version",
               "slot_b_version"
             ]
