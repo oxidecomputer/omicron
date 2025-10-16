@@ -361,7 +361,6 @@ impl DumpSetup {
         // log an error and bail out.  These error cases should be impossible to
         // hit in practice.
         let Some(file_name) = zone_root.file_name() else {
-            // This should be impossible.  We're never
             error!(
                 log,
                 "cannot archive former zone root";
@@ -393,7 +392,6 @@ impl DumpSetup {
                 "failed to request archive of former zone root";
                 "error" => "DumpSetup channel closed"
             );
-            return;
         }
     }
 }
@@ -1128,8 +1126,8 @@ impl DumpSetupWorker {
             .await;
         if let Err(()) = completion_tx.send(()) {
             // This is very surprising unless the runtime is shutting down, as
-            // in the test suite.  Anyway, it's not a failure to archive the
-            // logs.
+            // could happen in the test suite.  Anyway, it's not a failure to
+            // archive the logs.
             warn!(
                 self.log,
                 "Failed to report completion of former zone root archival";

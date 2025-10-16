@@ -710,7 +710,7 @@ impl OmicronZone {
             ));
         }
 
-        // Make a best effort to archive the zone.
+        // Make a best effort to archive the zone's log files.
         if let Some(zone_dataset_root) = running_zone.root().parent() {
             zone_facilities
                 .archive_zone_root(zone_dataset_root.to_owned())
