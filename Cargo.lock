@@ -14840,6 +14840,7 @@ dependencies = [
  "bytes",
  "camino",
  "chacha20poly1305",
+ "ciborium",
  "daft",
  "derive_more 0.99.20",
  "dropshot",

@@ -5,11 +5,12 @@
 //! A mechanism for maintaining a full mesh of trust quorum node connections
 
 use crate::{BaseboardId, PeerMsg};
+use bootstore::schemes::v0::NetworkConfig;
 use bytes::Buf;
 use camino::Utf8PathBuf;
 use futures::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
-use slog::{Logger, error, info, o};
+use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::VecDeque;
@@ -17,10 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Cursor;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
-use tokio::io::{
-    AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf,
-    split,
-};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf, split};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -113,7 +111,7 @@ pub enum WireMsg {
     /// `omicron` repo. This is technically an eventually consistent database
     /// of tiny information layered on top of trust quorum. You can still think
     /// of it as a bootstore, although, we no longer use that name.
-    NetworkConfig,
+    NetworkConfig(NetworkConfig),
 }
 
 /// Messages sent from connection managing tasks to the main peer task
@@ -132,9 +130,9 @@ pub enum ConnToMainMsgInner {
     Accepted { addr: SocketAddrV6, peer_id: BaseboardId },
     Connected { addr: SocketAddrV6, peer_id: BaseboardId },
     Disconnected { peer_id: BaseboardId },
-    //    Received { from: BaseboardId, msg: FsmMsg },
+    Received { from: BaseboardId, msg: PeerMsg },
     //  FailedAcceptorHandshake { addr: SocketAddrV6 },
-    //ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
+    ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
 }
 
 pub struct TaskHandle {
@@ -305,11 +303,19 @@ impl ConnMgr {
     }
 }
 
-/// An error from within an `EstablishedConn`
+/// An error from within an `EstablishedConn` that triggers connection close
 ///
 /// Also a great movie
+#[derive(Debug, thiserror::Error, SlogInlineError)]
 enum ConnErr {
+    #[error("Main task insructed this connection to close")]
     Close,
+    #[error("Failed to write")]
+    FailedWrite(#[source] std::io::Error),
+    #[error("Failed to read")]
+    FailedRead(#[source] std::io::Error),
+    #[error("Failed to deserialize wire message")]
+    DeserializeWireMsg(#[source] ciborium::de::Error<std::io::Error>),
 }
 
 // Container for code running in its own task per sprockets connection
@@ -387,10 +393,10 @@ impl EstablishedConn {
                 Some(msg) = self.rx.recv() => {
                     self.on_msg_from_main(msg).await
                 }
-                res = self.read_sock.read(&mut self.read_buf[self.total_read..]) => {
+                res = self.reader.read(&mut self.read_buf[self.total_read..]) => {
                     self.on_read(res).await
                 }
-                res = self.write_sock.write_buf(&mut self.current_write),
+                res = self.writer.write_buf(&mut self.current_write),
                    if self.current_write.has_remaining() =>
                 {
                    self.check_write_result(res).await
@@ -398,14 +404,129 @@ impl EstablishedConn {
             };
 
             if let Err(err) = res {
-                warn!(self.log, "Closing connection"; %err);
+                warn!(self.log, "Closing connection"; &err);
             }
         }
     }
 
-    async fn on_msg_from_main(&mut self, msg: MainToConnMsg) {}
+    async fn on_read(
+        &mut self,
+        res: Result<usize, std::io::Error>,
+    ) -> Result<(), ConnErr> {
+        match res {
+            Ok(n) => {
+                self.total_read += n;
+            }
+            Err(e) => {
+                return Err(ConnErr::FailedRead(e));
+            }
+        }
 
-    async fn ping(&mut self) {}
+        // We may have more than one message that has been read
+        loop {
+            if self.total_read < FRAME_HEADER_SIZE {
+                return Ok(());
+            }
+            // Read frame size
+            let size = read_frame_size(
+                self.read_buf[..FRAME_HEADER_SIZE].try_into().unwrap(),
+            );
+            let end = size + FRAME_HEADER_SIZE;
+
+            // If we haven't read the whole message yet, then return
+            if end > self.total_read {
+                return Ok(());
+            }
+            let msg: WireMsg = match ciborium::from_reader(
+                &self.read_buf[FRAME_HEADER_SIZE..end],
+            ) {
+                Ok(msg) => {
+                    // Move any remaining bytes to the beginning of the buffer.
+                    self.read_buf.copy_within(end..self.total_read, 0);
+                    self.total_read = self.total_read - end;
+                    msg
+                }
+                Err(e) => {
+                    return Err(ConnErr::DeserializeWireMsg(e));
+                }
+            };
+            self.last_received_msg = Instant::now();
+            debug!(self.log, "Received {msg:?}");
+            match msg {
+                WireMsg::Tq(msg) => {
+                    if let Err(e) = self
+                        .main_tx
+                        .send(ConnToMainMsg {
+                            task_id: self.task_id,
+                            msg: ConnToMainMsgInner::Received {
+                                from: self.peer_id.clone(),
+                                msg,
+                            },
+                        })
+                        .await
+                    {
+                        warn!(
+                            self.log,
+                            "Failed to send received fsm msg to main task: {e:?}"
+                        );
+                    }
+                }
+                WireMsg::Ping => {
+                    // Nothing to do here, since Ping is just to keep us alive and
+                    // we updated self.last_received_msg above.
+                }
+                WireMsg::NetworkConfig(config) => {
+                    let generation = config.generation;
+                    if let Err(e) = self
+                        .main_tx
+                        .send(ConnToMainMsg {
+                            task_id: self.task_id,
+                            msg: ConnToMainMsgInner::ReceivedNetworkConfig {
+                                from: self.peer_id.clone(),
+                                config,
+                            },
+                        })
+                        .await
+                    {
+                        warn!(
+                            self.log,
+                            "Failed to send received NetworkConfig with
+                             generation {generation} to main task: {e:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    async fn check_write_result(
+        &mut self,
+        res: Result<usize, std::io::Error>,
+    ) -> Result<(), ConnErr> {
+        match res {
+            Ok(_) => {
+                if !self.current_write.has_remaining() {
+                    self.current_write = Cursor::new(Vec::new());
+                }
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.writer.shutdown().await;
+                Err(ConnErr::FailedWrite(e))
+            }
+        }
+    }
+
+    async fn on_msg_from_main(
+        &mut self,
+        msg: MainToConnMsg,
+    ) -> Result<(), ConnErr> {
+        todo!()
+    }
+
+    async fn ping(&mut self) -> Result<(), ConnErr> {
+        todo!()
+    }
 }
 
 fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
@@ -413,4 +534,9 @@ fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
     let part_number = platform_id_iter.nth(1).unwrap().to_string();
     let serial_number = platform_id_iter.skip(1).next().unwrap().to_string();
     BaseboardId { part_number, serial_number }
+}
+
+// Decode the 4-byte big-endian frame size header
+fn read_frame_size(buf: [u8; FRAME_HEADER_SIZE]) -> usize {
+    u32::from_be_bytes(buf) as usize
 }

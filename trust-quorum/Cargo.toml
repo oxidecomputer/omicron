@@ -14,6 +14,7 @@ bootstore.workspace = true
 bytes.workspace = true
 camino.workspace = true
 chacha20poly1305.workspace = true
+ciborium.workspace = true
 daft.workspace = true
 derive_more.workspace = true
 futures.workspace = true
