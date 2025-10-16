@@ -21,8 +21,8 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, DbTypedUuid, TargetRelease, TufArtifact, TufRepo,
-    TufRepoDescription, TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
+    ArtifactHash, TargetRelease, TufArtifact, TufRepo, TufRepoDescription,
+    TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
 };
 use nexus_types::external_api::views::TufRepoUploadStatus;
 use omicron_common::api::external::{
@@ -30,8 +30,6 @@ use omicron_common::api::external::{
     ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
 };
 use omicron_common::api::external::{Error, InternalContext};
-use omicron_uuid_kinds::TufRepoKind;
-use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
 use semver::Version;
 use swrite::{SWrite, swrite};
@@ -39,7 +37,7 @@ use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
 async fn artifacts_for_repo(
-    repo_id: TypedUuid<TufRepoKind>,
+    repo_id: TufRepoUuid,
     conn: &async_bb8_diesel::Connection<DbConnection>,
 ) -> Result<Vec<TufArtifact>, DieselError> {
     use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
@@ -102,7 +100,7 @@ impl DataStore {
     pub async fn tuf_repo_get_by_id(
         &self,
         opctx: &OpContext,
-        repo_id: TypedUuid<TufRepoKind>,
+        repo_id: TufRepoUuid,
     ) -> LookupResult<TufRepoDescription> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
@@ -165,7 +163,7 @@ impl DataStore {
     pub async fn tuf_repo_get_version(
         &self,
         opctx: &OpContext,
-        tuf_repo_id: &DbTypedUuid<TufRepoKind>,
+        tuf_repo_id: &TufRepoUuid,
     ) -> LookupResult<semver::Version> {
         opctx
             .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
