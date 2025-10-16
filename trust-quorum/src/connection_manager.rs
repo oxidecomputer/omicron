@@ -314,6 +314,24 @@ impl ConnMgr {
         Ok(())
     }
 
+    pub async fn server_handshake_completed(
+        &mut self,
+        task_id: TaskId,
+        addr: SocketAddrV6,
+        peer_id: BaseboardId,
+    ) {
+        todo!()
+    }
+
+    pub async fn client_handshake_completed(
+        &mut self,
+        task_id: TaskId,
+        addr: SocketAddrV6,
+        peer_id: BaseboardId,
+    ) {
+        todo!()
+    }
+
     /// The set of known addresses on the bootstrap network has changed
     ///
     /// We need to connect to peers with addresses less than our own
@@ -357,6 +375,7 @@ impl ConnMgr {
         }
     }
 
+    /// Spawn a task to estalbish a sprockets connection for the given address
     async fn connect_client(
         &mut self,
         corpus: Vec<Utf8PathBuf>,

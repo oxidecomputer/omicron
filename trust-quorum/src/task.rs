@@ -4,7 +4,7 @@
 
 //! A runnable async trust quorum node that wraps the sans-io [`crate::Node`]
 
-use crate::connection_manager::ConnMgr;
+use crate::connection_manager::{ConnMgr, ConnToMainMsg, ConnToMainMsgInner};
 use crate::{BaseboardId, Node, NodeCtx};
 use camino::Utf8PathBuf;
 use slog::{Logger, error, info, o, warn};
@@ -67,13 +67,18 @@ pub struct NodeTask {
     config: Config,
     node: Node,
     ctx: NodeCtx,
+    conn_mgr: ConnMgr,
+    conn_mgr_rx: mpsc::Receiver<ConnToMainMsg>,
 
     // Handle requests received from `PeerHandle`
     rx: mpsc::Receiver<NodeApiRequest>,
 }
 
 impl NodeTask {
-    pub fn new(config: Config, log: &Logger) -> (NodeTask, NodeTaskHandle) {
+    pub async fn new(
+        config: Config,
+        log: &Logger,
+    ) -> (NodeTask, NodeTaskHandle) {
         let log = log.new(o!(
             "component" => "trust-quorum",
             "platform_id" => config.baseboard_id.to_string()
@@ -84,10 +89,22 @@ impl NodeTask {
         // requests in parallel. Just leave some room.
         let (tx, rx) = mpsc::channel(10);
 
+        let (conn_mgr_tx, conn_mgr_rx) = mpsc::channel(100);
+
         // TODO: Load persistent state from ledger
         let mut ctx = NodeCtx::new(config.baseboard_id.clone());
         let node = Node::new(&log, &mut ctx);
-        (NodeTask { log, config, node, ctx, rx }, NodeTaskHandle { tx })
+        let conn_mgr = ConnMgr::new(
+            &log,
+            config.listen_addr,
+            config.sprockets.clone(),
+            conn_mgr_tx,
+        )
+        .await;
+        (
+            NodeTask { log, config, node, ctx, conn_mgr, conn_mgr_rx, rx },
+            NodeTaskHandle { tx },
+        )
     }
 
     /// Run the main loop of the node
@@ -118,31 +135,34 @@ impl NodeTask {
 
     async fn on_accept(&mut self, acceptor: SprocketsAcceptor) {}
 
+    // Handle messages from connection management tasks
+    async fn on_conn_msg(&mut self, msg: ConnToMainMsg) {
+        let task_id = msg.task_id;
+        match msg.msg {
+            ConnToMainMsgInner::Accepted { addr, peer_id } => {
+                self.conn_mgr
+                    .server_handshake_completed(task_id, addr, peer_id)
+                    .await;
+            }
+            ConnToMainMsgInner::Connected { addr, peer_id } => {
+                self.conn_mgr
+                    .client_handshake_completed(task_id, addr, peer_id)
+                    .await;
+            }
+            ConnToMainMsgInner::Disconnected { peer_id } => {}
+            ConnToMainMsgInner::Received { from, msg } => {}
+            ConnToMainMsgInner::ReceivedNetworkConfig { from, config } => {}
+        }
+    }
+
     async fn on_api_request(&mut self, request: NodeApiRequest) {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {
                 info!(self.log, "Updated Peer Addresses: {addrs:?}");
-                self.manage_connections(addrs).await;
+                // TODO: real corpus
+                let corpus = vec![];
+                self.conn_mgr.update_bootstrap_connections(addrs, corpus).await;
             }
-        }
-    }
-
-    async fn manage_connections(&mut self, addrs: BTreeSet<SocketAddrV6>) {
-        if self.bootstrap_addrs == addrs {
-            return;
-        }
-
-        let to_remove: BTreeSet<_> =
-            self.bootstrap_addrs.difference(&addrs).cloned().collect();
-        let to_add: BTreeSet<_> =
-            addrs.difference(&self.bootstrap_addrs).cloned().collect();
-
-        self.bootstrap_addrs = addrs;
-
-        // Start a new client for each node that has an addr < self.config.listen_addr
-        // This is analagous to a "downhill rule" for connection management
-        for addr in to_add {
-            if addr < self.config.listen_addr {}
         }
     }
 }
