@@ -5,6 +5,7 @@
 //! A mechanism for maintaining a full mesh of trust quorum node connections
 
 use crate::{BaseboardId, PeerMsg};
+// TODO: Move or copy this to this crate?
 use bootstore::schemes::v0::NetworkConfig;
 use bytes::Buf;
 use camino::Utf8PathBuf;
@@ -82,8 +83,7 @@ impl TaskId {
 #[derive(Debug, PartialEq)]
 pub enum MainToConnMsg {
     Close,
-    // TODO: Fill this in
-    Msg,
+    Msg(WireMsg),
 }
 
 /// All possible messages sent over established connections
@@ -315,7 +315,13 @@ enum ConnErr {
     #[error("Failed to read")]
     FailedRead(#[source] std::io::Error),
     #[error("Failed to deserialize wire message")]
-    DeserializeWireMsg(#[source] ciborium::de::Error<std::io::Error>),
+    DeserializeWireMsg(#[from] ciborium::de::Error<std::io::Error>),
+    #[error("Failed to serialize wire message")]
+    SerializeWireMsg(#[from] ciborium::ser::Error<std::io::Error>),
+    #[error("Write queue filled with serialized messages")]
+    WriteQueueFull,
+    #[error("Inactivity timeout")]
+    InactivityTimeout,
 }
 
 // Container for code running in its own task per sprockets connection
@@ -521,11 +527,32 @@ impl EstablishedConn {
         &mut self,
         msg: MainToConnMsg,
     ) -> Result<(), ConnErr> {
-        todo!()
+        match msg {
+            MainToConnMsg::Close => {
+                return Err(ConnErr::Close);
+            }
+            MainToConnMsg::Msg(msg) => self.write_framed_to_queue(msg).await,
+        }
+    }
+
+    async fn write_framed_to_queue(
+        &mut self,
+        msg: WireMsg,
+    ) -> Result<(), ConnErr> {
+        if self.write_queue.len() == MSG_WRITE_QUEUE_CAPACITY {
+            return Err(ConnErr::WriteQueueFull);
+        } else {
+            let msg = write_framed(&msg)?;
+            self.write_queue.push_back(msg);
+            Ok(())
+        }
     }
 
     async fn ping(&mut self) -> Result<(), ConnErr> {
-        todo!()
+        if Instant::now() - self.last_received_msg > INACTIVITY_TIMEOUT {
+            return Err(ConnErr::InactivityTimeout);
+        }
+        self.write_framed_to_queue(WireMsg::Ping).await
     }
 }
 
@@ -539,4 +566,24 @@ fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
 // Decode the 4-byte big-endian frame size header
 fn read_frame_size(buf: [u8; FRAME_HEADER_SIZE]) -> usize {
     u32::from_be_bytes(buf) as usize
+}
+
+/// Serialize and write `msg` into `buf`, prefixed by a 4-byte big-endian size
+/// header
+///
+/// Return the total amount of data written into `buf` including the 4-byte
+/// header.
+fn write_framed<T: Serialize + ?Sized>(
+    msg: &T,
+) -> Result<Vec<u8>, ciborium::ser::Error<std::io::Error>> {
+    let mut cursor = Cursor::new(vec![]);
+    // Write a size placeholder
+    std::io::Write::write(&mut cursor, &[0u8; FRAME_HEADER_SIZE])?;
+    cursor.set_position(FRAME_HEADER_SIZE as u64);
+    ciborium::into_writer(msg, &mut cursor)?;
+    let size: u32 =
+        (cursor.position() - FRAME_HEADER_SIZE as u64).try_into().unwrap();
+    let mut buf = cursor.into_inner();
+    buf[0..FRAME_HEADER_SIZE].copy_from_slice(&size.to_be_bytes());
+    Ok(buf)
 }
