@@ -831,6 +831,34 @@ async fn test_repo_prune(cptestctx: &ControlPlaneTestContext) {
     assert!(repos.iter().any(|r| r.id() == repo2id));
     assert!(repos.iter().any(|r| r.id() == repo3id));
     assert!(repos.iter().any(|r| r.id() == repo4id));
+
+    // Re-insert repo 1.
+    let repo1id_again = insert_test_tuf_repo(&opctx, datastore, 1).await;
+    // The ID should be the same.
+    assert_eq!(repo1id, repo1id_again);
+    // All four repos should be visible again.
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 4);
+    assert!(repos.iter().any(|r| r.id() == repo1id));
+    assert!(repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
+
+    // Activate the task again and wait for it to complete.  The second repo
+    // should now be pruned, since it is the least-recently uploaded.
+    activate_background_task(client, "tuf_repo_pruner").await;
+    let repos = datastore
+        .tuf_list_repos_unpruned_batched(&opctx)
+        .await
+        .expect("listing repos");
+    assert_eq!(repos.len(), 3);
+    assert!(repos.iter().any(|r| r.id() == repo1id));
+    assert!(!repos.iter().any(|r| r.id() == repo2id));
+    assert!(repos.iter().any(|r| r.id() == repo3id));
+    assert!(repos.iter().any(|r| r.id() == repo4id));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
