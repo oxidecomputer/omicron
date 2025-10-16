@@ -14,6 +14,7 @@ chrono.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 illumos-utils.workspace = true
+jiff.workspace = true
 libc.workspace = true
 omicron-workspace-hack.workspace = true
 once_cell.workspace = true
@@ -26,7 +27,7 @@ serde.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-zip = { workspace = true, features = ["chrono","zstd"] }
+zip = { workspace = true, features = ["jiff-02","zstd"] }
 
 [dev-dependencies]
 omicron-common.workspace = true

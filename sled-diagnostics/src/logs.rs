@@ -10,7 +10,6 @@ use std::{
     sync::LazyLock,
 };
 
-use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
 use fs_err::File;
 use illumos_utils::zfs::{
@@ -452,11 +451,11 @@ impl LogsHandle {
         service: &str,
         zip: &mut zip::ZipWriter<W>,
         log_snapshots: &mut LogSnapshots,
-        logfile: &Utf8Path,
+        logfile: &LogFile,
         logtype: LogType,
     ) -> Result<(), LogError> {
         let snapshot_logfile =
-            self.find_log_in_snapshot(log_snapshots, logfile).await?;
+            self.find_log_in_snapshot(log_snapshots, &logfile.path).await?;
 
         if logtype == LogType::Current {
             // Since we are processing the current log files in a zone we need
@@ -502,6 +501,16 @@ impl LogsHandle {
                         .filter(|f| is_log_file(f.path(), filename))
                     {
                         let logfile = f.path();
+                        let system_mtime =
+                            f.metadata().and_then(|m| m.modified()).inspect_err(|e| {
+                                warn!(&self.log, "sled-diagnostic failed to get mtime of logfile";
+                                    "error" => %e,
+                                    "logfile" => %logfile,
+                                );
+                            }).ok();
+                        let mtime = system_mtime
+                            .and_then(|m| jiff::Timestamp::try_from(m).ok());
+
                         if logfile.is_file() {
                             write_log_to_zip(
                                 &self.log,
@@ -509,6 +518,7 @@ impl LogsHandle {
                                 zip,
                                 LogType::Current,
                                 logfile,
+                                mtime,
                             )?;
                         }
                     }
@@ -523,6 +533,7 @@ impl LogsHandle {
                         zip,
                         logtype,
                         &snapshot_logfile,
+                        logfile.modified,
                     )?;
                 }
                 false => {
@@ -613,7 +624,7 @@ impl LogsHandle {
                     &service,
                     &mut zip,
                     &mut log_snapshots,
-                    &current.path,
+                    &current,
                     LogType::Current,
                 )
                 .await?;
@@ -629,13 +640,13 @@ impl LogsHandle {
                 .archived
                 .into_iter()
                 .filter(|log| log.path.as_str().contains("crypt/debug"))
-                .map(|log| log.path)
                 .collect();
 
             // Since these logs can be spread out across multiple U.2 devices
             // we need to sort them by timestamp.
             archived.sort_by_key(|log| {
-                log.as_str()
+                log.path
+                    .as_str()
                     .rsplit_once(".")
                     .and_then(|(_, date)| date.parse::<u64>().ok())
                     .unwrap_or(0)
@@ -704,6 +715,7 @@ fn write_log_to_zip<W: Write + Seek>(
     zip: &mut zip::ZipWriter<W>,
     logtype: LogType,
     snapshot_logfile: &Utf8Path,
+    mtime: Option<jiff::Timestamp>,
 ) -> Result<(), LogError> {
     let Some(log_name) = snapshot_logfile.file_name() else {
         warn!(
@@ -717,23 +729,18 @@ fn write_log_to_zip<W: Write + Seek>(
 
     let mut src = File::open(&snapshot_logfile)?;
 
-    let mtime = get_log_mtime(snapshot_logfile)
-        .inspect_err(|e| {
-            warn!(
-                logger,
-                "sled-diagnostics unable to get mtime for logfile";
-                "error" => %e,
-                "logfile" => %snapshot_logfile,
-            );
+    let zip_mtime = mtime
+        .and_then(|ts| {
+            let zoned = ts.in_tz("UTC").ok()?;
+            zip::DateTime::try_from(zoned.datetime()).ok()
         })
-        .ok()
-        .unwrap_or_else(zip::DateTime::default_for_write);
+        .unwrap_or_else(zip::DateTime::default);
 
     let zip_path = format!("{service}/{logtype}/{log_name}");
     zip.start_file_from_path(
         zip_path,
         FullFileOptions::default()
-            .last_modified_time(mtime)
+            .last_modified_time(zip_mtime)
             .compression_method(zip::CompressionMethod::Zstd)
             .compression_level(Some(3))
             // NB: From the docs
@@ -761,17 +768,6 @@ fn write_log_to_zip<W: Write + Seek>(
     Ok(())
 }
 
-fn get_log_mtime(log_path: &Utf8Path) -> anyhow::Result<zip::DateTime> {
-    let mtime = log_path
-        .metadata()
-        .and_then(|s| s.modified())
-        .context("failed to stat path")?;
-
-    let datetime: chrono::DateTime<chrono::Utc> = mtime.into();
-    zip::DateTime::try_from(datetime.naive_utc())
-        .context("failed to convert file mtime to zip-compatible time")
-}
-
 /// A log file that is found in oxlog's "extra" bucket of service logs.
 #[derive(Debug, PartialEq)]
 enum ExtraLogKind<'a> {
@@ -783,8 +779,8 @@ enum ExtraLogKind<'a> {
 
 #[derive(Debug, Default, PartialEq)]
 struct ExtraLogs<'a> {
-    current: Option<&'a Utf8Path>,
-    rotated: Vec<&'a Utf8Path>,
+    current: Option<&'a LogFile>,
+    rotated: Vec<&'a LogFile>,
 }
 
 fn sort_extra_logs<'a>(
@@ -806,15 +802,15 @@ fn sort_extra_logs<'a>(
                         warn!(
                             logger,
                             "found multiple current log files for {name}";
-                            "old" => %old_path,
+                            "old" => %old_path.path,
                             "new" => %log.path,
                         );
                     }
-                    entry.current = Some(&log.path);
+                    entry.current = Some(&log);
                 }
                 ExtraLogKind::Rotated { name, log } => {
                     let entry = res.entry(name).or_default();
-                    entry.rotated.push(&log.path);
+                    entry.rotated.push(&log);
                 }
             }
         }
@@ -864,9 +860,9 @@ fn sort_cockroach_extra_logs(logs: &[LogFile]) -> HashMap<&str, ExtraLogs<'_>> {
             let entry = interested.entry(prefix).or_default();
 
             if file_name == format!("{prefix}.log") {
-                entry.current = Some(log.path.as_path());
+                entry.current = Some(log);
             } else {
-                entry.rotated.push(log.path.as_path());
+                entry.rotated.push(log);
             }
         }
     }
@@ -943,52 +939,30 @@ mod test {
             "bogus.log",
             "some/dir"
         ].into_iter().map(|l| {
-                oxlog::LogFile { path: Utf8PathBuf::from(l), size: None, modified: None }
-            }).collect();
+            oxlog::LogFile { path: Utf8PathBuf::from(l), size: None, modified: None }
+        }).collect();
+        let logs_map: HashMap<_, _> =
+            logs.iter().map(|l| (l.path.as_str(), l)).collect();
 
         let mut expected: HashMap<&str, ExtraLogs<'_>> = HashMap::new();
 
         // cockroach
         expected.entry("cockroach").or_default().current =
-            Some(Utf8Path::new("cockroach.log"));
-        expected
-            .entry("cockroach")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T17_11_45Z.011435.log"));
-        expected
-            .entry("cockroach")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-02-01T01_51_51Z.011486.log"));
+            Some(&logs_map["cockroach.log"]);
+        expected.entry("cockroach").or_default().rotated.push(&logs_map["cockroach.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T17_11_45Z.011435.log"]);
+        expected.entry("cockroach").or_default().rotated.push(&logs_map["cockroach.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-02-01T01_51_51Z.011486.log"]);
 
         // cockroach-health
         expected.entry("cockroach-health").or_default().current =
-            Some(Utf8Path::new("cockroach-health.log"));
-        expected
-            .entry("cockroach-health")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log"));
-        expected
-            .entry("cockroach-health")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-02-01T01_51_53Z.011486.log"));
+            Some(&logs_map["cockroach-health.log"]);
+        expected.entry("cockroach-health").or_default().rotated.push(&logs_map["cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-01-31T21_43_26Z.011435.log"]);
+        expected.entry("cockroach-health").or_default().rotated.push(&logs_map["cockroach-health.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2025-02-01T01_51_53Z.011486.log"]);
 
         // cockroach-stderr
         expected.entry("cockroach-stderr").or_default().current =
-            Some(Utf8Path::new("cockroach-stderr.log"));
-        expected
-            .entry("cockroach-stderr")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach-stderr.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2023-08-30T18_56_19Z.011950.log"));
-        expected
-            .entry("cockroach-stderr")
-            .or_default()
-            .rotated
-            .push(Utf8Path::new("cockroach-stderr.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2023-08-31T02_59_24Z.010479.log"));
+            Some(&logs_map["cockroach-stderr.log"]);
+        expected.entry("cockroach-stderr").or_default().rotated.push(&logs_map["cockroach-stderr.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2023-08-30T18_56_19Z.011950.log"]);
+        expected.entry("cockroach-stderr").or_default().rotated.push(&logs_map["cockroach-stderr.oxzcockroachdba3628a56-6f85-43b5-be50-71d8f0e04877.root.2023-08-31T02_59_24Z.010479.log"]);
 
         let extra = sort_cockroach_extra_logs(logs.as_slice());
         assert_eq!(
@@ -1254,14 +1228,19 @@ mod illumos_tests {
             let zipfile_path = mountpoint.join("test.zip");
             let zipfile = File::create_new(&zipfile_path).unwrap();
             let mut zip = ZipWriter::new(zipfile);
+            let log = LogFile {
+                path: mountpoint
+                    .join(format!("var/svc/log/{}", logfile_to_data[0].0)),
+                size: None,
+                modified: None,
+            };
 
             loghandle
                 .process_logs(
                     "mg-ddm",
                     &mut zip,
                     &mut log_snapshots,
-                    &mountpoint
-                        .join(format!("var/svc/log/{}", logfile_to_data[0].0)),
+                    &log,
                     LogType::Current,
                 )
                 .await
@@ -1348,13 +1327,14 @@ mod illumos_tests {
             let zipfile_path = mountpoint.join("test.zip");
             let zipfile = File::create_new(&zipfile_path).unwrap();
             let mut zip = ZipWriter::new(zipfile);
+            let log = LogFile { path: logfile, size: None, modified: None };
 
             loghandle
                 .process_logs(
                     "mg-ddm",
                     &mut zip,
                     &mut log_snapshots,
-                    &logfile,
+                    &log,
                     LogType::Current,
                 )
                 .await
