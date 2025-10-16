@@ -21,6 +21,7 @@ mod compute_key_share;
 mod configuration;
 mod coordinator_state;
 pub(crate) mod crypto;
+pub(crate) mod established_conn;
 mod messages;
 mod node;
 mod node_ctx;
@@ -41,6 +42,9 @@ mod alarm;
 mod connection_manager;
 mod task;
 
+pub(crate) use connection_manager::{
+    ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, TaskId, WireMsg,
+};
 pub use task::NodeTask;
 
 pub use alarm::Alarm;
