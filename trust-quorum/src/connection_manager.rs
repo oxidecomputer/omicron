@@ -135,14 +135,29 @@ pub enum ConnToMainMsgInner {
 }
 
 pub struct TaskHandle {
-    task_id: TaskId,
-    tx: mpsc::Sender<MainToConnMsg>,
-    conn_type: ConnectionType,
+    pub task_id: TaskId,
+    pub tx: mpsc::Sender<MainToConnMsg>,
+    pub conn_type: ConnectionType,
+}
+
+impl TaskHandle {
+    pub fn addr(&self) -> SocketAddrV6 {
+        self.conn_type.addr()
+    }
 }
 
 pub enum ConnectionType {
     Connected(SocketAddrV6),
     Accepted(SocketAddrV6),
+}
+
+impl ConnectionType {
+    pub fn addr(&self) -> SocketAddrV6 {
+        match self {
+            Self::Connected(addr) => *addr,
+            Self::Accepted(addr) => *addr,
+        }
+    }
 }
 
 pub struct ConnMgr {
@@ -303,7 +318,7 @@ impl ConnMgr {
     ///
     /// We need to connect to peers with addresses less than our own
     /// and tear down any connections that no longer exist in `addrs`.
-    pub fn update_bootstrap_connections(
+    pub async fn update_bootstrap_connections(
         &mut self,
         addrs: BTreeSet<SocketAddrV6>,
         corpus: Vec<Utf8PathBuf>,
@@ -407,6 +422,40 @@ impl ConnMgr {
             });
             self.join_handles.push(join_handle);
             self.connecting.insert(addr, task_handle);
+        }
+    }
+
+    /// Remove any information about a sprockets client connection and inform
+    /// the corresponding task to stop.
+    ///
+    /// We don't tear down server connections this way as we don't know their
+    /// listen port, just the ephemeral port.
+    async fn disconnect_clients(&mut self, addr: SocketAddrV6) {
+        if let Some(handle) = self.connecting.remove(&addr) {
+            // The connection has not yet completed its handshake
+            info!(
+                self.log,
+                "Deleting initiating connection";
+                "remote_addr" => addr.to_string()
+            );
+            let _ = handle.tx.send(MainToConnMsg::Close).await;
+        } else {
+            if let Some((id, handle)) = self
+                .established
+                .iter()
+                .find(|(_, handle)| handle.addr() == addr)
+            {
+                info!(
+                    self.log,
+                    "Deleting established connection";
+                    "remote_addr" => addr.to_string(),
+                    "remote_peer_id" => id.to_string(),
+                );
+                let _ = handle.tx.send(MainToConnMsg::Close).await;
+                // probably a better way to avoid borrowck issues
+                let id = id.clone();
+                self.established.remove(&id);
+            }
         }
     }
 }
@@ -519,6 +568,7 @@ impl EstablishedConn {
 
             if let Err(err) = res {
                 warn!(self.log, "Closing connection"; &err);
+                return;
             }
         }
     }
