@@ -203,9 +203,10 @@ impl NodeTask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::connection_manager::platform_id_to_baseboard_id;
+    use crate::connection_manager::{ConnState, platform_id_to_baseboard_id};
     use camino::Utf8PathBuf;
     use dropshot::test_util::log_prefix_for_test;
+    use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
     use omicron_test_utils::dev::test_setup_log;
     use sprockets_tls::keys::ResolveSetting;
     use sprockets_tls_test_utils::{
@@ -251,8 +252,10 @@ mod tests {
             .collect()
     }
 
+    /// Test that all nodes can connect to each other when given each the full
+    /// set of "bootstrap addresses".
     #[tokio::test]
-    async fn connect() {
+    async fn full_mesh_connectivity() {
         let logctx = test_setup_log("connect");
         let (dir, _) = log_prefix_for_test("connect");
         println!("Writing keys and certs to {dir}");
@@ -299,13 +302,35 @@ mod tests {
             h.load_peer_addresses(listen_addrs.clone()).await.unwrap();
         }
 
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        // Wait for all nodes have `num_nodes - 1` established connections
+        let poll_interval = Duration::from_millis(1);
+        let poll_max = Duration::from_secs(10);
+        wait_for_condition(
+            async || {
+                let mut count = 0;
+                for h in &handles {
+                    let status = h.conn_mgr_status().await.unwrap();
+                    if status
+                        .connections
+                        .iter()
+                        .all(|c| matches!(c.state, ConnState::Established(_)))
+                        && status.connections.len() == num_nodes - 1
+                    {
+                        count += 1;
+                    }
+                }
+                if count == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
 
-        for h in &handles {
-            let status = h.conn_mgr_status().await.unwrap();
-            println!("{status:#?}");
-        }
-
-        tokio::time::sleep(Duration::from_secs(60 * 60)).await;
+        logctx.cleanup_successful();
     }
 }
