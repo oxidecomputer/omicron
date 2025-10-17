@@ -254,6 +254,15 @@ impl SystemDescription {
         self.target_nexus_zone_count
     }
 
+    pub fn target_cockroachdb_zone_count(&mut self, count: usize) -> &mut Self {
+        self.target_cockroachdb_zone_count = count;
+        self
+    }
+
+    pub fn get_target_cockroachdb_zone_count(&self) -> usize {
+        self.target_cockroachdb_zone_count
+    }
+
     pub fn target_boundary_ntp_zone_count(
         &mut self,
         count: usize,

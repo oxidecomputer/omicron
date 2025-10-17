@@ -14,9 +14,6 @@ use nexus_types::deployment::CockroachdbUnsafeToShutdown;
 use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
-use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
-use omicron_common::policy::COCKROACHDB_REDUNDANCY;
-use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
@@ -216,11 +213,9 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
             }
         }
 
-        // TODO-correctness This should be looking at the input policy target
-        // redundancy, not the `BOUNDARY_NTP_REDUNDANCY` constant. (Same for the
-        // other redundancy checks in this file.)
-        // <https://github.com/oxidecomputer/omicron/issues/9220>
-        if synchronized_boundary_ntp_count < BOUNDARY_NTP_REDUNDANCY {
+        let target_boundary_ntp_zone_count =
+            self.blueprint.planning_input().target_boundary_ntp_zone_count();
+        if synchronized_boundary_ntp_count < target_boundary_ntp_zone_count {
             return Some(ZoneUnsafeToShutdown::BoundaryNtp {
                 total_boundary_ntp_zones: self.boundary_ntp_zones.len(),
                 synchronized_count: synchronized_boundary_ntp_count,
@@ -236,10 +231,13 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
         use CockroachdbUnsafeToShutdown::*;
         use ZoneUnsafeToShutdown::Cockroachdb;
 
+        let target_cockroachdb_zone_count =
+            self.blueprint.planning_input().target_cockroachdb_zone_count();
+
         // We must hear from all nodes
         let all_statuses = &self.inventory.cockroach_status;
 
-        if all_statuses.len() < COCKROACHDB_REDUNDANCY {
+        if all_statuses.len() < target_cockroachdb_zone_count {
             return Some(Cockroachdb { reason: NotEnoughNodes });
         }
 
@@ -260,7 +258,7 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
             let Some(live_nodes) = status.liveness_live_nodes else {
                 return Some(Cockroachdb { reason: MissingLiveNodesStat });
             };
-            if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
+            if live_nodes < target_cockroachdb_zone_count as u64 {
                 return Some(Cockroachdb {
                     reason: NotEnoughLiveNodes { live_nodes },
                 });
@@ -300,10 +298,12 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
         // and restarts, at least one exists and can get the control plane back
         // up and running.
         //
-        // Our INTERNAL_DNS_REDUNDANCY factor is set so that we can tolerate "at
-        // least one upgrade, and at least one failure during that upgrade
-        // window".
-        if synchronized_internal_dns_count >= INTERNAL_DNS_REDUNDANCY {
+        // The target internal DNS zone count should be set so that we can
+        // tolerate "at least one upgrade, and at least one failure during that
+        // upgrade window" (e.g., it should be "at least 3" in production).
+        let target_internal_dns_zone_count =
+            self.blueprint.planning_input().target_internal_dns_zone_count();
+        if synchronized_internal_dns_count >= target_internal_dns_zone_count {
             return None;
         } else {
             return Some(ZoneUnsafeToShutdown::InternalDns {
