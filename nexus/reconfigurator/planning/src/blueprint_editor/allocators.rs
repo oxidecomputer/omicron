@@ -8,7 +8,7 @@ use std::net::IpAddr;
 
 use super::SledEditor;
 use nexus_types::deployment::BlueprintZoneDisposition;
-use omicron_common::address::IpRange;
+use nexus_types::deployment::ExternalIpPolicy;
 
 mod external_networking;
 
@@ -33,7 +33,7 @@ pub(crate) struct BlueprintResourceAllocator {
 impl BlueprintResourceAllocator {
     pub fn new<'a, I>(
         all_sleds: I,
-        service_ip_pool_ranges: Vec<IpRange>,
+        external_ip_policy: &ExternalIpPolicy,
     ) -> Result<Self, BlueprintResourceAllocatorInputError>
     where
         I: Iterator<Item = &'a SledEditor> + Clone,
@@ -45,7 +45,7 @@ impl BlueprintResourceAllocator {
             all_sleds.flat_map(|editor| {
                 editor.zones(BlueprintZoneDisposition::is_expunged)
             }),
-            service_ip_pool_ranges,
+            external_ip_policy.service_ip_pool_ranges().to_vec(),
         )
         .map_err(BlueprintResourceAllocatorInputError::ExternalNetworking)?;
 

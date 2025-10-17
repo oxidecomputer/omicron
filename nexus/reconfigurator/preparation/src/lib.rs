@@ -20,6 +20,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::OximeterReadPolicy;
@@ -268,8 +269,9 @@ impl PlanningInputFromDb<'_> {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let external_ips = ExternalIpPolicy::new(service_ip_pool_ranges);
         let policy = Policy {
-            service_ip_pool_ranges,
+            external_ips,
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,

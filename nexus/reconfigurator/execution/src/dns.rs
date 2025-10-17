@@ -1568,7 +1568,7 @@ mod test {
             // We'll need another (fake) external IP for this new Nexus.
             builder
                 .policy_mut()
-                .service_ip_pool_ranges
+                .external_ips
                 .push(IpRange::from(IpAddr::V4(Ipv4Addr::LOCALHOST)));
 
             builder.build()
