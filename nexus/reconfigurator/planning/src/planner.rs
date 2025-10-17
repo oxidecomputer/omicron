@@ -1179,7 +1179,7 @@ impl<'a> Planner<'a> {
 
         let target_count = match discretionary_zone_kind {
             DiscretionaryOmicronZone::BoundaryNtp => {
-                self.input.target_boundary_ntp_zone_count()
+                self.input.set_target_boundary_ntp_zone_count()
             }
             DiscretionaryOmicronZone::Clickhouse => {
                 self.input.target_clickhouse_zone_count()
@@ -1191,13 +1191,13 @@ impl<'a> Planner<'a> {
                 self.input.target_clickhouse_server_zone_count()
             }
             DiscretionaryOmicronZone::CockroachDb => {
-                self.input.target_cockroachdb_zone_count()
+                self.input.set_target_cockroachdb_zone_count()
             }
             DiscretionaryOmicronZone::CruciblePantry => {
-                self.input.target_crucible_pantry_zone_count()
+                self.input.set_target_crucible_pantry_zone_count()
             }
             DiscretionaryOmicronZone::InternalDns => {
-                self.input.target_internal_dns_zone_count()
+                self.input.set_target_internal_dns_zone_count()
             }
             DiscretionaryOmicronZone::ExternalDns => {
                 // TODO-cleanup: When external DNS addresses are
@@ -1205,7 +1205,7 @@ impl<'a> Planner<'a> {
                 self.blueprint.count_parent_external_dns_zones()
             }
             DiscretionaryOmicronZone::Nexus => {
-                self.input.target_nexus_zone_count()
+                self.input.set_target_nexus_zone_count()
             }
             DiscretionaryOmicronZone::Oximeter => {
                 self.input.target_oximeter_zone_count()
@@ -2123,7 +2123,7 @@ impl<'a> Planner<'a> {
             return Ok(report);
         }
 
-        if nexuses_at_proposed_gen < self.input.target_nexus_zone_count() {
+        if nexuses_at_proposed_gen < self.input.set_target_nexus_zone_count() {
             // If there aren't enough Nexuses at the next generation, quiescing
             // could be a dangerous operation. Blueprint execution should be
             // able to continue even if the new Nexuses haven't started, but to
@@ -2837,7 +2837,7 @@ pub(crate) mod test {
             .diff_pair()
             .zones
             .added;
-        assert_eq!(zones_added.len(), input.target_nexus_zone_count() - 1);
+        assert_eq!(zones_added.len(), input.set_target_nexus_zone_count() - 1);
         for (_, zone) in zones_added {
             if zone.kind() != ZoneKind::Nexus {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
@@ -6593,7 +6593,7 @@ pub(crate) mod test {
         // If this assertion breaks - which would be okay - we should delete all
         // these planning steps explicitly including a base set of CRDB zones.
         assert_eq!(
-            example.system.get_target_cockroachdb_zone_count(),
+            example.system.target_cockroachdb_zone_count(),
             0,
             "We expect the system is initialized without cockroach zones"
         );
@@ -6601,7 +6601,9 @@ pub(crate) mod test {
         input_builder.policy_mut().target_cockroachdb_zone_count =
             COCKROACHDB_REDUNDANCY;
         example.input = input_builder.build();
-        example.system.target_cockroachdb_zone_count(COCKROACHDB_REDUNDANCY);
+        example
+            .system
+            .set_target_cockroachdb_zone_count(COCKROACHDB_REDUNDANCY);
 
         let blueprint_name = "blueprint_with_cockroach";
         let new_blueprint = Planner::new_based_on(
@@ -6988,7 +6990,9 @@ pub(crate) mod test {
         );
 
         // Use that boundary NTP zone to promote others.
-        example.system.target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
+        example
+            .system
+            .set_target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
         example.input = example
             .system
             .to_planning_input_builder()

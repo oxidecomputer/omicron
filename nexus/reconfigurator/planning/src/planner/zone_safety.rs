@@ -213,8 +213,10 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
             }
         }
 
-        let target_boundary_ntp_zone_count =
-            self.blueprint.planning_input().target_boundary_ntp_zone_count();
+        let target_boundary_ntp_zone_count = self
+            .blueprint
+            .planning_input()
+            .set_target_boundary_ntp_zone_count();
         if synchronized_boundary_ntp_count < target_boundary_ntp_zone_count {
             return Some(ZoneUnsafeToShutdown::BoundaryNtp {
                 total_boundary_ntp_zones: self.boundary_ntp_zones.len(),
@@ -232,7 +234,7 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
         use ZoneUnsafeToShutdown::Cockroachdb;
 
         let target_cockroachdb_zone_count =
-            self.blueprint.planning_input().target_cockroachdb_zone_count();
+            self.blueprint.planning_input().set_target_cockroachdb_zone_count();
 
         // We must hear from all nodes
         let all_statuses = &self.inventory.cockroach_status;
@@ -301,8 +303,10 @@ impl<'a> ZoneSafetyChecksBuilder<'a> {
         // The target internal DNS zone count should be set so that we can
         // tolerate "at least one upgrade, and at least one failure during that
         // upgrade window" (e.g., it should be "at least 3" in production).
-        let target_internal_dns_zone_count =
-            self.blueprint.planning_input().target_internal_dns_zone_count();
+        let target_internal_dns_zone_count = self
+            .blueprint
+            .planning_input()
+            .set_target_internal_dns_zone_count();
         if synchronized_internal_dns_count >= target_internal_dns_zone_count {
             return None;
         } else {
