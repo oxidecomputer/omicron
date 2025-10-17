@@ -6593,7 +6593,7 @@ pub(crate) mod test {
         // If this assertion breaks - which would be okay - we should delete all
         // these planning steps explicitly including a base set of CRDB zones.
         assert_eq!(
-            example.system.get_target_cockroachdb_zone_count(),
+            example.system.target_cockroachdb_zone_count(),
             0,
             "We expect the system is initialized without cockroach zones"
         );
@@ -6601,7 +6601,9 @@ pub(crate) mod test {
         input_builder.policy_mut().target_cockroachdb_zone_count =
             COCKROACHDB_REDUNDANCY;
         example.input = input_builder.build();
-        example.system.target_cockroachdb_zone_count(COCKROACHDB_REDUNDANCY);
+        example
+            .system
+            .set_target_cockroachdb_zone_count(COCKROACHDB_REDUNDANCY);
 
         let blueprint_name = "blueprint_with_cockroach";
         let new_blueprint = Planner::new_based_on(
@@ -6988,7 +6990,9 @@ pub(crate) mod test {
         );
 
         // Use that boundary NTP zone to promote others.
-        example.system.target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
+        example
+            .system
+            .set_target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
         example.input = example
             .system
             .to_planning_input_builder()
