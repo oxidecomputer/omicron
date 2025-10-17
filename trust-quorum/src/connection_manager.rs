@@ -191,7 +191,7 @@ pub struct ConnMgr {
 impl ConnMgr {
     pub async fn new(
         log: &Logger,
-        listen_addr: SocketAddrV6,
+        mut listen_addr: SocketAddrV6,
         sprockets_config: SprocketsConfig,
         main_tx: mpsc::Sender<ConnToMainMsg>,
     ) -> ConnMgr {
@@ -206,6 +206,17 @@ impl ConnMgr {
         )
         .await
         .expect("sprockets server can listen");
+
+        // If the listen port was 0, we want to update our addr to use
+        // the actual port This is really only useful for testing, but the
+        // connection manager won't work properly without doing this because
+        // it will never trigger connections since it's own address will always
+        // sort lower than other addresses if only the ports differ.
+        let listen_port = server.listen_addr().unwrap().port();
+
+        if listen_port != listen_addr.port() {
+            listen_addr.set_port(listen_port);
+        }
 
         info!(
             log,
@@ -226,6 +237,10 @@ impl ConnMgr {
             accepting: BTreeMap::new(),
             established: BTreeMap::new(),
         }
+    }
+
+    pub fn listen_addr(&self) -> SocketAddrV6 {
+        self.listen_addr
     }
 
     /// Perform any polling related operations that the connection

@@ -44,9 +44,17 @@ pub enum NodeApiError {
 #[derive(Debug, Clone)]
 pub struct NodeTaskHandle {
     tx: mpsc::Sender<NodeApiRequest>,
+    listen_addr: SocketAddrV6,
 }
 
 impl NodeTaskHandle {
+    /// Return the actual port being listened on
+    ///
+    /// This is useful when the port passed in was `0`.
+    pub fn listen_addr(&self) -> SocketAddrV6 {
+        self.listen_addr
+    }
+
     /// Inform the node of currently known IP addresses on the bootstrap network
     ///
     /// These are generated from DDM prefixes learned by the bootstrap agent.
@@ -101,9 +109,10 @@ impl NodeTask {
             conn_mgr_tx,
         )
         .await;
+        let listen_addr = conn_mgr.listen_addr();
         (
             NodeTask { log, config, node, ctx, conn_mgr, conn_mgr_rx, rx },
-            NodeTaskHandle { tx },
+            NodeTaskHandle { tx, listen_addr },
         )
     }
 
@@ -131,8 +140,6 @@ impl NodeTask {
             }
         }
     }
-
-    async fn on_accept(&mut self, acceptor: SprocketsAcceptor) {}
 
     // Handle messages from connection management tasks
     async fn on_conn_msg(&mut self, msg: ConnToMainMsg) {
@@ -182,20 +189,14 @@ mod tests {
     };
     use std::time::Duration;
 
-    pub const BASE_PORT: u16 = 11221;
-
     fn pki_doc_to_node_configs(dir: Utf8PathBuf, n: usize) -> Vec<Config> {
         (1..=n)
             .map(|i| {
                 let baseboard_id = platform_id_to_baseboard_id(
                     &sprockets_tls_test_utils::platform_id(i),
                 );
-                let listen_addr = SocketAddrV6::new(
-                    std::net::Ipv6Addr::LOCALHOST,
-                    BASE_PORT + i as u16,
-                    0,
-                    0,
-                );
+                let listen_addr =
+                    SocketAddrV6::new(std::net::Ipv6Addr::LOCALHOST, 0, 0, 0);
                 let sprockets_auth_key_name = sprockets_auth_prefix(i);
                 let alias_key_name = alias_prefix(i);
                 let sprockets = SprocketsConfig {
@@ -267,7 +268,7 @@ mod tests {
         }
 
         let listen_addrs: BTreeSet<_> =
-            configs.iter().map(|c| c.listen_addr.clone()).collect();
+            handles.iter().map(|h| h.listen_addr()).collect();
 
         for h in &handles {
             h.load_peer_addresses(listen_addrs.clone()).await.unwrap();
