@@ -12,6 +12,7 @@ use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::SlogInlineError;
 use sprockets_tls::client::Client as SprocketsClient;
 use sprockets_tls::keys::SprocketsConfig;
 use std::borrow::Cow;
@@ -21,34 +22,38 @@ use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, SlogInlineError)]
 pub enum Error {
-    #[error("Could not connect to {addr}: {err}")]
-    Connect { addr: SocketAddrV6, err: sprockets_tls::Error },
+    #[error("Could not connect to {addr}")]
+    Connect {
+        addr: SocketAddrV6,
+        #[source]
+        err: sprockets_tls::Error,
+    },
 
-    #[error("Failed serializing request: {0}")]
-    Serialize(serde_json::Error),
+    #[error("Failed serializing request")]
+    Serialize(#[source] serde_json::Error),
 
-    #[error("Failed writing request length prefix: {0}")]
-    WriteLengthPrefix(io::Error),
+    #[error("Failed writing request length prefix")]
+    WriteLengthPrefix(#[source] io::Error),
 
-    #[error("Failed writing request: {0}")]
-    WriteRequest(io::Error),
+    #[error("Failed writing request")]
+    WriteRequest(#[source] io::Error),
 
-    #[error("Failed flushing request: {0}")]
-    FlushRequest(io::Error),
+    #[error("Failed flushing request")]
+    FlushRequest(#[source] io::Error),
 
-    #[error("Failed reading response length prefix: {0}")]
-    ReadLengthPrefix(io::Error),
+    #[error("Failed reading response length prefix")]
+    ReadLengthPrefix(#[source] io::Error),
 
     #[error("Received bogus response length: {0}")]
     BadResponseLength(u32),
 
-    #[error("Failed reading response: {0}")]
-    ReadResponse(io::Error),
+    #[error("Failed reading response")]
+    ReadResponse(#[source] io::Error),
 
-    #[error("Failed deserializing response: {0}")]
-    Deserialize(serde_json::Error),
+    #[error("Failed deserializing response")]
+    Deserialize(#[source] serde_json::Error),
 
     #[error("Unsupported version: {0}")]
     UnsupportedVersion(u32),
@@ -111,9 +116,13 @@ impl Client {
         let log = self.log.new(o!("component" => "SledAgentSprocketsClient"));
         // Establish connection and sprockets connection (if possible).
         // The sprockets client loads the associated root certificates at this point.
+        //
+        // TODO: Use a real corpus
+        let corpus = vec![];
         let stream = SprocketsClient::connect(
             self.sprockets_conf.clone(),
             self.addr,
+            corpus,
             log.clone(),
         )
         .await
