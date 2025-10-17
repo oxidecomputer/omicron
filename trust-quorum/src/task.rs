@@ -180,6 +180,9 @@ mod tests {
         alias_prefix, cert_path, certlist_path, private_key_path, root_prefix,
         sprockets_auth_prefix,
     };
+    use std::time::Duration;
+
+    pub const BASE_PORT: u16 = 11221;
 
     fn pki_doc_to_node_configs(dir: Utf8PathBuf, n: usize) -> Vec<Config> {
         (1..=n)
@@ -189,7 +192,7 @@ mod tests {
                 );
                 let listen_addr = SocketAddrV6::new(
                     std::net::Ipv6Addr::LOCALHOST,
-                    11222,
+                    BASE_PORT + i as u16,
                     0,
                     0,
                 );
@@ -256,21 +259,20 @@ mod tests {
 
         let configs = pki_doc_to_node_configs(dir, num_nodes);
 
-        let (mut task, handle) =
-            NodeTask::new(configs[0].clone(), &logctx.log).await;
-        tokio::spawn(async move { task.run().await });
-
-        loop {
-            if let Err(e) = Client::connect(
-                configs[1].sprockets.clone(),
-                configs[0].listen_addr,
-                vec![],
-                logctx.log.clone(),
-            )
-            .await
-            {
-                continue;
-            }
+        let mut handles = vec![];
+        for config in configs.clone() {
+            let (mut task, handle) = NodeTask::new(config, &logctx.log).await;
+            handles.push(handle);
+            tokio::spawn(async move { task.run().await });
         }
+
+        let listen_addrs: BTreeSet<_> =
+            configs.iter().map(|c| c.listen_addr.clone()).collect();
+
+        for h in &handles {
+            h.load_peer_addresses(listen_addrs.clone()).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_secs(60 * 60)).await;
     }
 }
