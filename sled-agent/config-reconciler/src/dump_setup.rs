@@ -1156,7 +1156,7 @@ impl DumpSetupWorker {
         let mut rotated_log_files = Vec::new();
         if include_live {
             let pattern = logdir
-                .join("*.log")
+                .join("*.log*")
                 .to_str()
                 .ok_or_else(|| ArchiveLogsError::Utf8(zone_name.to_string()))?
                 .to_string();
@@ -1183,6 +1183,12 @@ impl DumpSetupWorker {
             info!(
                 self.log,
                 "Archiving {count} log files from {zone_name} zone"
+            );
+        } else if include_live {
+            warn!(
+                self.log,
+                "Found no log files from {zone_name} zone, including live \
+                 log files"
             );
         }
         for entry in rotated_log_files {

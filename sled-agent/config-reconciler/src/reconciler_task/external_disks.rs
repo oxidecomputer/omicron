@@ -31,6 +31,7 @@ use sled_storage::disk::Disk;
 use sled_storage::disk::DiskError;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
+use slog::debug;
 use slog::error;
 use slog::info;
 use slog::warn;
@@ -47,6 +48,8 @@ use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
 use crate::dump_setup_task::FormerZoneRootArchiver;
 use crate::raw_disks::RawDiskWithId;
+use camino::Utf8PathBuf;
+use illumos_utils::zfs::Mountpoint;
 
 /// Set of currently managed zpools.
 ///
@@ -506,8 +509,13 @@ impl ExternalDisks {
         // that we find on them.
         let mut failed = Vec::new();
         for (disk_id, zpool_name) in newly_adopted {
-            if let Err(error) = self
-                .archive_and_destroy_former_zone_roots(&zpool_name, log)
+            if let Err(error) = disk_adopter
+                .archive_and_destroy_former_zone_roots(
+                    &zpool_name,
+                    &self.mount_config,
+                    &self.archiver,
+                    log,
+                )
                 .await
             {
                 // This situation is really unfortunate.  We adopted the disk,
@@ -660,14 +668,103 @@ impl ExternalDisks {
             }
         }
     }
+}
+
+#[derive(Debug)]
+struct ExternalDiskState {
+    config: OmicronPhysicalDiskConfig,
+    state: DiskState,
+}
+
+impl ExternalDiskState {
+    fn managed(config: OmicronPhysicalDiskConfig, disk: Disk) -> Self {
+        Self { config, state: DiskState::Managed(disk) }
+    }
+
+    fn failed(
+        config: OmicronPhysicalDiskConfig,
+        err: DiskManagementError,
+    ) -> Self {
+        Self { config, state: DiskState::FailedToManage(err) }
+    }
+}
+
+impl IdMappable for ExternalDiskState {
+    type Id = PhysicalDiskUuid;
+
+    fn id(&self) -> Self::Id {
+        self.config.id
+    }
+}
+
+#[derive(Debug)]
+enum DiskState {
+    Managed(Disk),
+    FailedToManage(DiskManagementError),
+}
+
+/// Helper to allow unit tests to run without interacting with the real [`Disk`]
+/// implementation. In production, the only implementor of this trait is
+/// [`RealDiskAdopter`].
+trait DiskAdopter {
+    fn adopt_disk(
+        &self,
+        raw_disk: RawDisk,
+        mount_config: &MountConfig,
+        pool_id: ZpoolUuid,
+        log: &Logger,
+    ) -> impl Future<Output = Result<Disk, DiskManagementError>> + Send;
+
+    fn archive_and_destroy_former_zone_roots(
+        &self,
+        zpool_name: &ZpoolName,
+        mount_config: &MountConfig,
+        archiver: &FormerZoneRootArchiver,
+        log: &Logger,
+    ) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
+}
+
+struct RealDiskAdopter<'a> {
+    key_requester: &'a StorageKeyRequester,
+}
+
+impl DiskAdopter for RealDiskAdopter<'_> {
+    async fn adopt_disk(
+        &self,
+        raw_disk: RawDisk,
+        mount_config: &MountConfig,
+        pool_id: ZpoolUuid,
+        log: &Logger,
+    ) -> Result<Disk, DiskManagementError> {
+        Disk::new(
+            log,
+            mount_config,
+            raw_disk,
+            Some(pool_id),
+            Some(self.key_requester),
+        )
+        .await
+        .map_err(|err| {
+            let err_string = InlineErrorChain::new(&err).to_string();
+            match err {
+                // We pick this error out and identify it separately because
+                // it may be transient, and should sometimes be handled with
+                // a retry.
+                DiskError::Dataset(DatasetError::KeyManager(_)) => {
+                    DiskManagementError::KeyManager(err_string)
+                }
+                _ => DiskManagementError::Other(err_string),
+            }
+        })
+    }
 
     async fn archive_and_destroy_former_zone_roots(
         &self,
         zpool_name: &ZpoolName,
+        mount_config: &MountConfig,
+        archiver: &FormerZoneRootArchiver,
         log: &Logger,
     ) -> Result<(), anyhow::Error> {
-        let mount_config = &self.mount_config;
-
         // Attempt to archive and then wipe the contents of the zones dataset.
         //
         // There's a chain of design goals and compromises here:
@@ -737,7 +834,7 @@ impl ExternalDisks {
                 cleanup_former_zone_roots(
                     log,
                     mount_config,
-                    &self.archiver,
+                    archiver,
                     &zpool_name,
                 )
                 .await?;
@@ -757,87 +854,6 @@ impl ExternalDisks {
         };
 
         Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct ExternalDiskState {
-    config: OmicronPhysicalDiskConfig,
-    state: DiskState,
-}
-
-impl ExternalDiskState {
-    fn managed(config: OmicronPhysicalDiskConfig, disk: Disk) -> Self {
-        Self { config, state: DiskState::Managed(disk) }
-    }
-
-    fn failed(
-        config: OmicronPhysicalDiskConfig,
-        err: DiskManagementError,
-    ) -> Self {
-        Self { config, state: DiskState::FailedToManage(err) }
-    }
-}
-
-impl IdMappable for ExternalDiskState {
-    type Id = PhysicalDiskUuid;
-
-    fn id(&self) -> Self::Id {
-        self.config.id
-    }
-}
-
-#[derive(Debug)]
-enum DiskState {
-    Managed(Disk),
-    FailedToManage(DiskManagementError),
-}
-
-/// Helper to allow unit tests to run without interacting with the real [`Disk`]
-/// implementation. In production, the only implementor of this trait is
-/// [`RealDiskAdopter`].
-trait DiskAdopter {
-    fn adopt_disk(
-        &self,
-        raw_disk: RawDisk,
-        mount_config: &MountConfig,
-        pool_id: ZpoolUuid,
-        log: &Logger,
-    ) -> impl Future<Output = Result<Disk, DiskManagementError>> + Send;
-}
-
-struct RealDiskAdopter<'a> {
-    key_requester: &'a StorageKeyRequester,
-}
-
-impl DiskAdopter for RealDiskAdopter<'_> {
-    async fn adopt_disk(
-        &self,
-        raw_disk: RawDisk,
-        mount_config: &MountConfig,
-        pool_id: ZpoolUuid,
-        log: &Logger,
-    ) -> Result<Disk, DiskManagementError> {
-        Disk::new(
-            log,
-            mount_config,
-            raw_disk,
-            Some(pool_id),
-            Some(self.key_requester),
-        )
-        .await
-        .map_err(|err| {
-            let err_string = InlineErrorChain::new(&err).to_string();
-            match err {
-                // We pick this error out and identify it separately because
-                // it may be transient, and should sometimes be handled with
-                // a retry.
-                DiskError::Dataset(DatasetError::KeyManager(_)) => {
-                    DiskManagementError::KeyManager(err_string)
-                }
-                _ => DiskManagementError::Other(err_string),
-            }
-        })
     }
 }
 
@@ -876,7 +892,30 @@ async fn cleanup_former_zone_roots(
             &child_dataset_relative_to_pool,
         );
 
-        // Attempt to archive this zone as though it's a zone name.
+        // We need this dataset to be mounted in order to archive its logs.
+        // On initial sled boot, it won't be mounted yet.  In other cases (e.g.,
+        // sled-agent restart), it may already be.
+        let child_dataset_name =
+            format!("{}/{}", parent_dataset_name, child_name);
+        debug!(
+            log,
+            "ensuring dataset mounted to archive former zone root";
+            "path" => %mountpoint,
+            "dataset" => &child_dataset_name,
+        );
+        Zfs::ensure_dataset_mounted_and_exists(
+            &child_dataset_name,
+            &Mountpoint(Utf8PathBuf::from(&mountpoint)),
+        )
+        .await
+        .with_context(|| format!("mounting {:?}", &child_dataset_name))
+        .map_err(|error| {
+            DiskManagementError::Other(
+                InlineErrorChain::new(&*error).to_string(),
+            )
+        })?;
+
+        // Attempt to archive this dataset as though it's a former zone root.
         // This is best-effort.
         info!(
             log,
@@ -885,8 +924,8 @@ async fn cleanup_former_zone_roots(
         );
         archiver.archive_former_zone_root(mountpoint).await;
 
-        let child_dataset_name =
-            format!("{}/{}", parent_dataset_name, child_name);
+        // Finally, destroy it.  This preserves historical behavior of wiping
+        // these datasets when we adopt disks.
         info!(
             log,
             "destroying former zone root";
@@ -948,6 +987,16 @@ mod tests {
             });
             self.requests.lock().unwrap().push(raw_disk);
             Ok(disk)
+        }
+
+        async fn archive_and_destroy_former_zone_roots(
+            &self,
+            _zpool_name: &ZpoolName,
+            _mount_config: &MountConfig,
+            _archiver: &FormerZoneRootArchiver,
+            _log: &Logger,
+        ) -> Result<(), anyhow::Error> {
+            Ok(())
         }
     }
 
