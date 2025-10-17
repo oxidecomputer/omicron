@@ -71,8 +71,16 @@ impl super::Nexus {
         project_lookup: &lookup::Project<'_>,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let (.., authz_project) =
+        let (authz_silo, authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        // Additional check: if the project's silo has networking restrictions,
+        // only Silo Admins can create VPCs (Modify permission on Silo implies Silo Admin)
+        if authz_project.restricts_networking() {
+            opctx
+                .authorize(authz::Action::Modify, &authz_silo)
+                .await?;
+        }
 
         let saga_params = sagas::vpc_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
