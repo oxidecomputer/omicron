@@ -11,7 +11,6 @@ use dropshot::HttpError;
 use http::Response;
 use http::StatusCode;
 use nexus_db_lookup::lookup;
-use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::CrdbScimProviderStore;
 use nexus_types::external_api::views;
@@ -30,10 +29,11 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
     ) -> ListResultVec<views::ScimClientBearerToken> {
-        let (.., authz_silo, _) =
-            silo_lookup.fetch_for(authz::Action::ListChildren).await?;
+        let (.., authz_silo, _) = silo_lookup.fetch().await?;
+
         let tokens =
             self.datastore().scim_idp_get_tokens(opctx, &authz_silo).await?;
+
         Ok(tokens.into_iter().map(|t| t.into()).collect())
     }
 
@@ -42,10 +42,11 @@ impl super::Nexus {
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
     ) -> CreateResult<views::ScimClientBearerTokenValue> {
-        let (.., authz_silo, _) =
-            silo_lookup.fetch_for(authz::Action::ListChildren).await?;
+        let (.., authz_silo, _) = silo_lookup.fetch().await?;
+
         let token =
             self.datastore().scim_idp_create_token(opctx, &authz_silo).await?;
+
         Ok(token.into())
     }
 
@@ -55,8 +56,7 @@ impl super::Nexus {
         silo_lookup: &lookup::Silo<'_>,
         token_id: Uuid,
     ) -> LookupResult<views::ScimClientBearerToken> {
-        let (.., authz_silo, _) =
-            silo_lookup.fetch_for(authz::Action::ListChildren).await?;
+        let (.., authz_silo, _) = silo_lookup.fetch().await?;
 
         let token = self
             .datastore()
@@ -72,8 +72,7 @@ impl super::Nexus {
         silo_lookup: &lookup::Silo<'_>,
         token_id: Uuid,
     ) -> DeleteResult {
-        let (.., authz_silo, _) =
-            silo_lookup.fetch_for(authz::Action::ListChildren).await?;
+        let (.., authz_silo, _) = silo_lookup.fetch().await?;
 
         self.datastore()
             .scim_idp_delete_token_by_id(opctx, &authz_silo, token_id)

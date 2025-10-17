@@ -1042,7 +1042,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             // SCIM operations are authenticated by resolving a token (that does
             // _not_ resolve to any Actor) to a silo-specific SCIM server
             // implementation. There isn't any opctx to use, so the "external
-            // authentication" one is used here for audit purposes.
+            // scim" one is used here for audit purposes.
             let opctx = nexus.opctx_external_scim();
             let audit =
                 nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
