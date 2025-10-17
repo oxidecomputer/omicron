@@ -111,24 +111,23 @@ impl NodeTask {
     ///
     /// This should be spawned into its own tokio task
     pub async fn run(&mut self) {
-        let listener = Server::new(
-            self.config.sprockets.clone(),
-            self.config.listen_addr,
-            self.log.clone(),
-        )
-        .await
-        .expect("sprockets server can listen");
-        info!(self.log, "Started listening"; "local_addr" => %self.config.listen_addr);
         loop {
+            // TODO: Real corpus
+            let corpus = vec![];
             tokio::select! {
-                // TODO: Plumb through corpus update in `listener.accept`
-                Err(err) = listener.accept(vec![]) => {
-                    error!(self.log, "Failed to accept connection: {err}");
-                    continue;
-                }
                 Some(request) = self.rx.recv() => {
-                    //self.on_api_request(request).await;
+                    self.on_api_request(request).await;
                 }
+                res = self.conn_mgr.step(corpus.clone()) => {
+                    if let Err(err) = res {
+                        error!(self.log, "Failed to accept connection"; &err);
+                        continue;
+                    }
+                }
+                Some(msg) = self.conn_mgr_rx.recv() => {
+                    self.on_conn_msg(msg).await
+                }
+
             }
         }
     }
@@ -149,8 +148,12 @@ impl NodeTask {
                     .client_handshake_completed(task_id, addr, peer_id)
                     .await;
             }
-            ConnToMainMsgInner::Received { from, msg } => {}
-            ConnToMainMsgInner::ReceivedNetworkConfig { from, config } => {}
+            ConnToMainMsgInner::Received { from, msg } => {
+                todo!();
+            }
+            ConnToMainMsgInner::ReceivedNetworkConfig { from, config } => {
+                todo!();
+            }
         }
     }
 
@@ -169,19 +172,20 @@ impl NodeTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::connection_manager::platform_id_to_baseboard_id;
     use dropshot::test_util::log_prefix_for_test;
     use omicron_test_utils::dev::test_setup_log;
-    use pki_playground::sprockets::{
+    use sprockets_tls::keys::ResolveSetting;
+    use sprockets_tls_test_utils::{
         alias_prefix, cert_path, certlist_path, private_key_path, root_prefix,
         sprockets_auth_prefix,
     };
-    use sprockets_tls::keys::ResolveSetting;
 
     fn pki_doc_to_node_configs(dir: Utf8PathBuf, n: usize) -> Vec<Config> {
         (1..=n)
             .map(|i| {
                 let baseboard_id = platform_id_to_baseboard_id(
-                    &pki_playground::sprockets::platform_id(i),
+                    &sprockets_tls_test_utils::platform_id(i),
                 );
                 let listen_addr = SocketAddrV6::new(
                     std::net::Ipv6Addr::LOCALHOST,
@@ -225,23 +229,14 @@ mod tests {
         println!("Writing keys and certs to {dir}");
         let num_nodes = 4;
 
+        let file_behavior =
+            sprockets_tls_test_utils::OutputFileExistsBehavior::Overwrite;
+
         // Create `num_nodes` nodes worth of keys and certs
-        let doc = pki_playground::sprockets::generate_config(num_nodes);
-        doc.write_key_pairs(
-            dir.clone(),
-            pki_playground::OutputFileExistsBehavior::Overwrite,
-        )
-        .unwrap();
-        doc.write_certificates(
-            dir.clone(),
-            pki_playground::OutputFileExistsBehavior::Overwrite,
-        )
-        .unwrap();
-        doc.write_certificate_lists(
-            dir.clone(),
-            pki_playground::OutputFileExistsBehavior::Overwrite,
-        )
-        .unwrap();
+        let doc = sprockets_tls_test_utils::generate_config(num_nodes);
+        doc.write_key_pairs(dir.clone(), file_behavior).unwrap();
+        doc.write_certificates(dir.clone(), file_behavior).unwrap();
+        doc.write_certificate_lists(dir.clone(), file_behavior).unwrap();
 
         // This is just a made up digest. We aren't currently using a corpus, so it
         // doesn't matter what the measurements are, just that there is at least
@@ -261,7 +256,8 @@ mod tests {
 
         let configs = pki_doc_to_node_configs(dir, num_nodes);
 
-        let (mut task, handle) = NodeTask::new(configs[0].clone(), &logctx.log);
+        let (mut task, handle) =
+            NodeTask::new(configs[0].clone(), &logctx.log).await;
         tokio::spawn(async move { task.run().await });
 
         loop {

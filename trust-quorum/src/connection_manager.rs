@@ -4,9 +4,9 @@
 
 //! A mechanism for maintaining a full mesh of trust quorum node connections
 
+use crate::established_conn::EstablishedConn;
 use crate::{BaseboardId, PeerMsg};
 // TODO: Move or copy this to this crate?
-use crate::established_conn::EstablishedConn;
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use futures::StreamExt;
@@ -18,14 +18,19 @@ use sprockets_tls::keys::SprocketsConfig;
 use sprockets_tls::server::SprocketsAcceptor;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use tokio::time::{MissedTickBehavior, interval};
 
 /// We only expect one outstanding request at a time for `Init_` or
 /// `LoadRackSecret` requests, We can have one of those requests in
 /// flight while allowing `PeerAddresses` updates. We also allow status
 /// requests in parallel. Just leave some room.
 const CHANNEL_BOUND: usize = 10;
+
+// Time between checks to see if we need to reconnecto to any peers
+const RECONNECT_TIME: Duration = Duration::from_secs(5);
 
 /// An error returned from `ConnMgr::accept`
 #[derive(Debug, thiserror::Error, SlogInlineError)]
@@ -202,6 +207,12 @@ impl ConnMgr {
         .await
         .expect("sprockets server can listen");
 
+        info!(
+            log,
+            "Started listening";
+            "local_addr" => %listen_addr
+        );
+
         ConnMgr {
             log,
             main_tx,
@@ -223,6 +234,9 @@ impl ConnMgr {
         &mut self,
         corpus: Vec<Utf8PathBuf>,
     ) -> Result<(), AcceptError> {
+        let mut interval = interval(RECONNECT_TIME);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         loop {
             tokio::select! {
                 acceptor = self.server.accept(corpus.clone()) => {
@@ -238,6 +252,9 @@ impl ConnMgr {
                         }
 
                     }
+                }
+                _ = interval.tick() => {
+                    self.reconnect(corpus.clone()).await;
                 }
             }
         }
@@ -592,7 +609,7 @@ impl ConnMgr {
     }
 }
 
-fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
+pub fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
     let mut platform_id_iter = platform_id.split(":");
     let part_number = platform_id_iter.nth(1).unwrap().to_string();
     let serial_number = platform_id_iter.skip(1).next().unwrap().to_string();
