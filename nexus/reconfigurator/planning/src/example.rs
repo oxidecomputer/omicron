@@ -596,6 +596,8 @@ impl ExampleSystemBuilder {
                             )
                             .unwrap();
                     }
+                    let mut internal_dns_subnets =
+                        builder.available_internal_dns_subnets().unwrap();
                     for _ in 0..self
                         .internal_dns_count
                         .on(discretionary_ix, discretionary_sled_count)
@@ -608,6 +610,9 @@ impl ExampleSystemBuilder {
                                     .expect(
                                         "obtained InternalDNS image source",
                                     ),
+                                internal_dns_subnets.next().expect(
+                                    "sufficient available internal DNS subnets",
+                                ),
                             )
                             .unwrap();
                     }
