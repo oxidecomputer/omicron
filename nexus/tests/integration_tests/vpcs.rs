@@ -335,7 +335,8 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Grant the user Silo Collaborator role so they can create a project
-    let silo_policy_url = format!("/v1/system/silos/{}/policy", restricted_silo_name);
+    let silo_policy_url =
+        format!("/v1/system/silos/{}/policy", restricted_silo_name);
     let existing_silo_policy: shared::Policy<shared::SiloRole> =
         NexusRequest::object_get(client, &silo_policy_url)
             .authn_as(AuthnMode::PrivilegedUser)
@@ -344,14 +345,17 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
             .expect("failed to fetch silo policy")
             .parsed_body()
             .expect("failed to parse silo policy");
-    let new_role_assignment =
-        shared::RoleAssignment::for_silo_user(test_user.id, shared::SiloRole::Collaborator);
+    let new_role_assignment = shared::RoleAssignment::for_silo_user(
+        test_user.id,
+        shared::SiloRole::Collaborator,
+    );
     let new_role_assignments = existing_silo_policy
         .role_assignments
         .into_iter()
         .chain(std::iter::once(new_role_assignment))
         .collect();
-    let new_silo_policy = shared::Policy { role_assignments: new_role_assignments };
+    let new_silo_policy =
+        shared::Policy { role_assignments: new_role_assignments };
     NexusRequest::object_put(client, &silo_policy_url, Some(&new_silo_policy))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -369,22 +373,16 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
     };
 
     let _restricted_project: views::Project =
-        NexusRequest::objects_post(
-            &client,
-            "/v1/projects",
-            &project_params,
-        )
-        .authn_as(AuthnMode::SiloUser(test_user.id))
-        .execute_and_parse_unwrap()
-        .await;
+        NexusRequest::objects_post(&client, "/v1/projects", &project_params)
+            .authn_as(AuthnMode::SiloUser(test_user.id))
+            .execute_and_parse_unwrap()
+            .await;
 
     // Try to create a VPC as a Silo Collaborator (with Project Creator role)
     // Should FAIL with 403 Forbidden because the silo has restrict_network_actions=true
     // Note: When authenticated as a silo user, the silo context is implicit
-    let restricted_vpcs_url = format!(
-        "/v1/vpcs?project={}",
-        restricted_project_name
-    );
+    let restricted_vpcs_url =
+        format!("/v1/vpcs?project={}", restricted_project_name);
     let restricted_vpc_params = params::VpcCreate {
         identity: IdentityMetadataCreateParams {
             name: "restricted-vpc".parse().unwrap(),
