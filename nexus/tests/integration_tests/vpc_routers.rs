@@ -518,6 +518,7 @@ async fn test_vpc_routers_custom_delivered_to_instance(
             true,
             Default::default(),
             None,
+            Vec::new(),
         )
         .await;
         instance_simulate(

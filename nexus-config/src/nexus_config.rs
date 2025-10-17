@@ -441,6 +441,8 @@ pub struct BackgroundTaskConfig {
     pub webhook_deliverator: WebhookDeliveratorConfig,
     /// configuration for SP ereport ingester task
     pub sp_ereport_ingester: SpEreportIngesterConfig,
+    /// configuration for multicast group reconciler task
+    pub multicast_group_reconciler: MulticastGroupReconcilerConfig,
 }
 
 #[serde_as]
@@ -870,6 +872,36 @@ impl Default for SpEreportIngesterConfig {
     }
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MulticastGroupReconcilerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reconciles multicast group state with dendrite switch configuration
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+impl Default for MulticastGroupReconcilerConfig {
+    fn default() -> Self {
+        Self { period_secs: Duration::from_secs(60) }
+    }
+}
+
+/// TODO: remove this when multicast is implemented end-to-end.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MulticastConfig {
+    /// Whether multicast functionality is enabled or not.
+    ///
+    /// When false, multicast API calls remain accessible but no actual
+    /// multicast operations occur (no switch programming, reconciler disabled).
+    /// Instance sagas will skip multicast operations. This allows gradual
+    /// rollout and testing of multicast configuration.
+    ///
+    /// Default: false (experimental feature, disabled by default)
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -906,6 +938,9 @@ pub struct PackageConfig {
     pub initial_reconfigurator_config: Option<ReconfiguratorConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
+    /// Multicast feature configuration
+    #[serde(default)]
+    pub multicast: MulticastConfig,
     /// Default Crucible region allocation strategy
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
@@ -1169,6 +1204,7 @@ mod test {
             webhook_deliverator.first_retry_backoff_secs = 45
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
+            multicast_group_reconciler.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1413,7 +1449,12 @@ mod test {
                             period_secs: Duration::from_secs(47),
                             disable: false,
                         },
+                        multicast_group_reconciler:
+                            MulticastGroupReconcilerConfig {
+                                period_secs: Duration::from_secs(60),
+                            },
                     },
+                    multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
                             seed: Some(0)
@@ -1511,6 +1552,7 @@ mod test {
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
+            multicast_group_reconciler.period_secs = 60
 
             [default_region_allocation_strategy]
             type = "random"

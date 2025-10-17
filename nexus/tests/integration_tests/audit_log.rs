@@ -326,6 +326,7 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
         false, // start=false, so instance is created in stopped state
         None::<InstanceAutoRestartPolicy>,
         None::<InstanceCpuPlatform>,
+        Vec::new(),
     )
     .await;
     let _disk = create_disk(client, "test-project", "test-disk").await;
