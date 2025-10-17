@@ -4,17 +4,17 @@
 
 //! A runnable async trust quorum node that wraps the sans-io [`crate::Node`]
 
-use crate::connection_manager::{ConnMgr, ConnToMainMsg, ConnToMainMsgInner};
+use crate::connection_manager::{
+    ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner,
+};
 use crate::{BaseboardId, Node, NodeCtx};
-use camino::Utf8PathBuf;
-use slog::{Logger, error, info, o, warn};
-use sprockets_tls::Stream;
-use sprockets_tls::client::Client;
+use slog::{Logger, error, info, o};
 use sprockets_tls::keys::SprocketsConfig;
-use sprockets_tls::server::{Server, SprocketsAcceptor};
 use std::collections::BTreeSet;
-use std::net::{SocketAddr, SocketAddrV6};
+use std::net::SocketAddrV6;
 use thiserror::Error;
+use tokio::sync::mpsc::error::{SendError, TrySendError};
+use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, Clone)]
@@ -32,13 +32,30 @@ pub enum NodeApiRequest {
     ///
     /// These are generated from DDM prefixes learned by the bootstrap agent.
     BootstrapAddresses(BTreeSet<SocketAddrV6>),
+
+    /// Retrieve connectivity status via the `ConnMgr`
+    ConnMgrStatus { responder: oneshot::Sender<ConnMgrStatus> },
 }
 
 /// An error response from a `NodeApiRequest`
 #[derive(Error, Debug, PartialEq)]
 pub enum NodeApiError {
-    #[error("failed to send request to node task")]
+    #[error("Failed to send request to node task")]
     Send,
+    #[error("Failed to receive response from node task")]
+    Recv,
+}
+
+impl<T> From<SendError<T>> for NodeApiError {
+    fn from(_: SendError<T>) -> Self {
+        NodeApiError::Send
+    }
+}
+
+impl From<RecvError> for NodeApiError {
+    fn from(_: RecvError) -> Self {
+        NodeApiError::Recv
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -62,11 +79,15 @@ impl NodeTaskHandle {
         &self,
         addrs: BTreeSet<SocketAddrV6>,
     ) -> Result<(), NodeApiError> {
-        self.tx
-            .send(NodeApiRequest::BootstrapAddresses(addrs))
-            .await
-            .map_err(|_| NodeApiError::Send)?;
+        self.tx.send(NodeApiRequest::BootstrapAddresses(addrs)).await?;
         Ok(())
+    }
+
+    pub async fn conn_mgr_status(&self) -> Result<ConnMgrStatus, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(NodeApiRequest::ConnMgrStatus { responder: tx }).await?;
+        let res = rx.await?;
+        Ok(res)
     }
 }
 
@@ -172,6 +193,9 @@ impl NodeTask {
                 let corpus = vec![];
                 self.conn_mgr.update_bootstrap_connections(addrs, corpus).await;
             }
+            NodeApiRequest::ConnMgrStatus { responder } => {
+                let _ = responder.send(self.conn_mgr.status());
+            }
         }
     }
 }
@@ -180,6 +204,7 @@ impl NodeTask {
 mod tests {
     use super::*;
     use crate::connection_manager::platform_id_to_baseboard_id;
+    use camino::Utf8PathBuf;
     use dropshot::test_util::log_prefix_for_test;
     use omicron_test_utils::dev::test_setup_log;
     use sprockets_tls::keys::ResolveSetting;
@@ -272,6 +297,13 @@ mod tests {
 
         for h in &handles {
             h.load_peer_addresses(listen_addrs.clone()).await.unwrap();
+        }
+
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        for h in &handles {
+            let status = h.conn_mgr_status().await.unwrap();
+            println!("{status:#?}");
         }
 
         tokio::time::sleep(Duration::from_secs(60 * 60)).await;

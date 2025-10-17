@@ -143,6 +143,29 @@ impl ConnectionType {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum ConnState {
+    Connecting,
+    Accepting,
+    Established(BaseboardId),
+}
+
+/// Information about a single connection task
+#[derive(Debug, Clone)]
+pub struct ConnInfo {
+    pub state: ConnState,
+    pub addr: SocketAddrV6,
+    pub task_id: TaskId,
+}
+
+/// Status information useful for debugging
+#[derive(Debug, Clone)]
+pub struct ConnMgrStatus {
+    pub bootstrap_addrs: BTreeSet<SocketAddrV6>,
+    pub connections: Vec<ConnInfo>,
+    pub num_task_join_handles: u64,
+}
+
 /// A structure to manage all sprockets connections to peer nodes
 ///
 /// Each sprockets connection runs in its own task which communicates with the
@@ -236,6 +259,36 @@ impl ConnMgr {
             connecting: BTreeMap::new(),
             accepting: BTreeMap::new(),
             established: BTreeMap::new(),
+        }
+    }
+
+    pub fn status(&self) -> ConnMgrStatus {
+        let connections = self
+            .connecting
+            .iter()
+            .map(|(addr, task_handle)| ConnInfo {
+                state: ConnState::Connecting,
+                addr: *addr,
+                task_id: task_handle.task_id,
+            })
+            .chain(self.accepting.iter().map(|(addr, task_handle)| ConnInfo {
+                state: ConnState::Accepting,
+                addr: *addr,
+                task_id: task_handle.task_id,
+            }))
+            .chain(self.established.iter().map(
+                |(baseboard_id, task_handle)| ConnInfo {
+                    state: ConnState::Established(baseboard_id.clone()),
+                    addr: task_handle.addr(),
+                    task_id: task_handle.task_id,
+                },
+            ))
+            .collect();
+
+        ConnMgrStatus {
+            bootstrap_addrs: self.bootstrap_addrs.clone(),
+            connections,
+            num_task_join_handles: self.join_handles.len() as u64,
         }
     }
 
