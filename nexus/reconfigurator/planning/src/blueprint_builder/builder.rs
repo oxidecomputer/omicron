@@ -751,7 +751,7 @@ impl<'a> BlueprintBuilder<'a> {
 
             let allocator = BlueprintResourceAllocator::new(
                 self.sled_editors.values(),
-                self.input.service_ip_pool_ranges().to_vec(),
+                self.input.external_ip_policy(),
             )?;
 
             Ok::<_, Error>(allocator)
@@ -2803,6 +2803,7 @@ pub mod test {
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintDatasetDisposition;
+    use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
@@ -3541,7 +3542,8 @@ pub mod test {
             assert!(!used_ip_ranges.is_empty());
             let input = {
                 let mut builder = input.into_builder();
-                builder.policy_mut().service_ip_pool_ranges = used_ip_ranges;
+                builder.policy_mut().external_ips =
+                    ExternalIpPolicy::new(used_ip_ranges);
                 builder.build()
             };
 

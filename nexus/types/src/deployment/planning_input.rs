@@ -45,6 +45,7 @@ use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
 use std::error;
 use std::fmt;
+use std::net::IpAddr;
 use strum::Display;
 use strum::IntoEnumIterator;
 
@@ -223,8 +224,8 @@ impl PlanningInput {
         &self.policy.planner_config
     }
 
-    pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
-        &self.policy.service_ip_pool_ranges
+    pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
+        &self.policy.external_ips
     }
 
     pub fn clickhouse_cluster_enabled(&self) -> bool {
@@ -974,9 +975,9 @@ impl SledState {
 /// sled additionally has non-policy [`SledResources`] needed for planning.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
-    /// ranges specified by the IP pool for externally-visible control plane
+    /// description of IP addresses for externally-visible control plane
     /// services (e.g., external DNS, Nexus, boundary NTP)
-    pub service_ip_pool_ranges: Vec<IpRange>,
+    pub external_ips: ExternalIpPolicy,
 
     /// desired total number of deployed Boundary NTP zones
     pub target_boundary_ntp_zone_count: usize,
@@ -1041,6 +1042,98 @@ pub struct Policy {
 
     /// Runtime configuration (feature flags) to control planner behavior.
     pub planner_config: PlannerConfig,
+}
+
+/// Subset of [`Policy`] specific to external IP addresses.
+// NOTE: The fields of the struct are private and we manually implement
+// `Deserialize` to maintain invariants (e.g., that every `external_dns_ip` is
+// contained in one of the `service_ip_pool_ranges`).
+#[derive(Debug, Clone, Serialize)]
+pub struct ExternalIpPolicy {
+    /// ranges specified by the IP pool for externally-visible control plane
+    /// services (e.g., external DNS, Nexus, boundary NTP)
+    service_ip_pool_ranges: Vec<IpRange>,
+
+    /// specific IP addresses contained in `service_ip_pool_ranges` that are
+    /// earmarked for external DNS
+    external_dns_ips: BTreeSet<IpAddr>,
+}
+
+impl<'de> Deserialize<'de> for ExternalIpPolicy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        // The fields of `ExternalIpPolicyShadow` should exactly match the
+        // fields of `ExternalIpPolicy`. We're not really using serde's remote
+        // derive, but by adding the attribute we get compile-time checking that
+        // all the field names and types match. (It doesn't check the _order_,
+        // but that should be fine as long as we're using JSON or similar
+        // formats.)
+        #[derive(Deserialize)]
+        #[serde(remote = "ExternalIpPolicy")]
+        struct ExternalIpPolicyShadow {
+            service_ip_pool_ranges: Vec<IpRange>,
+            external_dns_ips: BTreeSet<IpAddr>,
+        }
+
+        // Deserialize without validation...
+        let ExternalIpPolicy { service_ip_pool_ranges, external_dns_ips } =
+            ExternalIpPolicyShadow::deserialize(deserializer)?;
+
+        // ...then validate.
+        let mut policy = ExternalIpPolicy::new(service_ip_pool_ranges);
+        for ip in external_dns_ips {
+            policy.set_ip_for_external_dns(ip).map_err(D::Error::custom)?;
+        }
+
+        Ok(policy)
+    }
+}
+
+impl ExternalIpPolicy {
+    pub fn empty() -> Self {
+        Self {
+            service_ip_pool_ranges: Vec::new(),
+            external_dns_ips: BTreeSet::new(),
+        }
+    }
+
+    // TODO-john comment
+    pub fn new(service_ip_pool_ranges: Vec<IpRange>) -> Self {
+        Self { service_ip_pool_ranges, external_dns_ips: BTreeSet::new() }
+    }
+
+    // TODO-john comment
+    pub fn set_ip_for_external_dns(
+        &mut self,
+        ip: IpAddr,
+    ) -> Result<(), ExternalIpPolicyError> {
+        if self.service_ip_pool_ranges.iter().any(|pool| pool.contains(ip)) {
+            self.external_dns_ips.insert(ip);
+            Ok(())
+        } else {
+            Err(ExternalIpPolicyError::ExternalDnsOutsideServiceIpPools(ip))
+        }
+    }
+
+    // TODO-john comment / remove / rename?
+    pub fn push(&mut self, pool_range: IpRange) {
+        self.service_ip_pool_ranges.push(pool_range);
+    }
+
+    // TODO-john comment / remove?
+    pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
+        &self.service_ip_pool_ranges
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ExternalIpPolicyError {
+    #[error("external DNS IP {0} is not a member of any service IP pool")]
+    ExternalDnsOutsideServiceIpPools(IpAddr),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -1297,7 +1390,7 @@ impl PlanningInputBuilder {
         // This empty input is known to be valid.
         PlanningInput {
             policy: Policy {
-                service_ip_pool_ranges: Vec::new(),
+                external_ips: ExternalIpPolicy::empty(),
                 target_boundary_ntp_zone_count: 0,
                 target_nexus_zone_count: 0,
                 target_internal_dns_zone_count: 0,

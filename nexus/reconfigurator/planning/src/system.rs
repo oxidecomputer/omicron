@@ -33,6 +33,7 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -117,7 +118,7 @@ pub struct SystemDescription {
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     target_crucible_pantry_zone_count: usize,
-    service_ip_pool_ranges: Vec<IpRange>,
+    external_ip_policy: ExternalIpPolicy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
@@ -181,13 +182,13 @@ impl SystemDescription {
             CockroachDbClusterVersion::POLICY;
 
         // IPs from TEST-NET-1 (RFC 5737)
-        let service_ip_pool_ranges = vec![
+        let external_ip_policy = ExternalIpPolicy::new(vec![
             IpRange::try_from((
                 "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
                 "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
             ))
             .unwrap(),
-        ];
+        ]);
 
         SystemDescription {
             sleds: IndexMap::new(),
@@ -202,7 +203,7 @@ impl SystemDescription {
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
             target_crucible_pantry_zone_count,
-            service_ip_pool_ranges,
+            external_ip_policy,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
@@ -302,11 +303,11 @@ impl SystemDescription {
         self.target_internal_dns_zone_count
     }
 
-    pub fn service_ip_pool_ranges(
+    pub fn external_ip_policy(
         &mut self,
-        ranges: Vec<IpRange>,
+        policy: ExternalIpPolicy,
     ) -> &mut Self {
-        self.service_ip_pool_ranges = ranges;
+        self.external_ip_policy = policy;
         self
     }
 
@@ -1075,7 +1076,7 @@ impl SystemDescription {
         &self,
     ) -> anyhow::Result<PlanningInputBuilder> {
         let policy = Policy {
-            service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
+            external_ips: self.external_ip_policy.clone(),
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,

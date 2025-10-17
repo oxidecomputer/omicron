@@ -14,14 +14,13 @@ use nexus_reconfigurator_planning::{
 };
 use nexus_types::{
     deployment::{
-        Blueprint, BlueprintTarget, SledFilter, UnstableReconfiguratorState,
+        Blueprint, BlueprintTarget, ExternalIpPolicy, SledFilter,
+        UnstableReconfiguratorState,
     },
     internal_api::params::{DnsConfigParams, DnsConfigZone},
     inventory::{CabooseWhich, Collection},
 };
-use omicron_common::{
-    address::IpRange, api::external::Generation, disk::M2Slot,
-};
+use omicron_common::{api::external::Generation, disk::M2Slot};
 use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
 use strum::IntoEnumIterator as _;
 
@@ -599,8 +598,8 @@ pub struct LoadSerializedSystemResult {
     /// The blueprint IDs successfully loaded.
     pub blueprint_ids: Vec<BlueprintUuid>,
 
-    /// The service IP pool ranges.
-    pub service_ip_pool_ranges: Vec<IpRange>,
+    /// The external IP policy.
+    pub external_ip_policy: ExternalIpPolicy,
 
     /// Internal DNS generations.
     pub internal_dns_generations: Vec<Generation>,
@@ -617,7 +616,7 @@ impl LoadSerializedSystemResult {
             sled_ids: Vec::new(),
             collection_ids: Vec::new(),
             blueprint_ids: Vec::new(),
-            service_ip_pool_ranges: Vec::new(),
+            external_ip_policy: ExternalIpPolicy::empty(),
             internal_dns_generations: Vec::new(),
             external_dns_generations: Vec::new(),
         }
@@ -643,10 +642,10 @@ impl fmt::Display for LoadSerializedSystemResult {
             join_comma_or_none(&self.blueprint_ids)
         )?;
         writeln!(
-            // TODO: output format for IP ranges that's not just Debug?
+            // TODO: output format for IP policy that's not just Debug?
             f,
-            "loaded service IP pool ranges: {:?}",
-            self.service_ip_pool_ranges,
+            "loaded external IP policy: {:?}",
+            self.external_ip_policy,
         )?;
         writeln!(
             f,
@@ -882,11 +881,11 @@ impl SimSystemBuilderInner {
             }
         }
 
-        self.system.description.service_ip_pool_ranges(
-            state.planning_input.service_ip_pool_ranges().to_vec(),
+        self.system.description.external_ip_policy(
+            state.planning_input.external_ip_policy().clone(),
         );
-        system_res.service_ip_pool_ranges =
-            state.planning_input.service_ip_pool_ranges().to_vec();
+        system_res.external_ip_policy =
+            state.planning_input.external_ip_policy().clone();
 
         self.set_internal_dns(state.internal_dns);
         self.set_external_dns(state.external_dns);

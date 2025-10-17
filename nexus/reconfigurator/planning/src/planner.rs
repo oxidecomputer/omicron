@@ -3172,9 +3172,12 @@ pub(crate) mod test {
         // the service IP pool. This will force reuse of the IP that was
         // allocated to the expunged Nexus zone.
         let mut builder = input.into_builder();
-        assert_eq!(builder.policy_mut().service_ip_pool_ranges.len(), 1);
+        assert_eq!(
+            builder.policy_mut().external_ips.service_ip_pool_ranges().len(),
+            1
+        );
         builder.policy_mut().target_nexus_zone_count =
-            builder.policy_mut().service_ip_pool_ranges[0]
+            builder.policy_mut().external_ips.service_ip_pool_ranges()[0]
                 .len()
                 .try_into()
                 .unwrap();
