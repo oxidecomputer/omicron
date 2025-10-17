@@ -3,6 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{MacAddr, VpcSubnet};
+use crate::Ipv4Addr;
+use crate::Ipv6Addr;
 use crate::Name;
 use crate::SqlU8;
 use crate::impl_enum_type;
@@ -11,13 +13,13 @@ use chrono::Utc;
 use db_macros::Resource;
 use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
-use ipnetwork::NetworkSize;
 use nexus_db_schema::schema::instance_network_interface;
 use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::service_network_interface;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
+use omicron_common::api::external::Error;
 use omicron_common::api::{external, internal};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -49,25 +51,25 @@ impl_enum_type! {
 pub struct NetworkInterface {
     #[diesel(embed)]
     pub identity: NetworkInterfaceIdentity,
-
     pub kind: NetworkInterfaceKind,
     pub parent_id: Uuid,
-
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
-
     pub mac: MacAddr,
-    // TODO-correctness: We need to split this into an optional V4 and optional V6 address, at
-    // least one of which will always be specified.
+    // NOTE: At least one of the below will be non-None.
     //
-    // If user requests an address of either kind, give exactly that and not the other.
-    // If neither is specified, auto-assign one of each?
-    pub ip: IpNetwork,
-
+    // We could use an enum to enforce this, but there's a lot of diesel
+    // machinery needed and it makes sharing the type between this model and the
+    // `InstanceNetworkInterface` below difficult. In particular, the db-lookup
+    // stuff chokes because we can't make the same type selectable from two
+    // different tables. In any case, we want to enforce this on the
+    // `IncompleteNetworkInterface` type, and we already do enforce it via a
+    // check constraint in the database itself.
+    pub ipv4: Option<Ipv4Addr>,
+    pub ipv6: Option<Ipv6Addr>,
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
-
     pub transit_ips: Vec<IpNetwork>,
 }
 
@@ -76,6 +78,12 @@ impl NetworkInterface {
         self,
         subnet: oxnet::IpNet,
     ) -> internal::shared::NetworkInterface {
+        // TODO-completeness: Handle IP Subnets of either version.
+        // https://github.com/oxidecomputer/omicron/issues/9246.
+        assert!(
+            matches!(subnet, oxnet::IpNet::V4(_)),
+            "Only IPv4 VPC Subnets are currently supported"
+        );
         internal::shared::NetworkInterface {
             id: self.id(),
             kind: match self.kind {
@@ -96,7 +104,9 @@ impl NetworkInterface {
                 }
             },
             name: self.name().clone(),
-            ip: self.ip.ip(),
+            // TODO-completeness: Handle one or both IP addresses when
+            // addressing https://github.com/oxidecomputer/omicron/issues/9246.
+            ip: self.ipv4.expect("only IPv4 interfaces are supported").into(),
             mac: self.mac.into(),
             subnet,
             vni: external::Vni::try_from(0).unwrap(),
@@ -117,18 +127,16 @@ impl NetworkInterface {
 pub struct InstanceNetworkInterface {
     #[diesel(embed)]
     pub identity: InstanceNetworkInterfaceIdentity,
-
     pub instance_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
-
     pub mac: MacAddr,
-    pub ip: IpNetwork,
-
+    // NOTE: At least one of the below will be non-None.
+    pub ipv4: Option<Ipv4Addr>,
+    pub ipv6: Option<Ipv6Addr>,
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
-
     pub transit_ips: Vec<IpNetwork>,
 }
 
@@ -142,14 +150,13 @@ pub struct InstanceNetworkInterface {
 pub struct ServiceNetworkInterface {
     #[diesel(embed)]
     pub identity: ServiceNetworkInterfaceIdentity,
-
     pub service_id: Uuid,
     pub vpc_id: Uuid,
     pub subnet_id: Uuid,
-
     pub mac: MacAddr,
-    pub ip: IpNetwork,
-
+    // NOTE: At least one of the below will be non-None.
+    pub ipv4: Option<Ipv4Addr>,
+    pub ipv6: Option<Ipv6Addr>,
     pub slot: SqlU8,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
@@ -174,35 +181,37 @@ impl ServiceNetworkInterface {
     }
 }
 
+// TODO-remove: Remove this when we support dual-stack service NICs. See
+// https://github.com/oxidecomputer/omicron/issues/9246.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "Service NIC {nic_id} has a range of IPs ({ip}); only a single IP is supported"
+    "Service NIC {nic_id} has an IPv6 address ({ip}); \
+    only a single IPv4 address is supported"
 )]
-pub struct ServiceNicNotSingleIpError {
+pub struct ServiceNicNotIpv4OnlyError {
     pub nic_id: Uuid,
-    pub ip: ipnetwork::IpNetwork,
+    pub ip: std::net::Ipv6Addr,
 }
 
 impl TryFrom<&'_ ServiceNetworkInterface>
     for nexus_types::deployment::OmicronZoneNic
 {
-    type Error = ServiceNicNotSingleIpError;
+    type Error = ServiceNicNotIpv4OnlyError;
 
     fn try_from(nic: &ServiceNetworkInterface) -> Result<Self, Self::Error> {
-        let size = match nic.ip.size() {
-            NetworkSize::V4(n) => u128::from(n),
-            NetworkSize::V6(n) => n,
-        };
-        if size != 1 {
-            return Err(ServiceNicNotSingleIpError {
+        if let Some(ipv6) = nic.ipv6 {
+            return Err(ServiceNicNotIpv4OnlyError {
                 nic_id: nic.id(),
-                ip: nic.ip,
+                ip: *ipv6,
             });
         }
+        let Some(ip) = nic.ipv4 else {
+            unreachable!("must be single-stack IPv4");
+        };
         Ok(Self {
             id: VnicUuid::from_untyped_uuid(nic.id()),
             mac: *nic.mac,
-            ip: nic.ip.ip(),
+            ip: ip.into(),
             slot: *nic.slot,
             primary: nic.primary,
         })
@@ -229,7 +238,8 @@ impl NetworkInterface {
             vpc_id: self.vpc_id,
             subnet_id: self.subnet_id,
             mac: self.mac,
-            ip: self.ip,
+            ipv4: self.ipv4,
+            ipv6: self.ipv6,
             slot: self.slot,
             primary: self.primary,
             transit_ips: self.transit_ips,
@@ -255,7 +265,8 @@ impl NetworkInterface {
             vpc_id: self.vpc_id,
             subnet_id: self.subnet_id,
             mac: self.mac,
-            ip: self.ip,
+            ipv4: self.ipv4,
+            ipv6: self.ipv6,
             slot: self.slot,
             primary: self.primary,
         }
@@ -278,7 +289,8 @@ impl From<InstanceNetworkInterface> for NetworkInterface {
             vpc_id: iface.vpc_id,
             subnet_id: iface.subnet_id,
             mac: iface.mac,
-            ip: iface.ip,
+            ipv4: iface.ipv4,
+            ipv6: iface.ipv6,
             slot: iface.slot,
             primary: iface.primary,
             transit_ips: iface.transit_ips,
@@ -302,7 +314,8 @@ impl From<ServiceNetworkInterface> for NetworkInterface {
             vpc_id: iface.vpc_id,
             subnet_id: iface.subnet_id,
             mac: iface.mac,
-            ip: iface.ip,
+            ipv4: iface.ipv4,
+            ipv6: iface.ipv6,
             slot: iface.slot,
             primary: iface.primary,
             transit_ips: vec![],
@@ -338,6 +351,13 @@ impl IncompleteNetworkInterface {
         transit_ips: Vec<IpNetwork>,
     ) -> Result<Self, external::Error> {
         if let Some(ip) = ip {
+            // TODO-completeness:
+            // https://github.com/oxidecomputer/omicron/issues/9244.
+            if ip.is_ipv6() {
+                return Err(Error::invalid_request(
+                    "IPv6 addresses are not yet supported",
+                ));
+            }
             subnet.check_requestable_addr(ip)?;
         };
         if let Some(mac) = mac {
@@ -465,12 +485,15 @@ pub struct NetworkInterfaceUpdate {
 
 impl From<InstanceNetworkInterface> for external::InstanceNetworkInterface {
     fn from(iface: InstanceNetworkInterface) -> Self {
+        // TODO-completeness: Support dual-stack in the public API, see
+        // https://github.com/oxidecomputer/omicron/issues/9248.
+        let ip = iface.ipv4.expect("only IPv4 addresses").into();
         Self {
             identity: iface.identity(),
             instance_id: iface.instance_id,
             vpc_id: iface.vpc_id,
             subnet_id: iface.subnet_id,
-            ip: iface.ip.ip(),
+            ip,
             mac: *iface.mac,
             primary: iface.primary,
             transit_ips: iface

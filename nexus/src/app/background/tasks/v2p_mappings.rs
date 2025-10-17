@@ -1,4 +1,8 @@
-use std::{collections::HashSet, sync::Arc};
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::{collections::HashSet, net::IpAddr, sync::Arc};
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -68,13 +72,25 @@ impl BackgroundTask for V2PManager {
             // create a set of updates from the v2p mappings
             let desired_v2p: HashSet<_> = v2p_mappings
                 .into_iter()
-                .map(|mapping| {
-                    VirtualNetworkInterfaceHost {
-                        virtual_ip: mapping.ip.ip(),
+                .filter_map(|mapping| {
+                    // TODO-completeness: Support dual-stack in the
+                    // `VirtualNetworkInterfaceHost` type. See
+                    // https://github.com/oxidecomputer/omicron/issues/9246.
+                    let Some(virtual_ip) = mapping.ipv4.map(IpAddr::from) else {
+                        error!(
+                            &log,
+                            "No IPv4 address in V2P mapping";
+                            "nic_id" => %mapping.nic_id,
+                            "sled_id" => %mapping.sled_id,
+                        );
+                        return None;
+                    };
+                    Some(VirtualNetworkInterfaceHost {
+                        virtual_ip,
                         virtual_mac: *mapping.mac,
                         physical_host_ip: *mapping.sled_ip,
                         vni: mapping.vni.0,
-                    }
+                    })
                 })
                 .collect();
 

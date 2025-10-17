@@ -526,7 +526,7 @@ pub struct NextIpv4Address {
     inner: NextItemSelfJoined<
         nexus_db_schema::schema::network_interface::table,
         IpNetwork,
-        nexus_db_schema::schema::network_interface::dsl::ip,
+        nexus_db_schema::schema::network_interface::dsl::ipv4,
         Uuid,
         nexus_db_schema::schema::network_interface::dsl::subnet_id,
     >,
@@ -1196,7 +1196,7 @@ impl QueryFragment<Pg> for InsertQuery {
             out.push_sql(")");
         }
         out.push_sql(" AS ");
-        out.push_identifier(dsl::ip::NAME)?;
+        out.push_identifier(dsl::ipv4::NAME)?;
         out.push_sql(", ");
 
         if let Some(slot) = &self.slot_sql {
@@ -1267,7 +1267,7 @@ impl QueryFragment<Pg> for InsertQueryValues {
         out.push_sql(", ");
         out.push_identifier(dsl::mac::NAME)?;
         out.push_sql(", ");
-        out.push_identifier(dsl::ip::NAME)?;
+        out.push_identifier(dsl::ipv4::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::slot::NAME)?;
         out.push_sql(", ");
@@ -2249,9 +2249,13 @@ mod tests {
             .expect("Failed to insert interface with known-good IP address");
         assert_interfaces_eq(&interface, &inserted_interface.clone().into());
         assert_eq!(
-            inserted_interface.ip.ip(),
+            IpAddr::from(inserted_interface.ipv4.expect("an IPv4 address")),
             requested_ip,
             "The requested IP address should be available when no interfaces exist in the table"
+        );
+        assert!(
+            inserted_interface.ipv6.is_none(),
+            "Should not have an IPv6 address"
         );
         context.success().await;
     }
@@ -2323,10 +2327,16 @@ mod tests {
                 &interface,
                 &inserted_interface.clone().into(),
             );
-            let actual_address = inserted_interface.ip.ip();
+            let actual_address = Ipv4Addr::from(
+                inserted_interface.ipv4.expect("an IPv4 address"),
+            );
             assert_eq!(
                 actual_address, expected_address,
                 "Failed to auto-assign correct sequential address to interface"
+            );
+            assert!(
+                inserted_interface.ipv6.is_none(),
+                "Should not have an IPv6 address"
             );
         }
         context.success().await;
@@ -2364,6 +2374,7 @@ mod tests {
 
         // Inserting an interface with the same IP should fail, even if all
         // other parameters are valid.
+        let ip = inserted_interface.ipv4.expect("an IPv4 address");
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             new_instance_id,
@@ -2372,7 +2383,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            Some(inserted_interface.ip.ip()),
+            Some(ip.into()),
             vec![],
         )
         .unwrap();
@@ -3047,7 +3058,7 @@ mod tests {
         }
 
         // Delete the NIC on the first instance.
-        let original_ip = instances[0].1.ip.ip();
+        let original_ip = instances[0].1.ipv4.expect("an IPv4 address");
         context.delete_instance_nics(instances[0].0.id()).await;
 
         // And recreate it, ensuring we get the same IP address again.
@@ -3069,9 +3080,9 @@ mod tests {
             .await
             .expect("Failed to insert interface");
         instances[0].1 = intf;
+        let new_ip = instances[0].1.ipv4.expect("an IPv4 address");
         assert_eq!(
-            instances[0].1.ip.ip(),
-            original_ip,
+            new_ip, original_ip,
             "Should have recreated the first available IP address again"
         );
 
@@ -3101,8 +3112,7 @@ mod tests {
             .await
             .expect("Failed to insert interface");
         assert_eq!(
-            intf.ip.ip(),
-            instances[1].1.ip.ip(),
+            intf.ipv4, instances[1].1.ipv4,
             "Should have used the second address",
         );
 
@@ -3178,9 +3188,10 @@ mod tests {
                         panic!("Should have been able to get the {NTH}-1-th address")
                     })
             ),
-            interface2.ip.ip(),
+            IpAddr::from(interface2.ipv4.expect("an IPv4 address")),
             "Should have allocated 1 less than the smallest existing address"
         );
+        assert!(interface2.ipv6.is_none(), "Should not have an IPv6 address");
 
         context.success().await;
     }

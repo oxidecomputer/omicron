@@ -86,7 +86,8 @@ impl DataStore {
                         sled_ip: sled.ip,
                         vni: vpc.vni,
                         mac: nic.mac,
-                        ip: nic.ip,
+                        ipv4: nic.ipv4,
+                        ipv6: nic.ipv6,
                     }
                 })
                 .collect();
@@ -138,7 +139,8 @@ impl DataStore {
                         sled_ip: sled.ip,
                         vni: vpc.vni,
                         mac: nic.mac,
-                        ip: nic.ip,
+                        ipv4: nic.ipv4,
+                        ipv6: nic.ipv6,
                     }
                 })
                 .collect();
