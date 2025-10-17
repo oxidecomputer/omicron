@@ -33,6 +33,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::datastore::EreportFilters;
 use nexus_db_queries::db::pagination::Paginator;
+use nexus_reconfigurator_preparation::reconfigurator_state_load;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -685,6 +686,48 @@ impl BundleCollection {
             self.bundle.id.to_string(),
         )
         .await?;
+
+        // Collect reconfigurator state
+        const NMAX_BLUEPRINTS: usize = 300;
+        match reconfigurator_state_load(
+            &self.opctx,
+            &self.datastore,
+            NMAX_BLUEPRINTS,
+        )
+        .await
+        {
+            Ok(state) => {
+                let file_path = dir.path().join("reconfigurator_state.json");
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&file_path)
+                    .with_context(|| format!("failed to open {}", file_path))?;
+                serde_json::to_writer_pretty(&file, &state).with_context(
+                    || {
+                        format!(
+                            "failed to serialize reconfigurator state to {}",
+                            file_path
+                        )
+                    },
+                )?;
+                info!(
+                    log,
+                    "Support bundle: collected reconfigurator state";
+                    "target_blueprint" => ?state.target_blueprint,
+                    "num_blueprints" => state.blueprints.len(),
+                    "num_collections" => state.collections.len(),
+                );
+            }
+            Err(err) => {
+                warn!(
+                    log,
+                    "Support bundle: failed to collect reconfigurator state";
+                    "err" => ?err,
+                );
+            }
+        }
 
         let ereport_collection = if let Some(ref ereport_filters) =
             self.request.ereport_query
@@ -2582,6 +2625,106 @@ mod test {
                 db_failing_bundles_updated: 1,
                 ..Default::default()
             }
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_reconfigurator_state_collected(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a support bundle
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                "Testing reconfigurator state collection",
+                nexus.id(),
+                None,
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
+
+        // Collect the bundle
+        let request =
+            BundleRequest { skip_sled_info: true, ..Default::default() };
+        let report = collector
+            .collect_bundle(&opctx, &request)
+            .await
+            .expect("Collection should have succeeded under test")
+            .expect("Collecting the bundle should have generated a report");
+        assert_eq!(report.bundle, bundle.id.into());
+
+        // Verify bundle is active
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Bundle should be in db");
+        assert_eq!(observed_bundle.state, SupportBundleState::Active);
+
+        // Download the reconfigurator_state.json file
+        let head = false;
+        let range = None;
+        let response = nexus
+            .support_bundle_download(
+                &opctx,
+                observed_bundle.id.into(),
+                SupportBundleQueryType::Path {
+                    file_path: "reconfigurator_state.json".to_string(),
+                },
+                head,
+                range,
+            )
+            .await
+            .expect("Should be able to download reconfigurator_state.json");
+
+        // Read and parse the JSON
+        let body_bytes =
+            response.into_body().collect().await.unwrap().to_bytes();
+        let body_string = String::from_utf8(body_bytes.to_vec()).unwrap();
+        let state: serde_json::Value =
+            serde_json::from_str(&body_string).expect("Should be valid JSON");
+
+        // Verify the JSON has the expected structure
+        //
+        // We don't really care about the contents that much, we just want to
+        // verify that the UnstableReconfiguratorState object got serialized
+        // at all.
+
+        assert!(
+            !state
+                .get("target_blueprint")
+                .expect("missing target blueprint")
+                .is_null(),
+            "Should have target blueprint"
+        );
+        assert!(
+            !state
+                .get("blueprints")
+                .expect("missing blueprints")
+                .as_array()
+                .expect("blueprints should be an array")
+                .is_empty(),
+            "Should have blueprints"
         );
     }
 }

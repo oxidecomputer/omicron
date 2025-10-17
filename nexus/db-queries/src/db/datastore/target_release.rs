@@ -346,10 +346,9 @@ mod test {
         assert_eq!(initial_target_release.generation, Generation(1.into()));
         assert!(initial_target_release.time_requested < Utc::now());
         assert_eq!(
-            initial_target_release.release_source,
+            initial_target_release.release_source().unwrap(),
             TargetReleaseSource::Unspecified
         );
-        assert!(initial_target_release.tuf_repo_id.is_none());
 
         // We should be able to set a new generation just like the first.
         // We allow some slack in the timestamp comparison because the
@@ -366,7 +365,10 @@ mod test {
                 .abs()
                 < TimeDelta::new(0, 1_000).expect("1 μsec")
         );
-        assert!(target_release.tuf_repo_id.is_none());
+        assert_eq!(
+            target_release.release_source().unwrap(),
+            TargetReleaseSource::Unspecified
+        );
 
         // Trying to reuse a generation should fail.
         assert!(
@@ -408,10 +410,9 @@ mod test {
         assert!(target_release.time_requested >= before);
         assert!(target_release.time_requested <= after);
         assert_eq!(
-            target_release.release_source,
-            TargetReleaseSource::SystemVersion
+            target_release.release_source().unwrap(),
+            TargetReleaseSource::SystemVersion(tuf_repo_id.into())
         );
-        assert_eq!(target_release.tuf_repo_id, Some(tuf_repo_id));
 
         // Clean up.
         db.terminate().await;
