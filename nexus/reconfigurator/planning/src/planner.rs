@@ -6606,10 +6606,18 @@ pub(crate) mod test {
         //
         // Ask for COCKROACHDB_REDUNDANCY cockroach nodes
 
+        // If this assertion breaks - which would be okay - we should delete all
+        // these planning steps explicitly including a base set of CRDB zones.
+        assert_eq!(
+            example.system.get_target_cockroachdb_zone_count(),
+            0,
+            "We expect the system is initialized without cockroach zones"
+        );
         let mut input_builder = example.input.clone().into_builder();
         input_builder.policy_mut().target_cockroachdb_zone_count =
             COCKROACHDB_REDUNDANCY;
         example.input = input_builder.build();
+        example.system.target_cockroachdb_zone_count(COCKROACHDB_REDUNDANCY);
 
         let blueprint_name = "blueprint_with_cockroach";
         let new_blueprint = Planner::new_based_on(
