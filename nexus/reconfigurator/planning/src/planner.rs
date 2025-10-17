@@ -1179,7 +1179,7 @@ impl<'a> Planner<'a> {
 
         let target_count = match discretionary_zone_kind {
             DiscretionaryOmicronZone::BoundaryNtp => {
-                self.input.set_target_boundary_ntp_zone_count()
+                self.input.target_boundary_ntp_zone_count()
             }
             DiscretionaryOmicronZone::Clickhouse => {
                 self.input.target_clickhouse_zone_count()
@@ -1191,13 +1191,13 @@ impl<'a> Planner<'a> {
                 self.input.target_clickhouse_server_zone_count()
             }
             DiscretionaryOmicronZone::CockroachDb => {
-                self.input.set_target_cockroachdb_zone_count()
+                self.input.target_cockroachdb_zone_count()
             }
             DiscretionaryOmicronZone::CruciblePantry => {
-                self.input.set_target_crucible_pantry_zone_count()
+                self.input.target_crucible_pantry_zone_count()
             }
             DiscretionaryOmicronZone::InternalDns => {
-                self.input.set_target_internal_dns_zone_count()
+                self.input.target_internal_dns_zone_count()
             }
             DiscretionaryOmicronZone::ExternalDns => {
                 // TODO-cleanup: When external DNS addresses are
@@ -1205,7 +1205,7 @@ impl<'a> Planner<'a> {
                 self.blueprint.count_parent_external_dns_zones()
             }
             DiscretionaryOmicronZone::Nexus => {
-                self.input.set_target_nexus_zone_count()
+                self.input.target_nexus_zone_count()
             }
             DiscretionaryOmicronZone::Oximeter => {
                 self.input.target_oximeter_zone_count()
@@ -2123,7 +2123,7 @@ impl<'a> Planner<'a> {
             return Ok(report);
         }
 
-        if nexuses_at_proposed_gen < self.input.set_target_nexus_zone_count() {
+        if nexuses_at_proposed_gen < self.input.target_nexus_zone_count() {
             // If there aren't enough Nexuses at the next generation, quiescing
             // could be a dangerous operation. Blueprint execution should be
             // able to continue even if the new Nexuses haven't started, but to
@@ -2837,7 +2837,7 @@ pub(crate) mod test {
             .diff_pair()
             .zones
             .added;
-        assert_eq!(zones_added.len(), input.set_target_nexus_zone_count() - 1);
+        assert_eq!(zones_added.len(), input.target_nexus_zone_count() - 1);
         for (_, zone) in zones_added {
             if zone.kind() != ZoneKind::Nexus {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");

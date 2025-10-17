@@ -155,15 +155,15 @@ impl PlanningInput {
         &self.cockroachdb_settings
     }
 
-    pub fn set_target_boundary_ntp_zone_count(&self) -> usize {
+    pub fn target_boundary_ntp_zone_count(&self) -> usize {
         self.policy.target_boundary_ntp_zone_count
     }
 
-    pub fn set_target_nexus_zone_count(&self) -> usize {
+    pub fn target_nexus_zone_count(&self) -> usize {
         self.policy.target_nexus_zone_count
     }
 
-    pub fn set_target_internal_dns_zone_count(&self) -> usize {
+    pub fn target_internal_dns_zone_count(&self) -> usize {
         self.policy.target_internal_dns_zone_count
     }
 
@@ -171,7 +171,7 @@ impl PlanningInput {
         self.policy.target_oximeter_zone_count
     }
 
-    pub fn set_target_cockroachdb_zone_count(&self) -> usize {
+    pub fn target_cockroachdb_zone_count(&self) -> usize {
         self.policy.target_cockroachdb_zone_count
     }
 
@@ -181,7 +181,7 @@ impl PlanningInput {
         self.policy.target_cockroachdb_cluster_version
     }
 
-    pub fn set_target_crucible_pantry_zone_count(&self) -> usize {
+    pub fn target_crucible_pantry_zone_count(&self) -> usize {
         self.policy.target_crucible_pantry_zone_count
     }
 
