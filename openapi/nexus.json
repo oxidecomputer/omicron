@@ -8304,6 +8304,7 @@
           "system/ip-pools"
         ],
         "summary": "Create IP pool",
+        "description": "IPv6 is not yet supported for unicast pools.",
         "operationId": "ip_pool_create",
         "requestBody": {
           "content": {
@@ -8515,8 +8516,8 @@
         "tags": [
           "system/ip-pools"
         ],
-        "summary": "Add range to IP pool",
-        "description": "IPv6 ranges are not allowed yet.",
+        "summary": "Add range to IP pool.",
+        "description": "IPv6 ranges are not allowed yet for unicast pools.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
         "operationId": "ip_pool_range_add",
         "parameters": [
           {
@@ -21480,6 +21481,14 @@
               }
             ]
           },
+          "pool_type": {
+            "description": "Type of IP pool (unicast or multicast)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolType"
+              }
+            ]
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -21496,12 +21505,13 @@
           "id",
           "ip_version",
           "name",
+          "pool_type",
           "time_created",
           "time_modified"
         ]
       },
       "IpPoolCreate": {
-        "description": "Create-time parameters for an `IpPool`",
+        "description": "Create-time parameters for an `IpPool`.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
         "type": "object",
         "properties": {
           "description": {
@@ -21518,6 +21528,15 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "pool_type": {
+            "description": "Type of IP pool (defaults to Unicast)",
+            "default": "unicast",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolType"
+              }
+            ]
           }
         },
         "required": [
@@ -21663,6 +21682,25 @@
         },
         "required": [
           "is_default"
+        ]
+      },
+      "IpPoolType": {
+        "description": "Type of IP pool.",
+        "oneOf": [
+          {
+            "description": "Unicast IP pool for standard IP allocations.",
+            "type": "string",
+            "enum": [
+              "unicast"
+            ]
+          },
+          {
+            "description": "Multicast IP pool for multicast group allocations.\n\nAll ranges in a multicast pool must be either ASM or SSM (not mixed).",
+            "type": "string",
+            "enum": [
+              "multicast"
+            ]
+          }
         ]
       },
       "IpPoolUpdate": {

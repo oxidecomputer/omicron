@@ -393,13 +393,18 @@ impl DataStore {
     /// This should generally not be used in API handlers or other
     /// latency-sensitive contexts, but it can make sense in saga actions or
     /// background tasks.
+    // TODO-correctness We currently _do_ use this method in an API handler
+    // (specifically, the "update status" endpoint). This is okay in a
+    // single-rack world because we'll never need more than one page to fetch
+    // at most 32 sleds, but we should fix this before we add support for
+    // multirack (at which point this should have an
+    // `opctx.check_complex_operations_allowed()?` guard).
     pub async fn sled_list_all_batched(
         &self,
         opctx: &OpContext,
         sled_filter: SledFilter,
     ) -> ListResultVec<Sled> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        opctx.check_complex_operations_allowed()?;
 
         let mut all_sleds = Vec::new();
         let mut paginator = Paginator::new(

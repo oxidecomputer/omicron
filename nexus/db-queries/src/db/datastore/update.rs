@@ -21,8 +21,8 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::{
-    ArtifactHash, DbTypedUuid, TargetRelease, TufArtifact, TufRepo,
-    TufRepoDescription, TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
+    ArtifactHash, TargetRelease, TufArtifact, TufRepo, TufRepoDescription,
+    TufRepoUpload, TufTrustRoot, to_db_typed_uuid,
 };
 use nexus_types::external_api::views::TufRepoUploadStatus;
 use omicron_common::api::external::{
@@ -30,8 +30,6 @@ use omicron_common::api::external::{
     ListResultVec, LookupResult, LookupType, ResourceType, UpdateResult,
 };
 use omicron_common::api::external::{Error, InternalContext};
-use omicron_uuid_kinds::TufRepoKind;
-use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::{GenericUuid, TufRepoUuid};
 use semver::Version;
 use swrite::{SWrite, swrite};
@@ -39,7 +37,7 @@ use tufaceous_artifact::ArtifactVersion;
 use uuid::Uuid;
 
 async fn artifacts_for_repo(
-    repo_id: TypedUuid<TufRepoKind>,
+    repo_id: TufRepoUuid,
     conn: &async_bb8_diesel::Connection<DbConnection>,
 ) -> Result<Vec<TufArtifact>, DieselError> {
     use nexus_db_schema::schema::tuf_artifact::dsl as tuf_artifact_dsl;
@@ -102,7 +100,7 @@ impl DataStore {
     pub async fn tuf_repo_get_by_id(
         &self,
         opctx: &OpContext,
-        repo_id: TypedUuid<TufRepoKind>,
+        repo_id: TufRepoUuid,
     ) -> LookupResult<TufRepoDescription> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
@@ -165,7 +163,7 @@ impl DataStore {
     pub async fn tuf_repo_get_version(
         &self,
         opctx: &OpContext,
-        tuf_repo_id: &DbTypedUuid<TufRepoKind>,
+        tuf_repo_id: &TufRepoUuid,
     ) -> LookupResult<semver::Version> {
         opctx
             .authorize(authz::Action::Read, &authz::TARGET_RELEASE_CONFIG)
@@ -546,7 +544,7 @@ async fn insert_impl(
             .await
             .optional()?;
 
-        if let Some(existing_repo) = existing_repo {
+        if let Some(mut existing_repo) = existing_repo {
             // It doesn't matter whether the UUID of the repo matches or not,
             // since it's uniquely generated. But do check the hash.
             if existing_repo.sha256 != desc.repo.sha256 {
@@ -556,6 +554,19 @@ async fn insert_impl(
                     existing: existing_repo.sha256,
                 }));
             }
+
+            // This repo matches a previous record, so reset `time_created` to
+            // now and ensure `time_pruned` is set to NULL.
+            existing_repo.time_created = chrono::Utc::now();
+            existing_repo.time_pruned = None;
+            diesel::update(dsl::tuf_repo)
+                .filter(dsl::id.eq(existing_repo.id))
+                .set((
+                    dsl::time_created.eq(existing_repo.time_created),
+                    dsl::time_pruned.eq(existing_repo.time_pruned),
+                ))
+                .execute_async(&conn)
+                .await?;
 
             // Just return the existing repo along with all of its artifacts.
             let artifacts =

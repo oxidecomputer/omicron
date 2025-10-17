@@ -17,6 +17,7 @@ use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::MgsUpdatePlanner;
 use crate::mgs_updates::PlannedMgsUpdates;
+use crate::mgs_updates::UpdateableBoard;
 use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
@@ -43,12 +44,11 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::{
-    CockroachdbUnsafeToShutdown, NexusGenerationBumpWaitingOn,
-    PlanningAddStepReport, PlanningCockroachdbSettingsStepReport,
-    PlanningDecommissionStepReport, PlanningExpungeStepReport,
-    PlanningMgsUpdatesStepReport, PlanningNexusGenerationBumpReport,
-    PlanningNoopImageSourceStepReport, PlanningReport,
-    PlanningZoneUpdatesStepReport, ZoneAddWaitingOn, ZoneUnsafeToShutdown,
+    NexusGenerationBumpWaitingOn, PlanningAddStepReport,
+    PlanningCockroachdbSettingsStepReport, PlanningDecommissionStepReport,
+    PlanningExpungeStepReport, PlanningMgsUpdatesStepReport,
+    PlanningNexusGenerationBumpReport, PlanningNoopImageSourceStepReport,
+    PlanningReport, PlanningZoneUpdatesStepReport, ZoneAddWaitingOn,
     ZoneUpdatesWaitingOn, ZoneWaitingToExpunge,
 };
 use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -58,9 +58,6 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::M2Slot;
-use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
-use omicron_common::policy::COCKROACHDB_REDUNDANCY;
-use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -84,10 +81,12 @@ use self::omicron_zone_placement::OmicronZonePlacement;
 use self::omicron_zone_placement::OmicronZonePlacementSledState;
 pub use self::rng::PlannerRng;
 pub use self::rng::SledPlannerRng;
+pub(crate) use self::zone_safety::ZoneSafetyChecks;
 
 mod image_source;
 mod omicron_zone_placement;
 pub(crate) mod rng;
+mod zone_safety;
 
 /// Maximum number of MGS-managed updates (updates to SP, RoT, RoT bootloader,
 /// or host OS) that we allow to be pending across the whole system at one time
@@ -114,9 +113,6 @@ pub(crate) mod rng;
 /// multiple sleds as long as they don't have overlapping control plane
 /// services, etc.).
 const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
-
-/// A receipt that `check_input_validity` has been run prior to planning.
-struct InputChecked;
 
 // Details of how a zone's status differs between the blueprint and the sled
 // inventory
@@ -192,26 +188,21 @@ impl<'a> Planner<'a> {
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
-        let checked = self.check_input_validity()?;
-        let report = self.do_plan(checked)?;
+        let report = self.do_plan()?;
         Ok(self.blueprint.build(BlueprintSource::Planner(Arc::new(report))))
     }
 
-    fn check_input_validity(&self) -> Result<InputChecked, Error> {
-        if self.input.target_internal_dns_zone_count() > INTERNAL_DNS_REDUNDANCY
-        {
-            return Err(Error::PolicySpecifiesTooManyInternalDnsServers);
-        }
-        Ok(InputChecked)
-    }
-
-    fn do_plan(
-        &mut self,
-        _checked: InputChecked,
-    ) -> Result<PlanningReport, Error> {
+    fn do_plan(&mut self) -> Result<PlanningReport, Error> {
         // Run the planning steps, recording their step reports as we go.
         let expunge = self.do_plan_expunge()?;
         let decommission = self.do_plan_decommission()?;
+
+        // Compute set of sleds/zones that we shouldn't choose to shut down.
+        let zone_safety_checks = ZoneSafetyChecks::new(
+            &self.blueprint,
+            &self.inventory,
+            self.input.internal_dns_version(),
+        );
 
         let mut noop_info =
             NoopConvertInfo::new(self.input, self.inventory, &self.blueprint)?;
@@ -233,7 +224,7 @@ impl<'a> Planner<'a> {
         // Only plan MGS-based updates updates if there are no outstanding
         // MUPdate overrides.
         let mgs_updates = if add_update_blocked_reasons.is_empty() {
-            self.do_plan_mgs_updates()?
+            self.do_plan_mgs_updates(&zone_safety_checks)?
         } else {
             PlanningMgsUpdatesStepReport::new()
         };
@@ -289,7 +280,7 @@ impl<'a> Planner<'a> {
                 ZoneUpdatesWaitingOn::ZoneAddBlockers,
             )
         } else {
-            self.do_plan_zone_updates(&mgs_updates)?
+            self.do_plan_zone_updates(&mgs_updates, &zone_safety_checks)?
         };
 
         // We may need to bump the top-level Nexus generation number
@@ -1341,7 +1332,7 @@ impl<'a> Planner<'a> {
         for (zone, nexus) in self
             .blueprint
             .current_zones(BlueprintZoneDisposition::any)
-            .filter_map(|z| match &z.zone_type {
+            .filter_map(|(_sled_id, z)| match &z.zone_type {
                 BlueprintZoneType::Nexus(nexus) => Some((z, nexus)),
                 _ => None,
             })
@@ -1379,6 +1370,7 @@ impl<'a> Planner<'a> {
     /// date.
     fn do_plan_mgs_updates(
         &mut self,
+        zone_safety_checks: &ZoneSafetyChecks,
     ) -> Result<PlanningMgsUpdatesStepReport, Error> {
         let mut report = PlanningMgsUpdatesStepReport::new();
         // Determine which baseboards we will consider updating.
@@ -1388,63 +1380,36 @@ impl<'a> Planner<'a> {
         // about to be added.  In dev/test environments, it's common to leave
         // some number of sleds out of the control plane for various reasons.
         // Inventory will still report them, but we don't want to touch them.
-        //
-        // For better or worse, switches and PSCs do not have the same idea of
-        // being adopted into the control plane.  If they're present, they're
-        // part of the system, and we will update them.
-        let included_sled_baseboards: BTreeMap<_, _> = self
+        let included_sled_baseboards = self
             .input
             .all_sleds(SledFilter::SpsUpdatedByReconfigurator)
-            .map(|(sled_id, details)| (&details.baseboard_id, sled_id))
-            .collect();
+            .map(|(sled_id, details)| {
+                UpdateableBoard::Sled(
+                    Arc::new(details.baseboard_id.clone()),
+                    sled_id,
+                )
+            });
 
-        // We collect the sled baseboards that contain zones that are unsafe to
-        // shut down
-        let unsafe_zone_baseboards = included_sled_baseboards
-            .iter()
-            .filter_map(|(&baseboard_id, sled_id)| {
-                let zones = self.blueprint.current_sled_zones(
-                    *sled_id,
-                    BlueprintZoneDisposition::is_in_service,
-                );
-
-                let mut unsafe_zone_report = BTreeMap::new();
-
-                let unsafe_zones: Vec<_> = zones
-                    .into_iter()
-                    .filter(|zone| {
-                        if let Some(zone_report) =
-                            self.zone_unsafe_to_shut_down_details(&zone)
-                        {
-                            unsafe_zone_report.insert(zone.id, zone_report);
-                            true
-                        } else {
-                            false
-                        }
-                    })
-                    .map(|zone| zone.kind().report_str())
-                    .collect();
-
-                (!unsafe_zones.is_empty()).then_some((
-                    Arc::new(baseboard_id.clone()),
-                    unsafe_zone_report,
-                ))
-            })
-            .collect();
-
-        let included_baseboards = self
-            .inventory
-            .sps
-            .iter()
-            .filter_map(|(baseboard_id, sp_state)| {
-                let do_include = match sp_state.sp_type {
-                    SpType::Sled => included_sled_baseboards
-                        .contains_key(baseboard_id.as_ref()),
-                    SpType::Power => true,
-                    SpType::Switch => true,
-                };
-                do_include.then_some(baseboard_id.clone())
-            })
+        // For better or worse, switches and PSCs do not have the same idea of
+        // being adopted into the control plane.  If they're present, they're
+        // part of the system, and we will update them.  Chain them onto the end
+        // of all the sled baseboards we're supposed to update.
+        let included_baseboards = included_sled_baseboards
+            .chain(self.inventory.sps.iter().filter_map(
+                |(baseboard_id, sp_state)| match sp_state.sp_type {
+                    SpType::Sled => {
+                        // Sleds are only updated if they're part of
+                        // `included_sled_baseboards`; skip them here.
+                        None
+                    }
+                    SpType::Power => {
+                        Some(UpdateableBoard::Power(baseboard_id.clone()))
+                    }
+                    SpType::Switch => {
+                        Some(UpdateableBoard::Switch(baseboard_id.clone()))
+                    }
+                },
+            ))
             .collect();
 
         // Compute the new set of PendingMgsUpdates.
@@ -1467,7 +1432,7 @@ impl<'a> Planner<'a> {
             log: &self.log,
             inventory: &self.inventory,
             current_boards: &included_baseboards,
-            unsafe_zone_boards: &unsafe_zone_baseboards,
+            zone_safety_checks,
             current_updates,
             current_artifacts,
             nmax_updates: NUM_CONCURRENT_MGS_UPDATES,
@@ -1595,6 +1560,7 @@ impl<'a> Planner<'a> {
     fn do_plan_zone_updates(
         &mut self,
         mgs_updates: &PlanningMgsUpdatesStepReport,
+        zone_safety_checks: &ZoneSafetyChecks,
     ) -> Result<PlanningZoneUpdatesStepReport, Error> {
         let zones_currently_updating =
             self.get_zones_not_yet_propagated_to_inventory();
@@ -1625,10 +1591,10 @@ impl<'a> Planner<'a> {
         ) = out_of_date_zones
             .into_iter()
             .filter(|(_, zone, _)| {
-                if let Some(zone_report) =
-                    self.zone_unsafe_to_shut_down_details(&zone)
+                if let Some(reason) =
+                    zone_safety_checks.zone_unsafe_shutdown_reason(&zone.id)
                 {
-                    report.unsafe_zones.insert(zone.id, zone_report);
+                    report.unsafe_zones.insert(zone.id, reason.clone());
                     false
                 } else {
                     self.are_zones_ready_for_updates(mgs_updates)
@@ -2448,163 +2414,6 @@ impl<'a> Planner<'a> {
 
         Ok(true)
     }
-
-    /// Return `None` iff we believe a zone can safely be shut down; e.g., any
-    /// data it's responsible for is sufficiently persisted or replicated.
-    /// Otherwise, return the details of why a zone cannot be safely shut down.
-    ///
-    /// "shut down" includes both "discretionary expunge" (e.g., if we're
-    /// dealing with a zone that is updated via expunge -> replace) or "shut
-    /// down and restart" (e.g., if we're upgrading a zone in place).
-    ///
-    /// This function is not (and cannot!) be called in the "expunge a zone
-    /// because the underlying disk / sled has been expunged" case. In this
-    /// case, we have no choice but to reconcile with the fact that the zone is
-    /// now gone.
-    fn zone_unsafe_to_shut_down_details(
-        &self,
-        zone: &BlueprintZoneConfig,
-    ) -> Option<ZoneUnsafeToShutdown> {
-        use ZoneUnsafeToShutdown::*;
-        match zone.zone_type.kind() {
-            ZoneKind::CockroachDb => {
-                use CockroachdbUnsafeToShutdown::*;
-
-                // We must hear from all nodes
-                let all_statuses = &self.inventory.cockroach_status;
-                if all_statuses.len() < COCKROACHDB_REDUNDANCY {
-                    return Some(Cockroachdb { reason: NotEnoughNodes });
-                }
-
-                // All nodes must report: "We have the necessary redundancy, and
-                // have observed no underreplicated ranges".
-                for (_node_id, status) in all_statuses {
-                    let Some(ranges_underreplicated) =
-                        status.ranges_underreplicated
-                    else {
-                        return Some(Cockroachdb {
-                            reason: MissingUnderreplicatedStat,
-                        });
-                    };
-                    if ranges_underreplicated != 0 {
-                        return Some(Cockroachdb {
-                            reason: UnderreplicatedRanges {
-                                n: ranges_underreplicated,
-                            },
-                        });
-                    }
-                    let Some(live_nodes) = status.liveness_live_nodes else {
-                        return Some(Cockroachdb {
-                            reason: MissingLiveNodesStat,
-                        });
-                    };
-                    if live_nodes < COCKROACHDB_REDUNDANCY as u64 {
-                        return Some(Cockroachdb {
-                            reason: NotEnoughLiveNodes { live_nodes },
-                        });
-                    }
-                }
-                None
-            }
-            ZoneKind::BoundaryNtp => {
-                // Find all boundary NTP zones expected to be in-service by our
-                // blueprint.
-                let mut boundary_ntp_zones = std::collections::HashSet::new();
-                for sled_id in self.blueprint.sled_ids_with_zones() {
-                    for zone in self.blueprint.current_sled_zones(
-                        sled_id,
-                        BlueprintZoneDisposition::is_in_service,
-                    ) {
-                        if zone.zone_type.kind() == ZoneKind::BoundaryNtp {
-                            boundary_ntp_zones.insert(zone.id);
-                        }
-                    }
-                }
-
-                // Count synchronized boundary NTP zones by checking timesync data.
-                let mut synchronized_boundary_ntp_count = 0;
-                for timesync in self.inventory.ntp_timesync.iter() {
-                    // We only consider zones which we expect to be in-service
-                    // from our blueprint - this means that old inventory
-                    // collections including data for expunged zones will not be
-                    // considered in the total count of synchronized boundary
-                    // NTP zones.
-                    if boundary_ntp_zones.contains(&timesync.zone_id)
-                        && timesync.synced
-                    {
-                        synchronized_boundary_ntp_count += 1;
-                    }
-                }
-
-                if synchronized_boundary_ntp_count < BOUNDARY_NTP_REDUNDANCY {
-                    return Some(BoundaryNtp {
-                        total_boundary_ntp_zones: boundary_ntp_zones.len(),
-                        synchronized_count: synchronized_boundary_ntp_count,
-                    });
-                }
-                None
-            }
-            ZoneKind::InternalDns => {
-                // Find all internal DNS zones expected to be in-service by our
-                // blueprint.
-                let mut internal_dns_zones = std::collections::HashSet::new();
-                for sled_id in self.blueprint.sled_ids_with_zones() {
-                    for zone in self.blueprint.current_sled_zones(
-                        sled_id,
-                        BlueprintZoneDisposition::is_in_service,
-                    ) {
-                        if zone.zone_type.kind() == ZoneKind::InternalDns {
-                            internal_dns_zones.insert(zone.id);
-                        }
-                    }
-                }
-
-                // Count the number of Internal DNS servers exactly at our
-                // expected generation number.
-                let mut synchronized_internal_dns_count = 0;
-                for status in
-                    self.inventory.internal_dns_generation_status.iter()
-                {
-                    // We consider internal DNS servers up-to-date if they have
-                    // a generation number matching what we observed in the DB
-                    // at the start of blueprint generation.
-                    //
-                    // - If we observe an older generation number in inventory,
-                    // the DNS server is out-of-date.
-                    // - If we observe a newer generation number in inventory,
-                    // the value the planner read from the database is
-                    // out-of-date.
-                    //
-                    // Either way, from our perspective, the internal DNS zone
-                    // shouldn't be considered "ready-to-shutdown".
-                    if internal_dns_zones.contains(&status.zone_id)
-                        && status.generation
-                            == self.input.internal_dns_version()
-                    {
-                        synchronized_internal_dns_count += 1;
-                    }
-                }
-
-                // Our goal is to have enough Internal DNS servers running
-                // at a sufficiently up-to-date version such that if the system
-                // powers off and restarts, at least one exists and can get the
-                // control plane back up and running.
-                //
-                // Our INTERNAL_DNS_REDUNDANCY factor is set so that we can
-                // tolerate "at least one upgrade, and at least one failure
-                // during that upgrade window".
-                if synchronized_internal_dns_count >= INTERNAL_DNS_REDUNDANCY {
-                    return None;
-                } else {
-                    return Some(InternalDns {
-                        total_internal_dns_zones: internal_dns_zones.len(),
-                        synchronized_count: synchronized_internal_dns_count,
-                    });
-                }
-            }
-            _ => None, // other zone kinds have no special safety check
-        }
-    }
 }
 
 /// The reason a sled's zones need to be expunged.
@@ -2665,8 +2474,10 @@ pub(crate) mod test {
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
     use omicron_common::policy::COCKROACHDB_REDUNDANCY;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
+    use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev::test_setup_log;
@@ -3169,7 +2980,7 @@ pub(crate) mod test {
         }
 
         // Try to run the planner with a high number of internal DNS zones;
-        // it will fail because the target is > MAX_DNS_REDUNDANCY.
+        // it will fail because the target is > INTERNAL_DNS_REDUNDANCY.
         {
             let mut builder = example
                 .system
@@ -3192,8 +3003,7 @@ pub(crate) mod test {
                 Err(err) => {
                     let err = InlineErrorChain::new(&err).to_string();
                     assert!(
-                        err.contains("can only have ")
-                            && err.contains(" internal DNS servers"),
+                        err.contains("error allocating internal DNS"),
                         "unexpected error: {err}"
                     );
                 }
@@ -6780,10 +6590,20 @@ pub(crate) mod test {
         //
         // Ask for COCKROACHDB_REDUNDANCY cockroach nodes
 
+        // If this assertion breaks - which would be okay - we should delete all
+        // these planning steps explicitly including a base set of CRDB zones.
+        assert_eq!(
+            example.system.target_cockroachdb_zone_count(),
+            0,
+            "We expect the system is initialized without cockroach zones"
+        );
         let mut input_builder = example.input.clone().into_builder();
         input_builder.policy_mut().target_cockroachdb_zone_count =
             COCKROACHDB_REDUNDANCY;
         example.input = input_builder.build();
+        example
+            .system
+            .set_target_cockroachdb_zone_count(COCKROACHDB_REDUNDANCY);
 
         let blueprint_name = "blueprint_with_cockroach";
         let new_blueprint = Planner::new_based_on(
@@ -7170,7 +6990,9 @@ pub(crate) mod test {
         );
 
         // Use that boundary NTP zone to promote others.
-        example.system.target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
+        example
+            .system
+            .set_target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
         example.input = example
             .system
             .to_planning_input_builder()

@@ -8104,6 +8104,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
+ "gateway-types",
  "headers",
  "hex",
  "hickory-resolver 0.25.2",
@@ -8661,6 +8662,7 @@ dependencies = [
  "uuid",
  "walkdir",
  "zeroize",
+ "zfs-test-harness",
  "zip 4.2.0",
  "zone 0.3.1",
 ]
@@ -12741,6 +12743,7 @@ dependencies = [
  "slog",
  "thiserror 2.0.17",
  "tokio",
+ "zfs-test-harness",
  "zip 4.2.0",
 ]
 
@@ -16477,6 +16480,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.106",
+]
+
+[[package]]
+name = "zfs-test-harness"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "camino",
+ "camino-tempfile",
+ "illumos-utils",
+ "key-manager",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "sled-storage",
+ "slog",
+ "slog-error-chain",
+ "tokio",
 ]
 
 [[package]]
