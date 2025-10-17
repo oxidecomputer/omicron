@@ -565,6 +565,8 @@ pub fn turin_v1() -> CpuIdDump {
         cpuid.get_feature_info().expect("baseline Milan defines leaf 1");
 
     // Set up EAX: Family 1Ah model 2h stepping 1.
+    //
+    // This corresponds to processor revision C1, the production stepping of Turin processors.
     leaf.set_extended_family_id(0x0B);
     leaf.set_base_family_id(0x0F);
     leaf.set_base_model_id(0x02);
@@ -745,6 +747,21 @@ pub fn turin_v1() -> CpuIdDump {
         .get_extended_feature_identification_2()
         .expect("can get leaf 8000_0021h");
 
+    // We don't support access to MSR `BP_CFG`, so SRSO_MSR_FIX stays hidden.
+    leaf.set_srso_msr_fix(false);
+    // SRSO_USER_KERNEL_NO is advice about vulnerabilities the processor is not
+    // affected by; no bhyve/Propolis support needed.
+    leaf.set_srso_user_kernel_no(true);
+    // SRSO_NO, more generally, is clear on Turin.
+    leaf.set_srso_no(false);
+    // IBPB_BRTYPE and SBPB are hidden because PRED_CMD and SPEC_CTRL generally
+    // aren't guest-accessible yet.
+    leaf.set_ibpb_brtype(false);
+    leaf.set_sbpb(false);
+    // Enhanced return address predictor security is another "this is just how
+    // the processor behaves" bit.
+    leaf.set_eraps(true);
+    leaf.set_prefetchi(true);
     // FP512 downgrade is configurable via MSR, but the MSR is not made
     // available to guests. The other bits are present on all Turin processors.
     leaf.set_fp512_downgrade(false);
