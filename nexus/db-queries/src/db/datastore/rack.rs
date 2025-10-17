@@ -2152,8 +2152,27 @@ mod test {
                     ..Default::default()
                 },
             )
-            .await
-            .expect("Failed to initialize rack");
+            .await;
+
+        // IPv6 addresses aren't fully supported right now. See
+        // https://github.com/oxidecomputer/omicron/issues/1716. When that is
+        // fully-addressed, this will start to fail and we can remove this
+        // block to restore the previous test coverage.
+        let Err(Error::InvalidRequest { message }) = &rack else {
+            panic!(
+                "Expected an error initializing a rack with an IPv6 address, \
+                until they are fully-supported. Found {rack:#?}"
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            "IPv6 addresses are not yet supported"
+        );
+        let Ok(rack) = rack else {
+            db.terminate().await;
+            logctx.cleanup_successful();
+            return;
+        };
 
         assert_eq!(rack.id(), rack_id());
         assert!(rack.initialized);

@@ -259,15 +259,19 @@ fn decode_database_error(
         r#"incorrect UUID length: multiple-vpcs"#,
     );
 
-    // Error message generated when we attempt to insert NULL in the `ip`
-    // column, which only happens when we run out of IPs in the subnet.
-    const IP_EXHAUSTION_ERROR_MESSAGE: &str =
-        r#"null value in column "ip" violates not-null constraint"#;
+    // The name of the constraint violated when we attempt to insert NULL for
+    // one of the IP address columns, either `ipv4` or `ipv6`. This only happens
+    // when we run out of addresses in the subnet.
+    const IP_EXHAUSTION_CONSTRAINT: &str = r#"at_least_one_ip_address"#;
 
     // The name of the index whose uniqueness is violated if we try to assign an
-    // IP that is already allocated to another interface in the same subnet.
-    const IP_NOT_AVAILABLE_CONSTRAINT: &str =
-        "network_interface_subnet_id_ip_key";
+    // IPv4 that is already allocated to another interface in the same subnet.
+    const IPV4_NOT_AVAILABLE_CONSTRAINT: &str =
+        "network_interface_subnet_id_ipv4_key";
+
+    // TODO-completeness: Add a similar constraint name and check below when we
+    // support inserting VPC-private IPv6 addresses. See
+    // https://github.com/oxidecomputer/omicron/issues/9245.
 
     // The name of the index whose uniqueness is violated if we try to assign a
     // MAC that is already allocated to another interface in the same VPC.
@@ -321,12 +325,11 @@ fn decode_database_error(
 
     match err {
         // If the address allocation subquery fails, we'll attempt to insert
-        // NULL for the `ip` column. This checks that the non-NULL constraint on
-        // that colum has been violated.
-        DieselError::DatabaseError(
-            DatabaseErrorKind::NotNullViolation,
-            info,
-        ) if info.message() == IP_EXHAUSTION_ERROR_MESSAGE => {
+        // NULL for one of the IP columns. This checks if the CHECK constraint
+        // on the table has been violated.
+        DieselError::DatabaseError(DatabaseErrorKind::CheckViolation, info)
+            if info.constraint_name() == Some(IP_EXHAUSTION_CONSTRAINT) =>
+        {
             InsertError::NoAvailableIpAddresses {
                 name: interface.subnet.identity.name.to_string(),
                 id: interface.subnet.identity.id,
@@ -397,7 +400,7 @@ fn decode_database_error(
         ) => match info.constraint_name() {
             // Constraint violated if a user-requested IP address has
             // already been assigned within the same VPC Subnet.
-            Some(constraint) if constraint == IP_NOT_AVAILABLE_CONSTRAINT => {
+            Some(constraint) if constraint == IPV4_NOT_AVAILABLE_CONSTRAINT => {
                 let ip = interface
                     .ip
                     .unwrap_or_else(|| std::net::Ipv4Addr::UNSPECIFIED.into());
@@ -1949,7 +1952,7 @@ mod tests {
         let new_runtime = model::InstanceRuntimeState {
             nexus_state: state,
             propolis_id,
-            gen: instance.runtime_state.gen.next().into(),
+            r#gen: instance.runtime_state.gen.next().into(),
             ..instance.runtime_state.clone()
         };
         let res = db_datastore
@@ -2249,9 +2252,13 @@ mod tests {
             .expect("Failed to insert interface with known-good IP address");
         assert_interfaces_eq(&interface, &inserted_interface.clone().into());
         assert_eq!(
-            inserted_interface.ip.ip(),
+            IpAddr::from(inserted_interface.ipv4.expect("an IPv4 address")),
             requested_ip,
             "The requested IP address should be available when no interfaces exist in the table"
+        );
+        assert!(
+            inserted_interface.ipv6.is_none(),
+            "Should not have an IPv6 address"
         );
         context.success().await;
     }
@@ -2323,10 +2330,16 @@ mod tests {
                 &interface,
                 &inserted_interface.clone().into(),
             );
-            let actual_address = inserted_interface.ip.ip();
+            let actual_address = Ipv4Addr::from(
+                inserted_interface.ipv4.expect("an IPv4 address"),
+            );
             assert_eq!(
                 actual_address, expected_address,
                 "Failed to auto-assign correct sequential address to interface"
+            );
+            assert!(
+                inserted_interface.ipv6.is_none(),
+                "Should not have an IPv6 address"
             );
         }
         context.success().await;
@@ -2364,6 +2377,7 @@ mod tests {
 
         // Inserting an interface with the same IP should fail, even if all
         // other parameters are valid.
+        let ip = inserted_interface.ipv4.expect("an IPv4 address");
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             new_instance_id,
@@ -2372,7 +2386,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            Some(inserted_interface.ip.ip()),
+            Some(ip.into()),
             vec![],
         )
         .unwrap();
@@ -2380,10 +2394,12 @@ mod tests {
             .datastore()
             .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
-        assert!(
-            matches!(result, Err(InsertError::IpAddressNotAvailable(_))),
-            "Requesting an interface with an existing IP should fail"
-        );
+        let Err(InsertError::IpAddressNotAvailable(_)) = result else {
+            panic!(
+                "Requesting an interface with an existing IP should fail, found {:?}",
+                result,
+            );
+        };
         context.success().await;
     }
 
@@ -3047,7 +3063,7 @@ mod tests {
         }
 
         // Delete the NIC on the first instance.
-        let original_ip = instances[0].1.ip.ip();
+        let original_ip = instances[0].1.ipv4.expect("an IPv4 address");
         context.delete_instance_nics(instances[0].0.id()).await;
 
         // And recreate it, ensuring we get the same IP address again.
@@ -3069,9 +3085,9 @@ mod tests {
             .await
             .expect("Failed to insert interface");
         instances[0].1 = intf;
+        let new_ip = instances[0].1.ipv4.expect("an IPv4 address");
         assert_eq!(
-            instances[0].1.ip.ip(),
-            original_ip,
+            new_ip, original_ip,
             "Should have recreated the first available IP address again"
         );
 
@@ -3101,8 +3117,7 @@ mod tests {
             .await
             .expect("Failed to insert interface");
         assert_eq!(
-            intf.ip.ip(),
-            instances[1].1.ip.ip(),
+            intf.ipv4, instances[1].1.ipv4,
             "Should have used the second address",
         );
 
@@ -3178,9 +3193,10 @@ mod tests {
                         panic!("Should have been able to get the {NTH}-1-th address")
                     })
             ),
-            interface2.ip.ip(),
+            IpAddr::from(interface2.ipv4.expect("an IPv4 address")),
             "Should have allocated 1 less than the smallest existing address"
         );
+        assert!(interface2.ipv6.is_none(), "Should not have an IPv6 address");
 
         context.success().await;
     }
