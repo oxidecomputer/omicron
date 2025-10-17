@@ -337,7 +337,7 @@ impl DumpSetup {
     }
 
     /// Request archive of logs from the specified directory, which is assumed
-    /// to correspond to the root filesystem of a zone that are no longer
+    /// to correspond to the root filesystem of a zone that is no longer
     /// running.
     ///
     /// Unlike typical log file archival, this includes non-rotated log files.
@@ -1134,9 +1134,8 @@ impl DumpSetupWorker {
             )
             .await;
         if let Err(()) = completion_tx.send(()) {
-            // This is very surprising unless the runtime is shutting down, as
-            // could happen in the test suite.  Anyway, it's not a failure to
-            // archive the logs.
+            // In practice, it would be surprising for our caller to have
+            // dropped this channel.  Make a note.
             warn!(
                 self.log,
                 "Failed to report completion of former zone root archival";
