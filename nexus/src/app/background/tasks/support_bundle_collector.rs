@@ -55,6 +55,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::future::Future;
 use std::io::Write;
 use std::num::NonZeroU64;
@@ -82,26 +83,83 @@ fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
     authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
 }
 
+// Describes how support bundle data is selected.
+//
+// Multiple values of this enum are joined together into a HashSet.
+// Categories should be additive.
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+enum BundleDataCategory {
+    Reconfigurator,
+    HostInfo,
+    SledCubbyInfo,
+    SpDumps,
+}
+
+// The set of sleds to include
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+enum SledSelection {
+    All,
+    Specific(SledUuid),
+}
+
 // Specifies the data to be collected within the Support Bundle.
 #[derive(Clone)]
 struct BundleRequest {
-    // If "false": Skip collecting host-specific info from each sled.
-    skip_sled_info: bool,
-
     // The size of chunks to use when transferring a bundle from Nexus
     // to a sled agent.
     //
     // Typically, this is CHUNK_SIZE, but can be modified for testing.
     transfer_chunk_size: NonZeroU64,
 
+    // The set of data to be included within this bundle.
+    data_selection: HashSet<BundleDataCategory>,
+
+    // The set of sets to be included within this bundle.
+    //
+    // NOTE: This selection is only considered if "data_selection" requests
+    // data from specific sleds.
+    sled_selection: HashSet<SledSelection>,
+
+    // The set of ereports to be included within this bundle.
+    //
+    // "None" causes ereports to be skipped.
     ereport_query: Option<EreportFilters>,
+}
+
+impl BundleRequest {
+    fn include_reconfigurator_data(&self) -> bool {
+        self.data_selection.contains(&BundleDataCategory::Reconfigurator)
+    }
+
+    fn include_host_info(&self) -> bool {
+        self.data_selection.contains(&BundleDataCategory::HostInfo)
+    }
+
+    fn include_sled(&self, id: SledUuid) -> bool {
+        self.sled_selection.contains(&SledSelection::Specific(id))
+            || self.sled_selection.contains(&SledSelection::All)
+    }
+
+    fn include_sled_cubby_info(&self) -> bool {
+        self.data_selection.contains(&BundleDataCategory::SledCubbyInfo)
+    }
+
+    fn include_sp_dumps(&self) -> bool {
+        self.data_selection.contains(&BundleDataCategory::SpDumps)
+    }
 }
 
 impl Default for BundleRequest {
     fn default() -> Self {
         Self {
-            skip_sled_info: false,
             transfer_chunk_size: CHUNK_SIZE,
+            data_selection: HashSet::from([
+                BundleDataCategory::Reconfigurator,
+                BundleDataCategory::HostInfo,
+                BundleDataCategory::SledCubbyInfo,
+                BundleDataCategory::SpDumps,
+            ]),
+            sled_selection: HashSet::from([SledSelection::All]),
             ereport_query: Some(EreportFilters {
                 start_time: Some(chrono::Utc::now() - chrono::Days::new(7)),
                 ..EreportFilters::default()
@@ -771,6 +829,10 @@ impl BundleCollection {
         &self,
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
+        if !self.request.include_reconfigurator_data() {
+            return Ok(CollectionStepOutput::None);
+        }
+
         // Collect reconfigurator state
         const NMAX_BLUEPRINTS: usize = 300;
         match reconfigurator_state_load(
@@ -920,6 +982,10 @@ impl BundleCollection {
         mgs_client: &OnceCell<Arc<Option<MgsClient>>>,
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
+        if !self.request.include_sled_cubby_info() {
+            return Ok(CollectionStepOutput::None);
+        }
+
         let Some(mgs_client) =
             &**self.get_or_initialize_mgs_client(mgs_client).await
         else {
@@ -945,6 +1011,10 @@ impl BundleCollection {
         mgs_client: &OnceCell<Arc<Option<MgsClient>>>,
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
+        if !self.request.include_sp_dumps() {
+            return Ok(CollectionStepOutput::None);
+        }
+
         let Some(mgs_client) =
             &**self.get_or_initialize_mgs_client(mgs_client).await
         else {
@@ -984,6 +1054,10 @@ impl BundleCollection {
         sp: SpIdentifier,
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
+        if !self.request.include_sp_dumps() {
+            return Ok(CollectionStepOutput::None);
+        }
+
         save_sp_dumps(mgs_client, sp, dir)
             .await
             .with_context(|| format!("SP {} {}", sp.type_, sp.slot))?;
@@ -1098,6 +1172,10 @@ impl BundleCollection {
         &self,
         all_sleds: &OnceCell<Arc<Option<Vec<Sled>>>>,
     ) -> anyhow::Result<CollectionStepOutput> {
+        if !self.request.include_host_info() {
+            return Ok(CollectionStepOutput::None);
+        }
+
         let Some(all_sleds) =
             self.get_or_initialize_all_sleds(all_sleds).await.as_deref()
         else {
@@ -1107,6 +1185,10 @@ impl BundleCollection {
 
         let mut extra_steps: Vec<(&'static str, CollectionStepFn)> = vec![];
         for sled in all_sleds {
+            if !self.request.include_sled(sled.id()) {
+                continue;
+            }
+
             extra_steps.push((
                 "sled data",
                 Box::new({
@@ -1135,6 +1217,12 @@ impl BundleCollection {
         sled: &nexus_db_model::Sled,
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
+        if !self.request.include_host_info()
+            || !self.request.include_sled(sled.id())
+        {
+            return Ok(CollectionStepOutput::None);
+        }
+
         let log = &self.log;
         info!(&log, "Collecting bundle info from sled"; "sled" => %sled.id());
         let sled_path = dir
@@ -1145,10 +1233,6 @@ impl BundleCollection {
         tokio::fs::create_dir_all(&sled_path).await?;
         tokio::fs::write(sled_path.join("sled.txt"), format!("{sled:?}"))
             .await?;
-
-        if self.request.skip_sled_info {
-            return Ok(CollectionStepOutput::None);
-        }
 
         let Ok(sled_client) = nexus_networking::sled_client(
             &self.datastore,
@@ -2266,7 +2350,7 @@ mod test {
         let request = BundleRequest {
             // NOTE: The support bundle querying interface isn't supported on
             // the simulated sled agent (yet?) so we're skipping this step.
-            skip_sled_info: true,
+            sled_selection: HashSet::new(),
             ..Default::default()
         };
         let report = collector
@@ -2340,9 +2424,10 @@ mod test {
         // We're going to use a really small chunk size here to force the bundle
         // to get split up.
         let request = BundleRequest {
-            skip_sled_info: true,
             transfer_chunk_size: NonZeroU64::new(16).unwrap(),
+            sled_selection: HashSet::new(),
             ereport_query: None,
+            ..Default::default()
         };
 
         let report = collector
@@ -2430,8 +2515,10 @@ mod test {
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
-        let request =
-            BundleRequest { skip_sled_info: true, ..Default::default() };
+        let request = BundleRequest {
+            sled_selection: HashSet::new(),
+            ..Default::default()
+        };
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -2579,8 +2666,10 @@ mod test {
             false,
             nexus.id(),
         );
-        let request =
-            BundleRequest { skip_sled_info: true, ..Default::default() };
+        let request = BundleRequest {
+            sled_selection: HashSet::new(),
+            ..Default::default()
+        };
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -2726,8 +2815,10 @@ mod test {
             false,
             nexus.id(),
         );
-        let request =
-            BundleRequest { skip_sled_info: true, ..Default::default() };
+        let request = BundleRequest {
+            sled_selection: HashSet::new(),
+            ..Default::default()
+        };
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -2811,8 +2902,10 @@ mod test {
             false,
             nexus.id(),
         );
-        let request =
-            BundleRequest { skip_sled_info: true, ..Default::default() };
+        let request = BundleRequest {
+            sled_selection: HashSet::new(),
+            ..Default::default()
+        };
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -2897,8 +2990,10 @@ mod test {
         );
 
         // Collect the bundle
-        let request =
-            BundleRequest { skip_sled_info: true, ..Default::default() };
+        let request = BundleRequest {
+            sled_selection: HashSet::new(),
+            ..Default::default()
+        };
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
