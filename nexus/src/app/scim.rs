@@ -86,7 +86,7 @@ impl super::Nexus {
 
     /// Authenticate a SCIM client based on a bearer token, and return a SCIM
     /// provider store implementation that is scoped to a Silo.
-    pub(crate) async fn scim_idp_get_provider(
+    pub(crate) async fn scim_get_provider_from_bearer_token(
         &self,
         request: &dropshot::RequestInfo,
     ) -> LookupResult<scim2_rs::Provider<CrdbScimProviderStore>> {
@@ -167,7 +167,8 @@ impl super::Nexus {
         request: &dropshot::RequestInfo,
         query: scim2_rs::QueryParams,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.list_users(query).await {
             Ok(response) => response.to_http_response(),
@@ -183,7 +184,8 @@ impl super::Nexus {
         query: scim2_rs::QueryParams,
         user_id: String,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.get_user_by_id(query, &user_id).await {
             Ok(response) => response.to_http_response(StatusCode::OK),
@@ -198,7 +200,8 @@ impl super::Nexus {
         request: &dropshot::RequestInfo,
         body: scim2_rs::CreateUserRequest,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.create_user(body).await {
             Ok(response) => response.to_http_response(StatusCode::CREATED),
@@ -214,7 +217,8 @@ impl super::Nexus {
         user_id: String,
         body: scim2_rs::CreateUserRequest,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.replace_user(&user_id, body).await {
             Ok(response) => response.to_http_response(StatusCode::OK),
@@ -230,7 +234,8 @@ impl super::Nexus {
         user_id: String,
         body: scim2_rs::PatchRequest,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.patch_user(&user_id, body).await {
             Ok(response) => response.to_http_response(StatusCode::OK),
@@ -245,7 +250,8 @@ impl super::Nexus {
         request: &dropshot::RequestInfo,
         user_id: String,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.delete_user(&user_id).await {
             Ok(response) => Ok(response),
@@ -260,7 +266,8 @@ impl super::Nexus {
         request: &dropshot::RequestInfo,
         query: scim2_rs::QueryParams,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.list_groups(query).await {
             Ok(response) => response.to_http_response(),
@@ -276,7 +283,8 @@ impl super::Nexus {
         query: scim2_rs::QueryParams,
         group_id: String,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.get_group_by_id(query, &group_id).await {
             Ok(response) => response.to_http_response(StatusCode::OK),
@@ -291,7 +299,8 @@ impl super::Nexus {
         request: &dropshot::RequestInfo,
         body: scim2_rs::CreateGroupRequest,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.create_group(body).await {
             Ok(response) => response.to_http_response(StatusCode::CREATED),
@@ -307,7 +316,8 @@ impl super::Nexus {
         group_id: String,
         body: scim2_rs::CreateGroupRequest,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.replace_group(&group_id, body).await {
             Ok(response) => response.to_http_response(StatusCode::OK),
@@ -323,7 +333,8 @@ impl super::Nexus {
         group_id: String,
         body: scim2_rs::PatchRequest,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.patch_group(&group_id, body).await {
             Ok(response) => response.to_http_response(StatusCode::OK),
@@ -338,7 +349,8 @@ impl super::Nexus {
         request: &dropshot::RequestInfo,
         group_id: String,
     ) -> Result<Response<Body>, HttpError> {
-        let provider = self.scim_idp_get_provider(&request).await?;
+        let provider =
+            self.scim_get_provider_from_bearer_token(&request).await?;
 
         let result = match provider.delete_group(&group_id).await {
             Ok(response) => Ok(response),
