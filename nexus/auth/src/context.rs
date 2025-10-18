@@ -378,6 +378,36 @@ impl OpContext {
             Ok(())
         }
     }
+
+    /// Authorize a networking action, respecting silo networking restrictions
+    ///
+    /// This combines standard project-level authorization with silo-level
+    /// networking restrictions. If the silo restricts networking actions,
+    /// only silo admins are allowed to perform the action.
+    pub async fn authorize_networking<Resource>(
+        &self,
+        action: authz::Action,
+        authz_resource: Resource,
+    ) -> Result<(), Error>
+    where
+        Resource: AuthorizedResource + Debug + Clone,
+    {
+        // First, do the standard authorization check
+        self.authorize(action, &authz_resource).await?;
+
+        // Then check networking restrictions
+        if let Some(silo_policy) = self.authn.silo_authn_policy() {
+            if silo_policy.restrict_network_actions() {
+                // Networking is restricted - verify user is silo admin
+                let authz_silo = self.authn.silo_required()?;
+                self.authorize(authz::Action::Modify, &authz_silo)
+                    .await
+                    .map_err(|_| Error::Forbidden)?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Session for ConsoleSessionWithSiloId {

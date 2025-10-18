@@ -878,7 +878,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo (
     /* child resource generation number, per RFD 192 */
     rcgen INT NOT NULL,
 
-    admin_group_name TEXT
+    admin_group_name TEXT,
+
+    restrict_network_actions BOOL NOT NULL DEFAULT FALSE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_by_name ON omicron.public.silo (
@@ -6792,7 +6794,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '199.0.0', NULL)
+    (TRUE, NOW(), NOW(), '200.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

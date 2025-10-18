@@ -703,3 +703,53 @@ resource AlertClassList {
 
 has_relation(fleet: Fleet, "parent_fleet", collection: AlertClassList)
 	if collection.fleet = fleet;
+
+# NETWORKING RESTRICTIONS BASED ON SILO SETTINGS
+#
+# These rules enforce networking restrictions when a silo has restrict_network_actions = true.
+# For silos with this restriction, only Silo Admins can perform networking create/modify/delete actions,
+# while read/list actions remain available to all project collaborators.
+
+# Determine if the actor has permissions to modify networking resources
+can_modify_networking_resource(actor: AuthenticatedActor, project: Project) if
+	# Always allow silo admins to update networking resources
+	has_role(actor, "admin", project.silo) or
+	# Allow project admins to update networking resources if the project's silo allows it
+	# Note that the restriction is configured at the silo level, but affects the projects on the silo
+    (has_role(actor, "collaborator", project) and not project.restricts_networking());
+
+# Apply networking restrictions to all networking resources
+# VPCs (project path: vpc.project)
+has_permission(actor: AuthenticatedActor, "create_child", vpc: Vpc) if
+    can_modify_networking_resource(actor, vpc.project);
+
+has_permission(actor: AuthenticatedActor, "modify", vpc: Vpc) if
+    can_modify_networking_resource(actor, vpc.project);
+
+# VPC Routers (project path: router.vpc.project)
+has_permission(actor: AuthenticatedActor, "create_child", router: VpcRouter) if
+    can_modify_networking_resource(actor, router.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "modify", router: VpcRouter) if
+    can_modify_networking_resource(actor, router.vpc.project);
+
+# VPC Subnets (project path: subnet.vpc.project)
+has_permission(actor: AuthenticatedActor, "create_child", subnet: VpcSubnet) if
+    can_modify_networking_resource(actor, subnet.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "modify", subnet: VpcSubnet) if
+    can_modify_networking_resource(actor, subnet.vpc.project);
+
+# Internet Gateways (project path: gateway.vpc.project)
+has_permission(actor: AuthenticatedActor, "create_child", gateway: InternetGateway) if
+    can_modify_networking_resource(actor, gateway.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "modify", gateway: InternetGateway) if
+    can_modify_networking_resource(actor, gateway.vpc.project);
+
+# Router Routes (project path: route.vpc_router.vpc.project)
+has_permission(actor: AuthenticatedActor, "create_child", route: RouterRoute) if
+    can_modify_networking_resource(actor, route.vpc_router.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "modify", route: RouterRoute) if
+    can_modify_networking_resource(actor, route.vpc_router.vpc.project);

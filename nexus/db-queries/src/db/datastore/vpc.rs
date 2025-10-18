@@ -475,7 +475,18 @@ impl DataStore {
         use nexus_db_schema::schema::vpc::dsl;
 
         assert_eq!(authz_project.id(), vpc_query.vpc.project_id);
-        opctx.authorize(authz::Action::CreateChild, authz_project).await?;
+
+        // Create a VPC authz resource for authorization check
+        let authz_vpc = authz::Vpc::new(
+            authz_project.clone(),
+            vpc_query.vpc.identity.id,
+            omicron_common::api::external::LookupType::ById(
+                vpc_query.vpc.identity.id,
+            ),
+        );
+
+        // Check if the actor can create this VPC (including networking restrictions)
+        opctx.authorize(authz::Action::CreateChild, &authz_vpc).await?;
 
         let name = vpc_query.vpc.identity.name.clone();
         let project_id = vpc_query.vpc.project_id;

@@ -236,6 +236,61 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_networking_restrictions_structure() {
+        // This test verifies that our networking restrictions compile and can be instantiated
+        let logctx =
+            dev::test_setup_log("test_networking_restrictions_structure");
+
+        // Test that SiloAuthnPolicy with networking restrictions can be created
+        let restricted_policy = authn::SiloAuthnPolicy::new(
+            std::collections::BTreeMap::new(),
+            true, // restrict_network_actions
+        );
+
+        let normal_policy = authn::SiloAuthnPolicy::new(
+            std::collections::BTreeMap::new(),
+            false, // restrict_network_actions
+        );
+
+        // Verify that the restricts_networking method works
+        assert_eq!(restricted_policy.restrict_network_actions(), true);
+        assert_eq!(normal_policy.restrict_network_actions(), false);
+
+        // Test that we can create auth contexts with these policies
+        let authn_restricted = authn::Context::for_test_user(
+            omicron_uuid_kinds::SiloUserUuid::new_v4(),
+            Uuid::new_v4(),
+            restricted_policy,
+        );
+        let authn_normal = authn::Context::for_test_user(
+            omicron_uuid_kinds::SiloUserUuid::new_v4(),
+            Uuid::new_v4(),
+            normal_policy,
+        );
+
+        // Verify the policies are accessible
+        assert_eq!(
+            authn_restricted
+                .silo_authn_policy()
+                .unwrap()
+                .restrict_network_actions(),
+            true
+        );
+        assert_eq!(
+            authn_normal
+                .silo_authn_policy()
+                .unwrap()
+                .restrict_network_actions(),
+            false
+        );
+
+        println!(
+            "Networking restrictions structure test completed successfully"
+        );
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_unregistered_resource() {
         let logctx = dev::test_setup_log("test_unregistered_resource");
         let datastore = FakeStorage::new();
