@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Database-friendly IPv6 addresses
+//! Database-friendly IPv4 addresses
 
 use diesel::backend::Backend;
 use diesel::deserialize;
@@ -13,9 +13,10 @@ use diesel::serialize::Output;
 use diesel::serialize::ToSql;
 use diesel::sql_types::Inet;
 use ipnetwork::IpNetwork;
-use ipnetwork::Ipv6Network;
+use ipnetwork::Ipv4Network;
 use omicron_common::api::external::Error;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(
     Clone,
@@ -30,60 +31,60 @@ use serde::{Deserialize, Serialize};
     Serialize,
 )]
 #[diesel(sql_type = Inet)]
-pub struct Ipv6Addr(std::net::Ipv6Addr);
+pub struct Ipv4Addr(std::net::Ipv4Addr);
 
-NewtypeDebug! { () pub struct Ipv6Addr(std::net::Ipv6Addr); }
-NewtypeFrom! { () pub struct Ipv6Addr(std::net::Ipv6Addr); }
-NewtypeDeref! { () pub struct Ipv6Addr(std::net::Ipv6Addr); }
+NewtypeDebug! { () pub struct Ipv4Addr(std::net::Ipv4Addr); }
+NewtypeFrom! { () pub struct Ipv4Addr(std::net::Ipv4Addr); }
+NewtypeDeref! { () pub struct Ipv4Addr(std::net::Ipv4Addr); }
 
-impl From<&std::net::Ipv6Addr> for Ipv6Addr {
-    fn from(addr: &std::net::Ipv6Addr) -> Self {
+impl From<&std::net::Ipv4Addr> for Ipv4Addr {
+    fn from(addr: &std::net::Ipv4Addr) -> Self {
         Self(*addr)
     }
 }
 
-impl From<Ipv6Addr> for std::net::IpAddr {
-    fn from(value: Ipv6Addr) -> Self {
-        value.0.into()
+impl From<Ipv4Addr> for std::net::IpAddr {
+    fn from(value: Ipv4Addr) -> Self {
+        std::net::IpAddr::from(value.0)
     }
 }
 
-impl From<&Ipv6Addr> for std::net::IpAddr {
-    fn from(value: &Ipv6Addr) -> Self {
+impl From<&Ipv4Addr> for std::net::IpAddr {
+    fn from(value: &Ipv4Addr) -> Self {
         (*value).into()
     }
 }
 
-impl From<Ipv6Addr> for Ipv6Network {
-    fn from(value: Ipv6Addr) -> Self {
-        Ipv6Network::from(value.0)
+impl From<Ipv4Addr> for Ipv4Network {
+    fn from(value: Ipv4Addr) -> Self {
+        Ipv4Network::from(value.0)
     }
 }
 
-impl From<Ipv6Addr> for IpNetwork {
-    fn from(value: Ipv6Addr) -> Self {
-        IpNetwork::V6(Ipv6Network::from(value.0))
+impl From<Ipv4Addr> for IpNetwork {
+    fn from(value: Ipv4Addr) -> Self {
+        IpNetwork::V4(Ipv4Network::from(value.0))
     }
 }
 
-impl ToSql<Inet, Pg> for Ipv6Addr {
+impl ToSql<Inet, Pg> for Ipv4Addr {
     fn to_sql<'a>(&'a self, out: &mut Output<'a, '_, Pg>) -> serialize::Result {
-        let net = IpNetwork::V6(Ipv6Network::from(self.0));
+        let net = IpNetwork::V4(Ipv4Network::from(self.0));
         <IpNetwork as ToSql<Inet, Pg>>::to_sql(&net, &mut out.reborrow())
     }
 }
 
-impl<DB> FromSql<Inet, DB> for Ipv6Addr
+impl<DB> FromSql<Inet, DB> for Ipv4Addr
 where
     DB: Backend,
     IpNetwork: FromSql<Inet, DB>,
 {
     fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         match IpNetwork::from_sql(bytes)?.ip() {
-            std::net::IpAddr::V6(ip) => Ok(Self(ip)),
-            v4 => {
+            std::net::IpAddr::V4(ip) => Ok(Self(ip)),
+            v6 => {
                 Err(Box::new(Error::internal_error(
-                    format!("Expected an IPv6 address from the database, found IPv4: '{}'", v4).as_str()
+                    format!("Expected an IPv4 address from the database, found IPv6: '{}'", v6).as_str()
                 )))
             }
         }
