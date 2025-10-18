@@ -70,6 +70,7 @@ ratatui.workspace = true
 reedline.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+sigpipe.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
