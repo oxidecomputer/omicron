@@ -1143,7 +1143,7 @@ mod test {
         cpuid_leaf!(0x8000001B, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001C, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
         cpuid_leaf!(0x8000001F, 0x00000000, 0x00000000, 0x00000000, 0x00000000),
-        cpuid_leaf!(0x80000021, 0x000D8C47, 0x00000000, 0x00000000, 0x00000000),
+        cpuid_leaf!(0x80000021, 0x411D8C47, 0x00000000, 0x00000000, 0x00000000),
     ];
 
     // Test that Turin V1 matches the predetermined CPUID leaves written above
