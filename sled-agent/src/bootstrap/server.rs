@@ -39,6 +39,7 @@ use omicron_ddm_admin_client::DdmError;
 use omicron_ddm_admin_client::types::EnableStatsRequest;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackInitUuid;
+use oximeter_instruments::kstat::KstatSemaphore;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::rack_init::RackInitializeRequestParams;
@@ -175,6 +176,7 @@ impl Server {
         // fail to start.
         let BootstrapAgentStartup {
             config,
+            semaphore,
             global_zone_bootstrap_ip,
             base_log,
             startup_log,
@@ -246,6 +248,7 @@ impl Server {
             let start_sled_agent_request = ledger.into_inner();
             let sled_agent_server = start_sled_agent(
                 &config,
+                semaphore.clone(),
                 start_sled_agent_request,
                 long_running_task_handles.clone(),
                 config_reconciler_spawn_token,
@@ -275,6 +278,7 @@ impl Server {
         // agent state.
         let inner = Inner {
             config,
+            semaphore,
             state,
             sled_init_rx,
             sled_reset_rx,
@@ -356,6 +360,7 @@ impl From<SledAgentServerStartError> for StartError {
 #[allow(clippy::too_many_arguments)]
 async fn start_sled_agent(
     config: &SledConfig,
+    semaphore: KstatSemaphore,
     request: StartSledAgentRequest,
     long_running_task_handles: LongRunningTaskHandles,
     config_reconciler_spawn_token: ConfigReconcilerSpawnToken,
@@ -407,6 +412,7 @@ async fn start_sled_agent(
     // Server does not exist, initialize it.
     let server = SledAgentServer::start(
         config,
+        semaphore,
         base_log.clone(),
         request.clone(),
         long_running_task_handles.clone(),
@@ -493,6 +499,7 @@ async fn sled_config_paths(
 
 struct Inner {
     config: SledConfig,
+    semaphore: KstatSemaphore,
     state: SledAgentState,
     sled_init_rx: mpsc::Receiver<(
         StartSledAgentRequest,
@@ -560,6 +567,7 @@ impl Inner {
 
                 let response = match start_sled_agent(
                     &self.config,
+                    self.semaphore.clone(),
                     request,
                     self.long_running_task_handles.clone(),
                     config_reconciler_spawn_token,
@@ -686,7 +694,9 @@ impl Inner {
         sled_hardware::cleanup::delete_omicron_vnics(&log)
             .await
             .map_err(BootstrapError::Cleanup)?;
-        illumos_utils::opte::delete_all_xde_devices(&log)?;
+        // XDE deletions need to be protected by the semaphore.
+        self.semaphore
+            .run(|| illumos_utils::opte::delete_all_xde_devices(&log))?;
         Ok(())
     }
 
