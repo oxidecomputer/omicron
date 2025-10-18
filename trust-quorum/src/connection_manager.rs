@@ -47,7 +47,7 @@ pub enum AcceptError {
 }
 
 /// A mechanism for uniquely identifying a task managing a connection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TaskId(u64);
 
 impl TaskId {
@@ -115,6 +115,7 @@ pub enum ConnToMainMsgInner {
     Connected { addr: SocketAddrV6, peer_id: BaseboardId },
     Received { from: BaseboardId, msg: PeerMsg },
     ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
+    Disconnected { peer_id: BaseboardId },
 }
 
 pub struct TaskHandle {
@@ -164,6 +165,7 @@ pub struct ConnMgrStatus {
     pub bootstrap_addrs: BTreeSet<SocketAddrV6>,
     pub connections: Vec<ConnInfo>,
     pub num_task_join_handles: u64,
+    pub next_task_id: TaskId,
 }
 
 /// A structure to manage all sprockets connections to peer nodes
@@ -262,6 +264,19 @@ impl ConnMgr {
         }
     }
 
+    pub async fn shutdown(&mut self) {
+        // Shutdown all connection processing tasks
+        for (_, handle) in &self.accepting {
+            let _ = handle.tx.send(MainToConnMsg::Close).await;
+        }
+        for (_, handle) in &self.connecting {
+            let _ = handle.tx.send(MainToConnMsg::Close).await;
+        }
+        for (_, handle) in &self.established {
+            let _ = handle.tx.send(MainToConnMsg::Close).await;
+        }
+    }
+
     pub fn status(&self) -> ConnMgrStatus {
         let connections = self
             .connecting
@@ -289,6 +304,7 @@ impl ConnMgr {
             bootstrap_addrs: self.bootstrap_addrs.clone(),
             connections,
             num_task_join_handles: self.join_handles.len() as u64,
+            next_task_id: self.next_task_id,
         }
     }
 
@@ -358,7 +374,7 @@ impl ConnMgr {
                     // happen in `sled-agent-types`. This is waiting on an update
                     // to the `dice-mfg-msgs` crate.
                     let log =
-                        log.new(o!("baseboard_id" => baseboard_id.to_string()));
+                        log.new(o!("peer_id" => baseboard_id.to_string()));
                     info!(log, "Accepted sprockets connection"; "addr" => %addr);
 
                     let mut conn = EstablishedConn::new(
@@ -441,6 +457,22 @@ impl ConnMgr {
 
             assert!(already_established.is_none());
         }
+    }
+
+    /// The established connection task has asynchronously exited.
+    pub async fn on_disconnected(
+        &mut self,
+        task_id: TaskId,
+        peer_id: BaseboardId,
+    ) {
+        if let Some(task_handle) = self.established.get(&peer_id) {
+            if task_handle.task_id != task_id {
+                // This was a stale disconnect
+                return;
+            }
+        }
+        warn!(self.log, "peer disconnected {peer_id}");
+        let _ = self.established.remove(&peer_id);
     }
 
     /// Initiate connections if a corresponding task doesn't already exist. This
@@ -550,7 +582,7 @@ impl ConnMgr {
                     // happen in `sled-agent-types`. This is waiting on an update
                     // to the `dice-mfg-msgs` crate.
                     let log =
-                        log.new(o!("baseboard_id" => baseboard_id.to_string()));
+                        log.new(o!("peer_id" => baseboard_id.to_string()));
                     info!(log, "Sprockets connection established"; "addr" => %addr);
 
                     let mut conn = EstablishedConn::new(
@@ -575,7 +607,7 @@ impl ConnMgr {
                     {
                         // The system is shutting down
                         // Just bail from this task
-                        warn!(
+                        error!(
                             log,
                             "Failed to send 'connected' msg to main task: {e:?}"
                         );
@@ -584,7 +616,7 @@ impl ConnMgr {
                     }
                 }
                 Err(err) => {
-                    error!(log, "Failed to connect"; &err);
+                    warn!(log, "Failed to connect"; &err);
                 }
             }
             task_id

@@ -35,7 +35,8 @@ const MSG_WRITE_QUEUE_CAPACITY: usize = 5;
 // Timing parameters for keeping the connection healthy
 const PING_INTERVAL: Duration = Duration::from_secs(1);
 
-const KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
+/// The time limit for not receiving a complete message from a peer.
+/// The connection is shutdown after this time.
 const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// An error from within an `EstablishedConn` that triggers connection close
@@ -146,9 +147,27 @@ impl EstablishedConn {
 
             if let Err(err) = res {
                 warn!(self.log, "Closing connection"; &err);
+                self.close().await;
                 return;
             }
         }
+    }
+
+    async fn close(&mut self) {
+        if let Err(e) = self
+            .main_tx
+            .send(ConnToMainMsg {
+                task_id: self.task_id,
+                msg: ConnToMainMsgInner::Disconnected {
+                    peer_id: self.peer_id.clone(),
+                },
+            })
+            .await
+        {
+            warn!(self.log, "Failed to send to main task: {e:?}");
+        }
+        // This causes a deadlock and breaks the test
+        //        let _ = self.writer.shutdown().await;
     }
 
     async fn on_read(

@@ -8,12 +8,12 @@ use crate::connection_manager::{
     ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner,
 };
 use crate::{BaseboardId, Node, NodeCtx};
-use slog::{Logger, error, info, o};
+use slog::{Logger, debug, error, info, o};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 use thiserror::Error;
-use tokio::sync::mpsc::error::{SendError, TrySendError};
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 
@@ -35,6 +35,9 @@ pub enum NodeApiRequest {
 
     /// Retrieve connectivity status via the `ConnMgr`
     ConnMgrStatus { responder: oneshot::Sender<ConnMgrStatus> },
+
+    /// Shutdown the node's tokio tasks
+    Shutdown,
 }
 
 /// An error response from a `NodeApiRequest`
@@ -89,9 +92,15 @@ impl NodeTaskHandle {
         let res = rx.await?;
         Ok(res)
     }
+
+    pub async fn shutdown(&self) -> Result<(), NodeApiError> {
+        self.tx.send(NodeApiRequest::Shutdown).await?;
+        Ok(())
+    }
 }
 
 pub struct NodeTask {
+    shutdown: bool,
     log: Logger,
     config: Config,
     node: Node,
@@ -110,7 +119,7 @@ impl NodeTask {
     ) -> (NodeTask, NodeTaskHandle) {
         let log = log.new(o!(
             "component" => "trust-quorum",
-            "platform_id" => config.baseboard_id.to_string()
+            "baseboard_id" => config.baseboard_id.to_string()
         ));
         // We only expect one outstanding request at a time for `Init_` or
         // `LoadRackSecret` requests, We can have one of those requests in
@@ -132,7 +141,16 @@ impl NodeTask {
         .await;
         let listen_addr = conn_mgr.listen_addr();
         (
-            NodeTask { log, config, node, ctx, conn_mgr, conn_mgr_rx, rx },
+            NodeTask {
+                shutdown: false,
+                log,
+                config,
+                node,
+                ctx,
+                conn_mgr,
+                conn_mgr_rx,
+                rx,
+            },
             NodeTaskHandle { tx, listen_addr },
         )
     }
@@ -141,7 +159,7 @@ impl NodeTask {
     ///
     /// This should be spawned into its own tokio task
     pub async fn run(&mut self) {
-        loop {
+        while !self.shutdown {
             // TODO: Real corpus
             let corpus = vec![];
             tokio::select! {
@@ -149,12 +167,14 @@ impl NodeTask {
                     self.on_api_request(request).await;
                 }
                 res = self.conn_mgr.step(corpus.clone()) => {
+                    println!("stepping through ConnMgr");
                     if let Err(err) = res {
                         error!(self.log, "Failed to accept connection"; &err);
                         continue;
                     }
                 }
                 Some(msg) = self.conn_mgr_rx.recv() => {
+                    println!("Received msg from ConnMgr");
                     self.on_conn_msg(msg).await
                 }
 
@@ -176,6 +196,9 @@ impl NodeTask {
                     .client_handshake_completed(task_id, addr, peer_id)
                     .await;
             }
+            ConnToMainMsgInner::Disconnected { peer_id } => {
+                self.conn_mgr.on_disconnected(task_id, peer_id).await;
+            }
             ConnToMainMsgInner::Received { from, msg } => {
                 todo!();
             }
@@ -194,7 +217,13 @@ impl NodeTask {
                 self.conn_mgr.update_bootstrap_connections(addrs, corpus).await;
             }
             NodeApiRequest::ConnMgrStatus { responder } => {
+                debug!(self.log, "Received Request for ConnMgrStatus");
                 let _ = responder.send(self.conn_mgr.status());
+            }
+            NodeApiRequest::Shutdown => {
+                info!(self.log, "Shutting down Node tokio tasks");
+                self.shutdown = true;
+                self.conn_mgr.shutdown().await;
             }
         }
     }
@@ -203,6 +232,7 @@ impl NodeTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TaskId;
     use crate::connection_manager::{ConnState, platform_id_to_baseboard_id};
     use camino::Utf8PathBuf;
     use dropshot::test_util::log_prefix_for_test;
@@ -256,8 +286,8 @@ mod tests {
     /// set of "bootstrap addresses".
     #[tokio::test]
     async fn full_mesh_connectivity() {
-        let logctx = test_setup_log("connect");
-        let (dir, _) = log_prefix_for_test("connect");
+        let logctx = test_setup_log("full_mesh_connectivity");
+        let (dir, _) = log_prefix_for_test("full_mesh_connectivity");
         println!("Writing keys and certs to {dir}");
         let num_nodes = 4;
 
@@ -288,33 +318,36 @@ mod tests {
 
         let configs = pki_doc_to_node_configs(dir, num_nodes);
 
-        let mut handles = vec![];
+        let mut node_handles = vec![];
+        let mut join_handles = vec![];
         for config in configs.clone() {
             let (mut task, handle) = NodeTask::new(config, &logctx.log).await;
-            handles.push(handle);
-            tokio::spawn(async move { task.run().await });
+            node_handles.push(handle);
+            join_handles.push(tokio::spawn(async move { task.run().await }));
         }
 
         let listen_addrs: BTreeSet<_> =
-            handles.iter().map(|h| h.listen_addr()).collect();
+            node_handles.iter().map(|h| h.listen_addr()).collect();
 
-        for h in &handles {
+        for h in &node_handles {
             h.load_peer_addresses(listen_addrs.clone()).await.unwrap();
         }
 
-        // Wait for all nodes have `num_nodes - 1` established connections
         let poll_interval = Duration::from_millis(1);
         let poll_max = Duration::from_secs(10);
+
+        // Wait for all nodes have `num_nodes - 1` established connections
         wait_for_condition(
             async || {
                 let mut count = 0;
-                for h in &handles {
+                for h in &node_handles {
                     let status = h.conn_mgr_status().await.unwrap();
                     if status
                         .connections
                         .iter()
                         .all(|c| matches!(c.state, ConnState::Established(_)))
                         && status.connections.len() == num_nodes - 1
+                        && status.next_task_id == TaskId::new(3)
                     {
                         count += 1;
                     }
@@ -331,6 +364,45 @@ mod tests {
         .await
         .unwrap();
 
-        logctx.cleanup_successful();
+        // Killing a single node should cause all other nodes to start
+        // reconnecting. This should cause the task id counter to start
+        // incrementing at all nodes and for their to be one fewer established
+        // connection.
+        let h = node_handles.pop().unwrap();
+        let res = h.shutdown().await.unwrap();
+        let last = join_handles.pop().unwrap();
+        //let res = last.await;
+
+        wait_for_condition(
+            async || {
+                let mut count = 0;
+                for h in &node_handles {
+                    let status = h.conn_mgr_status().await.unwrap();
+                    if status
+                        .connections
+                        .iter()
+                        .filter(|c| {
+                            matches!(c.state, ConnState::Established(_))
+                        })
+                        .count()
+                        == num_nodes - 2
+                        && status.next_task_id > TaskId::new(3)
+                    {
+                        count += 1;
+                    }
+                }
+                if count == num_nodes - 1 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        //        logctx.cleanup_successful();
     }
 }
