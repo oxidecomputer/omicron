@@ -2952,7 +2952,7 @@ fn cmd_set(
             state
                 .system_mut()
                 .description_mut()
-                .target_nexus_zone_count(usize::from(num_nexus));
+                .set_target_nexus_zone_count(usize::from(num_nexus));
             rv
         }
         SetArgs::ActiveNexusGen { gen } => {
