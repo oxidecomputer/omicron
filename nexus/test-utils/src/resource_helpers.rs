@@ -148,6 +148,24 @@ where
         .unwrap()
 }
 
+pub async fn object_create_no_body<OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+) -> OutputType
+where
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::objects_post_no_body(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"POST\" request to {path}: {e}")
+        })
+        .parsed_body()
+        .unwrap()
+}
+
 /// Make a POST, assert status code, return error response body
 pub async fn object_create_error<InputType>(
     client: &ClientTestContext,

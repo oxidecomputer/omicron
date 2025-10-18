@@ -9,7 +9,7 @@ session_idle_timeout_minutes = 480 # 8 hours
 session_absolute_timeout_minutes = 1440 # 24 hours
 
 [authn]
-schemes_external = ["session_cookie", "access_token"]
+schemes_external = ["session_cookie", "access_token", "scim_token"]
 
 [log]
 # Show log messages of this level and more severe

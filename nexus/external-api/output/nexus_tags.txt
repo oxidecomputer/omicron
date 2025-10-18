@@ -274,7 +274,6 @@ saml_identity_provider_create            POST     /v1/system/identity-providers/
 saml_identity_provider_view              GET      /v1/system/identity-providers/saml/{provider}
 scim_token_create                        POST     /v1/system/scim/tokens
 scim_token_delete                        DELETE   /v1/system/scim/tokens/{token_id}
-scim_token_delete_all                    DELETE   /v1/system/scim/tokens
 scim_token_list                          GET      /v1/system/scim/tokens
 scim_token_view                          GET      /v1/system/scim/tokens/{token_id}
 silo_create                              POST     /v1/system/silos

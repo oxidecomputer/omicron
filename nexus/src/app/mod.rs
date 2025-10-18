@@ -876,17 +876,6 @@ impl Nexus {
         )
     }
 
-    /// Returns an [`OpContext`] used for authenticating SCIM requests
-    pub fn opctx_external_scim(&self) -> OpContext {
-        OpContext::for_background(
-            self.log.new(o!("component" => "ExternalScim")),
-            Arc::clone(&self.authz),
-            authn::Context::external_scim(),
-            Arc::clone(&self.db_datastore)
-                as Arc<dyn nexus_auth::storage::Storage>,
-        )
-    }
-
     /// Used as the body of a "stub" endpoint -- one that's currently
     /// unimplemented but that we eventually intend to implement
     ///

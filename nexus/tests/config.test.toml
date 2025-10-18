@@ -10,7 +10,7 @@ session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
 [authn]
-schemes_external = ["spoof", "session_cookie", "access_token"]
+schemes_external = ["spoof", "session_cookie", "access_token", "scim_token"]
 
 #
 # NOTE: for the test suite, if mode = "file", the file path MUST be the sentinel

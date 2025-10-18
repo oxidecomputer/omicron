@@ -8,6 +8,8 @@
 use super::endpoints::*;
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
 use crate::integration_tests::updates::TestTrustRoot;
+use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use headers::authorization::Credentials;
@@ -140,6 +142,35 @@ async fn test_unauthorized() {
         .execute()
         .await
         .unwrap();
+
+    // Insert a SCIM client bearer token with a known UUID - normally these are
+    // completely random.
+
+    {
+        use nexus_db_model::ScimClientBearerToken;
+        use nexus_types::silo::DEFAULT_SILO_ID;
+
+        let now = Utc::now();
+
+        let new_token = ScimClientBearerToken {
+            id: "7885144e-9c75-47f7-a97d-7dfc58e1186c".parse().unwrap(),
+            time_created: now,
+            time_deleted: None,
+            time_expires: Some(now),
+            silo_id: DEFAULT_SILO_ID,
+            bearer_token: String::from("testpost"),
+        };
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let conn = nexus.datastore().pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::scim_client_bearer_token::dsl;
+        diesel::insert_into(dsl::scim_client_bearer_token)
+            .values(new_token.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+    }
 
     // Verify the hardcoded endpoints.
     info!(log, "verifying endpoints");

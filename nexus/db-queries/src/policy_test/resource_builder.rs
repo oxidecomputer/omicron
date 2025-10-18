@@ -264,6 +264,7 @@ impl_dyn_authorized_resource_for_resource!(authz::PhysicalDisk);
 impl_dyn_authorized_resource_for_resource!(authz::Project);
 impl_dyn_authorized_resource_for_resource!(authz::ProjectImage);
 impl_dyn_authorized_resource_for_resource!(authz::SamlIdentityProvider);
+impl_dyn_authorized_resource_for_resource!(authz::ScimClientBearerToken);
 impl_dyn_authorized_resource_for_resource!(authz::Service);
 impl_dyn_authorized_resource_for_resource!(authz::Silo);
 impl_dyn_authorized_resource_for_resource!(authz::SiloGroup);
@@ -378,5 +379,25 @@ impl DynAuthorizedResource for authz::SiloUserTokenList {
 
     fn resource_name(&self) -> String {
         format!("{}: token list", self.silo_user().resource_name())
+    }
+}
+
+impl DynAuthorizedResource for authz::ScimClientBearerTokenList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!(
+            "{}: scim client bearer token list",
+            self.silo().resource_name()
+        )
     }
 }

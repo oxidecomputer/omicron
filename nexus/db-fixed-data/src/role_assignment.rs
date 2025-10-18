@@ -53,13 +53,5 @@ pub static BUILTIN_ROLE_ASSIGNMENTS: LazyLock<Vec<RoleAssignment>> =
                 *FLEET_ID,
                 "external-authenticator",
             ),
-            // The "external-scim" user gets the "external-scim" role on the
-            // sole fleet. This grants them the ability to read SCIM tokens.
-            RoleAssignment::new_for_builtin_user(
-                user_builtin::USER_EXTERNAL_SCIM.id,
-                ResourceType::Fleet,
-                *FLEET_ID,
-                "external-scim",
-            ),
         ]
     });
