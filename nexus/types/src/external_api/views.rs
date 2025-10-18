@@ -388,15 +388,18 @@ pub struct InternetGatewayIpAddress {
 // IP POOLS
 
 /// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
-/// the pool can be allocated within that silo
+/// the pool can be allocated within that silo. IP Pools may also be delegated
+/// for internal use by Oxide, such as running API servers or NTP daemons.
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPool {
+pub struct SystemIpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     /// The IP version for the pool.
     pub ip_version: IpVersion,
     /// Type of IP pool (unicast or multicast)
     pub pool_type: shared::IpPoolType,
+    /// Resources the IP Pool is reserved for.
+    pub reservation_type: shared::IpPoolReservationType,
 }
 
 /// The utilization of IP addresses in a pool.
@@ -417,7 +420,7 @@ pub struct IpPoolUtilization {
 
 /// An IP pool in the context of a silo
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SiloIpPool {
+pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
@@ -425,6 +428,9 @@ pub struct SiloIpPool {
     /// ephemeral IPs will come from that pool when no other pool is specified.
     /// There can be at most one default for a given silo.
     pub is_default: bool,
+
+    /// The IP version of the pool.
+    pub ip_version: IpVersion,
 }
 
 /// A link between an IP pool and a silo that allows one to allocate IPs from

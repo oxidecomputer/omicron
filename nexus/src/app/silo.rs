@@ -57,6 +57,7 @@ impl super::Nexus {
         Ok(silo)
     }
 
+    // TODO-cleanup: This is infallible, it doesn't need to return a Result.
     pub fn silo_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
