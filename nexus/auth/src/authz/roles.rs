@@ -39,7 +39,6 @@ use crate::authn;
 use crate::context::OpContext;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ResourceType;
-use omicron_uuid_kinds::GenericUuid;
 use slog::trace;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -156,19 +155,26 @@ async fn load_directly_attached_roles(
             "resource_id" => resource_id.to_string(),
         );
 
+        let Some((identity_id, identity_type)) =
+            actor.id_and_type_for_role_assignment()
+        else {
+            trace!(
+                opctx.log,
+                "actor cannot have roles";
+                "actor" => ?actor,
+                "resource_type" => ?resource_type,
+                "resource_id" => resource_id.to_string(),
+            );
+            // XXX Ok, or an error?
+            return Ok(());
+        };
+
         let roles = opctx
             .datastore()
             .role_asgn_list_for(
                 opctx,
-                actor.into(),
-                match &actor {
-                    authn::Actor::SiloUser { silo_user_id, .. } => {
-                        silo_user_id.into_untyped_uuid()
-                    }
-                    authn::Actor::UserBuiltin { user_builtin_id, .. } => {
-                        user_builtin_id.into_untyped_uuid()
-                    }
-                },
+                identity_type,
+                identity_id,
                 resource_type,
                 resource_id,
             )

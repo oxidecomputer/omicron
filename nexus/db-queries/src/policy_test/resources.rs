@@ -311,6 +311,7 @@ async fn make_silo(
         scim_client_bearer_token_id,
         LookupType::by_id(scim_client_bearer_token_id),
     ));
+    builder.new_resource(authz::ScimClientBearerTokenList::new(silo.clone()));
 }
 
 /// Helper for `make_resources()` that constructs a small Project hierarchy

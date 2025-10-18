@@ -17,7 +17,7 @@ session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
 [authn]
-schemes_external = ["session_cookie", "access_token"]
+schemes_external = ["session_cookie", "access_token", "scim_token"]
 
 [log]
 # Show log messages of this level and more severe

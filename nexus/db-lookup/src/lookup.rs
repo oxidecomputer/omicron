@@ -262,9 +262,11 @@ impl<'a> LookupPath<'a> {
                 SiloUser::PrimaryKey(Root { lookup_root: self }, *silo_user_id),
             ),
 
-            authn::Actor::UserBuiltin { .. } => Err(
-                Error::non_resourcetype_not_found("could not find silo user"),
-            ),
+            authn::Actor::UserBuiltin { .. } | authn::Actor::Scim { .. } => {
+                Err(Error::non_resourcetype_not_found(
+                    "could not find silo user",
+                ))
+            }
         }
     }
 
@@ -927,7 +929,7 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
-    visible_outside_silo = true
+    visible_outside_silo = true // XXX needed?
 }
 
 // Helpers for unifying the interfaces around images

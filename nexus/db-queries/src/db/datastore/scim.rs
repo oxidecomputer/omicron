@@ -18,6 +18,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use rand::{RngCore, SeedableRng, rngs::StdRng};
 use uuid::Uuid;
 
@@ -37,7 +38,14 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
     ) -> ListResultVec<ScimClientBearerToken> {
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+        let authz_scim_client_bearer_token_list =
+            authz::ScimClientBearerTokenList::new(authz_silo.clone());
+        opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &authz_scim_client_bearer_token_list,
+            )
+            .await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -58,7 +66,14 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
     ) -> CreateResult<ScimClientBearerToken> {
-        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        let authz_scim_client_bearer_token_list =
+            authz::ScimClientBearerTokenList::new(authz_silo.clone());
+        opctx
+            .authorize(
+                authz::Action::CreateChild,
+                &authz_scim_client_bearer_token_list,
+            )
+            .await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -134,24 +149,44 @@ impl DataStore {
         Ok(())
     }
 
-    /// SCIM clients should _not_ authenticate to an Actor in the traditional
-    /// sense: they shouldn't have permission on any resources under a Silo,
-    /// only enough to CRUD Silo users and groups.
-    pub async fn scim_idp_lookup_token_by_bearer(
+    pub async fn scim_lookup_token_by_bearer(
         &self,
+        opctx: &OpContext,
         bearer_token: String,
     ) -> LookupResult<Option<ScimClientBearerToken>> {
-        let conn = self.pool_connection_unauthorized().await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         use nexus_db_schema::schema::scim_client_bearer_token::dsl;
-        let maybe_token = dsl::scim_client_bearer_token
-            .filter(dsl::bearer_token.eq(bearer_token))
-            .filter(dsl::time_deleted.is_null())
-            .first_async(&*conn)
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        let maybe_token: Option<ScimClientBearerToken> =
+            dsl::scim_client_bearer_token
+                .filter(dsl::bearer_token.eq(bearer_token))
+                .filter(dsl::time_deleted.is_null())
+                .select(ScimClientBearerToken::as_select())
+                .first_async(&*conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
 
-        Ok(maybe_token)
+        let Some(token) = maybe_token else {
+            return Ok(None);
+        };
+
+        // we have to construct the authz resource after the lookup because we
+        // don't have its ID on hand until then
+        let authz_token = authz::ScimClientBearerToken::new(
+            authz::Silo::new(
+                authz::FLEET,
+                token.silo_id,
+                LookupType::by_id(token.silo_id),
+            ),
+            token.id(),
+            LookupType::ById(token.id()),
+        );
+
+        opctx.authorize(authz::Action::Read, &authz_token).await?;
+
+        Ok(Some(token))
     }
 }

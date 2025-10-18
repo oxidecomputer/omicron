@@ -6016,7 +6016,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_actor_kind AS ENUM (
     'user_builtin',
     'silo_user',
-    'unauthenticated'
+    'unauthenticated',
+    'scim'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (

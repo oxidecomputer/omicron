@@ -446,7 +446,7 @@ async fn test_scim_client_token_bearer_auth(
     RequestBuilder::new(client, Method::GET, "/scim/v2/Users")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer {}", created_token.bearer_token),
+            format!("Bearer oxide-scim-{}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR))
@@ -501,10 +501,68 @@ async fn test_scim_client_no_auth_with_expired_token(
     // This should 401
 
     RequestBuilder::new(client, Method::GET, "/scim/v2/Users")
-        .header(http::header::AUTHORIZATION, String::from("Bearer testpost"))
+        .header(
+            http::header::AUTHORIZATION,
+            String::from("Bearer oxide-scim-testpost"),
+        )
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
         .expect("expected 401");
+}
+
+/// Test that a SCIM authenticated actor cannot read a Silo's projects
+#[nexus_test]
+async fn test_scim_client_no_read_project(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+
+    // Create a Silo, then insert an expired token into it
+
+    const SILO_NAME: &str = "saml-scim-silo";
+
+    let silo = create_silo(
+        &client,
+        SILO_NAME,
+        true,
+        shared::SiloIdentityMode::SamlScim,
+    )
+    .await;
+
+    // Manually create a token
+
+    {
+        let now = Utc::now();
+
+        let new_token = ScimClientBearerToken {
+            id: Uuid::new_v4(),
+            time_created: now,
+            time_deleted: None,
+            time_expires: None,
+            silo_id: silo.identity.id,
+            bearer_token: String::from("testpost"),
+        };
+
+        let conn = nexus.datastore().pool_connection_for_tests().await.unwrap();
+
+        use nexus_db_schema::schema::scim_client_bearer_token::dsl;
+        diesel::insert_into(dsl::scim_client_bearer_token)
+            .values(new_token.clone())
+            .execute_async(&*conn)
+            .await
+            .unwrap();
+    }
+
+    // This should 404
+
+    RequestBuilder::new(client, Method::GET, "/v1/projects")
+        .header(
+            http::header::AUTHORIZATION,
+            String::from("Bearer oxide-scim-testpost"),
+        )
+        .expect_status(Some(StatusCode::NOT_FOUND))
+        .execute()
+        .await
+        .expect("expected 404");
 }
