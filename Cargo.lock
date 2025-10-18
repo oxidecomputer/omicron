@@ -5354,6 +5354,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "strum 0.27.2",
 ]
 
 [[package]]
@@ -7029,16 +7030,19 @@ dependencies = [
  "cockroach-admin-types",
  "daft",
  "debug-ignore",
+ "dns-server",
  "dropshot",
  "expectorate",
  "gateway-client",
  "gateway-types",
  "hex-literal",
+ "hickory-resolver 0.25.2",
  "id-map",
  "iddqd",
  "illumos-utils",
  "indexmap 2.11.4",
  "internal-dns-resolver",
+ "internal-dns-types",
  "ipnet",
  "itertools 0.14.0",
  "maplit",
