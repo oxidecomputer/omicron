@@ -74,6 +74,7 @@ impl_typed_uuid_kinds! {
         Region = {},
         SiloGroup = {},
         SiloUser = {},
+        Sitrep = {},
         Sled = {},
         SpUpdate = {},
         SupportBundle = {},
