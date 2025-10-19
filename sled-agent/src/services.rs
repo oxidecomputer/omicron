@@ -4,9 +4,6 @@
 
 //! Sled-local service management.
 //!
-//! For controlling zone-based storage services, refer to
-//! [sled_storage::manager::StorageManager].
-//!
 //! For controlling virtual machine instances, refer to
 //! [crate::instance_manager::InstanceManager].
 //!

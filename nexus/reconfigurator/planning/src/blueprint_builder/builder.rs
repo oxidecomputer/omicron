@@ -72,7 +72,6 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::disk::M2Slot;
-use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
@@ -142,8 +141,6 @@ pub enum Error {
     AllocateInternalDnsSubnet(#[from] NoAvailableDnsSubnets),
     #[error("error allocating external networking resources")]
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
-    #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
-    PolicySpecifiesTooManyInternalDnsServers,
     #[error("zone is already up-to-date and should not be updated")]
     ZoneAlreadyUpToDate,
     #[error(
@@ -696,6 +693,10 @@ impl<'a> BlueprintBuilder<'a> {
         self.new_blueprint_id
     }
 
+    pub fn planning_input(&self) -> &PlanningInput {
+        &self.input
+    }
+
     fn resource_allocator(
         &mut self,
     ) -> Result<&mut BlueprintResourceAllocator, Error> {
@@ -757,12 +758,13 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn current_zones<F>(
         &'a self,
         filter: F,
-    ) -> impl Iterator<Item = &'a BlueprintZoneConfig>
+    ) -> impl Iterator<Item = (SledUuid, &'a BlueprintZoneConfig)>
     where
         F: FnMut(BlueprintZoneDisposition) -> bool + Clone,
     {
         self.sled_ids_with_zones().flat_map(move |sled_id| {
             self.current_sled_zones(sled_id, filter.clone())
+                .map(move |config| (sled_id, config))
         })
     }
 

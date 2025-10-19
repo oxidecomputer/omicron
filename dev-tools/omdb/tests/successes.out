@@ -89,9 +89,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL        IP           ROLE      POLICY      STATE   ID                                   
- sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL                                    IP           ROLE      POLICY      STATE   ID                                   
+ sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -102,9 +102,9 @@ EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL        IP           ROLE      POLICY      STATE   ID                                   
- sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL                                    IP           ROLE      POLICY      STATE   ID                                   
+ sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -1800,30 +1800,30 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 Installed RoT Bootloader Software
-BASEBOARD_ID                 STAGE0_VERSION STAGE0_NEXT_VERSION 
-FAKE_SIM_SIDECAR:SimSidecar0 unknown        unknown             
-FAKE_SIM_SIDECAR:SimSidecar1 unknown        unknown             
-i86pc:SimGimlet00            unknown        unknown             
-i86pc:SimGimlet01            unknown        unknown             
+BASEBOARD_ID                                        STAGE0_VERSION STAGE0_NEXT_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0                        unknown        unknown             
+FAKE_SIM_SIDECAR:SimSidecar1                        unknown        unknown             
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown        unknown             
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown        unknown             
 
 Installed RoT Software
-BASEBOARD_ID                 SLOT_A_VERSION   SLOT_B_VERSION 
-FAKE_SIM_SIDECAR:SimSidecar0 unknown (active) unknown        
-FAKE_SIM_SIDECAR:SimSidecar1 unknown (active) unknown        
-i86pc:SimGimlet00            unknown (active) unknown        
-i86pc:SimGimlet01            unknown (active) unknown        
+BASEBOARD_ID                                        SLOT_A_VERSION   SLOT_B_VERSION                
+FAKE_SIM_SIDECAR:SimSidecar0                        unknown (active) unknown                       
+FAKE_SIM_SIDECAR:SimSidecar1                        unknown (active) unknown                       
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown          unknown (ACTIVE SLOT UNKNOWN) 
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown          unknown (ACTIVE SLOT UNKNOWN) 
 
 Installed SP Software
-BASEBOARD_ID                 SLOT0_VERSION SLOT1_VERSION 
-FAKE_SIM_SIDECAR:SimSidecar0 unknown       unknown       
-FAKE_SIM_SIDECAR:SimSidecar1 unknown       unknown       
-i86pc:SimGimlet00            unknown       unknown       
-i86pc:SimGimlet01            unknown       unknown       
+BASEBOARD_ID                                        SLOT0_VERSION SLOT1_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0                        unknown       unknown       
+FAKE_SIM_SIDECAR:SimSidecar1                        unknown       unknown       
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown       unknown       
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown       unknown       
 
 Installed Host Phase 1 Software
-BASEBOARD_ID      SLED_ID SLOT_A_VERSION   SLOT_B_VERSION 
-i86pc:SimGimlet00         unknown (active) unknown        
-i86pc:SimGimlet01         unknown (active) unknown        
+BASEBOARD_ID                                        SLED_ID                              SLOT_A_VERSION SLOT_B_VERSION                
+sim-gimlet:sim-..........<REDACTED_UUID>........... ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
+sim-gimlet:sim-..........<REDACTED_UUID>........... ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
 
 Installed Host Phase 2 Software
 SLED_ID                              SLOT_A_VERSION      SLOT_B_VERSION 

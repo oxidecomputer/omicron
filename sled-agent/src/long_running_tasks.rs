@@ -5,8 +5,8 @@
 //! This module is responsible for spawning, starting, and managing long running
 //! tasks and task driven subsystems. These tasks run for the remainder of the
 //! sled-agent process from the moment they begin. Primarily they include the
-//! "managers", like `StorageManager`, `InstanceManager`, etc..., and are used
-//! by both the bootstrap agent and the sled-agent.
+//! "managers", like `KeyManager`, `ServiceManager`, etc., and are used by both
+//! the bootstrap agent and the sled-agent.
 //!
 //! We don't bother keeping track of the spawned tasks handles because we know
 //! these tasks are supposed to run forever, and they can shutdown if their

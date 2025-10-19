@@ -450,9 +450,11 @@ impl ExampleSystemBuilder {
         // Update the system's target counts with the counts. (Note that
         // there's no external DNS count.)
         system
-            .target_nexus_zone_count(nexus_count.0)
-            .target_internal_dns_zone_count(self.internal_dns_count.0)
-            .target_crucible_pantry_zone_count(self.crucible_pantry_count.0);
+            .set_target_nexus_zone_count(nexus_count.0)
+            .set_target_internal_dns_zone_count(self.internal_dns_count.0)
+            .set_target_crucible_pantry_zone_count(
+                self.crucible_pantry_count.0,
+            );
 
         // Set the target release if one is available. We don't do this
         // unconditionally because we don't want the target release generation
@@ -1011,9 +1013,9 @@ mod tests {
         );
 
         // Check that the system's target counts are set correctly.
-        assert_eq!(example.system.get_target_nexus_zone_count(), 6);
-        assert_eq!(example.system.get_target_internal_dns_zone_count(), 2);
-        assert_eq!(example.system.get_target_crucible_pantry_zone_count(), 5);
+        assert_eq!(example.system.target_nexus_zone_count(), 6);
+        assert_eq!(example.system.target_internal_dns_zone_count(), 2);
+        assert_eq!(example.system.target_crucible_pantry_zone_count(), 5);
 
         // Check that the right number of zones are present in both the
         // blueprint and in the collection.

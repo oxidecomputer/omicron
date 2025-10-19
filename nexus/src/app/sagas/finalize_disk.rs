@@ -19,6 +19,7 @@ use nexus_db_queries::{authn, authz};
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use serde::Deserialize;
 use serde::Serialize;
 use slog_error_chain::InlineErrorChain;
@@ -287,19 +288,27 @@ async fn sfd_call_pantry_detach_for_disk(
     let params = sagactx.saga_params::<Params>()?;
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
-    call_pantry_detach(
+    match call_pantry_detach(
         sagactx.user_data().nexus(),
         &log,
         params.disk_id,
         pantry_address,
     )
     .await
-    .map_err(|e| {
-        ActionError::action_failed(format!(
+    {
+        // If the detach succeeds, then proceed with finalization. If the detach
+        // fails because the associated pantry is gone, then we have to be able
+        // to proceed with finalization in order to be able to eventually delete
+        // the disk. The associated pantry may have been expunged at any time
+        // during the import and this part of the code doesn't know the state of
+        // the disk, but we can't fail and leave the disk un-deleteable.
+        Ok(()) | Err(ProgenitorOperationRetryError::Gone) => Ok(()),
+
+        Err(e) => Err(ActionError::action_failed(format!(
             "pantry detach failed: {}",
             InlineErrorChain::new(&e)
-        ))
-    })
+        ))),
+    }
 }
 
 async fn sfd_clear_pantry_address(
