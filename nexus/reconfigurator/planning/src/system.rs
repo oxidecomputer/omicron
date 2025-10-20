@@ -245,16 +245,28 @@ impl SystemDescription {
         self
     }
 
-    pub fn target_nexus_zone_count(&mut self, count: usize) -> &mut Self {
+    pub fn set_target_nexus_zone_count(&mut self, count: usize) -> &mut Self {
         self.target_nexus_zone_count = count;
         self
     }
 
-    pub fn get_target_nexus_zone_count(&self) -> usize {
+    pub fn target_nexus_zone_count(&self) -> usize {
         self.target_nexus_zone_count
     }
 
-    pub fn target_boundary_ntp_zone_count(
+    pub fn set_target_cockroachdb_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_cockroachdb_zone_count = count;
+        self
+    }
+
+    pub fn target_cockroachdb_zone_count(&self) -> usize {
+        self.target_cockroachdb_zone_count
+    }
+
+    pub fn set_target_boundary_ntp_zone_count(
         &mut self,
         count: usize,
     ) -> &mut Self {
@@ -262,11 +274,11 @@ impl SystemDescription {
         self
     }
 
-    pub fn get_target_boundary_ntp_zone_count(&self) -> usize {
+    pub fn target_boundary_ntp_zone_count(&self) -> usize {
         self.target_boundary_ntp_zone_count
     }
 
-    pub fn target_crucible_pantry_zone_count(
+    pub fn set_target_crucible_pantry_zone_count(
         &mut self,
         count: usize,
     ) -> &mut Self {
@@ -274,11 +286,11 @@ impl SystemDescription {
         self
     }
 
-    pub fn get_target_crucible_pantry_zone_count(&self) -> usize {
+    pub fn target_crucible_pantry_zone_count(&self) -> usize {
         self.target_crucible_pantry_zone_count
     }
 
-    pub fn target_internal_dns_zone_count(
+    pub fn set_target_internal_dns_zone_count(
         &mut self,
         count: usize,
     ) -> &mut Self {
@@ -286,7 +298,7 @@ impl SystemDescription {
         self
     }
 
-    pub fn get_target_internal_dns_zone_count(&self) -> usize {
+    pub fn target_internal_dns_zone_count(&self) -> usize {
         self.target_internal_dns_zone_count
     }
 

@@ -714,7 +714,16 @@ pub enum FailedHostOsUpdateReason {
 }
 
 #[derive(
-    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Diffable,
+    JsonSchema,
 )]
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub struct BlockedMgsUpdate {

@@ -90,15 +90,7 @@ fn print_status_summary(status: UpdateStatus) {
     for sled in sleds {
         let SledAgentUpdateStatus { host_phase_2, sled_id: _, zones } = sled;
 
-        // Check the boot disk to know which slot to count.
-        builder.insert(
-            Component::HostPhase2,
-            match host_phase_2.boot_disk {
-                Ok(M2Slot::A) => host_phase_2.slot_a_version,
-                Ok(M2Slot::B) => host_phase_2.slot_b_version,
-                Err(err) => TufRepoVersion::Error(err),
-            },
-        );
+        builder.insert(Component::HostPhase2, host_phase_2.boot_disk_version());
         for z in zones {
             builder.insert(Component::Zone, z.version);
         }
@@ -113,37 +105,12 @@ fn print_status_summary(status: UpdateStatus) {
             host_os_phase_1,
         } = mgs;
 
-        // Bootloader and SP always identify the active slot statically.
         builder.insert(Component::RotBootloader, rot_bootloader.stage0_version);
         builder.insert(Component::Sp, sp.slot0_version);
+        builder.insert(Component::Rot, rot.active_slot_version());
 
-        // RoT and host phase 1 need to check the active slot.
-        builder.insert(
-            Component::Rot,
-            match rot.active_slot {
-                Some(RotSlot::A) => rot.slot_a_version,
-                Some(RotSlot::B) => rot.slot_b_version,
-                None => TufRepoVersion::Unknown,
-            },
-        );
-
-        match host_os_phase_1 {
-            HostPhase1Status::NotASled => (),
-            HostPhase1Status::Sled {
-                active_slot,
-                slot_a_version,
-                slot_b_version,
-                ..
-            } => {
-                builder.insert(
-                    Component::HostPhase1,
-                    match active_slot {
-                        Some(M2Slot::A) => slot_a_version,
-                        Some(M2Slot::B) => slot_b_version,
-                        None => TufRepoVersion::Unknown,
-                    },
-                );
-            }
+        if let Some(version) = host_os_phase_1.active_slot_version() {
+            builder.insert(Component::HostPhase1, version);
         }
     }
 
@@ -387,8 +354,7 @@ fn print_host_phase_1s<'a>(
                 };
                 rows.push(HostPhase1Row {
                     baseboard_id,
-                    sled_id: sled_id
-                        .map_or("".to_string(), |id| id.to_string()),
+                    sled_id: sled_id.to_string(),
                     slot_a_version: format!("{slot_a_version}{slot_a_suffix}"),
                     slot_b_version: format!("{slot_b_version}{slot_b_suffix}"),
                 });

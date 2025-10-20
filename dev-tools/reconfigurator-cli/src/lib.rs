@@ -64,6 +64,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
+use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::convert::Infallible;
@@ -312,6 +313,7 @@ fn process_command(
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
         Commands::BlueprintDiffDns(args) => cmd_blueprint_diff_dns(sim, args),
+        Commands::BlueprintHistory(args) => cmd_blueprint_history(sim, args),
         Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
@@ -392,6 +394,12 @@ enum Commands {
     BlueprintDiff(BlueprintDiffArgs),
     /// show differences between a blueprint and a particular DNS version
     BlueprintDiffDns(BlueprintDiffDnsArgs),
+    /// print a summary of the history of blueprints
+    ///
+    /// This is similar to `omdb reconfigurator history` in a live system, but
+    /// it walks blueprints directly via their parent blueprint id rather than
+    /// walking the `bp_target` table.
+    BlueprintHistory(BlueprintHistoryArgs),
     /// write one blueprint to a file
     BlueprintSave(BlueprintSaveArgs),
 
@@ -936,6 +944,16 @@ impl FromStr for BlueprintIdOpt {
     }
 }
 
+impl fmt::Display for BlueprintIdOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintIdOpt::Target => f.write_str("target"),
+            BlueprintIdOpt::Latest => f.write_str("latest"),
+            BlueprintIdOpt::Id(id) => id.fmt(f),
+        }
+    }
+}
+
 impl From<BlueprintIdOpt> for BlueprintId {
     fn from(value: BlueprintIdOpt) -> Self {
         match value {
@@ -1198,6 +1216,21 @@ struct BlueprintDiffDnsArgs {
 enum CliDnsGroup {
     Internal,
     External,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintHistoryArgs {
+    /// how many blueprints worth of history to report
+    #[clap(long, default_value_t = 128)]
+    limit: usize,
+
+    /// also attempt to diff each blueprint
+    #[clap(long, default_value_t = false)]
+    diff: bool,
+
+    /// id of the blueprint to start history from
+    #[clap(default_value_t = BlueprintIdOpt::Target)]
+    blueprint_id: BlueprintIdOpt,
 }
 
 #[derive(Debug, Args)]
@@ -2609,6 +2642,92 @@ fn cmd_blueprint_diff_dns(
     Ok(Some(dns_diff.to_string()))
 }
 
+// This command looks a lot like `omdb reconfigurator history`, but it differs
+// in some ways that often don't matter but are worth knowing about:
+//
+// 1. It's reading the history of blueprints based on their parent ids.  `omdb
+//    reconfigurator history` reads the `bp_target` table.  These are generally
+//    equivalent, except that the `omdb` command sees entries for blueprints
+//    being enabled and disabled and the times that that happened.  This command
+//    doesn't know that.
+//
+// 2. Relatedly, this command prints the creation time of the blueprint, not
+//    when it was made the target.  These are generally very close in time but
+//    they're not the same thing.
+fn cmd_blueprint_history(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintHistoryArgs,
+) -> anyhow::Result<Option<String>> {
+    let BlueprintHistoryArgs { limit, diff, blueprint_id } = args;
+
+    let state = sim.current_state();
+    let system = state.system();
+    let resolved_id = system.resolve_blueprint_id(blueprint_id.into())?;
+    let mut blueprint = system.get_blueprint(&resolved_id)?;
+
+    // We want to print the output in logical order, but in order to construct
+    // the output, we need to walk in reverse-logical order.  To do this, we'll
+    // assemble the output as we go and then print it in reverse order.
+    //
+    // Although we're sort of printing a table, we use strings rather than a
+    // table in case we're in `diff` mode.  In that case, we want to print
+    // details with each "row" that don't go in the table itself.
+    let mut entries = Vec::new();
+
+    while entries.len() < limit {
+        let mut entry = String::new();
+        swriteln!(
+            entry,
+            "{} {} {}",
+            humantime::format_rfc3339_millis(blueprint.time_created.into()),
+            blueprint.id,
+            blueprint.comment
+        );
+        let new_blueprint = blueprint;
+        let Some(parent_blueprint_id) = &blueprint.parent_blueprint_id else {
+            // We reached the initial blueprint.
+            entries.push(entry);
+            break;
+        };
+
+        blueprint = match system
+            .resolve_and_get_blueprint(BlueprintId::Id(*parent_blueprint_id))
+        {
+            Ok(b) => b,
+            Err(error) => {
+                swriteln!(
+                    entry,
+                    "error walking back from blueprint {} to parent {}: {}",
+                    blueprint.id,
+                    parent_blueprint_id,
+                    InlineErrorChain::new(&error)
+                );
+                entries.push(entry);
+                break;
+            }
+        };
+
+        if diff {
+            let diff = new_blueprint.diff_since_blueprint(&blueprint);
+            swriteln!(entry, "{}", diff.display());
+        }
+
+        entries.push(entry);
+    }
+
+    if entries.len() == limit {
+        entries.push(String::from("... (earlier history omitted)\n"));
+    }
+
+    let mut output = String::new();
+    swriteln!(output, "{:24} {:36}", "TIME", "BLUEPRINT");
+    for entry in entries.iter().rev() {
+        swrite!(output, "{entry}");
+    }
+
+    Ok(Some(output))
+}
+
 fn cmd_blueprint_save(
     sim: &mut ReconfiguratorSim,
     args: BlueprintSaveArgs,
@@ -2833,7 +2952,7 @@ fn cmd_set(
             state
                 .system_mut()
                 .description_mut()
-                .target_nexus_zone_count(usize::from(num_nexus));
+                .set_target_nexus_zone_count(usize::from(num_nexus));
             rv
         }
         SetArgs::ActiveNexusGen { gen } => {

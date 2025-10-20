@@ -974,7 +974,6 @@ mod test {
 
 #[cfg(all(target_os = "illumos", test))]
 mod illumos_tests {
-    use std::collections::BTreeMap;
     use std::io::Read;
 
     use super::*;
@@ -983,73 +982,50 @@ mod illumos_tests {
     use omicron_common::disk::DatasetConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DatasetName;
-    use omicron_common::disk::DatasetsConfig;
     use omicron_common::disk::SharedDatasetConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::DatasetUuid;
-    use omicron_uuid_kinds::ZpoolUuid;
-    use sled_storage::manager_test_harness::StorageManagerTestHarness;
+    use omicron_uuid_kinds::ExternalZpoolUuid;
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;
+    use zfs_test_harness::ZfsTestHarness;
     use zip::ZipArchive;
     use zip::ZipWriter;
 
     struct SingleU2StorageHarness {
-        storage_test_harness: StorageManagerTestHarness,
-        zpool_id: ZpoolUuid,
+        storage_test_harness: ZfsTestHarness,
+        zpool_id: ExternalZpoolUuid,
     }
 
     impl SingleU2StorageHarness {
         async fn new(log: &Logger) -> Self {
-            let mut harness = StorageManagerTestHarness::new(log).await;
-            harness.handle().key_manager_ready().await;
-            let _raw_internal_disks =
-                harness.add_vdevs(&["m2_left.vdev", "m2_right.vdev"]).await;
-
-            let raw_disks = harness.add_vdevs(&["u2_0.vdev"]).await;
-
-            let config = harness.make_config(1, &raw_disks);
-            let result = harness
-                .handle()
-                .omicron_physical_disks_ensure(config.clone())
-                .await
-                .expect("Failed to ensure disks");
-            assert!(!result.has_error(), "{result:?}");
-
-            let zpool_id = config.disks[0].pool_id;
+            let mut harness = ZfsTestHarness::new(log.clone());
+            harness.add_external_disks(1).await;
+            let zpool_id = harness.all_external_zpool_ids().next().unwrap();
             Self { storage_test_harness: harness, zpool_id }
         }
 
         async fn configure_dataset(&self, kind: DatasetKind) -> Utf8PathBuf {
-            let zpool_name = ZpoolName::new_external(self.zpool_id);
+            let zpool_name = ZpoolName::External(self.zpool_id);
             let dataset_id = DatasetUuid::new_v4();
             let name = DatasetName::new(zpool_name, kind);
-            let mountpoint = name.mountpoint(
-                &self.storage_test_harness.handle().mount_config().root,
-            );
-            let datasets = BTreeMap::from([(
-                dataset_id,
-                DatasetConfig {
+            let mountpoint =
+                name.mountpoint(&self.storage_test_harness.mount_config().root);
+            self.storage_test_harness
+                .ensure_datasets([DatasetConfig {
                     id: dataset_id,
                     name: name.clone(),
                     inner: SharedDatasetConfig::default(),
-                },
-            )]);
-            let config = DatasetsConfig { datasets, ..Default::default() };
-            let status = self
-                .storage_test_harness
-                .handle()
-                .datasets_ensure(config.clone())
+                }])
                 .await
                 .unwrap();
-            assert!(!status.has_error(), "{status:?}");
 
             mountpoint
         }
 
-        async fn cleanup(mut self) {
-            self.storage_test_harness.cleanup().await
+        fn cleanup(mut self) {
+            self.storage_test_harness.cleanup();
         }
     }
 
@@ -1114,8 +1090,7 @@ mod illumos_tests {
                 name: "oxz_switch".to_string(),
             })
             .await;
-        let zfs_filesystem =
-            &ZpoolName::new_external(harness.zpool_id).to_string();
+        let zfs_filesystem = &ZpoolName::External(harness.zpool_id).to_string();
 
         // Make sure an error in this block results in the correct drop ordering
         // for test cleanup
@@ -1162,7 +1137,7 @@ mod illumos_tests {
         }
 
         // Cleanup
-        harness.cleanup().await;
+        harness.cleanup();
         logctx.cleanup_successful();
     }
 
@@ -1278,7 +1253,7 @@ mod illumos_tests {
         }
 
         // Cleanup
-        harness.cleanup().await;
+        harness.cleanup();
         logctx.cleanup_successful();
     }
 
@@ -1357,7 +1332,7 @@ mod illumos_tests {
         }
 
         // Cleanup
-        harness.cleanup().await;
+        harness.cleanup();
         logctx.cleanup_successful();
     }
 
@@ -1410,7 +1385,7 @@ mod illumos_tests {
         }
 
         // Cleanup
-        harness.cleanup().await;
+        harness.cleanup();
         logctx.cleanup_successful();
     }
 

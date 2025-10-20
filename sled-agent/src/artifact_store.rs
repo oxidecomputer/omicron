@@ -763,9 +763,6 @@ pub enum Error {
     #[error("Error while reading request body")]
     Body(dropshot::HttpError),
 
-    #[error("Error retrieving dataset configuration")]
-    DatasetConfig(#[from] sled_storage::error::Error),
-
     #[error("Error fetching artifact {sha256} from depot at {base_url}")]
     DepotCopy {
         sha256: ArtifactHash,
@@ -863,12 +860,10 @@ impl From<Error> for HttpError {
 
             // 5xx errors: ensure the error chain is logged
             Error::Body(inner) => inner,
-            Error::DatasetConfig(_) | Error::NoUpdateDataset => {
-                HttpError::for_unavail(
-                    None,
-                    InlineErrorChain::new(&err).to_string(),
-                )
-            }
+            Error::NoUpdateDataset => HttpError::for_unavail(
+                None,
+                InlineErrorChain::new(&err).to_string(),
+            ),
             Error::DepotCopy { .. }
             | Error::File { .. }
             | Error::Join(_)

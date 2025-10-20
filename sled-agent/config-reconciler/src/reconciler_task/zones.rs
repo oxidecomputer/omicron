@@ -11,6 +11,8 @@ use crate::InternalDisks;
 use crate::ResolverStatusExt;
 use crate::SledAgentFacilities;
 use crate::TimeSyncConfig;
+use crate::dump_setup_task::FormerZoneRootArchiver;
+use camino::Utf8PathBuf;
 use futures::FutureExt as _;
 use futures::future;
 use id_map::IdMap;
@@ -143,12 +145,13 @@ impl OmicronZones {
         resolver_status: &ResolverStatus,
         internal_disks: &InternalDisks,
         sled_agent_facilities: &T,
+        archiver: FormerZoneRootArchiver,
         log: &Logger,
     ) -> Result<(), NonZeroUsize> {
         self.shut_down_zones_if_needed_impl(
             desired_zones,
             sled_agent_facilities,
-            &RealZoneFacilities { resolver_status, internal_disks },
+            &RealZoneFacilities { resolver_status, internal_disks, archiver },
             log,
         )
         .await
@@ -304,12 +307,13 @@ impl OmicronZones {
         sled_agent_facilities: &T,
         is_time_synchronized: bool,
         datasets: &OmicronDatasets,
+        archiver: FormerZoneRootArchiver,
         log: &Logger,
     ) {
         self.start_zones_if_needed_impl(
             desired_zones,
             sled_agent_facilities,
-            &RealZoneFacilities { resolver_status, internal_disks },
+            &RealZoneFacilities { resolver_status, internal_disks, archiver },
             is_time_synchronized,
             datasets,
             log,
@@ -706,6 +710,16 @@ impl OmicronZone {
             ));
         }
 
+        // Make a best effort to archive the zone's log files.
+        if let Some(zone_dataset_root) = running_zone.root().parent() {
+            zone_facilities
+                .archive_zone_root(zone_dataset_root.to_owned())
+                .await;
+        } else {
+            // This should be impossible.
+            warn!(log, "Failed to archive zone root: non-existent parent");
+        }
+
         resume_shutdown_from_stop(
             &self.config,
             sled_agent_facilities,
@@ -948,11 +962,14 @@ trait ZoneFacilities {
         &self,
         addrobj: AddrObject,
     ) -> Result<(), ZoneShutdownError>;
+
+    async fn archive_zone_root(&self, path: Utf8PathBuf);
 }
 
 struct RealZoneFacilities<'a> {
     resolver_status: &'a ResolverStatus,
     internal_disks: &'a InternalDisks,
+    archiver: FormerZoneRootArchiver,
 }
 
 impl ZoneFacilities for RealZoneFacilities<'_> {
@@ -1005,6 +1022,10 @@ impl ZoneFacilities for RealZoneFacilities<'_> {
         Zones::delete_address(None, &addrobj)
             .await
             .map_err(ZoneShutdownError::DeleteGzAddrObj)
+    }
+
+    async fn archive_zone_root(&self, path: Utf8PathBuf) {
+        self.archiver.archive_former_zone_root(path).await
     }
 }
 
@@ -1456,6 +1477,8 @@ mod tests {
             self.inner.lock().unwrap().removed_gz_addresses.insert(addrobj);
             Ok(())
         }
+
+        async fn archive_zone_root(&self, _path: Utf8PathBuf) {}
     }
 
     const BOOT_DISK_PATH: &str = "/test/boot/disk";
