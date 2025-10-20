@@ -261,6 +261,18 @@ impl Context {
             schemes_tried: Vec::new(),
         }
     }
+
+    /// Returns an authenticated context for a Silo's SCIM Actor. Not marked as
+    /// #[cfg(test)] so that this is available in integration tests.
+    pub fn for_scim(silo_id: Uuid) -> Context {
+        Context {
+            kind: Kind::Authenticated(
+                Details { actor: Actor::Scim { silo_id } },
+                None,
+            ),
+            schemes_tried: Vec::new(),
+        }
+    }
 }
 
 /// Authentication-related policy derived from a user's Silo

@@ -209,6 +209,20 @@ async fn test_iam_roles_behavior() {
         ),
     )));
 
+    // Create a SCIM Actor for this silo.
+    let user_log = logctx.log.new(o!(
+        "actor" => "scim",
+    ));
+    user_contexts.push(Arc::new((
+        String::from("scim"),
+        OpContext::for_background(
+            user_log,
+            Arc::clone(&authz),
+            authn::Context::for_scim(main_silo_id),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        ),
+    )));
+
     // Create an output stream that writes to stdout as well as an in-memory
     // buffer.  The test run will write a textual summary to the stream.  Then
     // we'll use  use expectorate to verify it.  We do this rather than assert
