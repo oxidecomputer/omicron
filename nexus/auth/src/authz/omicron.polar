@@ -714,9 +714,9 @@ has_relation(fleet: Fleet, "parent_fleet", collection: AlertClassList)
 can_modify_networking_resource(actor: AuthenticatedActor, project: Project) if
 	# Always allow silo admins to update networking resources
 	has_role(actor, "admin", project.silo) or
-	# Allow project admins to update networking resources if the project's silo allows it
-	# Note that the restriction is configured at the silo level, but affects the projects on the silo
-    (has_role(actor, "collaborator", project) and not project.restricts_networking());
+	# Allow project collaborators to update networking resources if the actor's silo allows it
+	# Note that the restriction is checked on the actor's silo, not embedded in the project
+    (has_role(actor, "collaborator", project) and not actor.silo_restricts_networking());
 
 # Apply networking restrictions to all networking resources
 # VPCs (project path: vpc.project)

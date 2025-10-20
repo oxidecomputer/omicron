@@ -1018,148 +1018,12 @@ impl AuthorizedResource for AlertClassList {
 
 // Main resource hierarchy: Projects and their resources
 
-/// `authz` type for a resource of type Project
-/// Used to uniquely identify a resource of type Project across renames, moves,
-/// etc., and to do authorization checks (see [`crate::context::OpContext::authorize()`]).
-/// See [`crate::authz`] module-level documentation for more information.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Project {
-    parent: Silo,
-    key: Uuid,
-    lookup_type: LookupType,
-    /// Whether this project's silo restricts networking actions to Silo Admins only
-    /// This is populated from the parent Silo's restrict_network_actions field
-    restrict_network_actions: bool,
-}
-
-impl Eq for Project {}
-impl PartialEq for Project {
-    fn eq(&self, other: &Self) -> bool {
-        self.key == other.key
-    }
-}
-
-impl Project {
-    /// Makes a new `authz` struct for this resource with the given
-    /// `parent`, unique key `key`, looked up as described by `lookup_type`,
-    /// and optionally with the networking restrictions setting from the parent Silo.
-    ///
-    /// If `restrict_network_actions` is not provided, it defaults to `false`.
-    /// Use `with_network_restrictions()` to populate it with the actual Silo value.
-    pub fn new(parent: Silo, key: Uuid, lookup_type: LookupType) -> Project {
-        Project {
-            parent,
-            key,
-            lookup_type,
-            restrict_network_actions: false, // Default, should be updated via with_network_restrictions
-        }
-    }
-
-    /// A version of `new` that takes the primary key type directly.
-    /// This is only different from [`Self::new`] if this resource
-    /// uses a different input key type.
-    pub fn with_primary_key(
-        parent: Silo,
-        key: Uuid,
-        lookup_type: LookupType,
-    ) -> Project {
-        Project {
-            parent,
-            key,
-            lookup_type,
-            restrict_network_actions: false, // Default, should be updated via with_network_restrictions
-        }
-    }
-
-    /// Update this Project with the actual restrict_network_actions value from the Silo.
-    /// This should be called after construction to populate the correct value.
-    pub fn with_network_restrictions(
-        mut self,
-        restrict_network_actions: bool,
-    ) -> Self {
-        self.restrict_network_actions = restrict_network_actions;
-        self
-    }
-
-    pub fn id(&self) -> Uuid {
-        self.key
-    }
-
-    /// Returns true if this project's silo restricts networking actions to Silo Admins only
-    pub fn restricts_networking(&self) -> bool {
-        self.restrict_network_actions
-    }
-
-    /// Describes how to register this type with Oso
-    pub(super) fn init() -> Init {
-        // Create a custom class builder that includes the restricts_networking method
-        let class = oso::Class::builder()
-            .with_equality_check()
-            .add_method(
-                "has_role",
-                |r: &Project, actor: AuthenticatedActor, role: String| {
-                    actor.has_role_resource(ResourceType::Project, r.key, &role)
-                },
-            )
-            .add_attribute_getter("silo", |r: &Project| r.parent.clone())
-            .add_method("restricts_networking", |project: &Project| {
-                project.restricts_networking()
-            })
-            .build();
-
-        Init {
-            polar_snippet: "", // Custom snippet defined in omicron.polar
-            polar_class: class,
-        }
-    }
-}
-
-impl oso::PolarClass for Project {
-    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
-        oso::Class::builder()
-            .with_equality_check()
-            .add_method(
-                "has_role",
-                |r: &Project, actor: AuthenticatedActor, role: String| {
-                    actor.has_role_resource(ResourceType::Project, r.key, &role)
-                },
-            )
-            .add_attribute_getter("silo", |r: &Project| r.parent.clone())
-            .add_method("restricts_networking", |project: &Project| {
-                project.restricts_networking()
-            })
-    }
-}
-
-impl ApiResource for Project {
-    fn parent(&self) -> Option<&dyn AuthorizedResource> {
-        Some(&self.parent)
-    }
-
-    fn resource_type(&self) -> ResourceType {
-        ResourceType::Project
-    }
-
-    fn lookup_type(&self) -> &LookupType {
-        &self.lookup_type
-    }
-
-    fn as_resource_with_roles(&self) -> Option<&dyn ApiResourceWithRoles> {
-        Some(self)
-    }
-}
-
-impl ApiResourceWithRoles for Project {
-    fn resource_id(&self) -> Uuid {
-        self.key
-    }
-
-    fn conferred_roles_by(
-        &self,
-        _authn: &authn::Context,
-    ) -> Result<Option<(ResourceType, Uuid)>, Error> {
-        Ok(None)
-    }
+authz_resource! {
+    name = "Project",
+    parent = "Silo",
+    primary_key = Uuid,
+    roles_allowed = true,
+    polar_snippet = Custom,
 }
 
 impl ApiResourceWithRolesType for Project {
@@ -1227,7 +1091,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -1235,7 +1099,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -1243,7 +1107,7 @@ authz_resource! {
     parent = "VpcRouter",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -1251,7 +1115,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProject,
 }
 
 authz_resource! {
@@ -1259,7 +1123,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProject,
 }
 
 authz_resource! {

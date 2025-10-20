@@ -71,13 +71,26 @@ impl super::Nexus {
         project_lookup: &lookup::Project<'_>,
         params: &params::VpcCreate,
     ) -> CreateResult<db::model::Vpc> {
-        let (authz_silo, authz_project) =
+        let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        // Additional check: if the project's silo has networking restrictions,
-        // only Silo Admins can create VPCs (Modify permission on Silo implies Silo Admin)
-        if authz_project.restricts_networking() {
-            opctx.authorize(authz::Action::Modify, &authz_silo).await?;
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can create VPCs
+        if let Some(actor) = opctx.authn.actor() {
+            if let Some(silo_id) = actor.silo_id() {
+                let silo_policy = opctx.authn.silo_authn_policy();
+                if let Some(policy) = silo_policy {
+                    if policy.restrict_network_actions() {
+                        // The silo restricts networking - verify the actor is a Silo Admin
+                        let authz_silo = authz::Silo::new(
+                            authz::FLEET,
+                            silo_id,
+                            LookupType::ById(silo_id),
+                        );
+                        opctx.authorize(authz::Action::Modify, &authz_silo).await?;
+                    }
+                }
+            }
         }
 
         let saga_params = sagas::vpc_create::Params {
@@ -128,7 +141,8 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
     ) -> DeleteResult {
-        let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
+        let (.., authz_vpc, db_vpc) =
+            vpc_lookup.fetch_for(authz::Action::Modify).await?;
 
         let authz_vpc_router = authz::VpcRouter::new(
             authz_vpc.clone(),
