@@ -87,7 +87,9 @@ impl super::Nexus {
                             silo_id,
                             LookupType::ById(silo_id),
                         );
-                        opctx.authorize(authz::Action::Modify, &authz_silo).await?;
+                        opctx
+                            .authorize(authz::Action::Modify, &authz_silo)
+                            .await?;
                     }
                 }
             }
