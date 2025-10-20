@@ -7,8 +7,11 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use crate::DiskPaths;
+use crate::Partition;
+use crate::PooledDiskError;
 use crate::illumos::gpt;
-use crate::{DiskPaths, Partition, PooledDiskError};
+use crate::is_oxide_sled;
 use camino::Utf8Path;
 use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolName;
@@ -108,6 +111,8 @@ pub enum NvmeFormattingError {
     InfoError(#[from] libnvme::controller_info::NvmeInfoError),
     #[error("Could not find NVMe controller for disk with serial {0}")]
     NoController(String),
+    #[error("Could not determine if host is an Oxide sled: {0}")]
+    SystemDetection(#[source] anyhow::Error),
 }
 
 // The expected layout of an M.2 device within the Oxide rack.
@@ -294,6 +299,15 @@ fn ensure_size_and_formatting(
     use libnvme::Nvme;
     use libnvme::namespace::NamespaceDiscoveryLevel;
 
+    // Check that we are on real Oxide hardware so that we avoid:
+    // - Messing with NVMe devices in other environments
+    // - Failing tests which use zvols rather than real NVMe devices
+    // - Breaking virutal environments like a4x2 which likely don't expose or
+    //   implement changing the LBA on emulated devices.
+    if !is_oxide_sled().map_err(NvmeFormattingError::SystemDetection)? {
+        return Ok(());
+    }
+
     let mut controller_found = false;
     let nvme = Nvme::new()?;
 
@@ -309,13 +323,14 @@ fn ensure_size_and_formatting(
         let nsdisc =
             controller.namespace_discovery(NamespaceDiscoveryLevel::Active)?;
         let namespaces = nsdisc.into_iter().collect::<Result<Vec<_>, _>>()?;
-        if namespaces.len() != 1 {
+
+        // We only want to continue if there is a single namespace associated
+        // with the device, so we accomplish this by pattern matching for it.
+        let [namespace] = namespaces.as_slice() else {
             return Err(NvmeFormattingError::UnexpectedNamespaces(
                 namespaces.len(),
             ));
-        }
-        // Safe because verified there is exactly one namespace.
-        let namespace = namespaces.into_iter().next().unwrap();
+        };
 
         // First we need to detach blkdev from the namespace.
         namespace.blkdev_detach()?;
