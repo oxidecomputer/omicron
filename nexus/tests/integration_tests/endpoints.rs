@@ -3069,7 +3069,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             VerifyEndpoint {
                 url: &SCIM_TOKEN_URL,
-                visibility: Visibility::Public,
+                visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
                     AllowedMethod::Get,

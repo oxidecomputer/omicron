@@ -14935,6 +14935,25 @@
               "kind": {
                 "type": "string",
                 "enum": [
+                  "scim"
+                ]
+              },
+              "silo_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "silo_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
                   "unauthenticated"
                 ]
               }
