@@ -209,7 +209,9 @@ async fn test_iam_roles_behavior() {
         ),
     )));
 
-    // Create a SCIM Actor for this silo.
+    // Create a SCIM Actor for this silo. It should have permission to access
+    // none of the resources in a silo (other than query the database and use
+    // the audit log).
     let user_log = logctx.log.new(o!(
         "actor" => "scim",
     ));
