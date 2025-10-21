@@ -669,7 +669,7 @@ async fn test_multicast_group_persistence_through_stop_start(
         .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("running instance should be on a sled");
+        .expect("Running instance should be on a sled");
     info.sled_client.vmm_finish_transition(info.propolis_id).await;
 
     // Wait for instance to be stopped
@@ -799,7 +799,7 @@ async fn test_multicast_group_persistence_through_stop_start(
         .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("running instance should be on a sled");
+        .expect("Running instance should be on a sled");
     info.sled_client.vmm_finish_transition(info.propolis_id).await;
 
     // Wait for instance to be stopped
@@ -1212,7 +1212,7 @@ async fn test_multicast_group_membership_during_migration(
         .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("running instance should be on a sled")
+        .expect("Running instance should be on a sled")
         .sled_id;
 
     let target_sled_id = if source_sled_id == cptestctx.first_sled_id() {
@@ -1242,10 +1242,10 @@ async fn test_multicast_group_membership_during_migration(
         .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("instance should be on a sled");
+        .expect("Instance should be on a sled");
     let src_propolis_id = info.propolis_id;
     let dst_propolis_id =
-        info.dst_propolis_id.expect("instance should have a migration target");
+        info.dst_propolis_id.expect("Instance should have a migration target");
 
     // Helper function from instances.rs
     async fn vmm_simulate_on_sled(
@@ -1274,7 +1274,7 @@ async fn test_multicast_group_membership_during_migration(
         .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("migrated instance should still be on a sled")
+        .expect("Migrated instance should still be on a sled")
         .sled_id;
 
     assert_eq!(
@@ -1352,7 +1352,7 @@ async fn test_multicast_group_membership_during_migration(
         .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("instance should still be active for stop");
+        .expect("Instance should still be active for stop");
     final_info.sled_client.vmm_finish_transition(final_info.propolis_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
@@ -1465,7 +1465,7 @@ async fn test_multicast_group_concurrent_member_migrations(
             .active_instance_info(&instance_id, None)
             .await
             .unwrap()
-            .expect("running instance should be on a sled")
+            .expect("Running instance should be on a sled")
             .sled_id;
         source_sleds.push(current_sled);
 
@@ -1474,7 +1474,7 @@ async fn test_multicast_group_concurrent_member_migrations(
             .iter()
             .find(|&&sled| sled != current_sled)
             .copied()
-            .expect("should have available target sled");
+            .expect("Should have available target sled");
         target_sleds.push(target_sled);
     }
 
@@ -1513,11 +1513,11 @@ async fn test_multicast_group_concurrent_member_migrations(
             .active_instance_info(&instance_id, None)
             .await
             .unwrap()
-            .expect("instance should be on a sled");
+            .expect("Instance should be on a sled");
         let src_propolis_id = info.propolis_id;
         let dst_propolis_id = info
             .dst_propolis_id
-            .expect("instance should have a migration target");
+            .expect("Instance should have a migration target");
 
         // Helper function from instances.rs
         async fn vmm_simulate_on_sled(
@@ -1556,7 +1556,7 @@ async fn test_multicast_group_concurrent_member_migrations(
             .active_instance_info(&instance_id, None)
             .await
             .unwrap()
-            .expect("migrated instance should be on target sled")
+            .expect("Migrated instance should be on target sled")
             .sled_id;
 
         assert_eq!(

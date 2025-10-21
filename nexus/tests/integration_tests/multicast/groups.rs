@@ -44,6 +44,154 @@ use omicron_uuid_kinds::InstanceUuid;
 
 use super::*;
 
+/// Verify creation works when optional fields are omitted from the JSON body
+/// (i.e., keys are missing, not present as `null`). This mirrors CLI behavior.
+#[nexus_test]
+async fn test_multicast_group_create_raw_omitted_optionals(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let project_name = "raw-omit-proj";
+    let pool_name = "raw-omit-pool";
+    let group_name = "raw-omit-group";
+
+    // Ensure a project exists (not strictly required for fleet-scoped groups)
+    create_project(client, project_name).await;
+
+    // Create a multicast pool with a unique, non-reserved ASM range and link it
+    create_multicast_ip_pool_with_range(
+        client,
+        pool_name,
+        (224, 9, 0, 10),
+        (224, 9, 0, 255),
+    )
+    .await;
+
+    let group_url = mcast_groups_url();
+
+    // Omit multicast_ip and source_ips keys entirely; specify pool by name
+    let body = format!(
+        r#"{{"name":"{group}","description":"Create with omitted optionals","pool":"{pool}"}}"#,
+        group = group_name,
+        pool = pool_name,
+    );
+
+    let created: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &group_url)
+            .header("content-type", "application/json")
+            .raw_body(Some(body))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Create with omitted optional fields should succeed")
+    .parsed_body()
+    .expect("Failed to parse created MulticastGroup");
+
+    assert_eq!(created.identity.name, group_name);
+    assert!(created.multicast_ip.is_multicast());
+    assert!(created.source_ips.is_empty());
+
+    // Wait for reconciler to activate the group
+    wait_for_group_active(client, group_name).await;
+
+    // Cleanup
+    object_delete(client, &mcast_group_url(group_name)).await;
+}
+
+/// Verify ASM creation with explicit address works when `source_ips` is omitted
+#[nexus_test]
+async fn test_multicast_group_create_raw_asm_omitted_sources(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let pool_name = "raw-asm-pool";
+    let group_name = "raw-asm-group";
+
+    // Pool for allocation (even with explicit IP, current create path validates pool)
+    create_multicast_ip_pool_with_range(
+        client,
+        pool_name,
+        (224, 10, 0, 10),
+        (224, 10, 0, 255),
+    )
+    .await;
+
+    let group_url = mcast_groups_url();
+    let body = format!(
+        r#"{{"name":"{group}","description":"ASM no sources omitted","multicast_ip":"224.10.0.100","pool":"{pool}"}}"#,
+        group = group_name,
+        pool = pool_name,
+    );
+
+    let created: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &group_url)
+            .header("content-type", "application/json")
+            .raw_body(Some(body))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("ASM creation with omitted source_ips should succeed")
+    .parsed_body()
+    .expect("Failed to parse created MulticastGroup");
+
+    assert!(created.multicast_ip.is_multicast());
+    assert!(created.source_ips.is_empty());
+    wait_for_group_active(client, group_name).await;
+
+    object_delete(client, &mcast_group_url(group_name)).await;
+}
+
+/// Verify SSM creation fails when `source_ips` is omitted (missing sources)
+#[nexus_test]
+async fn test_multicast_group_create_raw_ssm_missing_sources(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let pool_name = "raw-ssm-pool";
+    let group_name = "raw-ssm-group";
+
+    // Pool for validation
+    create_multicast_ip_pool_with_range(
+        client,
+        pool_name,
+        (224, 11, 0, 10),
+        (224, 11, 0, 255),
+    )
+    .await;
+
+    let group_url = mcast_groups_url();
+    let body = format!(
+        r#"{{"name":"{group}","description":"SSM missing sources","multicast_ip":"232.1.2.3","pool":"{pool}"}}"#,
+        group = group_name,
+        pool = pool_name,
+    );
+
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &group_url)
+            .header("content-type", "application/json")
+            .raw_body(Some(body))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("SSM creation without sources should fail")
+    .parsed_body()
+    .expect("Failed to parse error response body");
+
+    assert!(
+        error
+            .message
+            .contains("SSM multicast addresses require at least one source IP"),
+        "unexpected error message: {}",
+        error.message
+    );
+}
+
 #[nexus_test]
 async fn test_multicast_group_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -2347,7 +2495,7 @@ async fn test_multicast_group_mvlan_with_member_operations(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to stop instance");
+    .expect("Failed to stop instance");
 
     let nexus = &cptestctx.server.server_context().nexus;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2500,7 +2648,7 @@ async fn test_multicast_group_mvlan_reconciler_update(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("failed to stop instance");
+    .expect("Failed to stop instance");
 
     let nexus = &cptestctx.server.server_context().nexus;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);

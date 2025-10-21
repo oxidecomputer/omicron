@@ -23062,12 +23062,14 @@
           "multicast_ip": {
             "nullable": true,
             "description": "The multicast IP address to allocate. If None, one will be allocated from the default pool.",
+            "default": null,
             "type": "string",
             "format": "ip"
           },
           "mvlan": {
             "nullable": true,
-            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. Tags packets leaving the rack to traverse VLAN-segmented upstream networks.\n\nValid range: 2-4094 (Dendrite requires >= 2).",
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. Tags packets leaving the rack to traverse VLAN-segmented upstream networks.\n\nValid range: 2-4094 (VLAN IDs 0-1 are reserved by IEEE 802.1Q standard).",
+            "default": null,
             "type": "integer",
             "format": "uint16",
             "minimum": 0
@@ -23078,6 +23080,7 @@
           "pool": {
             "nullable": true,
             "description": "Name or ID of the IP pool to allocate from. If None, uses the default multicast pool.",
+            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
@@ -23087,6 +23090,7 @@
           "source_ips": {
             "nullable": true,
             "description": "Source IP addresses for Source-Specific Multicast (SSM).\n\nNone uses default behavior (Any-Source Multicast). Empty list explicitly allows any source (Any-Source Multicast). Non-empty list restricts to specific sources (SSM).",
+            "default": null,
             "type": "array",
             "items": {
               "type": "string",
