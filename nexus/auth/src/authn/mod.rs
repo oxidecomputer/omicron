@@ -398,7 +398,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
-            Actor::Scim { .. } => None, // XXX scim actor does have a silo id?
+            Actor::Scim { .. } => Some(*silo_id),
         }
     }
 
