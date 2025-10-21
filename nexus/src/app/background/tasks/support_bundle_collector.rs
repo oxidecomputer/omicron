@@ -1243,9 +1243,15 @@ fn recursively_add_directory_to_zipfile(
         if file_type.is_file() {
             let src = entry.path();
 
-            let system_mtime = entry.metadata().and_then(|m| m.modified())?;
-            let zoned = jiff::Zoned::try_from(system_mtime)?;
-            let zip_time = zip::DateTime::try_from(zoned.datetime())?;
+            let zip_time = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|sys_time| jiff::Zoned::try_from(sys_time).ok())
+                .and_then(|zoned| {
+                    zip::DateTime::try_from(zoned.datetime()).ok()
+                })
+                .unwrap_or_else(zip::DateTime::default);
 
             let opts = FullFileOptions::default()
                 .last_modified_time(zip_time)
