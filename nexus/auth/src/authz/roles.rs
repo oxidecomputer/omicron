@@ -165,7 +165,6 @@ async fn load_directly_attached_roles(
                 "resource_type" => ?resource_type,
                 "resource_id" => resource_id.to_string(),
             );
-            // XXX Ok, or an error?
             return Ok(());
         };
 
