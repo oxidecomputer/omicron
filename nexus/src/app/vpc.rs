@@ -74,7 +74,7 @@ impl super::Nexus {
     ///
     /// Returns Err if the silo restricts networking and the actor is not
     /// a Silo Admin.
-    async fn check_networking_restrictions(
+    pub(crate) async fn check_networking_restrictions(
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {

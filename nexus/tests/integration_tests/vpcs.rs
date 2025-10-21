@@ -542,3 +542,245 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
     // TODO: Add delete tests once we handle subnet deletion
     // (VPCs can't be deleted if they have subnets)
 }
+
+#[nexus_test]
+async fn test_vpc_subnet_networking_restrictions(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_types::external_api::params;
+
+    let client = &cptestctx.external_client;
+
+    // Test Part 1: Create a restricted silo with networking restrictions enabled
+    let restricted_silo_name = "subnet-restricted-silo";
+    let silo_url = "/v1/system/silos";
+    let silo_params = params::SiloCreate {
+        identity: IdentityMetadataCreateParams {
+            name: restricted_silo_name.parse().unwrap(),
+            description: "Silo with subnet networking restrictions".to_string(),
+        },
+        discoverable: false,
+        identity_mode:
+            nexus_types::external_api::shared::SiloIdentityMode::LocalOnly,
+        admin_group_name: None,
+        tls_certificates: Vec::new(),
+        mapped_fleet_roles: Default::default(),
+        restrict_network_actions: Some(true), // Enable networking restrictions
+        quotas: params::SiloQuotasCreate::empty(),
+    };
+
+    let restricted_silo: views::Silo =
+        object_create(&client, silo_url, &silo_params).await;
+
+    // Test Part 2: Create a user with Admin role (needed to create project with default VPC)
+    let test_user = create_local_user(
+        client,
+        &restricted_silo,
+        &"subnet-test-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let silo_policy_url =
+        format!("/v1/system/silos/{}/policy", restricted_silo_name);
+    let silo_url = format!("/v1/system/silos/{}", restricted_silo_name);
+
+    // Grant the user Admin role first so they can create a project
+    // (project creation automatically creates a default VPC, which requires Admin in restricted silos)
+    grant_iam(
+        client,
+        &silo_url,
+        shared::SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Create a project in the restricted silo AS THE SILO USER (who is currently Admin)
+    // This will automatically create a default VPC with a default subnet
+    let restricted_project_name = "subnet-restricted-project";
+    let project_params = params::ProjectCreate {
+        identity: IdentityMetadataCreateParams {
+            name: restricted_project_name.parse().unwrap(),
+            description: "Project in subnet restricted silo".to_string(),
+        },
+    };
+
+    let _restricted_project: views::Project =
+        NexusRequest::objects_post(&client, "/v1/projects", &project_params)
+            .authn_as(AuthnMode::SiloUser(test_user.id))
+            .execute_and_parse_unwrap()
+            .await;
+
+    // Test Part 3: Demote to Collaborator
+    // Now add Collaborator role and remove Admin, so user has just Collaborator
+    // The default VPC and default subnet already exist from project creation
+    let silo_policy: shared::Policy<shared::SiloRole> =
+        NexusRequest::object_get(client, &silo_policy_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to fetch silo policy")
+            .parsed_body()
+            .expect("failed to parse silo policy");
+
+    let test_user_uuid = test_user.id.into_untyped_uuid();
+
+    // Add Collaborator and remove Admin
+    let mut new_assignments: Vec<_> = silo_policy
+        .role_assignments
+        .into_iter()
+        .filter(|ra| {
+            !matches!(
+                ra,
+                shared::RoleAssignment {
+                    identity_type: shared::IdentityType::SiloUser,
+                    identity_id,
+                    role_name,
+                } if *identity_id == test_user_uuid && *role_name == shared::SiloRole::Admin
+            )
+        })
+        .collect();
+
+    new_assignments.push(shared::RoleAssignment::for_silo_user(
+        test_user.id,
+        shared::SiloRole::Collaborator,
+    ));
+
+    let collaborator_policy =
+        shared::Policy { role_assignments: new_assignments };
+    NexusRequest::object_put(
+        client,
+        &silo_policy_url,
+        Some(&collaborator_policy),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to update silo policy");
+
+    // Test Part 4: Test as Collaborator - CREATE, UPDATE, DELETE should all FAIL
+    let restricted_subnets_url = format!(
+        "/v1/vpc-subnets?project={}&vpc=default",
+        restricted_project_name
+    );
+
+    // Try to CREATE a subnet as Collaborator - should FAIL
+    let collab_subnet_params = params::VpcSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "collab-subnet".parse().unwrap(),
+            description: "Collaborator creation attempt".to_string(),
+        },
+        ipv4_block: "10.1.0.0/22".parse().unwrap(),
+        ipv6_block: None,
+        custom_router: None,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &restricted_subnets_url)
+            .body(Some(&collab_subnet_params))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to create VPC subnet");
+
+    // Try to UPDATE the default subnet as Collaborator - should FAIL
+    let subnet_update_url = format!(
+        "/v1/vpc-subnets/default?project={}&vpc=default",
+        restricted_project_name
+    );
+    let subnet_update_params_collab = params::VpcSubnetUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some("Collaborator update attempt".to_string()),
+        },
+        custom_router: None,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &subnet_update_url)
+            .body(Some(&subnet_update_params_collab))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to update VPC subnet");
+
+    // Try to DELETE the default subnet as Collaborator - should FAIL
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &subnet_update_url)
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to delete VPC subnet");
+
+    // Test Part 5: Test as Admin - CREATE and UPDATE should SUCCEED
+    // Grant the user Silo Admin role again
+    grant_iam(
+        client,
+        &silo_url,
+        shared::SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Try to CREATE a subnet as Admin - should SUCCEED
+    let admin_subnet_params = params::VpcSubnetCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "admin-subnet".parse().unwrap(),
+            description: "Subnet created by admin".to_string(),
+        },
+        ipv4_block: "10.2.0.0/22".parse().unwrap(),
+        ipv6_block: None,
+        custom_router: None,
+    };
+
+    let created_subnet: views::VpcSubnet = NexusRequest::objects_post(
+        &client,
+        &restricted_subnets_url,
+        &admin_subnet_params,
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(created_subnet.identity.name, "admin-subnet");
+    assert_eq!(created_subnet.identity.description, "Subnet created by admin");
+
+    // Try to UPDATE the default subnet as Admin - should SUCCEED
+    let subnet_update_params_admin = params::VpcSubnetUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some("Admin update successful".to_string()),
+        },
+        custom_router: None,
+    };
+
+    let updated_subnet: views::VpcSubnet = NexusRequest::object_put(
+        &client,
+        &subnet_update_url,
+        Some(&subnet_update_params_admin),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(updated_subnet.identity.description, "Admin update successful");
+
+    // Try to DELETE the admin-created subnet as Admin - should SUCCEED
+    let admin_subnet_url = format!(
+        "/v1/vpc-subnets/admin-subnet?project={}&vpc=default",
+        restricted_project_name
+    );
+    NexusRequest::object_delete(&client, &admin_subnet_url)
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute()
+        .await
+        .expect("Admin should be able to delete VPC subnet");
+}
