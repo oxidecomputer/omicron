@@ -398,7 +398,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
-            Actor::Scim { .. } => Some(*silo_id),
+            Actor::Scim { silo_id } => Some(*silo_id),
         }
     }
 
