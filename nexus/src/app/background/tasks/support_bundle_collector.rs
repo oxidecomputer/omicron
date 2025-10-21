@@ -1244,6 +1244,7 @@ fn recursively_add_directory_to_zipfile(
             let src = entry.path();
 
             let zip_time = entry
+                .path()
                 .metadata()
                 .and_then(|m| m.modified())
                 .ok()
