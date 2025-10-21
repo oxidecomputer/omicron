@@ -278,8 +278,8 @@ impl SupportBundleCollector {
         }
     }
 
-    // Monitors all bundles that are "destroying" or "failing" and assigned to
-    // this Nexus, and attempts to clear their storage from Sled Agents.
+    // Monitors all bundles that are "destroying" or "failing" and attempts to
+    // clear their storage from Sled Agents.
     async fn cleanup_destroyed_bundles(
         &self,
         opctx: &OpContext,
@@ -290,7 +290,7 @@ impl SupportBundleCollector {
             .support_bundle_list_assigned_to_nexus(
                 opctx,
                 &pagparams,
-                self.nexus_id,
+                None,
                 vec![
                     SupportBundleState::Destroying,
                     SupportBundleState::Failing,
@@ -390,7 +390,7 @@ impl SupportBundleCollector {
             .support_bundle_list_assigned_to_nexus(
                 opctx,
                 &pagparams,
-                self.nexus_id,
+                Some(self.nexus_id),
                 vec![SupportBundleState::Collecting],
             )
             .await;

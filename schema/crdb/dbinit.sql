@@ -2822,8 +2822,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
     zpool_id UUID NOT NULL,
     dataset_id UUID NOT NULL,
 
-    -- The Nexus which is in charge of collecting the support bundle,
-    -- and later managing its storage.
+    -- The Nexus which is in charge of collecting the support bundle.
     assigned_nexus UUID,
 
     user_comment TEXT
@@ -2836,6 +2835,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.support_bundle (
 CREATE UNIQUE INDEX IF NOT EXISTS one_bundle_per_dataset ON omicron.public.support_bundle (
     dataset_id
 );
+
+CREATE INDEX IF NOT EXISTS lookup_bundle_by_state ON omicron.public.support_bundle (
+    state
+) WHERE state = 'failing' OR state = 'destroying';
 
 CREATE INDEX IF NOT EXISTS lookup_bundle_by_nexus ON omicron.public.support_bundle (
     assigned_nexus
@@ -6792,7 +6795,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '199.0.0', NULL)
+    (TRUE, NOW(), NOW(), '200.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

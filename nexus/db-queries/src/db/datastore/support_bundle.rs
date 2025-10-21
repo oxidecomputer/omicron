@@ -191,23 +191,34 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Lists one page of support bundles in a particular state, assigned to
-    /// a particular Nexus.
+    /// Lists one page of support bundles in a particular state.
+    ///
+    /// If `nexus_id` is not None, also filters for bundles assigned to a
+    /// particular Nexus. Otherwise, lists all bundles in the requested
+    /// states.
     pub async fn support_bundle_list_assigned_to_nexus(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-        nexus_id: OmicronZoneUuid,
+        nexus_id: Option<OmicronZoneUuid>,
         states: Vec<SupportBundleState>,
     ) -> ListResultVec<SupportBundle> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use nexus_db_schema::schema::support_bundle::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        paginated(dsl::support_bundle, dsl::id, pagparams)
-            .filter(dsl::assigned_nexus.eq(nexus_id.into_untyped_uuid()))
+        let query = paginated(dsl::support_bundle, dsl::id, pagparams)
             .filter(dsl::state.eq_any(states))
-            .order(dsl::time_created.asc())
+            .order(dsl::time_created.asc());
+
+        let query = match nexus_id {
+            Some(id) => {
+                query.filter(dsl::assigned_nexus.eq(id.into_untyped_uuid()))
+            }
+            None => query,
+        };
+
+        query
             .select(SupportBundle::as_select())
             .load_async(&*conn)
             .await
@@ -324,8 +335,9 @@ impl DataStore {
                             .execute_async(conn)
                             .await?;
 
-                    // Find all bundles on nexuses that no longer exist.
+                    // Find all collecting bundles on nexuses that no longer exist.
                     let bundles_with_bad_nexuses = dsl::support_bundle
+                        .filter(dsl::state.eq(SupportBundleState::Collecting))
                         .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
                         .select(SupportBundle::as_select())
                         .load_async(conn)
@@ -704,7 +716,7 @@ mod test {
                 .support_bundle_list_assigned_to_nexus(
                     &opctx,
                     &pagparams,
-                    nexus_a,
+                    Some(nexus_a),
                     vec![SupportBundleState::Collecting]
                 )
                 .await
@@ -732,7 +744,7 @@ mod test {
                 .support_bundle_list_assigned_to_nexus(
                     &opctx,
                     &pagparams,
-                    nexus_a,
+                    Some(nexus_a),
                     vec![SupportBundleState::Collecting]
                 )
                 .await
@@ -747,7 +759,7 @@ mod test {
                 .support_bundle_list_assigned_to_nexus(
                     &opctx,
                     &pagparams,
-                    nexus_b,
+                    Some(nexus_b),
                     vec![SupportBundleState::Collecting]
                 )
                 .await
@@ -776,7 +788,7 @@ mod test {
                 .support_bundle_list_assigned_to_nexus(
                     &opctx,
                     &pagparams,
-                    nexus_a,
+                    Some(nexus_a),
                     vec![SupportBundleState::Collecting]
                 )
                 .await
@@ -793,7 +805,7 @@ mod test {
                 .support_bundle_list_assigned_to_nexus(
                     &opctx,
                     &pagparams,
-                    nexus_a,
+                    Some(nexus_a),
                     vec![
                         SupportBundleState::Active,
                         SupportBundleState::Collecting
@@ -1435,6 +1447,7 @@ mod test {
         };
         bp_insert_and_make_target(&opctx, &datastore, &bp2).await;
 
+        // The bundle still appears active
         let report = datastore
             .support_bundle_fail_expunged(&opctx, &bp2, nexus_ids[1])
             .await
@@ -1442,8 +1455,8 @@ mod test {
 
         assert_eq!(
             SupportBundleExpungementReport {
-                bundles_failing_missing_nexus: 1,
-                bundles_reassigned: 1,
+                bundles_failing_missing_nexus: 0,
+                bundles_reassigned: 0,
                 ..Default::default()
             },
             report
@@ -1453,13 +1466,7 @@ mod test {
             .support_bundle_get(&opctx, bundle.id.into())
             .await
             .expect("Should be able to get bundle we just failed");
-        assert_eq!(SupportBundleState::Failing, observed_bundle.state);
-        assert!(
-            observed_bundle
-                .reason_for_failure
-                .unwrap()
-                .contains(FAILURE_REASON_NO_NEXUS)
-        );
+        assert_eq!(SupportBundleState::Active, observed_bundle.state);
 
         db.terminate().await;
         logctx.cleanup_successful();
