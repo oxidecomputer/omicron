@@ -929,7 +929,7 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
-    visible_outside_silo = true // XXX needed?
+    visible_outside_silo = true
 }
 
 // Helpers for unifying the interfaces around images
