@@ -21,6 +21,7 @@ use nexus_types::external_api::views;
 use nexus_types::external_api::{params, shared, views::Vpc};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid;
 
 type ControlPlaneTestContext =
@@ -968,6 +969,336 @@ async fn test_internet_gateway_firewall_networking_restrictions(
     .await;
 
     // STEP 9: As Admin - Delete internet gateway created in step 2
+    NexusRequest::object_delete(&client, &igw_delete_url)
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute()
+        .await
+        .expect("Admin should be able to delete internet gateway");
+}
+
+#[nexus_test]
+async fn test_igw_ip_pool_address_attach_detach_restrictions(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_test_utils::resource_helpers::{
+        create_local_user, grant_iam, object_create, test_params,
+    };
+    use nexus_types::external_api::shared::SiloRole;
+    use nexus_types::external_api::{params, shared};
+    use omicron_common::address::IpRange;
+    use std::net::Ipv4Addr;
+
+    let client = &cptestctx.external_client;
+
+    // STEP 1: Setup - Create restricted silo and admin user
+    let restricted_silo_name = "igw-pool-addr-restricted-silo";
+    let silo_url_base = "/v1/system/silos";
+    let silo_params = params::SiloCreate {
+        identity: IdentityMetadataCreateParams {
+            name: restricted_silo_name.parse().unwrap(),
+            description:
+                "Silo with IGW IP pool/address networking restrictions"
+                    .to_string(),
+        },
+        discoverable: false,
+        identity_mode:
+            nexus_types::external_api::shared::SiloIdentityMode::LocalOnly,
+        admin_group_name: None,
+        tls_certificates: Vec::new(),
+        mapped_fleet_roles: Default::default(),
+        restrict_network_actions: Some(true),
+        quotas: params::SiloQuotasCreate::empty(),
+    };
+
+    let restricted_silo: views::Silo =
+        object_create(&client, silo_url_base, &silo_params).await;
+
+    let test_user = create_local_user(
+        client,
+        &restricted_silo,
+        &"igw-pool-addr-test-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let silo_policy_url =
+        format!("/v1/system/silos/{}/policy", restricted_silo_name);
+    let silo_url = format!("/v1/system/silos/{}", restricted_silo_name);
+
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let restricted_project_name = "igw-pool-addr-restricted-project";
+    let project_params = params::ProjectCreate {
+        identity: IdentityMetadataCreateParams {
+            name: restricted_project_name.parse().unwrap(),
+            description: "Project in IGW pool/addr restricted silo".to_string(),
+        },
+    };
+
+    let _restricted_project: views::Project =
+        NexusRequest::objects_post(&client, "/v1/projects", &project_params)
+            .authn_as(AuthnMode::SiloUser(test_user.id))
+            .execute_and_parse_unwrap()
+            .await;
+
+    // STEP 2: As Admin - Create internet gateway
+    let restricted_igws_url = format!(
+        "/v1/internet-gateways?project={}&vpc=default",
+        restricted_project_name
+    );
+
+    let test_igw_params = params::InternetGatewayCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "test-igw-pools".parse().unwrap(),
+            description: "IGW for pool/address testing".to_string(),
+        },
+    };
+
+    let created_igw: views::InternetGateway = NexusRequest::objects_post(
+        &client,
+        &restricted_igws_url,
+        &test_igw_params,
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(created_igw.identity.name, "test-igw-pools");
+
+    // STEP 3: As Admin (privileged) - Create IP pool and link it to the silo
+    let pool_name = "test-pool-igw";
+    let pool_params = params::IpPoolCreate::new(
+        IdentityMetadataCreateParams {
+            name: pool_name.parse().unwrap(),
+            description: String::from("IP pool for IGW testing"),
+        },
+        views::IpVersion::v4(),
+    );
+    let _pool: views::IpPool =
+        object_create(client, "/v1/system/ip-pools", &pool_params).await;
+
+    // Add IP range to the pool
+    let ip_range = IpRange::try_from((
+        Ipv4Addr::new(198, 51, 100, 1),
+        Ipv4Addr::new(198, 51, 100, 254),
+    ))
+    .unwrap();
+    let url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
+    let _range: views::IpPoolRange =
+        object_create(client, &url, &ip_range).await;
+
+    // Link pool to silo
+    let link = params::IpPoolLinkSilo {
+        silo: NameOrId::Id(restricted_silo.identity.id),
+        is_default: true,
+    };
+    let url = format!("/v1/system/ip-pools/{}/silos", pool_name);
+    let _link: views::IpPoolSiloLink = object_create(client, &url, &link).await;
+
+    // STEP 4: As Admin - Attach IP pool to internet gateway
+    let attach_pool_url = format!(
+        "/v1/internet-gateway-ip-pools?project={}&vpc=default&gateway=test-igw-pools",
+        restricted_project_name
+    );
+
+    let attach_pool_params = params::InternetGatewayIpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "pool-attachment-1".parse().unwrap(),
+            description: "Initial pool attachment".to_string(),
+        },
+        ip_pool: NameOrId::Name(pool_name.parse().unwrap()),
+    };
+
+    let attached_pool: views::InternetGatewayIpPool =
+        NexusRequest::objects_post(
+            &client,
+            &attach_pool_url,
+            &attach_pool_params,
+        )
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute_and_parse_unwrap()
+        .await;
+
+    assert_eq!(attached_pool.identity.name, "pool-attachment-1");
+
+    // STEP 5: As Admin - Attach IP address to internet gateway
+    let attach_address_url = format!(
+        "/v1/internet-gateway-ip-addresses?project={}&vpc=default&gateway=test-igw-pools",
+        restricted_project_name
+    );
+
+    let test_ip = Ipv4Addr::new(198, 51, 100, 42);
+    let attach_address_params = params::InternetGatewayIpAddressCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "address-attachment-1".parse().unwrap(),
+            description: "Initial address attachment".to_string(),
+        },
+        address: test_ip.into(),
+    };
+
+    let attached_address: views::InternetGatewayIpAddress =
+        NexusRequest::objects_post(
+            &client,
+            &attach_address_url,
+            &attach_address_params,
+        )
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute_and_parse_unwrap()
+        .await;
+
+    assert_eq!(attached_address.identity.name, "address-attachment-1");
+
+    // STEP 6: Demote to Collaborator
+    let silo_policy: shared::Policy<SiloRole> =
+        NexusRequest::object_get(client, &silo_policy_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to fetch silo policy")
+            .parsed_body()
+            .expect("failed to parse silo policy");
+
+    let test_user_uuid = test_user.id.into_untyped_uuid();
+
+    let mut new_assignments: Vec<_> = silo_policy
+        .role_assignments
+        .into_iter()
+        .filter(|ra| {
+            !matches!(
+                ra,
+                shared::RoleAssignment {
+                    identity_type: shared::IdentityType::SiloUser,
+                    identity_id,
+                    role_name,
+                } if *identity_id == test_user_uuid && *role_name == SiloRole::Admin
+            )
+        })
+        .collect();
+
+    new_assignments.push(shared::RoleAssignment::for_silo_user(
+        test_user.id,
+        SiloRole::Collaborator,
+    ));
+
+    let collaborator_policy =
+        shared::Policy { role_assignments: new_assignments };
+
+    NexusRequest::object_put(
+        client,
+        &silo_policy_url,
+        Some(&collaborator_policy),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to update silo policy");
+
+    // STEP 7: As Collaborator - Try to ATTACH IP pool (should fail)
+    let collab_pool_params = params::InternetGatewayIpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "collab-pool-attachment".parse().unwrap(),
+            description: "Collaborator pool attachment attempt".to_string(),
+        },
+        ip_pool: NameOrId::Name(pool_name.parse().unwrap()),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &attach_pool_url)
+            .body(Some(&collab_pool_params))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to attach IP pool");
+
+    // STEP 8: As Collaborator - Try to DETACH IP pool (should fail)
+    let detach_pool_url = format!(
+        "/v1/internet-gateway-ip-pools/pool-attachment-1?project={}&vpc=default&gateway=test-igw-pools&cascade=false",
+        restricted_project_name
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &detach_pool_url)
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to detach IP pool");
+
+    // STEP 9: As Collaborator - Try to ATTACH IP address (should fail)
+    let another_test_ip = Ipv4Addr::new(198, 51, 100, 99);
+    let collab_address_params = params::InternetGatewayIpAddressCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "collab-address-attachment".parse().unwrap(),
+            description: "Collaborator address attachment attempt".to_string(),
+        },
+        address: another_test_ip.into(),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &attach_address_url)
+            .body(Some(&collab_address_params))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to attach IP address");
+
+    // STEP 10: As Collaborator - Try to DETACH IP address (should fail)
+    let detach_address_url = format!(
+        "/v1/internet-gateway-ip-addresses/address-attachment-1?project={}&vpc=default&gateway=test-igw-pools&cascade=false",
+        restricted_project_name
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &detach_address_url)
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to detach IP address");
+
+    // STEP 11: Promote back to Admin
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // STEP 12: As Admin - Detach IP address
+    NexusRequest::object_delete(&client, &detach_address_url)
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute()
+        .await
+        .expect("Admin should be able to detach IP address");
+
+    // STEP 13: As Admin - Detach IP pool
+    NexusRequest::object_delete(&client, &detach_pool_url)
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute()
+        .await
+        .expect("Admin should be able to detach IP pool");
+
+    // STEP 14: As Admin - Delete internet gateway (cleanup)
+    let igw_delete_url = format!(
+        "/v1/internet-gateways/test-igw-pools?project={}&vpc=default",
+        restricted_project_name
+    );
+
     NexusRequest::object_delete(&client, &igw_delete_url)
         .authn_as(AuthnMode::SiloUser(test_user.id))
         .execute()
