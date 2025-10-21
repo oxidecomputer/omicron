@@ -138,6 +138,7 @@ members = [
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
+    "sled-storage/zfs-test-harness",
     "sp-sim",
     "test-utils",
     "trust-quorum",
@@ -299,6 +300,7 @@ default-members = [
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
+    "sled-storage/zfs-test-harness",
     "sp-sim",
     "trust-quorum",
     "trust-quorum/gfss",
@@ -411,10 +413,10 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -642,10 +644,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -722,7 +724,7 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "6d31fa63217c6a51061dc4afa1ebe175a0021981" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "7da1f0b5dcd3d631da18b43ba78a84b1a2b425ee" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -783,6 +785,7 @@ wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
 zerocopy = "0.8.26"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
+zfs-test-harness = { path = "sled-storage/zfs-test-harness" }
 zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 
