@@ -114,6 +114,11 @@ impl super::Nexus {
     ) -> CreateResult<db::model::VpcRouter> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can create VPC routers
+        self.check_networking_restrictions(opctx).await?;
+
         let id = Uuid::new_v4();
         let router = db::model::VpcRouter::new(
             id,
@@ -155,6 +160,11 @@ impl super::Nexus {
     ) -> UpdateResult<VpcRouter> {
         let (.., authz_router) =
             vpc_router_lookup.lookup_for(authz::Action::Modify).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can update VPC routers
+        self.check_networking_restrictions(opctx).await?;
+
         self.db_datastore
             .vpc_update_router(opctx, &authz_router, params.clone().into())
             .await
@@ -167,6 +177,11 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_router, db_router) =
             vpc_router_lookup.fetch_for(authz::Action::Delete).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can delete VPC routers
+        self.check_networking_restrictions(opctx).await?;
+
         // TODO-performance shouldn't this check be part of the "update"
         // database query?  This shouldn't affect correctness, assuming that a
         // router kind cannot be changed, but it might be able to save us a
@@ -235,6 +250,10 @@ impl super::Nexus {
         let (.., authz_router, db_router) =
             router_lookup.fetch_for(authz::Action::CreateChild).await?;
 
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can create router routes
+        self.check_networking_restrictions(opctx).await?;
+
         if db_router.kind == VpcRouterKind::System {
             return Err(Error::invalid_request(
                 "user-provided routes cannot be added to a system router",
@@ -286,6 +305,10 @@ impl super::Nexus {
         let (.., authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Modify).await?;
 
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can update router routes
+        self.check_networking_restrictions(opctx).await?;
+
         match db_route.kind.0 {
             // Default routes allow a constrained form of modification:
             // only the target may change.
@@ -333,6 +356,10 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Delete).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can delete router routes
+        self.check_networking_restrictions(opctx).await?;
 
         // Only custom routes can be deleted
         // TODO Shouldn't this constraint be checked by the database query?
