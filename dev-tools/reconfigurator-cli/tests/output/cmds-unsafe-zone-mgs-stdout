@@ -1510,7 +1510,7 @@ INFO performed noop zone image source checks on sled, sled_id: d81c6a84-79b8-495
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
-INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (found issues), serial_number: serial0, part_number: model0
 INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO reached maximum number of pending MGS-driven updates, max: 1
 generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
@@ -1597,7 +1597,7 @@ INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noo
 INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: d81c6a84-79b8-4958-ae41-ea46c9b19763, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
 INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 1, sp_type: Sled, serial_number: serial1, part_number: model1
 INFO skipping board for MGS-driven update (no update necessary), serial_number: serial1, part_number: model1
-INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (found issues), serial_number: serial0, part_number: model0
 INFO skipping board for MGS-driven update (found issues), serial_number: serial2, part_number: model2
 INFO ran out of boards for MGS-driven update
 generated blueprint a5a8f242-ffa5-473c-8efd-2acf2dc0b736 based on parent blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976

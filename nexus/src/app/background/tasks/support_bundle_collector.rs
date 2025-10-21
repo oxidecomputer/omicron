@@ -20,9 +20,11 @@ use futures::stream::FuturesUnordered;
 use gateway_client::Client as MgsClient;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpIgnition;
+use gateway_types::component::SpType;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
 use nexus_db_model::Ereport;
+use nexus_db_model::Sled;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
 use nexus_db_queries::authz;
@@ -31,6 +33,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::datastore::EreportFilters;
 use nexus_db_queries::db::pagination::Paginator;
+use nexus_reconfigurator_preparation::reconfigurator_state_load;
 use nexus_types::deployment::SledFilter;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
@@ -47,9 +50,11 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use parallel_task_set::ParallelTaskSet;
+use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::io::Write;
 use std::num::NonZeroU64;
@@ -61,6 +66,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
 use tokio_util::task::AbortOnDropHandle;
 use tufaceous_artifact::ArtifactHash;
+use uuid::Uuid;
 use zip::ZipArchive;
 use zip::ZipWriter;
 use zip::write::FullFileOptions;
@@ -681,6 +687,48 @@ impl BundleCollection {
         )
         .await?;
 
+        // Collect reconfigurator state
+        const NMAX_BLUEPRINTS: usize = 300;
+        match reconfigurator_state_load(
+            &self.opctx,
+            &self.datastore,
+            NMAX_BLUEPRINTS,
+        )
+        .await
+        {
+            Ok(state) => {
+                let file_path = dir.path().join("reconfigurator_state.json");
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(true)
+                    .open(&file_path)
+                    .with_context(|| format!("failed to open {}", file_path))?;
+                serde_json::to_writer_pretty(&file, &state).with_context(
+                    || {
+                        format!(
+                            "failed to serialize reconfigurator state to {}",
+                            file_path
+                        )
+                    },
+                )?;
+                info!(
+                    log,
+                    "Support bundle: collected reconfigurator state";
+                    "target_blueprint" => ?state.target_blueprint,
+                    "num_blueprints" => state.blueprints.len(),
+                    "num_collections" => state.collections.len(),
+                );
+            }
+            Err(err) => {
+                warn!(
+                    log,
+                    "Support bundle: failed to collect reconfigurator state";
+                    "err" => ?err,
+                );
+            }
+        }
+
         let ereport_collection = if let Some(ref ereport_filters) =
             self.request.ereport_query
         {
@@ -707,23 +755,44 @@ impl BundleCollection {
             None
         };
 
-        let sp_dumps_dir = dir.path().join("sp_task_dumps");
-        tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(|| {
-            format!("failed to create SP task dump directory {sp_dumps_dir}")
-        })?;
-        if let Err(e) =
-            save_all_sp_dumps(log, &self.resolver, &sp_dumps_dir).await
-        {
-            error!(log, "failed to capture SP task dumps"; "error" => InlineErrorChain::new(e.as_ref()));
-        } else {
-            report.listed_sps = true;
-        };
-
-        if let Ok(all_sleds) = self
+        let all_sleds = self
             .datastore
             .sled_list_all_batched(&self.opctx, SledFilter::InService)
+            .await;
+
+        if let Ok(mgs_client) = self.create_mgs_client().await {
+            if let Err(e) = write_sled_info(
+                &self.log,
+                &mgs_client,
+                all_sleds.as_deref().ok(),
+                dir.path(),
+            )
             .await
-        {
+            {
+                error!(log, "Failed to write sled_info.json"; "error" => InlineErrorChain::new(e.as_ref()));
+            }
+
+            let sp_dumps_dir = dir.path().join("sp_task_dumps");
+            tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(
+                || {
+                    format!(
+                        "Failed to create SP task dump directory {sp_dumps_dir}"
+                    )
+                },
+            )?;
+
+            if let Err(e) =
+                save_all_sp_dumps(log, &mgs_client, &sp_dumps_dir).await
+            {
+                error!(log, "Failed to capture SP task dumps"; "error" => InlineErrorChain::new(e.as_ref()));
+            } else {
+                report.listed_sps = true;
+            };
+        } else {
+            warn!(log, "No MGS client, skipping SP task dump collection");
+        }
+
+        if let Ok(all_sleds) = all_sleds {
             report.listed_in_service_sleds = true;
 
             const MAX_CONCURRENT_SLED_REQUESTS: usize = 16;
@@ -1031,6 +1100,20 @@ impl BundleCollection {
         );
         Ok(())
     }
+
+    async fn create_mgs_client(&self) -> anyhow::Result<MgsClient> {
+        self
+            .resolver
+            .lookup_socket_v6(ServiceName::ManagementGatewayService)
+            .await
+            .map(|sockaddr| {
+                let url = format!("http://{}", sockaddr);
+                gateway_client::Client::new(&url, self.log.clone())
+            }).map_err(|e| {
+                error!(self.log, "failed to resolve MGS address"; "error" => InlineErrorChain::new(&e));
+                e.into()
+            })
+    }
 }
 
 impl BackgroundTask for SupportBundleCollector {
@@ -1316,18 +1399,9 @@ where
 /// Collect task dumps from all SPs via MGS and save them to a directory.
 async fn save_all_sp_dumps(
     log: &slog::Logger,
-    resolver: &Resolver,
+    mgs_client: &MgsClient,
     sp_dumps_dir: &Utf8Path,
 ) -> anyhow::Result<()> {
-    let mgs_client = resolver
-        .lookup_socket_v6(ServiceName::ManagementGatewayService)
-        .await
-        .map(|sockaddr| {
-            let url = format!("http://{}", sockaddr);
-            gateway_client::Client::new(&url, log.clone())
-        })
-        .context("failed to resolve address of MGS")?;
-
     let available_sps = get_available_sps(&mgs_client).await?;
 
     let mut tasks = ParallelTaskSet::new();
@@ -1409,6 +1483,82 @@ async fn save_sp_dumps(
             .await
             .context("failed to write SP task dump zip to disk")?;
     }
+    Ok(())
+}
+
+/// Write a file with a JSON mapping of sled serial numbers to cubby and UUIDs for easier
+/// identification of sleds present in a bundle.
+async fn write_sled_info(
+    log: &slog::Logger,
+    mgs_client: &MgsClient,
+    nexus_sleds: Option<&[Sled]>,
+    dir: &Utf8Path,
+) -> anyhow::Result<()> {
+    #[derive(Serialize)]
+    struct SledInfo {
+        cubby: Option<u16>,
+        uuid: Option<Uuid>,
+    }
+
+    let available_sps = get_available_sps(&mgs_client)
+        .await
+        .context("failed to get available SPs")?;
+
+    // We can still get a useful mapping of cubby to serial using just the data from MGS.
+    let mut nexus_map: BTreeMap<_, _> = nexus_sleds
+        .unwrap_or_default()
+        .into_iter()
+        .map(|sled| (sled.serial_number(), sled))
+        .collect();
+
+    let mut sled_info = BTreeMap::new();
+    for sp in
+        available_sps.into_iter().filter(|sp| matches!(sp.type_, SpType::Sled))
+    {
+        let sp_state = match mgs_client.sp_get(&sp.type_, sp.slot).await {
+            Ok(s) => s.into_inner(),
+            Err(e) => {
+                error!(log,
+                    "Failed to get SP state for sled_info.json";
+                    "cubby" => sp.slot,
+                    "component" => %sp.type_,
+                    "error" => InlineErrorChain::new(&e)
+                );
+                continue;
+            }
+        };
+
+        if let Some(sled) = nexus_map.remove(sp_state.serial_number.as_str()) {
+            sled_info.insert(
+                sp_state.serial_number.to_string(),
+                SledInfo {
+                    cubby: Some(sp.slot),
+                    uuid: Some(*sled.identity.id.as_untyped_uuid()),
+                },
+            );
+        } else {
+            sled_info.insert(
+                sp_state.serial_number.to_string(),
+                SledInfo { cubby: Some(sp.slot), uuid: None },
+            );
+        }
+    }
+
+    // Sleds not returned by MGS.
+    for (serial, sled) in nexus_map {
+        sled_info.insert(
+            serial.to_string(),
+            SledInfo {
+                cubby: None,
+                uuid: Some(*sled.identity.id.as_untyped_uuid()),
+            },
+        );
+    }
+
+    let json = serde_json::to_string_pretty(&sled_info)
+        .context("failed to serialize sled info to JSON")?;
+    tokio::fs::write(dir.join("sled_info.json"), json).await?;
+
     Ok(())
 }
 
@@ -2475,6 +2625,106 @@ mod test {
                 db_failing_bundles_updated: 1,
                 ..Default::default()
             }
+        );
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_reconfigurator_state_collected(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a support bundle
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                "Testing reconfigurator state collection",
+                nexus.id(),
+                None,
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+        assert_eq!(bundle.state, SupportBundleState::Collecting);
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
+
+        // Collect the bundle
+        let request =
+            BundleRequest { skip_sled_info: true, ..Default::default() };
+        let report = collector
+            .collect_bundle(&opctx, &request)
+            .await
+            .expect("Collection should have succeeded under test")
+            .expect("Collecting the bundle should have generated a report");
+        assert_eq!(report.bundle, bundle.id.into());
+
+        // Verify bundle is active
+        let observed_bundle = datastore
+            .support_bundle_get(&opctx, bundle.id.into())
+            .await
+            .expect("Bundle should be in db");
+        assert_eq!(observed_bundle.state, SupportBundleState::Active);
+
+        // Download the reconfigurator_state.json file
+        let head = false;
+        let range = None;
+        let response = nexus
+            .support_bundle_download(
+                &opctx,
+                observed_bundle.id.into(),
+                SupportBundleQueryType::Path {
+                    file_path: "reconfigurator_state.json".to_string(),
+                },
+                head,
+                range,
+            )
+            .await
+            .expect("Should be able to download reconfigurator_state.json");
+
+        // Read and parse the JSON
+        let body_bytes =
+            response.into_body().collect().await.unwrap().to_bytes();
+        let body_string = String::from_utf8(body_bytes.to_vec()).unwrap();
+        let state: serde_json::Value =
+            serde_json::from_str(&body_string).expect("Should be valid JSON");
+
+        // Verify the JSON has the expected structure
+        //
+        // We don't really care about the contents that much, we just want to
+        // verify that the UnstableReconfiguratorState object got serialized
+        // at all.
+
+        assert!(
+            !state
+                .get("target_blueprint")
+                .expect("missing target blueprint")
+                .is_null(),
+            "Should have target blueprint"
+        );
+        assert!(
+            !state
+                .get("blueprints")
+                .expect("missing blueprints")
+                .as_array()
+                .expect("blueprints should be an array")
+                .is_empty(),
+            "Should have blueprints"
         );
     }
 }

@@ -78,7 +78,7 @@ use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -128,9 +128,6 @@ pub enum Error {
     #[error("Error managing instances: {0}")]
     Instance(#[from] crate::instance_manager::Error),
 
-    #[error("Error managing storage: {0}")]
-    Storage(#[from] sled_storage::error::Error),
-
     #[error("Error updating: {0}")]
     Download(#[from] crate::updates::Error),
 
@@ -179,7 +176,6 @@ impl From<Error> for omicron_common::api::external::Error {
         match err {
             // Some errors can convert themselves into the external error
             Error::Services(err) => err.into(),
-            Error::Storage(err) => err.into(),
             _ => omicron_common::api::external::Error::InternalError {
                 internal_message: err.to_string(),
             },
@@ -1191,7 +1187,7 @@ impl SledAgent {
     }
 }
 
-#[derive(From, thiserror::Error, Debug)]
+#[derive(From, thiserror::Error, Debug, SlogInlineError)]
 pub enum AddSledError {
     #[error("Failed to learn bootstrap ip for {sled_id}")]
     BootstrapAgentClient {
@@ -1206,6 +1202,7 @@ pub enum AddSledError {
     #[error("Failed to initialize {sled_id}: {err}")]
     BootstrapTcpClient {
         sled_id: Baseboard,
+        #[source]
         err: crate::bootstrap::client::Error,
     },
 }
