@@ -435,11 +435,15 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
 
     let collaborator_policy =
         shared::Policy { role_assignments: collaborator_only_assignments };
-    NexusRequest::object_put(client, &silo_policy_url, Some(&collaborator_policy))
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("failed to update silo policy");
+    NexusRequest::object_put(
+        client,
+        &silo_policy_url,
+        Some(&collaborator_policy),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to update silo policy");
 
     // Try to CREATE a VPC as Collaborator - should FAIL
     let collab_vpc_params = params::VpcCreate {
