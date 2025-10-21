@@ -65,17 +65,19 @@ impl super::Nexus {
         }
     }
 
-    pub(crate) async fn project_create_vpc(
-        self: &Arc<Self>,
+    /// Check if the actor's silo restricts networking actions, and if so,
+    /// verify the actor has Silo Admin permissions.
+    ///
+    /// Returns Ok(()) if either:
+    /// - The silo does not restrict networking actions, or
+    /// - The silo restricts networking and the actor is a Silo Admin
+    ///
+    /// Returns Err if the silo restricts networking and the actor is not
+    /// a Silo Admin.
+    async fn check_networking_restrictions(
+        &self,
         opctx: &OpContext,
-        project_lookup: &lookup::Project<'_>,
-        params: &params::VpcCreate,
-    ) -> CreateResult<db::model::Vpc> {
-        let (.., authz_project) =
-            project_lookup.lookup_for(authz::Action::CreateChild).await?;
-
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can create VPCs
+    ) -> Result<(), Error> {
         if let Some(actor) = opctx.authn.actor() {
             if let Some(silo_id) = actor.silo_id() {
                 let silo_policy = opctx.authn.silo_authn_policy();
@@ -94,6 +96,21 @@ impl super::Nexus {
                 }
             }
         }
+        Ok(())
+    }
+
+    pub(crate) async fn project_create_vpc(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        params: &params::VpcCreate,
+    ) -> CreateResult<db::model::Vpc> {
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can create VPCs
+        self.check_networking_restrictions(opctx).await?;
 
         let saga_params = sagas::vpc_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -133,6 +150,11 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Vpc> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::Modify).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can update VPCs
+        self.check_networking_restrictions(opctx).await?;
+
         self.db_datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
             .await
@@ -145,6 +167,10 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_vpc, db_vpc) =
             vpc_lookup.fetch_for(authz::Action::Modify).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can delete VPCs
+        self.check_networking_restrictions(opctx).await?;
 
         let authz_vpc_router = authz::VpcRouter::new(
             authz_vpc.clone(),

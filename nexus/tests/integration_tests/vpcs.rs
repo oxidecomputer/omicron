@@ -21,6 +21,7 @@ use nexus_types::external_api::views;
 use nexus_types::external_api::{params, shared, views::Vpc};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_uuid_kinds::GenericUuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -324,7 +325,7 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
             .unwrap()
     );
 
-    // Test Part 3: Test authorization with different user roles
+    // Test Part 3: Test as Collaborator - CREATE and UPDATE should FAIL
     // Create a user in the restricted silo
     let test_user = create_local_user(
         client,
@@ -363,7 +364,6 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to update silo policy");
 
     // Create a project in the restricted silo AS THE SILO USER
-    // This ensures the project is properly set up for that user
     let restricted_project_name = "restricted-project";
     let project_params = params::ProjectCreate {
         identity: IdentityMetadataCreateParams {
@@ -378,31 +378,10 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
             .execute_and_parse_unwrap()
             .await;
 
-    // Try to create a VPC as a Silo Collaborator (with Project Creator role)
-    // Should FAIL with 403 Forbidden because the silo has restrict_network_actions=true
-    // Note: When authenticated as a silo user, the silo context is implicit
     let restricted_vpcs_url =
         format!("/v1/vpcs?project={}", restricted_project_name);
-    let restricted_vpc_params = params::VpcCreate {
-        identity: IdentityMetadataCreateParams {
-            name: "restricted-vpc".parse().unwrap(),
-            description: "VPC in restricted silo".to_string(),
-        },
-        ipv6_prefix: None,
-        dns_name: "restricted".parse().unwrap(),
-    };
 
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &restricted_vpcs_url)
-            .body(Some(&restricted_vpc_params))
-            .expect_status(Some(StatusCode::FORBIDDEN)),
-    )
-    .authn_as(AuthnMode::SiloUser(test_user.id))
-    .execute()
-    .await
-    .expect("VPC create should fail for Silo Collaborator in restricted silo");
-
-    // Now grant the user Silo Admin role
+    // First, temporarily grant Admin so we can create a VPC to test updates
     let silo_url = format!("/v1/system/silos/{}", restricted_silo_name);
     grant_iam(
         client,
@@ -413,19 +392,149 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // Try to create a VPC again as Silo Admin - should succeed
-    let vpc_as_admin: Vpc = NexusRequest::objects_post(
-        &client,
-        &restricted_vpcs_url,
-        &restricted_vpc_params,
+    // Create a VPC as Admin so we have something to test update with
+    let test_vpc_params = params::VpcCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "test-vpc".parse().unwrap(),
+            description: "VPC for testing".to_string(),
+        },
+        ipv6_prefix: None,
+        dns_name: "test".parse().unwrap(),
+    };
+
+    NexusRequest::objects_post(&client, &restricted_vpcs_url, &test_vpc_params)
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute_and_parse_unwrap::<Vpc>()
+        .await;
+
+    // Remove Admin role, back to just Collaborator
+    let silo_policy: shared::Policy<shared::SiloRole> =
+        NexusRequest::object_get(client, &silo_policy_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to fetch silo policy")
+            .parsed_body()
+            .expect("failed to parse silo policy");
+
+    let test_user_uuid = test_user.id.into_untyped_uuid();
+    let collaborator_only_assignments: Vec<_> = silo_policy
+        .role_assignments
+        .into_iter()
+        .filter(|ra| {
+            !matches!(
+                ra,
+                shared::RoleAssignment {
+                    identity_type: shared::IdentityType::SiloUser,
+                    identity_id,
+                    role_name,
+                } if *identity_id == test_user_uuid && *role_name == shared::SiloRole::Admin
+            )
+        })
+        .collect();
+
+    let collaborator_policy =
+        shared::Policy { role_assignments: collaborator_only_assignments };
+    NexusRequest::object_put(client, &silo_policy_url, Some(&collaborator_policy))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to update silo policy");
+
+    // Try to CREATE a VPC as Collaborator - should FAIL
+    let collab_vpc_params = params::VpcCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "collab-vpc".parse().unwrap(),
+            description: "Collaborator creation attempt".to_string(),
+        },
+        ipv6_prefix: None,
+        dns_name: "collab".parse().unwrap(),
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &restricted_vpcs_url)
+            .body(Some(&collab_vpc_params))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
     )
     .authn_as(AuthnMode::SiloUser(test_user.id))
     .execute()
     .await
-    .expect("VPC creation should succeed for Silo Admin in restricted silo")
-    .parsed_body()
-    .unwrap();
+    .expect("Collaborator should not be able to create VPC");
 
-    assert_eq!(vpc_as_admin.identity.name, "restricted-vpc");
-    assert_eq!(vpc_as_admin.dns_name, "restricted");
+    // Try to UPDATE the VPC as Collaborator - should FAIL
+    let vpc_update_url =
+        format!("/v1/vpcs/test-vpc?project={}", restricted_project_name);
+    let vpc_update_params_collab = params::VpcUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some("Collaborator update attempt".to_string()),
+        },
+        dns_name: None,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &vpc_update_url)
+            .body(Some(&vpc_update_params_collab))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to update VPC");
+
+    // Test Part 4: Test as Admin - CREATE and UPDATE should SUCCEED
+    // Grant the user Silo Admin role again
+    grant_iam(
+        client,
+        &silo_url,
+        shared::SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Try to CREATE a VPC as Admin - should SUCCEED
+    let admin_vpc_params = params::VpcCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "admin-vpc".parse().unwrap(),
+            description: "VPC created by admin".to_string(),
+        },
+        ipv6_prefix: None,
+        dns_name: "admin".parse().unwrap(),
+    };
+
+    let created_vpc: Vpc = NexusRequest::objects_post(
+        &client,
+        &restricted_vpcs_url,
+        &admin_vpc_params,
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(created_vpc.identity.name, "admin-vpc");
+    assert_eq!(created_vpc.dns_name, "admin");
+
+    // Try to UPDATE the VPC as Admin - should SUCCEED
+    let vpc_update_params_admin = params::VpcUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some("Admin update successful".to_string()),
+        },
+        dns_name: None,
+    };
+
+    let updated_vpc: Vpc = NexusRequest::object_put(
+        &client,
+        &vpc_update_url,
+        Some(&vpc_update_params_admin),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(updated_vpc.identity.description, "Admin update successful");
+
+    // TODO: Add delete tests once we handle subnet deletion
+    // (VPCs can't be deleted if they have subnets)
 }
