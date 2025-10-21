@@ -12,6 +12,7 @@ use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::IncompleteNetworkInterface;
+use nexus_db_model::IpConfig;
 use nexus_db_model::IpPool;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -384,6 +385,16 @@ impl DataStore {
         if self.is_nic_already_allocated(conn, service_id, nic, log).await? {
             return Ok(());
         }
+
+        // TODO-completeness: Handle dual-stack `shared::NetworkInterface`s.
+        // See https://github.com/oxidecomputer/omicron/issues/9246.
+        let std::net::IpAddr::V4(ip) = nic.ip else {
+            return Err(Error::internal_error(&format!(
+                "Unexpectedly found a service NIC without an IPv4 \
+                address, nic_id=\"{}\"",
+                nic.id,
+            )));
+        };
         let nic_arg = IncompleteNetworkInterface::new_service(
             nic.id,
             service_id.into_untyped_uuid(),
@@ -392,7 +403,7 @@ impl DataStore {
                 name: nic.name.clone(),
                 description: format!("{} service vNIC", zone_kind.report_str()),
             },
-            nic.ip,
+            IpConfig::from_ipv4(ip),
             nic.mac,
             nic.slot,
         )?;
