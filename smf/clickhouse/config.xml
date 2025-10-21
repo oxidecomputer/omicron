@@ -72,6 +72,10 @@
     </quotas>
 
     <merge_tree>
+        <!-- Disable sparse column serialization, which we expect to not need -->
         <ratio_of_defaults_for_sparse_serialization>1.0</ratio_of_defaults_for_sparse_serialization>
+        <!-- Prevent ClickHouse from setting distributed tables to read-only. -->
+        <!-- See https://github.com/oxidecomputer/omicron/issues/8595 for details. -->
+        <replicated_max_ratio_of_wrong_parts>1.0</replicated_max_ratio_of_wrong_parts>
     </merge_tree>
 </clickhouse>
