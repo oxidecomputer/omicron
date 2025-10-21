@@ -70,6 +70,11 @@ impl super::Nexus {
     ) -> CreateResult<db::model::InternetGateway> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can create internet gateways
+        self.check_networking_restrictions(opctx).await?;
+
         let id = Uuid::new_v4();
         let router =
             db::model::InternetGateway::new(id, authz_vpc.id(), params.clone());
@@ -112,6 +117,10 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_vpc, authz_igw, _db_igw) =
             lookup.fetch_for(authz::Action::Delete).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can delete internet gateways
+        self.check_networking_restrictions(opctx).await?;
 
         let out = self
             .db_datastore

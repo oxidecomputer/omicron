@@ -225,6 +225,11 @@ impl super::Nexus {
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
         let (.., authz_vpc, db_vpc) =
             vpc_lookup.fetch_for(authz::Action::Modify).await?;
+
+        // Check networking restrictions: if the actor's silo restricts networking
+        // actions, only Silo Admins can update VPC firewall rules
+        self.check_networking_restrictions(opctx).await?;
+
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
             params.clone(),

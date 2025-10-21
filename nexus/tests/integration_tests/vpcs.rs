@@ -784,3 +784,313 @@ async fn test_vpc_subnet_networking_restrictions(
         .await
         .expect("Admin should be able to delete VPC subnet");
 }
+
+#[nexus_test]
+async fn test_internet_gateway_firewall_networking_restrictions(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_test_utils::resource_helpers::{
+        create_local_user, grant_iam, object_create, test_params,
+    };
+    use nexus_types::external_api::shared::SiloRole;
+    use nexus_types::external_api::{params, shared, views};
+    use omicron_common::api::external::{
+        L4Port, L4PortRange, VpcFirewallRuleAction, VpcFirewallRuleDirection,
+        VpcFirewallRuleFilter, VpcFirewallRulePriority,
+        VpcFirewallRuleProtocol, VpcFirewallRuleStatus, VpcFirewallRuleUpdate,
+        VpcFirewallRuleUpdateParams, VpcFirewallRules,
+    };
+    use std::convert::TryFrom;
+
+    let client = &cptestctx.external_client;
+
+    // Test Part 1: Create a restricted silo with networking restrictions enabled
+    let restricted_silo_name = "igw-restricted-silo";
+    let silo_url = "/v1/system/silos";
+    let silo_params = params::SiloCreate {
+        identity: IdentityMetadataCreateParams {
+            name: restricted_silo_name.parse().unwrap(),
+            description: "Silo with IGW networking restrictions".to_string(),
+        },
+        discoverable: false,
+        identity_mode:
+            nexus_types::external_api::shared::SiloIdentityMode::LocalOnly,
+        admin_group_name: None,
+        tls_certificates: Vec::new(),
+        mapped_fleet_roles: Default::default(),
+        restrict_network_actions: Some(true), // Enable networking restrictions
+        quotas: params::SiloQuotasCreate::empty(),
+    };
+
+    let restricted_silo: views::Silo =
+        object_create(&client, silo_url, &silo_params).await;
+
+    // Test Part 2: Create a user with Admin role (needed to create project with default VPC)
+    let test_user = create_local_user(
+        client,
+        &restricted_silo,
+        &"igw-test-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let silo_policy_url =
+        format!("/v1/system/silos/{}/policy", restricted_silo_name);
+    let silo_url = format!("/v1/system/silos/{}", restricted_silo_name);
+
+    // Grant the user Admin role first so they can create a project
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Create a project in the restricted silo AS THE SILO USER (who is currently Admin)
+    let restricted_project_name = "igw-restricted-project";
+    let project_params = params::ProjectCreate {
+        identity: IdentityMetadataCreateParams {
+            name: restricted_project_name.parse().unwrap(),
+            description: "Project in IGW restricted silo".to_string(),
+        },
+    };
+
+    let _restricted_project: views::Project =
+        NexusRequest::objects_post(&client, "/v1/projects", &project_params)
+            .authn_as(AuthnMode::SiloUser(test_user.id))
+            .execute_and_parse_unwrap()
+            .await;
+
+    // Test Part 3: Demote to Collaborator
+    let silo_policy: shared::Policy<SiloRole> =
+        NexusRequest::object_get(client, &silo_policy_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to fetch silo policy")
+            .parsed_body()
+            .expect("failed to parse silo policy");
+
+    let test_user_uuid = test_user.id.into_untyped_uuid();
+
+    // Add Collaborator and remove Admin
+    let mut new_assignments: Vec<_> = silo_policy
+        .role_assignments
+        .into_iter()
+        .filter(|ra| {
+            !matches!(
+                ra,
+                shared::RoleAssignment {
+                    identity_type: shared::IdentityType::SiloUser,
+                    identity_id,
+                    role_name,
+                } if *identity_id == test_user_uuid && *role_name == SiloRole::Admin
+            )
+        })
+        .collect();
+
+    new_assignments.push(shared::RoleAssignment::for_silo_user(
+        test_user.id,
+        SiloRole::Collaborator,
+    ));
+
+    let collaborator_policy =
+        shared::Policy { role_assignments: new_assignments };
+    NexusRequest::object_put(
+        client,
+        &silo_policy_url,
+        Some(&collaborator_policy),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to update silo policy");
+
+    // Test Part 4: Test Internet Gateway operations as Collaborator - CREATE and DELETE should FAIL
+    let restricted_igws_url = format!(
+        "/v1/internet-gateways?project={}&vpc=default",
+        restricted_project_name
+    );
+
+    // Try to CREATE an internet gateway as Collaborator - should FAIL
+    let collab_igw_params = params::InternetGatewayCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "collab-igw".parse().unwrap(),
+            description: "Collaborator IGW creation attempt".to_string(),
+        },
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &restricted_igws_url)
+            .body(Some(&collab_igw_params))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to create internet gateway");
+
+    // Test Part 5: Test as Admin - CREATE and DELETE should SUCCEED
+    // Grant the user Silo Admin role again
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Try to CREATE an internet gateway as Admin - should SUCCEED
+    let admin_igw_params = params::InternetGatewayCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "admin-igw".parse().unwrap(),
+            description: "IGW created by admin".to_string(),
+        },
+    };
+
+    let created_igw: views::InternetGateway = NexusRequest::objects_post(
+        &client,
+        &restricted_igws_url,
+        &admin_igw_params,
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(created_igw.identity.name, "admin-igw");
+    assert_eq!(created_igw.identity.description, "IGW created by admin");
+
+    // Demote back to Collaborator
+    NexusRequest::object_put(
+        client,
+        &silo_policy_url,
+        Some(&collaborator_policy),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to update silo policy");
+
+    // Try to DELETE the internet gateway as Collaborator - should FAIL
+    let igw_delete_url = format!(
+        "/v1/internet-gateways/admin-igw?project={}&vpc=default",
+        restricted_project_name
+    );
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &igw_delete_url)
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to delete internet gateway");
+
+    // Promote back to Admin and DELETE should succeed
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Try to DELETE the internet gateway as Admin - should SUCCEED
+    NexusRequest::object_delete(&client, &igw_delete_url)
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute()
+        .await
+        .expect("Admin should be able to delete internet gateway");
+
+    // Test Part 6: Test Firewall Rules - Collaborator should be blocked, Admin should succeed
+    // Demote back to Collaborator
+    NexusRequest::object_put(
+        client,
+        &silo_policy_url,
+        Some(&collaborator_policy),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to update silo policy");
+
+    let firewall_rules_url = format!(
+        "/v1/vpc-firewall-rules?project={}&vpc=default",
+        restricted_project_name
+    );
+
+    // Try to UPDATE firewall rules as Collaborator - should FAIL
+    let collab_firewall_params = VpcFirewallRuleUpdateParams {
+        rules: vec![VpcFirewallRuleUpdate {
+            name: "allow-icmp".parse().unwrap(),
+            description: "Allow ICMP".to_string(),
+            action: VpcFirewallRuleAction::Allow,
+            direction: VpcFirewallRuleDirection::Inbound,
+            filters: VpcFirewallRuleFilter {
+                hosts: None,
+                ports: None,
+                protocols: Some(vec![VpcFirewallRuleProtocol::Icmp(None)]),
+            },
+            priority: VpcFirewallRulePriority(100),
+            status: VpcFirewallRuleStatus::Enabled,
+            targets: vec![],
+        }],
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &firewall_rules_url)
+            .body(Some(&collab_firewall_params))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute()
+    .await
+    .expect("Collaborator should not be able to update firewall rules");
+
+    // Promote back to Admin
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Try to UPDATE firewall rules as Admin - should SUCCEED
+    let admin_firewall_params = VpcFirewallRuleUpdateParams {
+        rules: vec![VpcFirewallRuleUpdate {
+            name: "allow-ssh".parse().unwrap(),
+            description: "Allow SSH".to_string(),
+            action: VpcFirewallRuleAction::Allow,
+            direction: VpcFirewallRuleDirection::Inbound,
+            filters: VpcFirewallRuleFilter {
+                hosts: None,
+                ports: Some(vec![L4PortRange {
+                    first: L4Port::try_from(22).unwrap(),
+                    last: L4Port::try_from(22).unwrap(),
+                }]),
+                protocols: Some(vec![VpcFirewallRuleProtocol::Tcp]),
+            },
+            priority: VpcFirewallRulePriority(100),
+            status: VpcFirewallRuleStatus::Enabled,
+            targets: vec![],
+        }],
+    };
+
+    let updated_rules: VpcFirewallRules = NexusRequest::object_put(
+        &client,
+        &firewall_rules_url,
+        Some(&admin_firewall_params),
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
+
+    assert_eq!(updated_rules.rules.len(), 1);
+    assert_eq!(updated_rules.rules[0].identity.name, "allow-ssh");
+}
