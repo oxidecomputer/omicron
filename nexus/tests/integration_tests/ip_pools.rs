@@ -15,7 +15,6 @@ use http::StatusCode;
 use http::method::Method;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::SERVICE_IPV4_POOL_NAME;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -45,6 +44,7 @@ use nexus_types::external_api::params::IpPoolCreate;
 use nexus_types::external_api::params::IpPoolLinkSilo;
 use nexus_types::external_api::params::IpPoolSiloUpdate;
 use nexus_types::external_api::params::IpPoolUpdate;
+use nexus_types::external_api::shared::IpPoolReservationType;
 use nexus_types::external_api::shared::IpPoolType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
@@ -55,9 +55,8 @@ use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolSiloLink;
 use nexus_types::external_api::views::IpVersion;
 use nexus_types::external_api::views::Silo;
-use nexus_types::external_api::views::SiloIpPool;
+use nexus_types::external_api::views::SystemIpPool;
 use nexus_types::identity::Resource;
-use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::InstanceState;
@@ -104,37 +103,45 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
 
     // Create the pool, verify we can get it back by either listing or fetching
     // directly
-    let params = IpPoolCreate::new(
-        IdentityMetadataCreateParams {
+    let params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        IpVersion::V4,
-    );
-    let created_pool: IpPool =
+        ip_version: IpVersion::V4,
+        pool_type: IpPoolType::Unicast,
+        reservation_type: IpPoolReservationType::ExternalSilos,
+    };
+    let created_pool: SystemIpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
     assert_eq!(created_pool.identity.description, description);
     assert_eq!(created_pool.ip_version, IpVersion::V4);
+    assert_eq!(
+        created_pool.reservation_type,
+        IpPoolReservationType::ExternalSilos
+    );
 
     let list = get_ip_pools(client).await;
     assert_eq!(list.len(), 1, "Expected exactly 1 IP pool");
     assert_pools_eq(&created_pool, &list[0]);
 
-    let fetched_pool: IpPool = object_get(client, &ip_pool_url).await;
+    let fetched_pool: SystemIpPool = object_get(client, &ip_pool_url).await;
     assert_pools_eq(&created_pool, &fetched_pool);
 
     // Verify we get a conflict error if we insert it again
     let error = object_create_error(
         client,
         ip_pools_url,
-        &params::IpPoolCreate::new(
-            IdentityMetadataCreateParams {
+        &params::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
                 name: pool_name.parse().unwrap(),
                 description: String::new(),
             },
-            IpVersion::V4,
-        ),
+            ip_version: IpVersion::V4,
+            pool_type: IpPoolType::Unicast,
+            reservation_type: IpPoolReservationType::ExternalSilos,
+        },
         StatusCode::BAD_REQUEST,
     )
     .await;
@@ -179,7 +186,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             description: None,
         },
     };
-    let modified_pool: IpPool =
+    let modified_pool: SystemIpPool =
         object_put(client, &ip_pool_url, &updates).await;
     assert_eq!(modified_pool.identity.name, new_pool_name);
     assert_eq!(modified_pool.identity.id, created_pool.identity.id);
@@ -196,7 +203,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
             > created_pool.identity.time_modified
     );
 
-    let fetched_modified_pool: IpPool =
+    let fetched_modified_pool: SystemIpPool =
         object_get(client, &new_ip_pool_url).await;
     assert_pools_eq(&modified_pool, &fetched_modified_pool);
 
@@ -225,8 +232,8 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
         .expect("Expected to be able to delete an empty IP Pool");
 }
 
-async fn get_ip_pools(client: &ClientTestContext) -> Vec<IpPool> {
-    NexusRequest::iter_collection_authn::<IpPool>(
+async fn get_ip_pools(client: &ClientTestContext) -> Vec<SystemIpPool> {
+    NexusRequest::iter_collection_authn::<SystemIpPool>(
         client,
         "/v1/system/ip-pools",
         "",
@@ -327,130 +334,6 @@ async fn test_ip_pool_list_dedupe(cptestctx: &ControlPlaneTestContext) {
 
     let silo3_pools = pools_for_silo(client, "silo3").await;
     assert_eq!(silo3_pools.len(), 0);
-}
-
-/// The internal IP pool, defined by its association with the internal silo,
-/// cannot be interacted with through the operator API. CRUD operations should
-/// all 404 except fetch by name or ID.
-#[nexus_test]
-async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-
-    let internal_pool_name_url =
-        format!("/v1/system/ip-pools/{}", SERVICE_IPV4_POOL_NAME);
-
-    // we can fetch the service pool by name or ID
-    let pool = NexusRequest::object_get(client, &internal_pool_name_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<IpPool>()
-        .await;
-
-    let internal_pool_id_url =
-        format!("/v1/system/ip-pools/{}", pool.identity.id);
-    let pool = NexusRequest::object_get(client, &internal_pool_id_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute_and_parse_unwrap::<IpPool>()
-        .await;
-
-    // but it does not come back in the list. there are none in the list
-    let pools =
-        objects_list_page_authz::<IpPool>(client, "/v1/system/ip-pools").await;
-    assert_eq!(pools.items.len(), 0);
-
-    // deletes fail
-
-    let error = object_delete_error(
-        client,
-        &internal_pool_name_url,
-        StatusCode::NOT_FOUND,
-    )
-    .await;
-    let not_found_name =
-        "not found: ip-pool with name \"oxide-service-pool-v4\"";
-    assert_eq!(error.message, not_found_name);
-
-    let not_found_id =
-        format!("not found: ip-pool with id \"{}\"", pool.identity.id);
-    let error = object_delete_error(
-        client,
-        &internal_pool_id_url,
-        StatusCode::NOT_FOUND,
-    )
-    .await;
-    assert_eq!(error.message, not_found_id);
-
-    // Update not allowed
-    let put_body = params::IpPoolUpdate {
-        identity: IdentityMetadataUpdateParams {
-            name: Some("test".parse().unwrap()),
-            description: Some("test".to_string()),
-        },
-    };
-    let error = object_put_error(
-        client,
-        &internal_pool_id_url,
-        &put_body,
-        StatusCode::NOT_FOUND,
-    )
-    .await;
-    assert_eq!(error.message, not_found_id);
-
-    let error = object_put_error(
-        client,
-        &internal_pool_name_url,
-        &put_body,
-        StatusCode::NOT_FOUND,
-    )
-    .await;
-    assert_eq!(error.message, not_found_name);
-
-    // add range not allowed by name or ID
-    let range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 2),
-            std::net::Ipv4Addr::new(10, 0, 0, 5),
-        )
-        .unwrap(),
-    );
-    let url = format!("{}/ranges/add", internal_pool_id_url);
-    let error =
-        object_create_error(client, &url, &range, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, not_found_id);
-
-    let url = format!("{}/ranges/add", internal_pool_name_url);
-    let error =
-        object_create_error(client, &url, &range, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, not_found_name);
-
-    // remove range not allowed by name or ID
-    let url = format!("{}/ranges/add", internal_pool_id_url);
-    let error =
-        object_create_error(client, &url, &range, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, not_found_id);
-
-    let url = format!("{}/ranges/remove", internal_pool_name_url);
-    let error =
-        object_create_error(client, &url, &range, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, not_found_name);
-
-    // linking not allowed by name or ID
-    let body = params::IpPoolLinkSilo {
-        silo: NameOrId::Name(cptestctx.silo_name.clone()),
-        is_default: false,
-    };
-    let url = format!("{}/silos", internal_pool_id_url);
-    let error =
-        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, not_found_id);
-
-    // unlink not allowed by name or ID
-    let url = format!("{}/silos/{}", internal_pool_id_url, INTERNAL_SILO_ID);
-    let error = object_delete_error(client, &url, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, not_found_id);
-
-    let url = format!("{}/silos/{}", internal_pool_name_url, INTERNAL_SILO_ID);
-    let error = object_delete_error(client, &url, StatusCode::NOT_FOUND).await;
-    assert_eq!(error.message, not_found_name);
 }
 
 #[nexus_test]
@@ -809,7 +692,8 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
 async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let base_url = "/v1/system/ip-pools";
-    let first_page = objects_list_page_authz::<IpPool>(client, &base_url).await;
+    let first_page =
+        objects_list_page_authz::<SystemIpPool>(client, &base_url).await;
 
     // we start out with no pools
     assert_eq!(first_page.items.len(), 0);
@@ -826,7 +710,7 @@ async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
 
     let first_five_url = format!("{}?limit=5", base_url);
     let first_five =
-        objects_list_page_authz::<IpPool>(client, &first_five_url).await;
+        objects_list_page_authz::<SystemIpPool>(client, &first_five_url).await;
     assert!(first_five.next_page.is_some());
     assert_eq!(get_names(first_five.items), &pool_names[0..5]);
 
@@ -836,7 +720,7 @@ async fn test_ip_pool_pagination(cptestctx: &ControlPlaneTestContext) {
         first_five.next_page.unwrap()
     );
     let next_page =
-        objects_list_page_authz::<IpPool>(client, &next_page_url).await;
+        objects_list_page_authz::<SystemIpPool>(client, &next_page_url).await;
     assert_eq!(get_names(next_page.items), &pool_names[5..8]);
 }
 
@@ -889,7 +773,7 @@ async fn test_ip_pool_silos_pagination(cptestctx: &ControlPlaneTestContext) {
 }
 
 /// helper to make tests less ugly
-fn get_names(pools: Vec<IpPool>) -> Vec<String> {
+fn get_names(pools: Vec<SystemIpPool>) -> Vec<String> {
     pools.iter().map(|p| p.identity.name.to_string()).collect()
 }
 
@@ -901,15 +785,15 @@ async fn silos_for_pool(
     objects_list_page_authz::<IpPoolSiloLink>(client, &url).await
 }
 
-async fn pools_for_silo(
-    client: &ClientTestContext,
-    silo: &str,
-) -> Vec<SiloIpPool> {
+async fn pools_for_silo(client: &ClientTestContext, silo: &str) -> Vec<IpPool> {
     let url = format!("/v1/system/silos/{}/ip-pools", silo);
-    objects_list_page_authz::<SiloIpPool>(client, &url).await.items
+    objects_list_page_authz::<IpPool>(client, &url).await.items
 }
 
-async fn create_ipv4_pool(client: &ClientTestContext, name: &str) -> IpPool {
+async fn create_ipv4_pool(
+    client: &ClientTestContext,
+    name: &str,
+) -> SystemIpPool {
     create_pool(client, name, IpVersion::V4).await
 }
 
@@ -917,14 +801,16 @@ async fn create_pool(
     client: &ClientTestContext,
     name: &str,
     ip_version: IpVersion,
-) -> IpPool {
-    let params = IpPoolCreate::new(
-        IdentityMetadataCreateParams {
+) -> SystemIpPool {
+    let params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: Name::try_from(name.to_string()).unwrap(),
             description: "".to_string(),
         },
         ip_version,
-    );
+        pool_type: IpPoolType::Unicast,
+        reservation_type: IpPoolReservationType::ExternalSilos,
+    };
     NexusRequest::objects_post(client, "/v1/system/ip-pools", &params)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
@@ -1002,7 +888,6 @@ async fn test_ipv6_ip_pool_utilization_total(
     let by_id = NameOrId::Id(pool.id());
     let (authz_pool, db_pool) = nexus
         .ip_pool_lookup(&opctx, &by_id)
-        .expect("should be able to lookup pool we just created")
         .fetch_for(authz::Action::CreateChild)
         .await
         .expect("should be able to fetch pool we just created");
@@ -1046,19 +931,24 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
     // Create the pool, verify basic properties
-    let params = IpPoolCreate::new(
-        IdentityMetadataCreateParams {
+    let params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        IpVersion::V4,
-    );
-
-    let created_pool: IpPool =
+        ip_version: IpVersion::V4,
+        pool_type: IpPoolType::Unicast,
+        reservation_type: IpPoolReservationType::ExternalSilos,
+    };
+    let created_pool: SystemIpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
     assert_eq!(created_pool.identity.description, description);
     assert_eq!(created_pool.ip_version, IpVersion::V4);
+    assert_eq!(
+        created_pool.reservation_type,
+        IpPoolReservationType::ExternalSilos
+    );
 
     // Test data for IPv4 ranges that should fail due to overlap
     let ipv4_range = TestRange {
@@ -1186,13 +1076,6 @@ async fn test_ip_pool_range_rejects_v6(cptestctx: &ControlPlaneTestContext) {
             .await;
 
     assert_eq!(error.message, "IPv6 ranges are not allowed yet");
-
-    // same deal with service pool
-    let add_url = "/v1/system/ip-pools-service/ranges/add";
-    let error =
-        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
-            .await;
-    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
 }
 
 #[nexus_test]
@@ -1206,18 +1089,24 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
     // Create the pool, verify basic properties
-    let params = IpPoolCreate::new(
-        IdentityMetadataCreateParams {
+    let params = IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
             name: String::from(pool_name).parse().unwrap(),
             description: String::from(description),
         },
-        IpVersion::V4,
-    );
-    let created_pool: IpPool =
+        ip_version: IpVersion::V4,
+        pool_type: IpPoolType::Unicast,
+        reservation_type: IpPoolReservationType::ExternalSilos,
+    };
+    let created_pool: SystemIpPool =
         object_create(client, ip_pools_url, &params).await;
     assert_eq!(created_pool.identity.name, pool_name);
     assert_eq!(created_pool.identity.description, description);
     assert_eq!(created_pool.ip_version, IpVersion::V4);
+    assert_eq!(
+        created_pool.reservation_type,
+        IpPoolReservationType::ExternalSilos
+    );
 
     // Add some ranges, out of order. These will be paginated by their first
     // address, which sorts all IPv4 before IPv6, then within protocol versions
@@ -1338,7 +1227,7 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     let list = NexusRequest::object_get(client, "/v1/ip-pools")
         .authn_as(AuthnMode::SiloUser(user.id))
-        .execute_and_parse_unwrap::<ResultsPage<SiloIpPool>>()
+        .execute_and_parse_unwrap::<ResultsPage<IpPool>>()
         .await
         .items;
 
@@ -1352,7 +1241,7 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
     let url = format!("/v1/ip-pools/{}", default_name);
     let pool = NexusRequest::object_get(client, &url)
         .authn_as(AuthnMode::SiloUser(user.id))
-        .execute_and_parse_unwrap::<SiloIpPool>()
+        .execute_and_parse_unwrap::<IpPool>()
         .await;
     assert_eq!(pool.identity.name.as_str(), default_name);
     assert!(pool.is_default);
@@ -1360,7 +1249,7 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
     let url = format!("/v1/ip-pools/{}", other_name);
     let pool = NexusRequest::object_get(client, &url)
         .authn_as(AuthnMode::SiloUser(user.id))
-        .execute_and_parse_unwrap::<SiloIpPool>()
+        .execute_and_parse_unwrap::<IpPool>()
         .await;
     assert_eq!(pool.identity.name.as_str(), other_name);
     assert!(!pool.is_default);
@@ -1503,115 +1392,7 @@ async fn test_ip_range_delete_with_allocated_external_ip_fails(
     );
 }
 
-#[nexus_test]
-async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let ip_pool_url = "/v1/system/ip-pools-service".to_string();
-    let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
-    let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
-    let ip_pool_remove_range_url = format!("{}/remove", ip_pool_ranges_url);
-
-    // View the pool, which should exist without explicit creation.
-    let fetched_pool: IpPool = NexusRequest::object_get(client, &ip_pool_url)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body()
-        .unwrap();
-    assert_eq!(
-        fetched_pool.identity.name,
-        nexus_db_queries::db::datastore::SERVICE_IPV4_POOL_NAME
-    );
-    assert_eq!(
-        fetched_pool.identity.description,
-        "IPv4 IP Pool for Oxide Services"
-    );
-
-    // Fetch any ranges already present.
-    let existing_ranges =
-        objects_list_page_authz::<IpPoolRange>(client, &ip_pool_ranges_url)
-            .await
-            .items;
-
-    // Add some ranges. Pagination is tested more explicitly in the IP pool
-    // implementation, but we just check that these endpoints work here.
-    let ranges = [
-        IpRange::V4(
-            Ipv4Range::new(
-                std::net::Ipv4Addr::new(10, 0, 0, 3),
-                std::net::Ipv4Addr::new(10, 0, 0, 4),
-            )
-            .unwrap(),
-        ),
-        IpRange::V4(
-            Ipv4Range::new(
-                std::net::Ipv4Addr::new(10, 0, 0, 1),
-                std::net::Ipv4Addr::new(10, 0, 0, 2),
-            )
-            .unwrap(),
-        ),
-    ];
-
-    let mut expected_ranges = existing_ranges.clone();
-    for range in ranges.iter() {
-        let created_range: IpPoolRange =
-            NexusRequest::objects_post(client, &ip_pool_add_range_url, &range)
-                .authn_as(AuthnMode::PrivilegedUser)
-                .execute()
-                .await
-                .unwrap()
-                .parsed_body()
-                .unwrap();
-        assert_eq!(range.first_address(), created_range.range.first_address());
-        assert_eq!(range.last_address(), created_range.range.last_address());
-        expected_ranges.push(created_range);
-    }
-    expected_ranges
-        .sort_by(|a, b| a.range.first_address().cmp(&b.range.first_address()));
-
-    // List the ranges.
-    let first_page =
-        objects_list_page_authz::<IpPoolRange>(client, &ip_pool_ranges_url)
-            .await;
-    assert_eq!(first_page.items.len(), expected_ranges.len());
-
-    let actual_ranges = first_page.items.iter();
-    for (expected_range, actual_range) in
-        expected_ranges.iter().zip(actual_ranges)
-    {
-        assert_ranges_eq(expected_range, actual_range);
-    }
-
-    // Remove both ranges, observe that the IP Pool is empty.
-    for range in ranges.iter() {
-        NexusRequest::new(
-            RequestBuilder::new(
-                client,
-                Method::POST,
-                &ip_pool_remove_range_url,
-            )
-            .body(Some(&range))
-            .expect_status(Some(StatusCode::NO_CONTENT)),
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("Failed to delete IP range from a pool");
-    }
-
-    let first_page =
-        objects_list_page_authz::<IpPoolRange>(client, &ip_pool_ranges_url)
-            .await;
-    assert_eq!(first_page.items.len(), existing_ranges.len());
-    for (expected_range, actual_range) in
-        existing_ranges.iter().zip(first_page.items.iter())
-    {
-        assert_ranges_eq(expected_range, actual_range);
-    }
-}
-
-fn assert_pools_eq(first: &IpPool, second: &IpPool) {
+fn assert_pools_eq(first: &SystemIpPool, second: &SystemIpPool) {
     assert_eq!(first.identity, second.identity);
     assert_eq!(first.ip_version, second.ip_version);
 }
@@ -1638,8 +1419,9 @@ async fn test_ip_pool_unicast_defaults(cptestctx: &ControlPlaneTestContext) {
             description: "Explicit unicast pool".to_string(),
         },
         IpVersion::V4,
+        IpPoolReservationType::ExternalSilos,
     );
-    let pool: IpPool =
+    let pool: SystemIpPool =
         object_create(client, "/v1/system/ip-pools", &params).await;
     assert_eq!(pool.pool_type, IpPoolType::Unicast);
 }

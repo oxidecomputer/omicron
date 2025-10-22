@@ -813,7 +813,6 @@ async fn sic_allocate_instance_external_ip(
                     osagactx
                         .nexus()
                         .ip_pool_lookup(&opctx, name_or_id)
-                        .map_err(ActionError::action_failed)?
                         .lookup_for(authz::Action::CreateChild)
                         .await
                         .map_err(ActionError::action_failed)?

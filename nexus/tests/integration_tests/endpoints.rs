@@ -21,6 +21,8 @@ use nexus_test_utils::SWITCH_UUID;
 use nexus_test_utils::resource_helpers::test_params;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::IpPoolReservationType;
+use nexus_types::external_api::shared::IpPoolType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::IpVersion;
 use nexus_types::external_api::shared::Ipv4Range;
@@ -922,20 +924,20 @@ pub static DEMO_IMAGE_CREATE: LazyLock<params::ImageCreate> =
     });
 
 // IP Pools
-pub static DEMO_IP_POOLS_PROJ_URL: LazyLock<String> =
+pub static DEMO_SILOED_IP_POOLS_URL: LazyLock<String> =
     LazyLock::new(|| "/v1/ip-pools".to_string());
-pub const DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
+pub const DEMO_SYSTEM_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
 pub static DEMO_IP_POOL_NAME: LazyLock<Name> =
     LazyLock::new(|| "default".parse().unwrap());
 pub static DEMO_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
-    LazyLock::new(|| {
-        params::IpPoolCreate::new(
-            IdentityMetadataCreateParams {
-                name: DEMO_IP_POOL_NAME.clone(),
-                description: String::from("an IP pool"),
-            },
-            IpVersion::V4,
-        )
+    LazyLock::new(|| params::IpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_IP_POOL_NAME.clone(),
+            description: String::from("an IP pool"),
+        },
+        ip_version: IpVersion::V4,
+        pool_type: IpPoolType::Unicast,
+        reservation_type: IpPoolReservationType::ExternalSilos,
     });
 pub static DEMO_IP_POOL_PROJ_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -945,6 +947,12 @@ pub static DEMO_IP_POOL_PROJ_URL: LazyLock<String> = LazyLock::new(|| {
 });
 pub static DEMO_IP_POOL_URL: LazyLock<String> =
     LazyLock::new(|| format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME));
+pub static DEMO_IP_POOL_RESERVE_URL: LazyLock<String> =
+    LazyLock::new(|| format!("{}/reserve", *DEMO_IP_POOL_URL));
+pub static DEMO_IP_POOL_RESERVE: LazyLock<params::IpPoolReservationUpdate> =
+    LazyLock::new(|| params::IpPoolReservationUpdate {
+        reservation_type: shared::IpPoolReservationType::OxideInternal,
+    });
 pub static DEMO_IP_POOL_UTILIZATION_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/utilization", *DEMO_IP_POOL_URL));
 pub static DEMO_IP_POOL_UPDATE: LazyLock<params::IpPoolUpdate> =
@@ -983,16 +991,6 @@ pub static DEMO_IP_POOL_RANGES_ADD_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/add", *DEMO_IP_POOL_RANGES_URL));
 pub static DEMO_IP_POOL_RANGES_DEL_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/remove", *DEMO_IP_POOL_RANGES_URL));
-
-// IP Pools (Services)
-pub const DEMO_IP_POOL_SERVICE_URL: &'static str =
-    "/v1/system/ip-pools-service";
-pub static DEMO_IP_POOL_SERVICE_RANGES_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{}/ranges", DEMO_IP_POOL_SERVICE_URL));
-pub static DEMO_IP_POOL_SERVICE_RANGES_ADD_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{}/add", *DEMO_IP_POOL_SERVICE_RANGES_URL));
-pub static DEMO_IP_POOL_SERVICE_RANGES_DEL_URL: LazyLock<String> =
-    LazyLock::new(|| format!("{}/remove", *DEMO_IP_POOL_SERVICE_RANGES_URL));
 
 // Snapshots
 pub static DEMO_SNAPSHOT_NAME: LazyLock<Name> =
@@ -1447,7 +1445,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             },
             // IP Pools top-level endpoint
             VerifyEndpoint {
-                url: &DEMO_IP_POOLS_URL,
+                url: &DEMO_SYSTEM_IP_POOLS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
@@ -1457,8 +1455,19 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                     ),
                 ],
             },
+            // IP Pool reservation endpoint
             VerifyEndpoint {
-                url: &DEMO_IP_POOLS_PROJ_URL,
+                url: &DEMO_IP_POOL_RESERVE_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Post(
+                        serde_json::to_value(&*DEMO_IP_POOL_RESERVE).unwrap(),
+                    ),
+                ],
+            },
+            VerifyEndpoint {
+                url: &DEMO_SILOED_IP_POOLS_URL,
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::ReadOnly,
                 allowed_methods: vec![AllowedMethod::Get],
@@ -1538,38 +1547,6 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Protected,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
-            },
-            // IP Pool endpoint (Oxide services)
-            VerifyEndpoint {
-                url: &DEMO_IP_POOL_SERVICE_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
-            },
-            // IP Pool ranges endpoint (Oxide services)
-            VerifyEndpoint {
-                url: &DEMO_IP_POOL_SERVICE_RANGES_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Get],
-            },
-            // IP Pool ranges/add endpoint (Oxide services)
-            VerifyEndpoint {
-                url: &DEMO_IP_POOL_SERVICE_RANGES_ADD_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
-                )],
-            },
-            // IP Pool ranges/delete endpoint (Oxide services)
-            VerifyEndpoint {
-                url: &DEMO_IP_POOL_SERVICE_RANGES_DEL_URL,
-                visibility: Visibility::Protected,
-                unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Post(
-                    serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap(),
-                )],
             },
             /* Silos */
             VerifyEndpoint {
