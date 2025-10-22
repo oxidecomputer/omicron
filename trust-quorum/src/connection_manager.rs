@@ -45,7 +45,7 @@ pub enum AcceptError {
 #[derive(Debug, PartialEq)]
 pub enum MainToConnMsg {
     Close,
-    #[allow(unused)]
+    #[expect(unused)]
     Msg(WireMsg),
 }
 
@@ -491,8 +491,10 @@ impl ConnMgr {
 
     /// The set of known addresses on the bootstrap network has changed
     ///
-    /// We need to connect to peers with addresses less than our own
-    /// and tear down any connections that no longer exist in `addrs`.
+    /// We only want a single connection between known peers at a time. The
+    /// easiest way to achieve this is to only connect to peers with addresses
+    /// that sort less than our own and tear down any connections that no longer
+    /// exist in `addrs`.
     pub async fn update_bootstrap_connections(
         &mut self,
         addrs: BTreeSet<SocketAddrV6>,

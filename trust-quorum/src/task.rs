@@ -107,11 +107,11 @@ impl NodeTaskHandle {
 pub struct NodeTask {
     shutdown: bool,
     log: Logger,
-    #[allow(unused)]
+    #[expect(unused)]
     config: Config,
-    #[allow(unused)]
+    #[expect(unused)]
     node: Node,
-    #[allow(unused)]
+    #[expect(unused)]
     ctx: NodeCtx,
     conn_mgr: ConnMgr,
     conn_mgr_rx: mpsc::Receiver<ConnToMainMsg>,
