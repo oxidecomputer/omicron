@@ -336,11 +336,11 @@ async fn authorize_one_resource(
                     "result" => ?result,
                 );
                 let summary = match result {
-                    Ok(_) => '\u{2714}',
+                    Ok(_) => '\u{2714}', // ✔
                     Err(Error::Forbidden)
-                    | Err(Error::ObjectNotFound { .. }) => '\u{2718}',
+                    | Err(Error::ObjectNotFound { .. }) => '\u{2718}', // ✘
                     Err(Error::Unauthenticated { .. }) => '!',
-                    Err(_) => '\u{26a0}',
+                    Err(_) => '\u{26a0}', // ⚠
                 };
                 write!(out, " {:>2}", summary)?;
             }

@@ -146,11 +146,17 @@ impl Context {
         })
     }
 
-    /// Returns the `SiloAuthnPolicy` for the authenticated actor's Silo, if any
+    /// Returns the `SiloAuthnPolicy` for the authenticated actor's Silo, if
+    /// any.
     pub fn silo_authn_policy(&self) -> Option<&SiloAuthnPolicy> {
         match &self.kind {
             Kind::Unauthenticated => None,
-            Kind::Authenticated(_, policy) => policy.as_ref(),
+            Kind::Authenticated(_, policy) => {
+                // note: must be Some if `details.actor` is also Some, otherwise
+                // you'll see a 500 in the impl of
+                // `ApiResourceWithRoles::conferred_roles_by` for Fleet.
+                policy.as_ref()
+            }
         }
     }
 
@@ -268,7 +274,9 @@ impl Context {
         Context {
             kind: Kind::Authenticated(
                 Details { actor: Actor::Scim { silo_id } },
-                None,
+                // This should never be non-empty, we don't want the SCIM user
+                // to ever have associated roles.
+                Some(SiloAuthnPolicy::new(BTreeMap::default())),
             ),
             schemes_tried: Vec::new(),
         }
