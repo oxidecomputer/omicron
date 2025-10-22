@@ -9,12 +9,15 @@ use crate::{BaseboardId, PeerMsg};
 // TODO: Move or copy this to this crate?
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
+use iddqd::{
+    BiHashItem, BiHashMap, TriHashItem, TriHashMap, bi_upcast, tri_upcast,
+};
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use sprockets_tls::server::SprocketsAcceptor;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -109,6 +112,63 @@ impl TaskHandle {
     }
 }
 
+impl BiHashItem for TaskHandle {
+    type K1<'a> = task::Id;
+    type K2<'a> = SocketAddrV6;
+
+    fn key1(&self) -> Self::K1<'_> {
+        self.task_id
+    }
+
+    fn key2(&self) -> Self::K2<'_> {
+        self.conn_type.addr()
+    }
+
+    bi_upcast!();
+}
+
+pub struct EstablishedTaskHandle {
+    baseboard_id: BaseboardId,
+    task_handle: TaskHandle,
+}
+
+impl EstablishedTaskHandle {
+    pub fn new(
+        baseboard_id: BaseboardId,
+        task_handle: TaskHandle,
+    ) -> EstablishedTaskHandle {
+        EstablishedTaskHandle { baseboard_id, task_handle }
+    }
+
+    pub fn task_id(&self) -> task::Id {
+        self.task_handle.task_id
+    }
+
+    pub fn addr(&self) -> SocketAddrV6 {
+        self.task_handle.addr()
+    }
+}
+
+impl TriHashItem for EstablishedTaskHandle {
+    type K1<'a> = &'a BaseboardId;
+    type K2<'a> = task::Id;
+    type K3<'a> = SocketAddrV6;
+
+    fn key1(&self) -> Self::K1<'_> {
+        &self.baseboard_id
+    }
+
+    fn key2(&self) -> Self::K2<'_> {
+        self.task_handle.task_id
+    }
+
+    fn key3(&self) -> Self::K3<'_> {
+        self.task_handle.addr()
+    }
+
+    tri_upcast!();
+}
+
 pub enum ConnectionType {
     Connected(SocketAddrV6),
     Accepted(SocketAddrV6),
@@ -177,14 +237,14 @@ pub struct ConnMgr {
 
     /// All tasks currently connecting to remote nodes and attempting a
     /// sprockets handshake.
-    connecting: BTreeMap<SocketAddrV6, TaskHandle>,
+    connecting: BiHashMap<TaskHandle>,
 
     /// All tasks with an accepted TCP connnection performing a sprockets handshake
-    accepting: BTreeMap<SocketAddrV6, TaskHandle>,
+    accepting: BiHashMap<TaskHandle>,
 
     /// All tasks containing established connections that can be used to communicate
     /// with other nodes.
-    established: BTreeMap<BaseboardId, TaskHandle>,
+    established: TriHashMap<EstablishedTaskHandle>,
 
     /// An interval for reconnect operations
     reconnect_interval: Interval,
@@ -239,9 +299,9 @@ impl ConnMgr {
             listen_addr,
             join_set: JoinSet::new(),
             bootstrap_addrs: BTreeSet::new(),
-            connecting: BTreeMap::new(),
-            accepting: BTreeMap::new(),
-            established: BTreeMap::new(),
+            connecting: BiHashMap::new(),
+            accepting: BiHashMap::new(),
+            established: TriHashMap::new(),
             reconnect_interval,
             total_tasks_spawned: 0,
         }
@@ -251,23 +311,25 @@ impl ConnMgr {
         let connections = self
             .connecting
             .iter()
-            .map(|(addr, task_handle)| ConnInfo {
+            .map(|task_handle| ConnInfo {
                 state: ConnState::Connecting,
-                addr: *addr,
+                addr: task_handle.addr(),
                 task_id: task_handle.task_id,
             })
-            .chain(self.accepting.iter().map(|(addr, task_handle)| ConnInfo {
+            .chain(self.accepting.iter().map(|task_handle| ConnInfo {
                 state: ConnState::Accepting,
-                addr: *addr,
+                addr: task_handle.addr(),
                 task_id: task_handle.task_id,
             }))
-            .chain(self.established.iter().map(
-                |(baseboard_id, task_handle)| ConnInfo {
-                    state: ConnState::Established(baseboard_id.clone()),
-                    addr: task_handle.addr(),
-                    task_id: task_handle.task_id,
-                },
-            ))
+            .chain(self.established.iter().map(|established_task_handle| {
+                ConnInfo {
+                    state: ConnState::Established(
+                        established_task_handle.baseboard_id.clone(),
+                    ),
+                    addr: established_task_handle.addr(),
+                    task_id: established_task_handle.task_id(),
+                }
+            }))
             .collect();
 
         ConnMgrStatus {
@@ -379,7 +441,7 @@ impl ConnMgr {
             tx,
             conn_type: ConnectionType::Accepted(addr),
         };
-        self.accepting.insert(addr, task_handle);
+        assert!(self.accepting.insert_unique(task_handle).is_ok());
         Ok(())
     }
 
@@ -389,7 +451,7 @@ impl ConnMgr {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
-        if let Some(task_handle) = self.accepting.remove(&addr) {
+        if let Some(task_handle) = self.accepting.remove2(&addr) {
             info!(
                 self.log,
                 "Established server connection";
@@ -397,9 +459,17 @@ impl ConnMgr {
                 "peer_addr" => %addr,
                 "peer_id" => %peer_id
             );
-            let already_established =
-                self.established.insert(peer_id, task_handle);
-            assert!(already_established.is_none());
+
+            let already_established = self.established.insert_unique(
+                EstablishedTaskHandle::new(peer_id, task_handle),
+            );
+            assert!(already_established.is_ok());
+        } else {
+            error!(self.log, "Server handshake completed, but no server addr in map";
+                "task_id" => ?task_id,
+                "peer_addr" => %addr,
+                "peer_id" => %peer_id
+            );
         }
     }
 
@@ -409,7 +479,7 @@ impl ConnMgr {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
-        if let Some(task_handle) = self.connecting.remove(&addr) {
+        if let Some(task_handle) = self.connecting.remove2(&addr) {
             info!(
                 self.log,
                 "Established client connection";
@@ -417,10 +487,10 @@ impl ConnMgr {
                 "peer_addr" => %addr,
                 "peer_id" => %peer_id
             );
-            let already_established =
-                self.established.insert(peer_id, task_handle);
-
-            assert!(already_established.is_none());
+            let already_established = self.established.insert_unique(
+                EstablishedTaskHandle::new(peer_id, task_handle),
+            );
+            assert!(already_established.is_ok());
         } else {
             error!(self.log, "Client handshake completed, but no client addr in map";
                 "task_id" => ?task_id,
@@ -436,14 +506,14 @@ impl ConnMgr {
         task_id: task::Id,
         peer_id: BaseboardId,
     ) {
-        if let Some(task_handle) = self.established.get(&peer_id) {
-            if task_handle.task_id != task_id {
+        if let Some(established_task_handle) = self.established.get1(&peer_id) {
+            if established_task_handle.task_id() != task_id {
                 // This was a stale disconnect
                 return;
             }
         }
         warn!(self.log, "peer disconnected"; "peer_id" => %peer_id);
-        let _ = self.established.remove(&peer_id);
+        let _ = self.established.remove1(&peer_id);
     }
 
     /// Initiate connections if a corresponding task doesn't already exist. This
@@ -455,15 +525,11 @@ impl ConnMgr {
         for addr in
             self.bootstrap_addrs.iter().filter(|&&addr| self.listen_addr > addr)
         {
-            if self.connecting.contains_key(addr) {
+            if self.connecting.contains_key2(addr) {
                 continue;
             }
 
-            if self
-                .established
-                .values()
-                .any(|task_handle| task_handle.addr() == *addr)
-            {
+            if self.established.contains_key3(addr) {
                 continue;
             }
 
@@ -595,7 +661,7 @@ impl ConnMgr {
             tx,
             conn_type: ConnectionType::Connected(addr),
         };
-        self.connecting.insert(addr, task_handle);
+        assert!(self.connecting.insert_unique(task_handle).is_ok());
     }
 
     /// Remove any information about a sprockets client connection and inform
@@ -604,7 +670,7 @@ impl ConnMgr {
     /// We don't tear down server connections this way as we don't know their
     /// listen port, just the ephemeral port.
     async fn disconnect_client(&mut self, addr: SocketAddrV6) {
-        if let Some(handle) = self.connecting.remove(&addr) {
+        if let Some(handle) = self.connecting.remove2(&addr) {
             // The connection has not yet completed its handshake
             info!(
                 self.log,
@@ -613,21 +679,14 @@ impl ConnMgr {
             );
             let _ = handle.tx.send(MainToConnMsg::Close).await;
         } else {
-            if let Some((id, handle)) = self
-                .established
-                .iter()
-                .find(|(_, handle)| handle.addr() == addr)
-            {
+            if let Some(handle) = self.established.remove3(&addr) {
                 info!(
                     self.log,
                     "Deleting established connection";
                     "peer_addr" => %addr,
-                    "peer_id" => %id
+                    "peer_id" => %handle.baseboard_id
                 );
-                let _ = handle.tx.send(MainToConnMsg::Close).await;
-                // probably a better way to avoid borrowck issues
-                let id = id.clone();
-                self.established.remove(&id);
+                let _ = handle.task_handle.tx.send(MainToConnMsg::Close).await;
             }
         }
     }
@@ -635,43 +694,28 @@ impl ConnMgr {
     /// Remove any references to the given task
     async fn on_task_exit(&mut self, task_id: task::Id) {
         // We're most likely to find the task as established so we start with that
-        if let Some((id, handle)) = self
-            .established
-            .iter()
-            .find(|(_, handle)| handle.task_id == task_id)
-        {
+        if let Some(handle) = self.established.remove2(&task_id) {
             info!(
                 self.log,
                 "Established connection task exited";
                 "task_id" => ?task_id,
                 "peer_addr" => %handle.addr(),
-                "peer_id" => %id
+                "peer_id" => %handle.baseboard_id
             );
-            // probably a better way to avoid borrowck issues
-            let id = id.clone();
-            self.established.remove(&id);
-        } else if let Some((addr, handle)) =
-            self.accepting.iter().find(|(_, handle)| handle.task_id == task_id)
-        {
+        } else if let Some(handle) = self.accepting.remove1(&task_id) {
             info!(
                 self.log,
                 "Accepting task exited";
                 "task_id" => ?task_id,
                 "peer_addr" => %handle.addr()
             );
-            let addr = *addr;
-            self.accepting.remove(&addr);
-        } else if let Some((addr, handle)) =
-            self.connecting.iter().find(|(_, handle)| handle.task_id == task_id)
-        {
+        } else if let Some(handle) = self.connecting.remove1(&task_id) {
             info!(
                 self.log,
                 "Connecting task exited";
                 "task_id" => ?task_id,
                 "peer_addr" => %handle.addr()
             );
-            let addr = *addr;
-            self.connecting.remove(&addr);
         } else {
             info!(
                 self.log,
