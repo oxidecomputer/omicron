@@ -209,24 +209,29 @@ impl SupportBundleCollector {
             SupportBundleState::Destroying => {
                 // Destroying is a terminal state; no one should be able to
                 // change this state from underneath us.
-                self.datastore.support_bundle_delete(
-                    opctx,
-                    &authz_bundle,
-                ).await.map_err(|err| {
-                    warn!(
-                        &opctx.log,
-                        "SupportBundleCollector: Could not delete 'destroying' bundle";
-                        "err" => %err
-                    );
-                    anyhow::anyhow!("Could not delete 'destroying' bundle: {:#}", err)
-                })?;
-
-                return Ok(
-                    DatabaseBundleCleanupResult::DestroyingBundleRemoved,
-                );
+                match self
+                    .datastore
+                    .support_bundle_delete(opctx, &authz_bundle)
+                    .await
+                {
+                    Ok(_) | Err(Error::NotFound { .. }) => {
+                        return Ok(DatabaseBundleCleanupResult::DestroyingBundleRemoved);
+                    }
+                    Err(err) => {
+                        warn!(
+                            &opctx.log,
+                            "SupportBundleCollector: Could not delete 'destroying' bundle";
+                            "err" => %err
+                        );
+                        anyhow::bail!(
+                            "Could not delete 'destroying' bundle: {:#}",
+                            err
+                        );
+                    }
+                }
             }
             SupportBundleState::Failing => {
-                if let Err(err) = self
+                match self
                     .datastore
                     .support_bundle_update(
                         &opctx,
@@ -235,21 +240,32 @@ impl SupportBundleCollector {
                     )
                     .await
                 {
-                    if matches!(err, Error::InvalidRequest { .. }) {
+                    Ok(()) => {
+                        return Ok(
+                            DatabaseBundleCleanupResult::FailingBundleUpdated,
+                        );
+                    }
+                    Err(Error::InvalidRequest { message }) => {
                         // It's possible that the bundle is marked "destroying" by a
                         // user request, concurrently with our operation.
                         //
-                        // In this case, we log that this happened, but do nothing.
-                        // The next iteration of this background task should treat
-                        // this as the "Destroying" case, and delete the bundle.
+                        // It's also possible that another concurrent Nexus
+                        // successfully performed this "Failing" -> "Failed"
+                        // transition.
+                        //
+                        // In these cases, we log that this happened, but do
+                        // nothing. The next iteration of this background task
+                        // should treat this as the "Destroying" case, and
+                        // delete the bundle.
                         info!(
                             &opctx.log,
                             "SupportBundleCollector: Concurrent state change failing bundle";
                             "bundle" => %bundle.id,
-                            "err" => ?err,
+                            "err_message" => ?message,
                         );
                         return Ok(DatabaseBundleCleanupResult::BadState);
-                    } else {
+                    }
+                    Err(err) => {
                         warn!(
                             &opctx.log,
                             "Could not delete 'failing' bundle";
@@ -261,8 +277,6 @@ impl SupportBundleCollector {
                         );
                     }
                 }
-
-                return Ok(DatabaseBundleCleanupResult::FailingBundleUpdated);
             }
             other => {
                 // We should be filtering to only see "Destroying" and
