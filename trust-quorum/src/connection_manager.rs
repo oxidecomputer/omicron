@@ -21,18 +21,18 @@ use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
-use tokio::time::{MissedTickBehavior, interval};
+use tokio::time::{Interval, MissedTickBehavior, interval};
 
 /// We only expect a handful of concurrent requests at most.
 const CHANNEL_BOUND: usize = 10;
 
 // Time between checks to see if we need to reconnect to to any peers
-const RECONNECT_TIME: Duration = Duration::from_secs(5);
+pub const RECONNECT_TIME: Duration = Duration::from_secs(5);
 
 /// An error returned from `ConnMgr::accept`
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum AcceptError {
-    #[error("Accepted connection from IPv4 address {addr}. Only IPv6 allowed.")]
+    #[error("accepted connection from IPv4 address {addr}. Only IPv6 allowed.")]
     Ipv4Accept { addr: SocketAddrV4 },
 
     #[error("sprockets error")]
@@ -209,6 +209,9 @@ pub struct ConnMgr {
     /// All tasks containing established connections that can be used to communicate
     /// with other nodes.
     established: BTreeMap<BaseboardId, TaskHandle>,
+
+    /// An interval for reconnect operations
+    reconnect_interval: Interval,
 }
 
 impl ConnMgr {
@@ -246,6 +249,9 @@ impl ConnMgr {
             "local_addr" => %listen_addr
         );
 
+        let mut reconnect_interval = interval(RECONNECT_TIME);
+        reconnect_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         ConnMgr {
             log,
             main_tx,
@@ -258,6 +264,7 @@ impl ConnMgr {
             connecting: BTreeMap::new(),
             accepting: BTreeMap::new(),
             established: BTreeMap::new(),
+            reconnect_interval,
         }
     }
 
@@ -315,30 +322,27 @@ impl ConnMgr {
         &mut self,
         corpus: Vec<Utf8PathBuf>,
     ) -> Result<(), AcceptError> {
-        let mut interval = interval(RECONNECT_TIME);
-        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-
-        loop {
-            tokio::select! {
-                acceptor = self.server.accept(corpus.clone()) => {
-                    self.accept(acceptor?).await?;
-                }
-                Some(res) = self.join_handles.next() => {
-                    match res {
-                        Ok(task_id) => {
-                            self.on_task_exit(task_id).await;
-                        }
-                        Err(err) => {
-                            error!(self.log, "Connection task panic: {}", err);
-                        }
-
+        tokio::select! {
+            acceptor = self.server.accept(corpus.clone()) => {
+                self.accept(acceptor?).await?;
+            }
+            Some(res) = self.join_handles.next() => {
+                match res {
+                    Ok(task_id) => {
+                        self.on_task_exit(task_id).await;
                     }
-                }
-                _ = interval.tick() => {
-                    self.reconnect(corpus.clone()).await;
+                    Err(err) => {
+                        error!(self.log, "Connection task panic: {}", err);
+                    }
+
                 }
             }
+            _ = self.reconnect_interval.tick() => {
+                self.reconnect(corpus.clone()).await;
+            }
         }
+
+        Ok(())
     }
 
     pub async fn accept(
