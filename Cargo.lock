@@ -8377,6 +8377,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sigpipe",
  "sled-agent-client",
  "slog",
  "slog-error-chain",
