@@ -385,7 +385,7 @@ mod tests {
         // connection.
         let h = node_handles.pop().unwrap();
         h.shutdown().await.unwrap();
-        let _ = join_handles.pop().unwrap();
+        join_handles.pop().unwrap();
         let stopped_addr = h.listen_addr;
 
         // Speed up reconnection in the test
