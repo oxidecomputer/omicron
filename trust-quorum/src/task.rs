@@ -234,7 +234,6 @@ impl NodeTask {
             NodeApiRequest::Shutdown => {
                 info!(self.log, "Shutting down Node tokio tasks");
                 self.shutdown = true;
-                self.conn_mgr.shutdown().await;
             }
         }
     }

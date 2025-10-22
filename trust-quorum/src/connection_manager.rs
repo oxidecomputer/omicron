@@ -247,19 +247,6 @@ impl ConnMgr {
         }
     }
 
-    pub async fn shutdown(&mut self) {
-        // Shutdown all connection processing tasks
-        for (_, handle) in &self.accepting {
-            let _ = handle.tx.send(MainToConnMsg::Close).await;
-        }
-        for (_, handle) in &self.connecting {
-            let _ = handle.tx.send(MainToConnMsg::Close).await;
-        }
-        for (_, handle) in &self.established {
-            let _ = handle.tx.send(MainToConnMsg::Close).await;
-        }
-    }
-
     pub fn status(&self) -> ConnMgrStatus {
         let connections = self
             .connecting
@@ -311,7 +298,7 @@ impl ConnMgr {
                         self.on_task_exit(task_id).await;
                     }
                     Err(err) => {
-                        error!(self.log, "Connection task panic: {}", err);
+                        error!(self.log, "Connection task panic: {err}");
                         self.on_task_exit(err.id()).await;
                     }
 
@@ -344,7 +331,7 @@ impl ConnMgr {
 
                 Err(err) => {
                     error!(log, "Failed to accept a connection"; &err);
-                    return ();
+                    return;
                 }
             };
             let platform_id = stream.peer_platform_id().as_str().unwrap();
@@ -700,6 +687,6 @@ impl ConnMgr {
 pub fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
     let mut platform_id_iter = platform_id.split(":");
     let part_number = platform_id_iter.nth(1).unwrap().to_string();
-    let serial_number = platform_id_iter.nth(2).unwrap().to_string();
+    let serial_number = platform_id_iter.nth(1).unwrap().to_string();
     BaseboardId { part_number, serial_number }
 }
