@@ -1401,7 +1401,7 @@ mod test {
 
         let mut system = SystemDescription::new();
         system
-            .external_ip_policy(external_ip_policy.clone())
+            .set_external_ip_policy(external_ip_policy.clone())
             .sled(SledBuilder::new().id(sled1.id()))
             .expect("failed to add sled1")
             .sled(SledBuilder::new().id(sled2.id()))
@@ -1753,7 +1753,7 @@ mod test {
 
         let mut system = SystemDescription::new();
         system
-            .external_ip_policy(external_ip_policy.clone())
+            .set_external_ip_policy(external_ip_policy.clone())
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
@@ -2048,7 +2048,7 @@ mod test {
 
         let mut system = SystemDescription::new();
         system
-            .external_ip_policy(external_ip_policy.clone())
+            .set_external_ip_policy(external_ip_policy.clone())
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
@@ -2381,7 +2381,7 @@ mod test {
 
         let mut system = SystemDescription::new();
         system
-            .external_ip_policy(external_ip_policy.clone())
+            .set_external_ip_policy(external_ip_policy.clone())
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 

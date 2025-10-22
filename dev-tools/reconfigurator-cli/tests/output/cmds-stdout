@@ -871,7 +871,7 @@ result:
     loaded sleds: 04ef3330-c682-4a08-8def-fcc4bef31bcd, 90c1102a-b9f5-4d88-92a2-60d54a2d98cc, dde1c0e2-b10d-4621-b420-f179f7a7a00a
     loaded collections: 6e066695-94bc-4250-bd63-fd799c166cc1
     loaded blueprints: (none)
-    loaded service IP pool ranges: [V4(Ipv4Range { first: 192.0.2.2, last: 192.0.2.20 })]
+    loaded external IP policy: ExternalIpPolicy { service_ip_pool_ranges: [V4(Ipv4Range { first: 192.0.2.2, last: 192.0.2.20 })], external_dns_ips: {} }
     loaded internal DNS generations: (none)
     loaded external DNS generations: (none)
   config:
