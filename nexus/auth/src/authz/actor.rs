@@ -122,6 +122,9 @@ impl oso::PolarClass for AuthenticatedActor {
                 },
                 "USER_INTERNAL_API",
             )
+            // This is meant to guard against the SCIM actor being able to see
+            // the full resource hierarchy due to implicit grants in the Polar
+            // file. There are "if actor.is_user" guards to prevent this.
             .add_attribute_getter("is_user", |a: &AuthenticatedActor| {
                 match a.actor {
                     authn::Actor::SiloUser { .. } => true,
