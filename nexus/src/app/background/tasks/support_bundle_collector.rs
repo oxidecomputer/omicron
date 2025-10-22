@@ -513,32 +513,75 @@ impl BundleCollection {
             work_duration,
         );
 
-        loop {
-            tokio::select! {
-                // Timer fired mid-collection - let's check if we should stop.
-                _ = yield_interval.tick() => {
+        // We run this task to "check for cancellation" as a whole tokio task
+        // for a critical, but subtle reason: After the tick timer yields,
+        // we may then try to "await" a database function.
+        //
+        // This, at a surface-level glance seems innocent enough. However, there
+        // is something potentially insidious here: if calling a datastore
+        // function - such as "support_bundle_get" - blocks on acquiring access
+        // to a connection from the connection pool, while creating the
+        // collection ALSO potentially blocks on acquiring access to the
+        // connection pool, it is possible for:
+        //
+        // 1. The "&mut collection" arm to have created a future, currently
+        //    yielded, which wants access to this underlying resource.
+        // 2. The current task of execution, in "support_bundle_get", to be
+        //    blocked "await-ing" for this same underlying resource.
+        //
+        // In this specific case, the connection pool would be attempting to
+        // yield to the "&mut collection" arm, which cannot run, if we were
+        // blocking on the body of a different async select arm. This would
+        // result in a deadlock.
+        //
+        // In the future, we may attempt to make access to the connection pool
+        // safer from concurrent asynchronous access - it is unsettling that
+        // multiple concurrent ".claim()" functions can cause this behavior -
+        // but in the meantime, we spawn this cancellation check in an entirely
+        // new tokio task. Because of this separation, each task (the one
+        // checking for cancellation, and the main thread attempting to collect
+        // the bundle) do not risk preventing the other from being polled
+        // indefinitely.
+        let mut check_for_cancellation = tokio::task::spawn({
+            let s = self.clone();
+            async move {
+                loop {
+                    // Timer fired mid-collection - let's check if we should stop.
+                    yield_interval.tick().await;
                     trace!(
-                        &self.log,
+                        &s.log,
                         "Checking if Bundle Collection cancelled";
-                        "bundle" => %self.bundle.id
+                        "bundle" => %s.bundle.id
                     );
 
-                    let bundle = self.datastore.support_bundle_get(
-                        &self.opctx,
-                        self.bundle.id.into()
-                    ).await?;
+                    let bundle = s
+                        .datastore
+                        .support_bundle_get(&s.opctx, s.bundle.id.into())
+                        .await?;
                     if !matches!(bundle.state, SupportBundleState::Collecting) {
-                        warn!(
-                            &self.log,
-                            "Support Bundle cancelled - stopping collection";
-                            "bundle" => %self.bundle.id,
-                            "state" => ?self.bundle.state
-                        );
                         anyhow::bail!("Support Bundle Cancelled");
                     }
+                }
+            }
+        });
+
+        loop {
+            tokio::select! {
+                // Returns if the bundle has been cancelled explicitly, or if we
+                // cannot successfully check the bundle state.
+                why = &mut check_for_cancellation => {
+                    let why = why.expect("Should not cancel the bundle-checking task without returning");
+                    warn!(
+                        &self.log,
+                        "Support Bundle cancelled - stopping collection";
+                        "bundle" => %self.bundle.id,
+                        "state" => ?self.bundle.state
+                    );
+                    return why;
                 },
                 // Otherwise, keep making progress on the collection itself.
                 report = &mut collection => {
+                    check_for_cancellation.abort();
                     info!(
                         &self.log,
                         "Bundle Collection completed";
