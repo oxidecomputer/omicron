@@ -126,11 +126,10 @@ impl EstablishedConn {
         //
         // Continuously process messages until the connection closes
         loop {
-            if !self.current_write.has_remaining()
-                && !self.write_queue.is_empty()
-            {
-                self.current_write =
-                    Cursor::new(self.write_queue.pop_front().unwrap());
+            if !self.current_write.has_remaining() {
+                if let Some(buf) = self.write_queue.pop_front() {
+                    self.current_write = Cursor::new(buf);
+                }
             }
 
             let res = tokio::select! {
@@ -178,14 +177,8 @@ impl EstablishedConn {
         &mut self,
         res: Result<usize, std::io::Error>,
     ) -> Result<(), ConnErr> {
-        match res {
-            Ok(n) => {
-                self.total_read += n;
-            }
-            Err(e) => {
-                return Err(ConnErr::FailedRead(e));
-            }
-        }
+        let n = res.map_err(ConnErr::FailedRead)?;
+        self.total_read += n;
 
         // We may have more than one message that has been read
         loop {
