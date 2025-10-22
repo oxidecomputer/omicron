@@ -1370,11 +1370,14 @@ async fn test_project_create_networking_restrictions(
         },
     };
 
-    let _admin_project: views::Project =
-        NexusRequest::objects_post(&client, "/v1/projects", &admin_project_params)
-            .authn_as(AuthnMode::SiloUser(test_user.id))
-            .execute_and_parse_unwrap()
-            .await;
+    let _admin_project: views::Project = NexusRequest::objects_post(
+        &client,
+        "/v1/projects",
+        &admin_project_params,
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
 
     // Verify default VPC was created
     let admin_vpcs_url = format!("/v1/vpcs?project={}", admin_project_name);
@@ -1384,7 +1387,11 @@ async fn test_project_create_networking_restrictions(
         .await;
     let admin_vpcs: ResultsPage<Vpc> = admin_vpcs_result;
 
-    assert_eq!(admin_vpcs.items.len(), 1, "Admin project should have default VPC");
+    assert_eq!(
+        admin_vpcs.items.len(),
+        1,
+        "Admin project should have default VPC"
+    );
     assert_eq!(admin_vpcs.items[0].identity.name, "default");
 
     // STEP 3: Demote to Collaborator
@@ -1414,9 +1421,8 @@ async fn test_project_create_networking_restrictions(
         })
         .collect();
 
-    let updated_policy = shared::Policy {
-        role_assignments: updated_role_assignments,
-    };
+    let updated_policy =
+        shared::Policy { role_assignments: updated_role_assignments };
 
     NexusRequest::object_put(client, &silo_policy_url, Some(&updated_policy))
         .authn_as(AuthnMode::PrivilegedUser)
@@ -1433,18 +1439,22 @@ async fn test_project_create_networking_restrictions(
         },
     };
 
-    let _collab_project: views::Project =
-        NexusRequest::objects_post(&client, "/v1/projects", &collab_project_params)
-            .authn_as(AuthnMode::SiloUser(test_user.id))
-            .execute_and_parse_unwrap()
-            .await;
+    let _collab_project: views::Project = NexusRequest::objects_post(
+        &client,
+        "/v1/projects",
+        &collab_project_params,
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
 
     // Verify NO default VPC was created
     let collab_vpcs_url = format!("/v1/vpcs?project={}", collab_project_name);
-    let collab_vpcs_result = NexusRequest::object_get(&client, &collab_vpcs_url)
-        .authn_as(AuthnMode::SiloUser(test_user.id))
-        .execute_and_parse_unwrap()
-        .await;
+    let collab_vpcs_result =
+        NexusRequest::object_get(&client, &collab_vpcs_url)
+            .authn_as(AuthnMode::SiloUser(test_user.id))
+            .execute_and_parse_unwrap()
+            .await;
     let collab_vpcs: ResultsPage<Vpc> = collab_vpcs_result;
 
     assert_eq!(
@@ -1472,11 +1482,14 @@ async fn test_project_create_networking_restrictions(
         },
     };
 
-    let _admin_project_2: views::Project =
-        NexusRequest::objects_post(&client, "/v1/projects", &admin_project_params_2)
-            .authn_as(AuthnMode::SiloUser(test_user.id))
-            .execute_and_parse_unwrap()
-            .await;
+    let _admin_project_2: views::Project = NexusRequest::objects_post(
+        &client,
+        "/v1/projects",
+        &admin_project_params_2,
+    )
+    .authn_as(AuthnMode::SiloUser(test_user.id))
+    .execute_and_parse_unwrap()
+    .await;
 
     // Verify default VPC was created
     let admin_vpcs_url_2 = format!("/v1/vpcs?project={}", admin_project_name_2);
