@@ -565,31 +565,29 @@ impl BundleCollection {
             }
         });
 
-        loop {
-            tokio::select! {
-                // Returns if the bundle has been cancelled explicitly, or if we
-                // cannot successfully check the bundle state.
-                why = &mut check_for_cancellation => {
-                    let why = why.expect("Should not cancel the bundle-checking task without returning");
-                    warn!(
-                        &self.log,
-                        "Support Bundle cancelled - stopping collection";
-                        "bundle" => %self.bundle.id,
-                        "state" => ?self.bundle.state
-                    );
-                    return why;
-                },
-                // Otherwise, keep making progress on the collection itself.
-                report = &mut collection => {
-                    check_for_cancellation.abort();
-                    info!(
-                        &self.log,
-                        "Bundle Collection completed";
-                        "bundle" => %self.bundle.id
-                    );
-                    return report;
-                },
-            }
+        tokio::select! {
+            // Returns if the bundle has been cancelled explicitly, or if we
+            // cannot successfully check the bundle state.
+            why = &mut check_for_cancellation => {
+                let why = why.expect("Should not cancel the bundle-checking task without returning");
+                warn!(
+                    &self.log,
+                    "Support Bundle cancelled - stopping collection";
+                    "bundle" => %self.bundle.id,
+                    "state" => ?self.bundle.state
+                );
+                return why;
+            },
+            // Otherwise, keep making progress on the collection itself.
+            report = &mut collection => {
+                check_for_cancellation.abort();
+                info!(
+                    &self.log,
+                    "Bundle Collection completed";
+                    "bundle" => %self.bundle.id
+                );
+                return report;
+            },
         }
     }
 
