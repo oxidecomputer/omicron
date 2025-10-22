@@ -28,6 +28,7 @@ use slog::Logger;
 use slog::debug;
 use slog::trace;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::time::Duration;
 use std::time::Instant;
 use uuid::Uuid;
@@ -949,98 +950,91 @@ impl Client {
         Ok(query)
     }
 
+    // Build a reasonably efficient query to retrieve all fields for a given
+    // timeseries. Joins in ClickHouse are expensive, so aggregate all relevant
+    // fields from each relevant fields table in a single subquery, then join
+    // the results together. This results in n - 1 joins, where n is the number
+    // of relevant fields tables. Note that we may be able to improve
+    // performance in future ClickHouse versions, which have better support for
+    // Variant types, better support for the merge() table function, and faster
+    // joins.
     fn all_fields_query_raw(
         &self,
         schema: &TimeseriesSchema,
     ) -> (bool, String) {
         match schema.field_schema.len() {
             0 => unreachable!(),
-            1 => {
-                let field_schema = schema.field_schema.first().unwrap();
-                (
-                    true,
-                    format!(
-                        "SELECT DISTINCT timeseries_key, field_value AS {field_name} \
-                        FROM {db_name}.{field_table} \
-                        WHERE \
-                            timeseries_name = '{timeseries_name}' AND \
-                            field_name = '{field_name}'",
-                        field_name = field_schema.name,
-                        db_name = crate::DATABASE_NAME,
-                        field_table = field_table_name(field_schema.field_type),
-                        timeseries_name = schema.timeseries_name,
-                    ),
-                )
-            }
             _ => {
-                let mut top_level_columns =
-                    Vec::with_capacity(schema.field_schema.len());
-                let mut field_subqueries =
-                    Vec::with_capacity(schema.field_schema.len());
-
-                // Select each field value, aliasing it to its field name.
+                // Build a vector of top-level select expressions, as well as a
+                // map from fields to lists of subquery select expressions.
+                let mut top_selects: Vec<String> = Vec::new();
+                let mut select_map: HashMap<oximeter::FieldType, Vec<String>> =
+                    HashMap::new();
                 for field_schema in schema.field_schema.iter() {
-                    top_level_columns.push(format!(
-                        "filter_on_{}.field_value AS {}",
-                        field_schema.name, field_schema.name
-                    ));
-                    field_subqueries.push((
-                        format!(
-                            "SELECT DISTINCT timeseries_key, field_value \
-                                FROM {db_name}.{field_table} \
-                                WHERE \
-                                    timeseries_name = '{timeseries_name}' AND \
-                                    field_name = '{field_name}' \
-                                ",
-                            db_name = crate::DATABASE_NAME,
-                            field_table =
-                                field_table_name(field_schema.field_type),
-                            timeseries_name = schema.timeseries_name,
-                            field_name = field_schema.name,
-                        ),
-                        format!("filter_on_{}", field_schema.name),
+                    select_map
+                        .entry(field_schema.field_type)
+                        .or_insert(vec![String::from("timeseries_key")])
+                        .push(format!(
+                            "anyIf(field_value, field_name = '{}') AS `{}`",
+                            field_schema.name, field_schema.name
+                        ));
+                    top_selects.push(format!(
+                        "{}_pivot.`{}` AS `{}`",
+                        field_table_name(field_schema.field_type),
+                        field_schema.name,
+                        field_schema.name
                     ));
                 }
 
-                // Write the top-level select statement, starting by selecting
-                // the timeseries key from the first field schema.
-                let mut out = format!(
-                    "SELECT {}.timeseries_key AS timeseries_key, {} FROM ",
-                    field_subqueries[0].1,
-                    top_level_columns.join(", "),
-                );
+                // Sort field tables by number of columns, descending.
+                // ClickHouse recommends joining larger tables to smaller
+                // tables, and doesn't currently reorder joins automatically.
+                let mut field_types: Vec<oximeter::FieldType> =
+                    select_map.keys().cloned().collect();
+                field_types.sort_by(|a, b| {
+                    select_map[b].len().cmp(&select_map[a].len())
+                });
 
-                // Then add all the subqueries selecting each field.
-                //
-                // We need to add these, along with their aliases. The first
-                // such subquery has no join conditions, but the later ones all
-                // refer to the previous via:
-                //
-                // `ON <previous_filter_name>.timeseries_key = <current_filter_name>.timeseries_key`
-                for (i, (subq, alias)) in field_subqueries.iter().enumerate() {
-                    // Push the subquery itself, aliased.
-                    out.push('(');
-                    out.push_str(subq);
-                    out.push_str(") AS ");
-                    out.push_str(alias);
-
-                    // Push the join conditions.
-                    if i > 0 {
-                        let previous_alias = &field_subqueries[i - 1].1;
-                        out.push_str(" ON ");
-                        out.push_str(alias);
-                        out.push_str(".timeseries_key = ");
-                        out.push_str(previous_alias);
-                        out.push_str(".timeseries_key");
-                    }
-
-                    // Push the "INNER JOIN" expression itself, for all but the
-                    // last subquery.
-                    if i < field_subqueries.len() - 1 {
-                        out.push_str(" INNER JOIN ");
-                    }
+                // Build a map from field type to pivot subquery.
+                let mut query_map: HashMap<oximeter::FieldType, String> =
+                    HashMap::new();
+                for field_type in field_types.clone() {
+                    let selects = &select_map[&field_type];
+                    let query = format!(
+                        "(
+                            SELECT
+                                {select}
+                            FROM {db_name}.{from}
+                            WHERE timeseries_name = '{timeseries_name}'
+                            GROUP BY timeseries_key
+                        ) AS {subquery_name}_pivot",
+                        select = selects.join(", "),
+                        db_name = crate::DATABASE_NAME,
+                        from = field_table_name(field_type),
+                        timeseries_name = schema.timeseries_name,
+                        subquery_name = field_table_name(field_type),
+                    );
+                    query_map.insert(field_type, query);
                 }
-                (false, out)
+
+                // Assemble the final query.
+                let mut from = query_map[&field_types[0]].clone();
+                for field_type in field_types.iter().skip(1) {
+                    from = format!(
+                        "{from} JOIN {query} ON {source}_pivot.timeseries_key = {dest}_pivot.timeseries_key",
+                        from = from,
+                        query = query_map[field_type],
+                        source = field_table_name(field_types[0]),
+                        dest = field_table_name(*field_type),
+                    );
+                }
+                top_selects.push(format!(
+                    "{}_pivot.timeseries_key AS timeseries_key",
+                    field_table_name(field_types[0])
+                ));
+                let query =
+                    format!("SELECT {} FROM {}", top_selects.join(", "), from);
+                (false, query)
             }
         }
     }
