@@ -339,52 +339,51 @@ impl ConnMgr {
         let (tx, rx) = mpsc::channel(CHANNEL_BOUND);
         let main_tx = self.main_tx.clone();
         let abort_handle = self.join_set.spawn(async move {
-            match acceptor.handshake().await {
-                Ok((stream, _)) => {
-                    let platform_id =
-                        stream.peer_platform_id().as_str().unwrap();
-                    let baseboard_id = platform_id_to_baseboard_id(platform_id);
+            let stream = match acceptor.handshake().await {
+                Ok((stream, _)) => stream,
 
-                    // TODO: Conversion between `PlatformId` and `BaseboardId` should
-                    // happen in `sled-agent-types`. This is waiting on an update
-                    // to the `dice-mfg-msgs` crate.
-                    let log =
-                        log.new(o!("peer_id" => baseboard_id.to_string()));
-                    info!(log, "Accepted sprockets connection"; "addr" => %addr);
-
-                    let mut conn = EstablishedConn::new(
-                        baseboard_id.clone(),
-                        task::id(),
-                        stream,
-                        main_tx.clone(),
-                        rx,
-                        &log,
-                    );
-
-                    // Inform the main task that accepted connection is established
-                    if let Err(e) = main_tx
-                        .send(ConnToMainMsg {
-                            task_id: task::id(),
-                            msg: ConnToMainMsgInner::Accepted {
-                                addr,
-                                peer_id: baseboard_id,
-                            },
-                        })
-                        .await
-                    {
-                        // The system is shutting down
-                        // Just bail from this task
-                        warn!(
-                            log,
-                            "Failed to send 'accepted' msg to main task: {e:?}"
-                        );
-                    } else {
-                        conn.run().await;
-                    }
-                }
                 Err(err) => {
                     error!(log, "Failed to accept a connection"; &err);
+                    return ();
                 }
+            };
+            let platform_id = stream.peer_platform_id().as_str().unwrap();
+            let baseboard_id = platform_id_to_baseboard_id(platform_id);
+
+            // TODO: Conversion between `PlatformId` and `BaseboardId` should
+            // happen in `sled-agent-types`. This is waiting on an update
+            // to the `dice-mfg-msgs` crate.
+            let log = log.new(o!(
+                "peer_id" => baseboard_id.to_string(),
+                "peer_addr" => addr.to_string()
+            ));
+            info!(log, "Accepted sprockets connection");
+
+            let mut conn = EstablishedConn::new(
+                baseboard_id.clone(),
+                task::id(),
+                stream,
+                main_tx.clone(),
+                rx,
+                &log,
+            );
+
+            // Inform the main task that accepted connection is established
+            if let Err(e) = main_tx
+                .send(ConnToMainMsg {
+                    task_id: task::id(),
+                    msg: ConnToMainMsgInner::Accepted {
+                        addr,
+                        peer_id: baseboard_id,
+                    },
+                })
+                .await
+            {
+                // The system is shutting down
+                // Just bail from this task
+                warn!(log, "Failed to send 'accepted' msg to main task: {e:?}");
+            } else {
+                conn.run().await;
             }
         });
         self.total_tasks_spawned += 1;
@@ -408,8 +407,8 @@ impl ConnMgr {
                 self.log,
                 "Established server connection";
                 "task_id" => ?task_id,
-                "remote_addr" => %addr,
-                "remote_peer_id" => peer_id.to_string()
+                "peer_addr" => %addr,
+                "peer_id" => %peer_id
             );
             let already_established =
                 self.established.insert(peer_id, task_handle);
@@ -428,13 +427,19 @@ impl ConnMgr {
                 self.log,
                 "Established client connection";
                 "task_id" => ?task_id,
-                "remote_addr" => %addr,
-                "remote_peer_id" => peer_id.to_string()
+                "peer_addr" => %addr,
+                "peer_id" => %peer_id
             );
             let already_established =
                 self.established.insert(peer_id, task_handle);
 
             assert!(already_established.is_none());
+        } else {
+            error!(self.log, "Client handshake completed, but no client addr in map";
+                "task_id" => ?task_id,
+                "peer_addr" => %addr,
+                "peer_id" => %peer_id
+            );
         }
     }
 
@@ -539,7 +544,7 @@ impl ConnMgr {
         let log = self.log.clone();
         let config = self.config.clone();
         let abort_handle = self.join_set.spawn(async move {
-            match sprockets_tls::Client::connect(
+            let stream = match sprockets_tls::Client::connect(
                 config,
                 addr,
                 corpus.clone(),
@@ -547,51 +552,52 @@ impl ConnMgr {
             )
             .await
             {
-                Ok(stream) => {
-                    let platform_id =
-                        stream.peer_platform_id().as_str().unwrap();
-                    let baseboard_id = platform_id_to_baseboard_id(platform_id);
-
-                    // TODO: Conversion between `PlatformId` and `BaseboardId` should
-                    // happen in `sled-agent-types`. This is waiting on an update
-                    // to the `dice-mfg-msgs` crate.
-                    let log =
-                        log.new(o!("peer_id" => baseboard_id.to_string()));
-                    info!(log, "Sprockets connection established"; "addr" => %addr);
-
-                    let mut conn = EstablishedConn::new(
-                        baseboard_id.clone(),
-                        task::id(),
-                        stream,
-                        main_tx.clone(),
-                        rx,
-                        &log,
-                    );
-                    // Inform the main task that the client connection is
-                    // established.
-                    if let Err(e) = main_tx
-                        .send(ConnToMainMsg {
-                            task_id: task::id(),
-                            msg: ConnToMainMsgInner::Connected {
-                                addr,
-                                peer_id: baseboard_id,
-                            },
-                        })
-                        .await
-                    {
-                        // The system is shutting down
-                        // Just bail from this task
-                        error!(
-                            log,
-                            "Failed to send 'connected' msg to main task: {e:?}"
-                        );
-                    } else {
-                        conn.run().await;
-                    }
-                }
+                Ok(stream) => stream,
                 Err(err) => {
-                    warn!(log, "Failed to connect"; &err);
+                    warn!(log, "Failed to connect"; "peer_addr"=> %addr, &err);
+                    return ();
                 }
+            };
+            let platform_id = stream.peer_platform_id().as_str().unwrap();
+            let baseboard_id = platform_id_to_baseboard_id(platform_id);
+
+            // TODO: Conversion between `PlatformId` and `BaseboardId` should
+            // happen in `sled-agent-types`. This is waiting on an update
+            // to the `dice-mfg-msgs` crate.
+            let log = log.new(o!(
+                "peer_id" => baseboard_id.to_string(),
+                "peer_addr" => addr.to_string()
+            ));
+            info!(log, "Sprockets connection established");
+
+            let mut conn = EstablishedConn::new(
+                baseboard_id.clone(),
+                task::id(),
+                stream,
+                main_tx.clone(),
+                rx,
+                &log,
+            );
+            // Inform the main task that the client connection is
+            // established.
+            if let Err(e) = main_tx
+                .send(ConnToMainMsg {
+                    task_id: task::id(),
+                    msg: ConnToMainMsgInner::Connected {
+                        addr,
+                        peer_id: baseboard_id,
+                    },
+                })
+                .await
+            {
+                // The system is shutting down
+                // Just bail from this task
+                error!(
+                    log,
+                    "Failed to send 'connected' msg to main task: {e:?}"
+                );
+            } else {
+                conn.run().await;
             }
         });
         self.total_tasks_spawned += 1;
@@ -614,7 +620,7 @@ impl ConnMgr {
             info!(
                 self.log,
                 "Deleting initiating connection";
-                "remote_addr" => addr.to_string()
+                "remote_addr" => %addr
             );
             let _ = handle.tx.send(MainToConnMsg::Close).await;
         } else {
@@ -626,8 +632,8 @@ impl ConnMgr {
                 info!(
                     self.log,
                     "Deleting established connection";
-                    "remote_addr" => addr.to_string(),
-                    "remote_peer_id" => id.to_string(),
+                    "peer_addr" => %addr,
+                    "peer_id" => %id
                 );
                 let _ = handle.tx.send(MainToConnMsg::Close).await;
                 // probably a better way to avoid borrowck issues
@@ -649,8 +655,8 @@ impl ConnMgr {
                 self.log,
                 "Established connection task exited";
                 "task_id" => ?task_id,
-                "remote_addr" => handle.addr().to_string(),
-                "remote_peer_id" => id.to_string(),
+                "peer_addr" => %handle.addr(),
+                "peer_id" => %id
             );
             // probably a better way to avoid borrowck issues
             let id = id.clone();
@@ -662,7 +668,7 @@ impl ConnMgr {
                 self.log,
                 "Accepting task exited";
                 "task_id" => ?task_id,
-                "remote_addr" => handle.addr().to_string(),
+                "peer_addr" => %handle.addr()
             );
             let addr = *addr;
             self.accepting.remove(&addr);
@@ -673,7 +679,7 @@ impl ConnMgr {
                 self.log,
                 "Connecting task exited";
                 "task_id" => ?task_id,
-                "remote_addr" => handle.addr().to_string(),
+                "peer_addr" => %handle.addr()
             );
             let addr = *addr;
             self.connecting.remove(&addr);
