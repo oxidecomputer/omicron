@@ -733,11 +733,17 @@ has_permission(actor: AuthenticatedActor, "create_child", router: VpcRouter) if
 has_permission(actor: AuthenticatedActor, "modify", router: VpcRouter) if
     can_modify_networking_resource(actor, router.vpc.project);
 
+has_permission(actor: AuthenticatedActor, "delete", router: VpcRouter) if
+    can_modify_networking_resource(actor, router.vpc.project);
+
 # VPC Subnets (project path: subnet.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", subnet: VpcSubnet) if
     can_modify_networking_resource(actor, subnet.vpc.project);
 
 has_permission(actor: AuthenticatedActor, "modify", subnet: VpcSubnet) if
+    can_modify_networking_resource(actor, subnet.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "delete", subnet: VpcSubnet) if
     can_modify_networking_resource(actor, subnet.vpc.project);
 
 # Internet Gateways (project path: gateway.vpc.project)
@@ -747,9 +753,25 @@ has_permission(actor: AuthenticatedActor, "create_child", gateway: InternetGatew
 has_permission(actor: AuthenticatedActor, "modify", gateway: InternetGateway) if
     can_modify_networking_resource(actor, gateway.vpc.project);
 
+has_permission(actor: AuthenticatedActor, "delete", gateway: InternetGateway) if
+    can_modify_networking_resource(actor, gateway.vpc.project);
+
 # Router Routes (project path: route.vpc_router.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", route: RouterRoute) if
     can_modify_networking_resource(actor, route.vpc_router.vpc.project);
 
 has_permission(actor: AuthenticatedActor, "modify", route: RouterRoute) if
     can_modify_networking_resource(actor, route.vpc_router.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "delete", route: RouterRoute) if
+    can_modify_networking_resource(actor, route.vpc_router.vpc.project);
+
+# Internet Gateway IP Pool attachments (project path: pool.internet_gateway.vpc.project)
+# Note: create_child is already handled by InternetGateway "create_child" rule above
+has_permission(actor: AuthenticatedActor, "delete", pool: InternetGatewayIpPool) if
+    can_modify_networking_resource(actor, pool.internet_gateway.vpc.project);
+
+# Internet Gateway IP Address attachments (project path: addr.internet_gateway.vpc.project)
+# Note: create_child is already handled by InternetGateway "create_child" rule above
+has_permission(actor: AuthenticatedActor, "delete", addr: InternetGatewayIpAddress) if
+    can_modify_networking_resource(actor, addr.internet_gateway.vpc.project);
