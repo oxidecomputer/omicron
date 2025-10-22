@@ -12,6 +12,7 @@ use crate::nexus::make_nexus_client;
 use crate::services::ServiceManager;
 use internal_dns_resolver::Resolver;
 use omicron_uuid_kinds::SledUuid;
+use oximeter_instruments::kstat::KstatSemaphore;
 use sled_agent_config_reconciler::ConfigReconcilerSpawnToken;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
@@ -37,6 +38,7 @@ impl Server {
     /// Starts a SledAgent server
     pub async fn start(
         config: &Config,
+        semaphore: KstatSemaphore,
         log: Logger,
         request: StartSledAgentRequest,
         long_running_tasks_handles: LongRunningTaskHandles,
@@ -58,6 +60,7 @@ impl Server {
 
         let sled_agent = SledAgent::new(
             &config,
+            semaphore,
             log.clone(),
             nexus_client,
             request,
