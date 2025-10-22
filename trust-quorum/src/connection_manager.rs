@@ -9,8 +9,6 @@ use crate::{BaseboardId, PeerMsg};
 // TODO: Move or copy this to this crate?
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
-use futures::StreamExt;
-use futures::stream::FuturesUnordered;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, error, info, o, warn};
 use slog_error_chain::SlogInlineError;
@@ -20,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
+use tokio::task::{self, JoinSet};
 use tokio::time::{Interval, MissedTickBehavior, interval};
 
 /// We only expect a handful of concurrent requests at most.
@@ -41,23 +39,6 @@ pub enum AcceptError {
         #[source]
         sprockets_tls::Error,
     ),
-}
-
-/// A mechanism for uniquely identifying a task managing a connection
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct TaskId(u64);
-
-impl TaskId {
-    pub fn new(id: u64) -> TaskId {
-        TaskId(id)
-    }
-
-    /// Increment the ID and then return the value before the increment
-    pub fn inc(&mut self) -> TaskId {
-        let id = *self;
-        self.0 += 1;
-        id
-    }
 }
 
 /// Messages sent from the main task to the connection managing tasks
@@ -103,7 +84,7 @@ pub enum WireMsg {
 /// shutdown.
 #[derive(Debug, PartialEq)]
 pub struct ConnToMainMsg {
-    pub task_id: TaskId,
+    pub task_id: task::Id,
     pub msg: ConnToMainMsgInner,
 }
 
@@ -117,7 +98,7 @@ pub enum ConnToMainMsgInner {
 }
 
 pub struct TaskHandle {
-    pub task_id: TaskId,
+    pub task_id: task::Id,
     pub tx: mpsc::Sender<MainToConnMsg>,
     pub conn_type: ConnectionType,
 }
@@ -154,7 +135,7 @@ pub enum ConnState {
 pub struct ConnInfo {
     pub state: ConnState,
     pub addr: SocketAddrV6,
-    pub task_id: TaskId,
+    pub task_id: task::Id,
 }
 
 /// Status information useful for debugging
@@ -162,8 +143,8 @@ pub struct ConnInfo {
 pub struct ConnMgrStatus {
     pub bootstrap_addrs: BTreeSet<SocketAddrV6>,
     pub connections: Vec<ConnInfo>,
-    pub num_task_join_handles: u64,
-    pub next_task_id: TaskId,
+    pub num_conn_tasks: u64,
+    pub total_tasks_spawned: u64,
 }
 
 /// A structure to manage all sprockets connections to peer nodes
@@ -188,13 +169,8 @@ pub struct ConnMgr {
     /// The address the sprockets server listens on
     listen_addr: SocketAddrV6,
 
-    // A unique, monotonically incrementing id for each task to help map tasks
-    // to their handles in case the task aborts, or there is a new connection
-    // accepted and established for an existing `BaseboardId`.
-    next_task_id: TaskId,
-
-    /// `JoinHandle`s to all tasks that can be polled for crashes
-    join_handles: FuturesUnordered<JoinHandle<TaskId>>,
+    /// A mechanism for spawning connection tasks
+    join_set: JoinSet<()>,
 
     /// All known addresses on the bootstrap network, learned via DDMD
     bootstrap_addrs: BTreeSet<SocketAddrV6>,
@@ -212,6 +188,9 @@ pub struct ConnMgr {
 
     /// An interval for reconnect operations
     reconnect_interval: Interval,
+
+    /// The number of total connection tasks spawned
+    total_tasks_spawned: u64,
 }
 
 impl ConnMgr {
@@ -258,13 +237,13 @@ impl ConnMgr {
             config,
             server,
             listen_addr,
-            next_task_id: TaskId::new(0),
-            join_handles: Default::default(),
+            join_set: JoinSet::new(),
             bootstrap_addrs: BTreeSet::new(),
             connecting: BTreeMap::new(),
             accepting: BTreeMap::new(),
             established: BTreeMap::new(),
             reconnect_interval,
+            total_tasks_spawned: 0,
         }
     }
 
@@ -307,8 +286,8 @@ impl ConnMgr {
         ConnMgrStatus {
             bootstrap_addrs: self.bootstrap_addrs.clone(),
             connections,
-            num_task_join_handles: self.join_handles.len() as u64,
-            next_task_id: self.next_task_id,
+            num_conn_tasks: self.join_set.len() as u64,
+            total_tasks_spawned: self.total_tasks_spawned,
         }
     }
 
@@ -326,13 +305,14 @@ impl ConnMgr {
             acceptor = self.server.accept(corpus.clone()) => {
                 self.accept(acceptor?).await?;
             }
-            Some(res) = self.join_handles.next() => {
+            Some(res) = self.join_set.join_next_with_id() => {
                 match res {
-                    Ok(task_id) => {
+                    Ok((task_id, _)) => {
                         self.on_task_exit(task_id).await;
                     }
                     Err(err) => {
                         error!(self.log, "Connection task panic: {}", err);
+                        self.on_task_exit(err.id()).await;
                     }
 
                 }
@@ -356,15 +336,9 @@ impl ConnMgr {
             SocketAddr::V6(addr) => addr,
         };
         let log = self.log.clone();
-        let task_id = self.next_task_id.inc();
         let (tx, rx) = mpsc::channel(CHANNEL_BOUND);
-        let task_handle = TaskHandle {
-            task_id,
-            tx,
-            conn_type: ConnectionType::Accepted(addr),
-        };
         let main_tx = self.main_tx.clone();
-        let join_handle = tokio::spawn(async move {
+        let abort_handle = self.join_set.spawn(async move {
             match acceptor.handshake().await {
                 Ok((stream, _)) => {
                     let platform_id =
@@ -380,7 +354,7 @@ impl ConnMgr {
 
                     let mut conn = EstablishedConn::new(
                         baseboard_id.clone(),
-                        task_id,
+                        task::id(),
                         stream,
                         main_tx.clone(),
                         rx,
@@ -390,7 +364,7 @@ impl ConnMgr {
                     // Inform the main task that accepted connection is established
                     if let Err(e) = main_tx
                         .send(ConnToMainMsg {
-                            task_id: task_id,
+                            task_id: task::id(),
                             msg: ConnToMainMsgInner::Accepted {
                                 addr,
                                 peer_id: baseboard_id,
@@ -412,16 +386,20 @@ impl ConnMgr {
                     error!(log, "Failed to accept a connection"; &err);
                 }
             }
-            task_id
         });
-        self.join_handles.push(join_handle);
+        self.total_tasks_spawned += 1;
+        let task_handle = TaskHandle {
+            task_id: abort_handle.id(),
+            tx,
+            conn_type: ConnectionType::Accepted(addr),
+        };
         self.accepting.insert(addr, task_handle);
         Ok(())
     }
 
     pub async fn server_handshake_completed(
         &mut self,
-        task_id: TaskId,
+        task_id: task::Id,
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
@@ -441,7 +419,7 @@ impl ConnMgr {
 
     pub async fn client_handshake_completed(
         &mut self,
-        task_id: TaskId,
+        task_id: task::Id,
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     ) {
@@ -463,7 +441,7 @@ impl ConnMgr {
     /// The established connection task has asynchronously exited.
     pub async fn on_disconnected(
         &mut self,
-        task_id: TaskId,
+        task_id: task::Id,
         peer_id: BaseboardId,
     ) {
         if let Some(task_handle) = self.established.get(&peer_id) {
@@ -555,18 +533,12 @@ impl ConnMgr {
         corpus: Vec<Utf8PathBuf>,
         addr: SocketAddrV6,
     ) {
-        let task_id = self.next_task_id.inc();
         let (tx, rx) = mpsc::channel(CHANNEL_BOUND);
-        let task_handle = TaskHandle {
-            task_id,
-            tx,
-            conn_type: ConnectionType::Connected(addr),
-        };
         info!(self.log, "Initiating connection to new peer: {addr}");
         let main_tx = self.main_tx.clone();
         let log = self.log.clone();
         let config = self.config.clone();
-        let join_handle = tokio::spawn(async move {
+        let abort_handle = self.join_set.spawn(async move {
             match sprockets_tls::Client::connect(
                 config,
                 addr,
@@ -589,7 +561,7 @@ impl ConnMgr {
 
                     let mut conn = EstablishedConn::new(
                         baseboard_id.clone(),
-                        task_id,
+                        task::id(),
                         stream,
                         main_tx.clone(),
                         rx,
@@ -599,7 +571,7 @@ impl ConnMgr {
                     // established.
                     if let Err(e) = main_tx
                         .send(ConnToMainMsg {
-                            task_id: task_id,
+                            task_id: task::id(),
                             msg: ConnToMainMsgInner::Connected {
                                 addr,
                                 peer_id: baseboard_id,
@@ -621,9 +593,13 @@ impl ConnMgr {
                     warn!(log, "Failed to connect"; &err);
                 }
             }
-            task_id
         });
-        self.join_handles.push(join_handle);
+        self.total_tasks_spawned += 1;
+        let task_handle = TaskHandle {
+            task_id: abort_handle.id(),
+            tx,
+            conn_type: ConnectionType::Connected(addr),
+        };
         self.connecting.insert(addr, task_handle);
     }
 
@@ -662,7 +638,7 @@ impl ConnMgr {
     }
 
     /// Remove any references to the given task
-    async fn on_task_exit(&mut self, task_id: TaskId) {
+    async fn on_task_exit(&mut self, task_id: task::Id) {
         // We're most likely to find the task as established so we start with that
         if let Some((id, handle)) = self
             .established

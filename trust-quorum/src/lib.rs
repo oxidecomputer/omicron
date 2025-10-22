@@ -43,7 +43,7 @@ mod connection_manager;
 mod task;
 
 pub(crate) use connection_manager::{
-    ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, TaskId, WireMsg,
+    ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg,
 };
 pub use task::NodeTask;
 

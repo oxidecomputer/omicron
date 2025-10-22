@@ -243,7 +243,6 @@ impl NodeTask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TaskId;
     use crate::connection_manager::{
         ConnState, RECONNECT_TIME, platform_id_to_baseboard_id,
     };
@@ -360,7 +359,7 @@ mod tests {
                         .iter()
                         .all(|c| matches!(c.state, ConnState::Established(_)))
                         && status.connections.len() == num_nodes - 1
-                        && status.next_task_id == TaskId::new(3)
+                        && status.total_tasks_spawned == 3
                     {
                         count += 1;
                     }
@@ -411,7 +410,7 @@ mod tests {
                     // is the stopped node.
                     let should_be_connecting = h.listen_addr > stopped_addr;
                     let valid_task_id = if should_be_connecting {
-                        status.next_task_id > TaskId::new(3)
+                        status.total_tasks_spawned > 3
                     } else {
                         true
                     };
