@@ -171,16 +171,7 @@ impl EstablishedConn {
         {
             warn!(self.log, "Failed to send to main task: {e:?}");
         }
-        // TODO: This causes a deadlock and breaks the test.
-        //
-        // I'm unclear why, although I plan to dig a bit further in the future.
-        // It should be noted that the writer and reader share a std::mutex
-        // under the hood and that could be causing issues. Regardless, it
-        // is not actually critical to issue a shutdown as detection will
-        // be discovered via missing ping messages at the other end of the
-        // connection.
-        //
-        // let _ = self.writer.shutdown().await;
+        let _ = self.writer.shutdown().await;
     }
 
     async fn on_read(
