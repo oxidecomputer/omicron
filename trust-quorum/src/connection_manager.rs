@@ -21,7 +21,7 @@ use std::collections::BTreeSet;
 use std::net::{SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::task::{self, JoinSet};
+use tokio::task::{self, AbortHandle, JoinSet};
 use tokio::time::{Interval, MissedTickBehavior, interval};
 
 /// We only expect a handful of concurrent requests at most.
@@ -47,7 +47,6 @@ pub enum AcceptError {
 /// Messages sent from the main task to the connection managing tasks
 #[derive(Debug, PartialEq)]
 pub enum MainToConnMsg {
-    Close,
     #[expect(unused)]
     Msg(WireMsg),
 }
@@ -101,14 +100,23 @@ pub enum ConnToMainMsgInner {
 }
 
 pub struct TaskHandle {
-    pub task_id: task::Id,
+    pub abort_handle: AbortHandle,
+    #[expect(unused)]
     pub tx: mpsc::Sender<MainToConnMsg>,
     pub conn_type: ConnectionType,
 }
 
 impl TaskHandle {
+    pub fn task_id(&self) -> task::Id {
+        self.abort_handle.id()
+    }
+
     pub fn addr(&self) -> SocketAddrV6 {
         self.conn_type.addr()
+    }
+
+    pub fn abort(&self) {
+        self.abort_handle.abort()
     }
 }
 
@@ -117,7 +125,7 @@ impl BiHashItem for TaskHandle {
     type K2<'a> = SocketAddrV6;
 
     fn key1(&self) -> Self::K1<'_> {
-        self.task_id
+        self.task_id()
     }
 
     fn key2(&self) -> Self::K2<'_> {
@@ -141,11 +149,15 @@ impl EstablishedTaskHandle {
     }
 
     pub fn task_id(&self) -> task::Id {
-        self.task_handle.task_id
+        self.task_handle.task_id()
     }
 
     pub fn addr(&self) -> SocketAddrV6 {
         self.task_handle.addr()
+    }
+
+    pub fn abort(&self) {
+        self.task_handle.abort();
     }
 }
 
@@ -159,7 +171,7 @@ impl TriHashItem for EstablishedTaskHandle {
     }
 
     fn key2(&self) -> Self::K2<'_> {
-        self.task_handle.task_id
+        self.task_handle.task_id()
     }
 
     fn key3(&self) -> Self::K3<'_> {
@@ -314,12 +326,12 @@ impl ConnMgr {
             .map(|task_handle| ConnInfo {
                 state: ConnState::Connecting,
                 addr: task_handle.addr(),
-                task_id: task_handle.task_id,
+                task_id: task_handle.task_id(),
             })
             .chain(self.accepting.iter().map(|task_handle| ConnInfo {
                 state: ConnState::Accepting,
                 addr: task_handle.addr(),
-                task_id: task_handle.task_id,
+                task_id: task_handle.task_id(),
             }))
             .chain(self.established.iter().map(|established_task_handle| {
                 ConnInfo {
@@ -437,7 +449,7 @@ impl ConnMgr {
         });
         self.total_tasks_spawned += 1;
         let task_handle = TaskHandle {
-            task_id: abort_handle.id(),
+            abort_handle,
             tx,
             conn_type: ConnectionType::Accepted(addr),
         };
@@ -657,7 +669,7 @@ impl ConnMgr {
         });
         self.total_tasks_spawned += 1;
         let task_handle = TaskHandle {
-            task_id: abort_handle.id(),
+            abort_handle,
             tx,
             conn_type: ConnectionType::Connected(addr),
         };
@@ -677,7 +689,7 @@ impl ConnMgr {
                 "Deleting initiating connection";
                 "remote_addr" => %addr
             );
-            let _ = handle.tx.send(MainToConnMsg::Close).await;
+            handle.abort();
         } else {
             if let Some(handle) = self.established.remove3(&addr) {
                 info!(
@@ -686,7 +698,7 @@ impl ConnMgr {
                     "peer_addr" => %addr,
                     "peer_id" => %handle.baseboard_id
                 );
-                let _ = handle.task_handle.tx.send(MainToConnMsg::Close).await;
+                handle.abort();
             }
         }
     }
