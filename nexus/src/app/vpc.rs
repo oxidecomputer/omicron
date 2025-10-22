@@ -171,7 +171,7 @@ impl super::Nexus {
         vpc_lookup: &lookup::Vpc<'_>,
     ) -> DeleteResult {
         let (.., authz_vpc, db_vpc) =
-            vpc_lookup.fetch_for(authz::Action::Modify).await?;
+            vpc_lookup.fetch_for(authz::Action::Delete).await?;
 
         // Check networking restrictions: if the actor's silo restricts networking
         // actions, only Silo Admins can delete VPCs

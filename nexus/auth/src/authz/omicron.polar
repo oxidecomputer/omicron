@@ -726,6 +726,9 @@ has_permission(actor: AuthenticatedActor, "create_child", vpc: Vpc) if
 has_permission(actor: AuthenticatedActor, "modify", vpc: Vpc) if
     can_modify_networking_resource(actor, vpc.project);
 
+has_permission(actor: AuthenticatedActor, "delete", vpc: Vpc) if
+    can_modify_networking_resource(actor, vpc.project);
+
 has_permission(actor: AuthenticatedActor, "read", vpc: Vpc) if
     has_role(actor, "viewer", vpc.project);
 
