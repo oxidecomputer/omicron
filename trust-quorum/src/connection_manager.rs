@@ -480,7 +480,7 @@ impl ConnMgr {
                 continue;
             }
 
-            to_connect.push(addr.clone());
+            to_connect.push(*addr);
         }
 
         for addr in to_connect {
@@ -700,6 +700,6 @@ impl ConnMgr {
 pub fn platform_id_to_baseboard_id(platform_id: &str) -> BaseboardId {
     let mut platform_id_iter = platform_id.split(":");
     let part_number = platform_id_iter.nth(1).unwrap().to_string();
-    let serial_number = platform_id_iter.skip(1).next().unwrap().to_string();
+    let serial_number = platform_id_iter.nth(2).unwrap().to_string();
     BaseboardId { part_number, serial_number }
 }
