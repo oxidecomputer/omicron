@@ -2875,14 +2875,14 @@ impl DataStore {
                     .unwrap_or_default(),
                 (RouteTarget::Instance(n), _) => instances
                     .get(&n)
-                    .map(|i| match i.1.ip {
-                        // TODO: update for dual-stack v4/6.
-                        ip @ IpNetwork::V4(_) => {
-                            (Some(RouterTarget::Ip(ip.ip())), None)
-                        }
-                        ip @ IpNetwork::V6(_) => {
-                            (None, Some(RouterTarget::Ip(ip.ip())))
-                        }
+                    .map(|(_inst, iface)| {
+                        let v4_target = iface
+                            .ipv4
+                            .map(|ipv4| RouterTarget::Ip(ipv4.into()));
+                        let v6_target = iface
+                            .ipv6
+                            .map(|ipv6| RouterTarget::Ip(ipv6.into()));
+                        (v4_target, v6_target)
                     })
                     .unwrap_or_default(),
                 (RouteTarget::Drop, _) => {
@@ -3008,6 +3008,8 @@ mod tests {
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
 
     // Test that we detect the right error condition and return None when we
     // fail to insert a VPC due to VNI exhaustion.
@@ -4059,7 +4061,10 @@ mod tests {
         assert!(routes.iter().any(|x| (x.dest
             == "192.168.0.0/16".parse::<IpNet>().unwrap())
             && match x.target {
-                RouterTarget::Ip(ip) => ip == nic.ip.ip(),
+                RouterTarget::Ip(IpAddr::V4(ipv4)) =>
+                    ipv4 == Ipv4Addr::from(nic.ipv4.unwrap()),
+                RouterTarget::Ip(IpAddr::V6(ipv6)) =>
+                    ipv6 == Ipv6Addr::from(nic.ipv6.unwrap()),
                 _ => false,
             }));
 

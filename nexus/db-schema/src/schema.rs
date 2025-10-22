@@ -575,7 +575,11 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        // NOTE: This is the IPv4 address, despite the name. We kept the
+        // original name of `ip` because renaming columns is not idempotent in
+        // CRDB as of today.
+        ip -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
         transit_ips -> Array<Inet>,
@@ -594,7 +598,8 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
         transit_ips -> Array<Inet>,
@@ -614,7 +619,8 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
     }
