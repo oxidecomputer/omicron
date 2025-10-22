@@ -16,7 +16,7 @@ pub const VLAN_MAX: u16 = 4094;
 
 /// Wrapper around a VLAN ID, ensuring it is valid.
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone, Copy, JsonSchema)]
-#[serde(rename = "VlanId")]
+#[serde(transparent)]
 pub struct VlanID(u16);
 
 impl VlanID {

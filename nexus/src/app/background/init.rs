@@ -110,6 +110,7 @@ use super::tasks::inventory_collection;
 use super::tasks::inventory_load;
 use super::tasks::lookup_region_port;
 use super::tasks::metrics_producer_gc;
+use super::tasks::multicast::MulticastGroupReconciler;
 use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
@@ -254,7 +255,12 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator: Activator::new(),
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
+            task_multicast_group_reconciler: Activator::new(),
 
+            // Handles to activate background tasks that do not get used by Nexus
+            // at-large.  These background tasks are implementation details as far as
+            // the rest of Nexus is concerned.  These handles don't even really need to
+            // be here, but it's convenient.
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
         };
@@ -334,6 +340,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator,
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
+            task_multicast_group_reconciler,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -935,7 +942,7 @@ impl BackgroundTasksInitializer {
             period: config.region_snapshot_replacement_finish.period_secs,
             task_impl: Box::new(RegionSnapshotReplacementFinishDetector::new(
                 datastore.clone(),
-                sagas,
+                sagas.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
@@ -1041,6 +1048,21 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "multicast_group_reconciler",
+            description: "reconciles multicast group state with dendrite switch configuration",
+            period: config.multicast_group_reconciler.period_secs,
+            task_impl: Box::new(MulticastGroupReconciler::new(
+                datastore.clone(),
+                resolver.clone(),
+                sagas.clone(),
+                args.multicast_enabled,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_multicast_group_reconciler,
+        });
+
+        driver.register(TaskDefinition {
             name: "sp_ereport_ingester",
             description: "collects error reports from service processors",
             period: config.sp_ereport_ingester.period_secs,
@@ -1066,6 +1088,8 @@ pub struct BackgroundTasksData {
     pub datastore: Arc<DataStore>,
     /// background task configuration
     pub config: BackgroundTaskConfig,
+    /// whether multicast functionality is enabled (or not)
+    pub multicast_enabled: bool,
     /// rack identifier
     pub rack_id: Uuid,
     /// nexus identifier

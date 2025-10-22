@@ -22,7 +22,7 @@ use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::{Deserialize, Serialize};
-use slog::info;
+use slog::{error, info};
 use steno::ActionError;
 
 /// Parameters to the instance start saga.
@@ -111,6 +111,7 @@ declare_saga_actions! {
     ENSURE_RUNNING -> "ensure_running" {
         + sis_ensure_running
     }
+
 }
 
 /// Node name for looking up the VMM record once it has been registered with the
@@ -621,7 +622,7 @@ async fn sis_ensure_registered(
             .await
             .map_err(ActionError::action_failed)?;
 
-    osagactx
+    let register_result = osagactx
         .nexus()
         .instance_ensure_registered(
             &opctx,
@@ -635,31 +636,67 @@ async fn sis_ensure_registered(
             &vmm_record,
             InstanceRegisterReason::Start { vmm_id: propolis_id },
         )
-        .await
-        .map_err(|err| match err {
-            InstanceStateChangeError::SledAgent(inner) => {
-                info!(osagactx.log(),
-                      "start saga: sled agent failed to register instance";
-                      "instance_id" => %instance_id,
-                      "sled_id" =>  %sled_id,
-                      "error" => ?inner,
-                      "start_reason" => ?params.reason);
+        .await;
 
-                // Don't set the instance to Failed in this case. Instead, allow
-                // the saga to unwind and restore the instance to the Stopped
-                // state (matching what would happen if there were a failure
-                // prior to this point).
-                ActionError::action_failed(Error::from(inner))
+    // Handle the result and update multicast members if successful
+    let vmm_record = match register_result {
+        Ok(vmm_record) => {
+            // Update multicast group members with the instance's sled_id now that it's registered
+            // Only do this if multicast is enabled - if disabled, no members exist to update
+            if osagactx.nexus().multicast_enabled() {
+                if let Err(e) = osagactx
+                    .datastore()
+                    .multicast_group_member_update_sled_id(
+                        &opctx,
+                        instance_id,
+                        Some(sled_id.into()),
+                    )
+                    .await
+                {
+                    // Log but don't fail the saga - the reconciler will fix this later
+                    info!(osagactx.log(),
+                          "start saga: failed to update multicast member sled_id, reconciler will fix";
+                          "instance_id" => %instance_id,
+                          "sled_id" => %sled_id,
+                          "error" => ?e);
+                } else {
+                    info!(osagactx.log(),
+                          "start saga: updated multicast member sled_id";
+                          "instance_id" => %instance_id,
+                          "sled_id" => %sled_id);
+                }
             }
-            InstanceStateChangeError::Other(inner) => {
-                info!(osagactx.log(),
-                      "start saga: internal error registering instance";
-                      "instance_id" => %instance_id,
-                      "error" => ?inner,
-                      "start_reason" => ?params.reason);
-                ActionError::action_failed(inner)
-            }
-        })
+            vmm_record
+        }
+        Err(err) => {
+            return Err(match err {
+                InstanceStateChangeError::SledAgent(inner) => {
+                    info!(osagactx.log(),
+                          "start saga: sled agent failed to register instance";
+                          "instance_id" => %instance_id,
+                          "sled_id" =>  %sled_id,
+                          "error" => ?inner,
+                          "start_reason" => ?params.reason);
+
+                    // Don't set the instance to Failed in this case. Instead, allow
+                    // the saga to unwind and restore the instance to the Stopped
+                    // state (matching what would happen if there were a failure
+                    // prior to this point).
+                    ActionError::action_failed(Error::from(inner))
+                }
+                InstanceStateChangeError::Other(inner) => {
+                    info!(osagactx.log(),
+                          "start saga: internal error registering instance";
+                          "instance_id" => %instance_id,
+                          "error" => ?inner,
+                          "start_reason" => ?params.reason);
+                    ActionError::action_failed(inner)
+                }
+            });
+        }
+    };
+
+    Ok(vmm_record)
 }
 
 async fn sis_ensure_registered_undo(
@@ -696,11 +733,13 @@ async fn sis_ensure_registered_undo(
     // writing back the state returned from sled agent). Otherwise, try to
     // reason about the next action from the specific kind of error that was
     // returned.
-    if let Err(e) = osagactx
+    let unregister_result = osagactx
         .nexus()
         .instance_ensure_unregistered(&propolis_id, &sled_id)
-        .await
-    {
+        .await;
+
+    // Handle the unregister result
+    if let Err(e) = unregister_result {
         error!(osagactx.log(),
                "start saga: failed to unregister instance from sled";
                "instance_id" => %instance_id,
@@ -769,6 +808,31 @@ async fn sis_ensure_registered_undo(
             }
         }
     } else {
+        // Only clear multicast member sled_id if multicast is enabled
+        // If disabled, no members exist to clear
+        if osagactx.nexus().multicast_enabled() {
+            datastore
+                .multicast_group_member_update_sled_id(
+                    &opctx,
+                    instance_id.into_untyped_uuid(),
+                    None,
+                )
+                .await
+                .map(|_| {
+                    info!(osagactx.log(),
+                          "start saga: cleared multicast member sled_id during undo";
+                          "instance_id" => %instance_id);
+                })
+                .map_err(|e| {
+                    // The reconciler will fix this later
+                    info!(osagactx.log(),
+                          "start saga: failed to clear multicast member sled_id during undo, reconciler will fix";
+                          "instance_id" => %instance_id,
+                          "error" => ?e);
+                })
+                .ok(); // Ignore the result
+        }
+
         Ok(())
     }
 }
@@ -892,6 +956,7 @@ mod test {
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
         )
         .await
@@ -938,7 +1003,7 @@ mod test {
 
     #[tokio::test]
     async fn should_start_with_dead_switch() {
-        let mut cptestctx = nexus_test_utils::test_setup::<crate::Server>(
+        let cptestctx = nexus_test_utils::test_setup::<crate::Server>(
             "should_start_with_dead_switch",
             3,
         )
@@ -1056,10 +1121,14 @@ mod test {
             .expect("unable to update switch1 settings");
 
         // Shutdown one of the switch daemons
-        let switch0_dpd = cptestctx
+        let mut switch0_dpd = cptestctx
             .dendrite
-            .get_mut(&SwitchLocation::Switch0)
+            .write()
+            .unwrap()
+            .remove(&SwitchLocation::Switch0)
             .expect("there should be at least one dendrite running");
+
+        let switch0_port = switch0_dpd.port;
 
         switch0_dpd
             .cleanup()
@@ -1067,8 +1136,6 @@ mod test {
             .expect("switch0 process should get cleaned up");
 
         let log = &opctx.log;
-
-        let port = switch0_dpd.port;
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
@@ -1080,7 +1147,7 @@ mod test {
         let addr = std::net::Ipv6Addr::LOCALHOST;
 
         let switch_0_dpd_client = dpd_client::Client::new(
-            &format!("http://[{addr}]:{port}"),
+            &format!("http://[{addr}]:{switch0_port}"),
             client_state,
         );
 
@@ -1108,11 +1175,13 @@ mod test {
 
         assert_eq!(vmm_state, nexus_db_model::VmmState::Running);
 
-        let port = cptestctx
-            .dendrite
-            .get(&SwitchLocation::Switch1)
-            .expect("two dendrites should be present in test context")
-            .port;
+        let port = {
+            let dendrite_guard = cptestctx.dendrite.read().unwrap();
+            dendrite_guard
+                .get(&SwitchLocation::Switch1)
+                .expect("two dendrites should be present in test context")
+                .port
+        };
 
         let client_state = dpd_client::ClientState {
             tag: String::from("nexus"),
@@ -1130,22 +1199,37 @@ mod test {
 
         let log = opctx.log;
 
-        // Check to ensure that the nat entry for the address has made it onto switch1 dendrite
-        let nat_entries = dpd_client
-            .nat_ipv4_list(&std::net::Ipv4Addr::new(10, 0, 0, 0), None, None)
-            .await
-            .unwrap()
-            .items
-            .clone();
+        // Check to ensure that the nat entry for the address has made it onto switch1 dendrite.
+        // Note: ipv4_nat_trigger_update() triggers dendrite's RPW asynchronously and returns
+        // immediately, but dendrite still needs time to process the update and create the NAT
+        // entries. Tests need to poll/wait for entries rather than checking immediately, or
+        // they'll be flaky.
+        let expected_nat_entries = 1; // Instance has 1 external IP
+        let nat_subnet = std::net::Ipv4Addr::new(10, 0, 0, 0);
+        let poll_interval = Duration::from_millis(100);
+        let poll_max = Duration::from_secs(60); // Allow time for RPW to process
 
-        assert_eq!(nat_entries.len(), 1);
+        poll::wait_for_condition(
+            async || {
+                let result =
+                    dpd_client.nat_ipv4_list(&nat_subnet, None, None).await;
 
-        let port = cptestctx
-            .dendrite
-            .get(&SwitchLocation::Switch0)
-            .expect("two dendrites should be present in test context")
-            .port;
+                let data =
+                    result.map_err(|_| poll::CondCheckError::<()>::NotYet)?;
 
+                if data.items.len() == expected_nat_entries {
+                    Ok(())
+                } else {
+                    Err(poll::CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .expect("NAT entry should appear on switch1");
+
+        // Reuse the port number from the removed Switch0 to start a new dendrite instance
         let nexus_address = cptestctx.internal_client.bind_address;
         let mgs = cptestctx.gateway.get(&SwitchLocation::Switch0).unwrap();
         let mgs_address =
@@ -1155,14 +1239,18 @@ mod test {
         // Start a new dendrite instance for switch0
         let new_switch0 =
             omicron_test_utils::dev::dendrite::DendriteInstance::start(
-                port,
+                switch0_port,
                 Some(nexus_address),
                 Some(mgs_address),
             )
             .await
             .unwrap();
 
-        cptestctx.dendrite.insert(SwitchLocation::Switch0, new_switch0);
+        cptestctx
+            .dendrite
+            .write()
+            .unwrap()
+            .insert(SwitchLocation::Switch0, new_switch0);
 
         // Ensure that the nat entry for the address has made it onto the new switch0 dendrite.
         // This might take some time while the new dendrite comes online.

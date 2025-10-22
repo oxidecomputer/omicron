@@ -235,6 +235,7 @@ async fn create_resources_in_test_suite_silo(client: &ClientTestContext) {
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
     };
 
     NexusRequest::objects_post(
