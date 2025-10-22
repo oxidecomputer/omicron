@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use dropshot::HttpErrorResponseBody;
+use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
@@ -1304,4 +1305,192 @@ async fn test_igw_ip_pool_address_attach_detach_restrictions(
         .execute()
         .await
         .expect("Admin should be able to delete internet gateway");
+}
+
+/// Test that project creation respects networking restrictions:
+/// - Silo admins can create projects with default VPCs
+/// - Non-admins in restricted silos create projects WITHOUT default VPCs
+#[nexus_test]
+async fn test_project_create_networking_restrictions(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    use nexus_types::external_api::params;
+
+    let client = &cptestctx.external_client;
+
+    // STEP 1: Setup - Create restricted silo and admin user
+    let restricted_silo_name = "restricted-silo";
+    let silo_url_path = "/v1/system/silos";
+    let silo_params = params::SiloCreate {
+        identity: IdentityMetadataCreateParams {
+            name: restricted_silo_name.parse().unwrap(),
+            description: "Silo with networking restrictions".to_string(),
+        },
+        discoverable: false,
+        identity_mode:
+            nexus_types::external_api::shared::SiloIdentityMode::LocalOnly,
+        admin_group_name: None,
+        tls_certificates: Vec::new(),
+        mapped_fleet_roles: Default::default(),
+        restrict_network_actions: Some(true),
+        quotas: params::SiloQuotasCreate::empty(),
+    };
+
+    let restricted_silo: views::Silo =
+        object_create(&client, silo_url_path, &silo_params).await;
+
+    let test_user = create_local_user(
+        client,
+        &restricted_silo,
+        &"test-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let silo_policy_url =
+        format!("/v1/system/silos/{}/policy", restricted_silo_name);
+    let silo_url = format!("/v1/system/silos/{}", restricted_silo_name);
+
+    // Grant Silo Admin role
+    grant_iam(
+        client,
+        &silo_url,
+        shared::SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // STEP 2: As Admin - Create project and verify it has default VPC
+    let admin_project_name = "admin-project";
+    let admin_project_params = params::ProjectCreate {
+        identity: IdentityMetadataCreateParams {
+            name: admin_project_name.parse().unwrap(),
+            description: "Project created by admin".to_string(),
+        },
+    };
+
+    let _admin_project: views::Project =
+        NexusRequest::objects_post(&client, "/v1/projects", &admin_project_params)
+            .authn_as(AuthnMode::SiloUser(test_user.id))
+            .execute_and_parse_unwrap()
+            .await;
+
+    // Verify default VPC was created
+    let admin_vpcs_url = format!("/v1/vpcs?project={}", admin_project_name);
+    let admin_vpcs_result = NexusRequest::object_get(&client, &admin_vpcs_url)
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute_and_parse_unwrap()
+        .await;
+    let admin_vpcs: ResultsPage<Vpc> = admin_vpcs_result;
+
+    assert_eq!(admin_vpcs.items.len(), 1, "Admin project should have default VPC");
+    assert_eq!(admin_vpcs.items[0].identity.name, "default");
+
+    // STEP 3: Demote to Collaborator
+    let silo_policy: shared::Policy<shared::SiloRole> =
+        NexusRequest::object_get(client, &silo_policy_url)
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("failed to fetch silo policy")
+            .parsed_body()
+            .expect("failed to parse silo policy");
+
+    let test_user_uuid = test_user.id.into_untyped_uuid();
+    let updated_role_assignments = silo_policy
+        .role_assignments
+        .into_iter()
+        .map(|assignment| {
+            if assignment.identity_id == test_user_uuid {
+                shared::RoleAssignment {
+                    identity_type: assignment.identity_type,
+                    identity_id: assignment.identity_id,
+                    role_name: shared::SiloRole::Collaborator,
+                }
+            } else {
+                assignment
+            }
+        })
+        .collect();
+
+    let updated_policy = shared::Policy {
+        role_assignments: updated_role_assignments,
+    };
+
+    NexusRequest::object_put(client, &silo_policy_url, Some(&updated_policy))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Failed to update silo policy");
+
+    // STEP 4: As Collaborator - Create project and verify NO default VPC
+    let collab_project_name = "collab-project";
+    let collab_project_params = params::ProjectCreate {
+        identity: IdentityMetadataCreateParams {
+            name: collab_project_name.parse().unwrap(),
+            description: "Project created by collaborator".to_string(),
+        },
+    };
+
+    let _collab_project: views::Project =
+        NexusRequest::objects_post(&client, "/v1/projects", &collab_project_params)
+            .authn_as(AuthnMode::SiloUser(test_user.id))
+            .execute_and_parse_unwrap()
+            .await;
+
+    // Verify NO default VPC was created
+    let collab_vpcs_url = format!("/v1/vpcs?project={}", collab_project_name);
+    let collab_vpcs_result = NexusRequest::object_get(&client, &collab_vpcs_url)
+        .authn_as(AuthnMode::SiloUser(test_user.id))
+        .execute_and_parse_unwrap()
+        .await;
+    let collab_vpcs: ResultsPage<Vpc> = collab_vpcs_result;
+
+    assert_eq!(
+        collab_vpcs.items.len(),
+        0,
+        "Collaborator project should NOT have default VPC"
+    );
+
+    // STEP 5: Promote back to Admin
+    grant_iam(
+        client,
+        &silo_url,
+        shared::SiloRole::Admin,
+        test_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // STEP 6: As Admin - Create another project and verify it has default VPC
+    let admin_project_name_2 = "admin-project-2";
+    let admin_project_params_2 = params::ProjectCreate {
+        identity: IdentityMetadataCreateParams {
+            name: admin_project_name_2.parse().unwrap(),
+            description: "Second project created by admin".to_string(),
+        },
+    };
+
+    let _admin_project_2: views::Project =
+        NexusRequest::objects_post(&client, "/v1/projects", &admin_project_params_2)
+            .authn_as(AuthnMode::SiloUser(test_user.id))
+            .execute_and_parse_unwrap()
+            .await;
+
+    // Verify default VPC was created
+    let admin_vpcs_url_2 = format!("/v1/vpcs?project={}", admin_project_name_2);
+    let admin_vpcs_2_result =
+        NexusRequest::object_get(&client, &admin_vpcs_url_2)
+            .authn_as(AuthnMode::SiloUser(test_user.id))
+            .execute_and_parse_unwrap()
+            .await;
+    let admin_vpcs_2: ResultsPage<Vpc> = admin_vpcs_2_result;
+
+    assert_eq!(
+        admin_vpcs_2.items.len(),
+        1,
+        "Admin project should have default VPC"
+    );
+    assert_eq!(admin_vpcs_2.items[0].identity.name, "default");
 }

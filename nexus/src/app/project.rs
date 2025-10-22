@@ -53,10 +53,27 @@ impl super::Nexus {
             .internal_context("creating a Project")?;
         opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
 
+        // Determine if we should create a default VPC.
+        // Skip VPC creation if networking is restricted and user is not a Silo Admin.
+        let create_default_vpc = if let Some(policy) = opctx.authn.silo_authn_policy() {
+            if policy.restrict_network_actions() {
+                // Networking is restricted - only create VPC if user is Silo Admin
+                // (i.e., has Modify permission on the Silo)
+                opctx.authorize(authz::Action::Modify, &authz_silo).await.is_ok()
+            } else {
+                // No networking restrictions, create VPC
+                true
+            }
+        } else {
+            // No policy, create VPC
+            true
+        };
+
         let saga_params = sagas::project_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_create: new_project.clone(),
             authz_silo,
+            create_default_vpc,
         };
         let saga_outputs = self
             .sagas

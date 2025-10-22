@@ -23,6 +23,10 @@ pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_create: params::ProjectCreate,
     pub authz_silo: authz::Silo,
+    /// Whether to create a default VPC for this project.
+    /// Set to false when networking actions are restricted and the actor
+    /// is not a Silo Admin.
+    pub create_default_vpc: bool,
 }
 
 // project create saga: actions
@@ -51,20 +55,26 @@ impl NexusSaga for SagaProjectCreate {
     }
 
     fn make_saga_dag(
-        _params: &Self::Params,
+        params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
         builder.append(project_create_record_action());
-        builder.append(project_create_vpc_params_action());
 
-        let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-            sagas::vpc_create::SagaVpcCreate::NAME,
-        ));
-        builder.append(steno::Node::subsaga(
-            "vpc",
-            sagas::vpc_create::create_dag(subsaga_builder)?,
-            "vpc_create_params",
-        ));
+        // Only create default VPC if allowed (i.e., networking is not restricted
+        // or the actor is a Silo Admin)
+        if params.create_default_vpc {
+            builder.append(project_create_vpc_params_action());
+
+            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
+                sagas::vpc_create::SagaVpcCreate::NAME,
+            ));
+            builder.append(steno::Node::subsaga(
+                "vpc",
+                sagas::vpc_create::create_dag(subsaga_builder)?,
+                "vpc_create_params",
+            ));
+        }
+
         Ok(builder.build()?)
     }
 }
@@ -182,6 +192,7 @@ mod test {
                 },
             },
             authz_silo,
+            create_default_vpc: true,
         }
     }
 
