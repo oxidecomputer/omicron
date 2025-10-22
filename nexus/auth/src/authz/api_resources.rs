@@ -1091,7 +1091,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1099,7 +1099,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1107,7 +1107,7 @@ authz_resource! {
     parent = "VpcRouter",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1115,7 +1115,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1123,7 +1123,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1131,7 +1131,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {
@@ -1139,7 +1139,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectNetworking,
 }
 
 authz_resource! {

@@ -726,6 +726,12 @@ has_permission(actor: AuthenticatedActor, "create_child", vpc: Vpc) if
 has_permission(actor: AuthenticatedActor, "modify", vpc: Vpc) if
     can_modify_networking_resource(actor, vpc.project);
 
+has_permission(actor: AuthenticatedActor, "read", vpc: Vpc) if
+    has_role(actor, "viewer", vpc.project);
+
+has_permission(actor: AuthenticatedActor, "list_children", vpc: Vpc) if
+    has_role(actor, "viewer", vpc.project);
+
 # VPC Routers (project path: router.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", router: VpcRouter) if
     can_modify_networking_resource(actor, router.vpc.project);
@@ -735,6 +741,12 @@ has_permission(actor: AuthenticatedActor, "modify", router: VpcRouter) if
 
 has_permission(actor: AuthenticatedActor, "delete", router: VpcRouter) if
     can_modify_networking_resource(actor, router.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "read", router: VpcRouter) if
+    has_role(actor, "viewer", router.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "list_children", router: VpcRouter) if
+    has_role(actor, "viewer", router.vpc.project);
 
 # VPC Subnets (project path: subnet.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", subnet: VpcSubnet) if
@@ -746,6 +758,12 @@ has_permission(actor: AuthenticatedActor, "modify", subnet: VpcSubnet) if
 has_permission(actor: AuthenticatedActor, "delete", subnet: VpcSubnet) if
     can_modify_networking_resource(actor, subnet.vpc.project);
 
+has_permission(actor: AuthenticatedActor, "read", subnet: VpcSubnet) if
+    has_role(actor, "viewer", subnet.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "list_children", subnet: VpcSubnet) if
+    has_role(actor, "viewer", subnet.vpc.project);
+
 # Internet Gateways (project path: gateway.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", gateway: InternetGateway) if
     can_modify_networking_resource(actor, gateway.vpc.project);
@@ -755,6 +773,12 @@ has_permission(actor: AuthenticatedActor, "modify", gateway: InternetGateway) if
 
 has_permission(actor: AuthenticatedActor, "delete", gateway: InternetGateway) if
     can_modify_networking_resource(actor, gateway.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "read", gateway: InternetGateway) if
+    has_role(actor, "viewer", gateway.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "list_children", gateway: InternetGateway) if
+    has_role(actor, "viewer", gateway.vpc.project);
 
 # Router Routes (project path: route.vpc_router.vpc.project)
 has_permission(actor: AuthenticatedActor, "create_child", route: RouterRoute) if
@@ -766,12 +790,30 @@ has_permission(actor: AuthenticatedActor, "modify", route: RouterRoute) if
 has_permission(actor: AuthenticatedActor, "delete", route: RouterRoute) if
     can_modify_networking_resource(actor, route.vpc_router.vpc.project);
 
+has_permission(actor: AuthenticatedActor, "read", route: RouterRoute) if
+    has_role(actor, "viewer", route.vpc_router.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "list_children", route: RouterRoute) if
+    has_role(actor, "viewer", route.vpc_router.vpc.project);
+
 # Internet Gateway IP Pool attachments (project path: pool.internet_gateway.vpc.project)
 # Note: create_child is already handled by InternetGateway "create_child" rule above
 has_permission(actor: AuthenticatedActor, "delete", pool: InternetGatewayIpPool) if
     can_modify_networking_resource(actor, pool.internet_gateway.vpc.project);
 
+has_permission(actor: AuthenticatedActor, "read", pool: InternetGatewayIpPool) if
+    has_role(actor, "viewer", pool.internet_gateway.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "list_children", pool: InternetGatewayIpPool) if
+    has_role(actor, "viewer", pool.internet_gateway.vpc.project);
+
 # Internet Gateway IP Address attachments (project path: addr.internet_gateway.vpc.project)
 # Note: create_child is already handled by InternetGateway "create_child" rule above
 has_permission(actor: AuthenticatedActor, "delete", addr: InternetGatewayIpAddress) if
     can_modify_networking_resource(actor, addr.internet_gateway.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "read", addr: InternetGatewayIpAddress) if
+    has_role(actor, "viewer", addr.internet_gateway.vpc.project);
+
+has_permission(actor: AuthenticatedActor, "list_children", addr: InternetGatewayIpAddress) if
+    has_role(actor, "viewer", addr.internet_gateway.vpc.project);

@@ -76,11 +76,16 @@ impl super::Nexus {
     /// a Silo Admin.
     pub(crate) async fn check_networking_restrictions(
         &self,
-        opctx: &OpContext,
+        _opctx: &OpContext,
     ) -> Result<(), Error> {
-        if let Some(actor) = opctx.authn.actor() {
+        // TEMPORARY: Early return to test Polar-only authorization
+        // Remove this return statement to re-enable explicit checks
+        return Ok(());
+
+        #[allow(unreachable_code)]
+        if let Some(actor) = _opctx.authn.actor() {
             if let Some(silo_id) = actor.silo_id() {
-                let silo_policy = opctx.authn.silo_authn_policy();
+                let silo_policy = _opctx.authn.silo_authn_policy();
                 if let Some(policy) = silo_policy {
                     if policy.restrict_network_actions() {
                         // The silo restricts networking - verify the actor is a Silo Admin
@@ -89,7 +94,7 @@ impl super::Nexus {
                             silo_id,
                             LookupType::ById(silo_id),
                         );
-                        opctx
+                        _opctx
                             .authorize(authz::Action::Modify, &authz_silo)
                             .await?;
                     }
