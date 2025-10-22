@@ -270,7 +270,7 @@ pub struct SiloAuthnPolicy {
     mapped_fleet_roles: BTreeMap<SiloRole, BTreeSet<FleetRole>>,
 
     /// When true, restricts networking actions to Silo Admins only
-    pub restrict_network_actions: bool,
+    restrict_network_actions: bool,
 }
 
 impl SiloAuthnPolicy {
