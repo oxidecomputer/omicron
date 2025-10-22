@@ -5,8 +5,7 @@
 //! An individual sprockets connection running in its own task
 
 use crate::{
-    BaseboardId, ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, TaskId,
-    WireMsg,
+    BaseboardId, ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg,
 };
 use bytes::Buf;
 use serde::Serialize;
@@ -18,6 +17,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf, split};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::task;
 use tokio::time::{Instant, MissedTickBehavior, interval};
 
 /// Max buffer size of a connection
@@ -63,7 +63,7 @@ pub enum ConnErr {
 /// Container for code running in its own task per sprockets connection
 pub struct EstablishedConn {
     peer_id: BaseboardId,
-    task_id: TaskId,
+    task_id: task::Id,
     reader: ReadHalf<sprockets_tls::Stream<TcpStream>>,
     writer: WriteHalf<sprockets_tls::Stream<TcpStream>>,
     main_tx: mpsc::Sender<ConnToMainMsg>,
@@ -94,7 +94,7 @@ pub struct EstablishedConn {
 impl EstablishedConn {
     pub fn new(
         peer_id: BaseboardId,
-        task_id: TaskId,
+        task_id: task::Id,
         stream: sprockets_tls::Stream<TcpStream>,
         main_tx: mpsc::Sender<ConnToMainMsg>,
         rx: mpsc::Receiver<MainToConnMsg>,
