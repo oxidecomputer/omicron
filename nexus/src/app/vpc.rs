@@ -68,6 +68,8 @@ impl super::Nexus {
     /// Check if the actor's silo restricts networking actions, and if so,
     /// verify the actor has Silo Admin permissions.
     ///
+    /// Only used at VPC creation time; other networking resources use Polar rules
+    ///
     /// Returns Ok(()) if either:
     /// - The silo does not restrict networking actions, or
     /// - The silo restricts networking and the actor is a Silo Admin
@@ -76,16 +78,11 @@ impl super::Nexus {
     /// a Silo Admin.
     pub(crate) async fn check_networking_restrictions(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
     ) -> Result<(), Error> {
-        // TEMPORARY: Early return to test Polar-only authorization
-        // Remove this return statement to re-enable explicit checks
-        return Ok(());
-
-        #[allow(unreachable_code)]
-        if let Some(actor) = _opctx.authn.actor() {
+        if let Some(actor) = opctx.authn.actor() {
             if let Some(silo_id) = actor.silo_id() {
-                let silo_policy = _opctx.authn.silo_authn_policy();
+                let silo_policy = opctx.authn.silo_authn_policy();
                 if let Some(policy) = silo_policy {
                     if policy.restrict_network_actions() {
                         // The silo restricts networking - verify the actor is a Silo Admin
@@ -94,7 +91,7 @@ impl super::Nexus {
                             silo_id,
                             LookupType::ById(silo_id),
                         );
-                        _opctx
+                        opctx
                             .authorize(authz::Action::Modify, &authz_silo)
                             .await?;
                     }
@@ -156,9 +153,8 @@ impl super::Nexus {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::Modify).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can update VPCs
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (VPC modify permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         self.db_datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
@@ -173,9 +169,8 @@ impl super::Nexus {
         let (.., authz_vpc, db_vpc) =
             vpc_lookup.fetch_for(authz::Action::Delete).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can delete VPCs
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (VPC delete permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         let authz_vpc_router = authz::VpcRouter::new(
             authz_vpc.clone(),
@@ -231,9 +226,8 @@ impl super::Nexus {
         let (.., authz_vpc, db_vpc) =
             vpc_lookup.fetch_for(authz::Action::Modify).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can update VPC firewall rules
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (VPC modify permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),

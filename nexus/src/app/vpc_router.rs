@@ -115,9 +115,8 @@ impl super::Nexus {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can create VPC routers
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (VpcRouter create_child permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         let id = Uuid::new_v4();
         let router = db::model::VpcRouter::new(
@@ -161,9 +160,8 @@ impl super::Nexus {
         let (.., authz_router) =
             vpc_router_lookup.lookup_for(authz::Action::Modify).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can update VPC routers
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (VpcRouter modify permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         self.db_datastore
             .vpc_update_router(opctx, &authz_router, params.clone().into())
@@ -178,9 +176,8 @@ impl super::Nexus {
         let (.., authz_router, db_router) =
             vpc_router_lookup.fetch_for(authz::Action::Delete).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can delete VPC routers
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (VpcRouter delete permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         // TODO-performance shouldn't this check be part of the "update"
         // database query?  This shouldn't affect correctness, assuming that a
@@ -250,9 +247,8 @@ impl super::Nexus {
         let (.., authz_router, db_router) =
             router_lookup.fetch_for(authz::Action::CreateChild).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can create router routes
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (RouterRoute create_child permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         if db_router.kind == VpcRouterKind::System {
             return Err(Error::invalid_request(
@@ -305,9 +301,8 @@ impl super::Nexus {
         let (.., authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Modify).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can update router routes
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (RouterRoute modify permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         match db_route.kind.0 {
             // Default routes allow a constrained form of modification:
@@ -357,9 +352,8 @@ impl super::Nexus {
         let (.., authz_router, authz_route, db_route) =
             route_lookup.fetch_for(authz::Action::Delete).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can delete router routes
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (RouterRoute delete permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         // Only custom routes can be deleted
         // TODO Shouldn't this constraint be checked by the database query?

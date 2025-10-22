@@ -71,9 +71,8 @@ impl super::Nexus {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can create internet gateways
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (InternetGateway create_child permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         let id = Uuid::new_v4();
         let router =
@@ -118,9 +117,8 @@ impl super::Nexus {
         let (.., authz_vpc, authz_igw, _db_igw) =
             lookup.fetch_for(authz::Action::Delete).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can delete internet gateways
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (InternetGateway delete permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         let out = self
             .db_datastore
@@ -210,9 +208,8 @@ impl super::Nexus {
         let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can attach IP pools to internet gateways
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (InternetGatewayIpPool create_child permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         // need to use this method so it works for non-fleet users
         let (authz_pool, ..) =
@@ -249,9 +246,8 @@ impl super::Nexus {
         let (.., authz_vpc, _authz_igw, authz_pool, db_pool) =
             lookup.fetch_for(authz::Action::Delete).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can detach IP pools from internet gateways
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (InternetGatewayIpPool delete permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         let (.., igw) = LookupPath::new(opctx, &self.db_datastore)
             .internet_gateway_id(db_pool.internet_gateway_id)
@@ -348,9 +344,8 @@ impl super::Nexus {
         let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can attach IP addresses to internet gateways
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (InternetGatewayIpAddress create_child permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         let id = Uuid::new_v4();
         let route = db::model::InternetGatewayIpAddress::new(
@@ -382,9 +377,8 @@ impl super::Nexus {
         let (.., authz_vpc, _authz_igw, authz_addr, db_addr) =
             lookup.fetch_for(authz::Action::Delete).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can detach IP addresses from internet gateways
-        self.check_networking_restrictions(opctx).await?;
+        // Networking restrictions are enforced by Polar rules (InternetGatewayIpAddress delete permission)
+        // self.check_networking_restrictions(opctx).await?;
 
         let (.., igw) = LookupPath::new(opctx, &self.db_datastore)
             .internet_gateway_id(db_addr.internet_gateway_id)
