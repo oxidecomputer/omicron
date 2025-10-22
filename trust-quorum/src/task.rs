@@ -244,7 +244,9 @@ impl NodeTask {
 mod tests {
     use super::*;
     use crate::TaskId;
-    use crate::connection_manager::{ConnState, platform_id_to_baseboard_id};
+    use crate::connection_manager::{
+        ConnState, RECONNECT_TIME, platform_id_to_baseboard_id,
+    };
     use camino::Utf8PathBuf;
     use dropshot::test_util::log_prefix_for_test;
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -375,6 +377,9 @@ mod tests {
         .await
         .unwrap();
 
+        // Pause time so we can jump it for reconnects
+        tokio::time::pause();
+
         // Killing a single node should cause all other nodes to start
         // reconnecting. This should cause the task id counter to start
         // incrementing at all nodes and for their to be one fewer established
@@ -383,6 +388,9 @@ mod tests {
         h.shutdown().await.unwrap();
         let _ = join_handles.pop().unwrap();
         let stopped_addr = h.listen_addr;
+
+        // Speed up reconnection in the test
+        tokio::time::advance(RECONNECT_TIME).await;
 
         let poll_interval = Duration::from_millis(50);
         wait_for_condition(
