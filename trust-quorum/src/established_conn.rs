@@ -44,8 +44,6 @@ const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Also a great movie
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum ConnErr {
-    #[error("Main task insructed this connection to close")]
-    Close,
     #[error("Failed to write")]
     FailedWrite(#[source] std::io::Error),
     #[error("Failed to read")]
@@ -273,9 +271,6 @@ impl EstablishedConn {
         msg: MainToConnMsg,
     ) -> Result<(), ConnErr> {
         match msg {
-            MainToConnMsg::Close => {
-                return Err(ConnErr::Close);
-            }
             MainToConnMsg::Msg(msg) => self.write_framed_to_queue(msg).await,
         }
     }
