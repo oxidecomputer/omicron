@@ -1128,6 +1128,10 @@ impl ExternalIpPolicy {
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
         &self.service_ip_pool_ranges
     }
+
+    pub fn external_dns_ips(&self) -> &BTreeSet<IpAddr> {
+        &self.external_dns_ips
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

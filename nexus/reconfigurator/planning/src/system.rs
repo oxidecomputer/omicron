@@ -181,7 +181,9 @@ impl SystemDescription {
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
 
-        // IPs from TEST-NET-1 (RFC 5737)
+        // Nexus / Boundary NTPs IPs from TEST-NET-1 (RFC 5737).
+        //
+        // This policy doesn't configure any external DNS IPs.
         let external_ip_policy = ExternalIpPolicy::new(vec![
             IpRange::try_from((
                 "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
@@ -303,7 +305,11 @@ impl SystemDescription {
         self.target_internal_dns_zone_count
     }
 
-    pub fn external_ip_policy(
+    pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
+        &self.external_ip_policy
+    }
+
+    pub fn set_external_ip_policy(
         &mut self,
         policy: ExternalIpPolicy,
     ) -> &mut Self {

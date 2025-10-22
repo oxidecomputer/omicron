@@ -4,8 +4,6 @@
 
 //! Blueprint planner resource allocation
 
-use std::net::IpAddr;
-
 use super::SledEditor;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::ExternalIpPolicy;
@@ -36,16 +34,13 @@ impl BlueprintResourceAllocator {
         external_ip_policy: &ExternalIpPolicy,
     ) -> Result<Self, BlueprintResourceAllocatorInputError>
     where
-        I: Iterator<Item = &'a SledEditor> + Clone,
+        I: Iterator<Item = &'a SledEditor>,
     {
         let external_networking = ExternalNetworkingAllocator::new(
-            all_sleds.clone().flat_map(|editor| {
+            all_sleds.flat_map(|editor| {
                 editor.zones(BlueprintZoneDisposition::is_in_service)
             }),
-            all_sleds.flat_map(|editor| {
-                editor.zones(BlueprintZoneDisposition::is_expunged)
-            }),
-            external_ip_policy.service_ip_pool_ranges().to_vec(),
+            external_ip_policy,
         )
         .map_err(BlueprintResourceAllocatorInputError::ExternalNetworking)?;
 
@@ -68,19 +63,5 @@ impl BlueprintResourceAllocator {
         &mut self,
     ) -> Result<ExternalSnatNetworkingChoice, ExternalNetworkingError> {
         self.external_networking.for_new_boundary_ntp()
-    }
-
-    /// Allow a test to manually add an external DNS address, which could
-    /// ordinarily only come from RSS.
-    ///
-    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    // This can't be `#[cfg(test)]` because it's used by the `ExampleSystem`
-    // helper (which itself is used by reconfigurator-cli and friends). We give
-    // it a scary name instead.
-    pub(crate) fn inject_untracked_external_dns_ip(
-        &mut self,
-        ip: IpAddr,
-    ) -> Result<(), ExternalNetworkingError> {
-        self.external_networking.add_external_dns_ip(ip)
     }
 }

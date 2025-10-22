@@ -36,6 +36,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
+use omicron_common::address::IpRange;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -309,7 +310,7 @@ impl ExampleSystemBuilder {
     /// anywhere between 0 and 30, inclusive, is permitted. (The limit of 30 is
     /// primarily to simplify the implementation.)
     ///
-    /// Each DNS server is assigned an address in the 10.x.x.x range.
+    /// Each DNS server is assigned an address in the 198.51.100.x range.
     pub fn external_dns_count(
         mut self,
         external_dns_count: usize,
@@ -500,9 +501,36 @@ impl ExampleSystemBuilder {
                 .unwrap();
         }
 
+        // Add as many external IPs as is necessary for external DNS zones. We
+        // pick addresses in the TEST-NET-2 (RFC 5737) range.
+        let mut external_ip_policy = system.external_ip_policy().clone();
+        if self.external_dns_count.0 > 0 {
+            external_ip_policy.push(
+                IpRange::try_from((
+                    "198.51.100.1".parse::<Ipv4Addr>().unwrap(),
+                    "198.51.100.30".parse::<Ipv4Addr>().unwrap(),
+                ))
+                .unwrap(),
+            );
+        }
+        for i in 0..self.external_dns_count.0 {
+            external_ip_policy
+                .set_ip_for_external_dns(IpAddr::V4(Ipv4Addr::new(
+                    198,
+                    51,
+                    100,
+                    (i + 1)
+                        .try_into()
+                        .expect("external_dns_count is always <= 30"),
+                )))
+                .expect("test IPs are valid service IPs");
+        }
+        system.set_external_ip_policy(external_ip_policy);
+
         let mut input_builder = system
             .to_planning_input_builder()
             .expect("failed to make planning input builder");
+
         let base_input = input_builder.clone().build();
 
         // Start with an empty blueprint containing only our sleds, no zones.
@@ -528,24 +556,6 @@ impl ExampleSystemBuilder {
             rng.blueprint2_rng,
         )
         .unwrap();
-
-        // Add as many external IPs as is necessary for external DNS zones. We
-        // pick addresses in the TEST-NET-2 (RFC 5737) range.
-        for i in 0..self.external_dns_count.0 {
-            builder
-                .inject_untracked_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
-                    198,
-                    51,
-                    100,
-                    (i + 1)
-                        .try_into()
-                        .expect("external_dns_count is always <= 30"),
-                )))
-                .expect(
-                    "this shouldn't error because provided external IPs \
-                 are all unique",
-                );
-        }
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();

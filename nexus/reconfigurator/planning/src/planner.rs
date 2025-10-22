@@ -2482,6 +2482,7 @@ pub(crate) mod test {
     use nexus_types::inventory::CockroachStatus;
     use nexus_types::inventory::InternalDnsGenerationStatus;
     use nexus_types::inventory::TimeSync;
+    use omicron_common::address::IpRange;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::TufArtifactMeta;
@@ -3250,6 +3251,7 @@ pub(crate) mod test {
         // We should not be able to add any external DNS zones yet,
         // because we haven't give it any addresses (which currently
         // come only from RSS). This is not an error, though.
+        assert!(input.external_ip_policy().external_dns_ips().is_empty());
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3267,8 +3269,31 @@ pub(crate) mod test {
             )
             .expect_err("can't add external DNS zones");
 
-        // Build a builder for a modfied blueprint that will include
-        // some external DNS addresses.
+        // Change the policy: add some external DNS IPs.
+        let external_dns_ips =
+            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
+                addr.parse::<IpAddr>()
+                    .expect("can't parse external DNS IP address")
+            });
+        let input = {
+            let mut builder = input.into_builder();
+            // Add a "service IP pool" covering our external DNS IP range.
+            builder.policy_mut().external_ips.push(
+                IpRange::try_from((external_dns_ips[0], external_dns_ips[2]))
+                    .unwrap(),
+            );
+            // Set these IPs as "for external DNS".
+            for ip in external_dns_ips {
+                builder
+                    .policy_mut()
+                    .external_ips
+                    .set_ip_for_external_dns(ip)
+                    .unwrap();
+            }
+            builder.build()
+        };
+
+        // Build a builder for a modfied blueprint based on the new policy.
         let mut blueprint_builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3278,18 +3303,6 @@ pub(crate) mod test {
             PlannerRng::from_entropy(),
         )
         .expect("failed to build blueprint builder");
-
-        // Manually reach into the external networking allocator and "find"
-        // some external IP addresses (maybe they fell off a truck).
-        // TODO-cleanup: Remove when external DNS addresses are in the policy.
-        let external_dns_ips =
-            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
-                addr.parse::<IpAddr>()
-                    .expect("can't parse external DNS IP address")
-            });
-        for addr in external_dns_ips {
-            blueprint_builder.inject_untracked_external_dns_ip(addr).unwrap();
-        }
 
         // Now we can add external DNS zones. We'll add two to the first
         // sled and one to the second.

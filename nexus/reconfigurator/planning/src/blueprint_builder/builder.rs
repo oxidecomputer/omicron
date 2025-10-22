@@ -2273,20 +2273,6 @@ impl<'a> BlueprintBuilder<'a> {
         });
     }
 
-    /// Allow a test to manually add an external DNS address, which could
-    /// ordinarily only come from RSS.
-    ///
-    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    // This can't be `#[cfg(test)]` because it's used by the `ExampleSystem`
-    // helper (which itself is used by reconfigurator-cli and friends). We give
-    // it a scary name instead.
-    pub(crate) fn inject_untracked_external_dns_ip(
-        &mut self,
-        addr: IpAddr,
-    ) -> Result<(), Error> {
-        Ok(self.resource_allocator()?.inject_untracked_external_dns_ip(addr)?)
-    }
-
     pub fn pending_mgs_updates_replace_all(
         &mut self,
         updates: nexus_types::deployment::PendingMgsUpdates,

@@ -8,11 +8,11 @@ use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::inventory::SourceNatConfig;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
-use omicron_common::address::IpRange;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
@@ -59,7 +59,7 @@ pub(super) struct ExternalNetworkingAllocator {
     // see https://github.com/oxidecomputer/omicron/issues/3732
     available_external_dns_ips: BTreeSet<IpAddr>,
 
-    // Allocator for external IPs for service zones
+    // Allocator for external IPs for Nexus and Boundary NTP zones.
     external_ip_alloc: ExternalIpAllocator,
 
     // Iterator of available MAC addresses in the system address range
@@ -69,8 +69,7 @@ pub(super) struct ExternalNetworkingAllocator {
 impl ExternalNetworkingAllocator {
     pub(super) fn new<'b>(
         running_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
-        expunged_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
-        service_ip_pool_ranges: Vec<IpRange>,
+        external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {
         // Scan through the running zones and build several sets of "used
         // resources". When adding new control plane zones to a sled, we may
@@ -112,9 +111,9 @@ impl ExternalNetworkingAllocator {
         let mut existing_external_dns_v6_ips: HashSet<Ipv6Addr> =
             HashSet::new();
         let mut external_ip_alloc =
-            ExternalIpAllocator::new(service_ip_pool_ranges);
+            ExternalIpAllocator::new(external_ip_policy);
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
-        let mut used_external_dns_ips: HashSet<IpAddr> = HashSet::new();
+        let mut used_external_dns_ips: BTreeSet<IpAddr> = BTreeSet::new();
 
         for z in running_omicron_zones {
             let zone_type = &z.zone_type;
@@ -181,36 +180,35 @@ impl ExternalNetworkingAllocator {
             }
         }
 
-        // Recycle the IP addresses of expunged external DNS zones,
-        // ensuring that those addresses aren't currently in use.
-        // TODO: Remove when external DNS addresses come from policy.
-        let mut available_external_dns_ips = BTreeSet::new();
-        for zone in expunged_omicron_zones {
-            if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
-                let ip = dns.dns_address.addr.ip();
-                if !used_external_dns_ips.contains(&ip) {
-                    available_external_dns_ips.insert(ip);
-
-                    // We also need to partition the external DNS IPs off from
-                    // the set of standard service external IPs. For any
-                    // available external DNS IP, mark it as used as far as the
-                    // normal IP allocator is concerned.
-                    let omicron_ip = OmicronZoneExternalIp::Floating(
-                        dns.dns_address.into_ip(),
-                    );
-                    match external_ip_alloc.mark_ip_used(&omicron_ip) {
-                        // Because we're checking _expunged_ zones, we might
-                        // have duplicate IPs. Ignore those; that means we've
-                        // already marked this IP as used, which is all we need.
-                        Ok(())
-                        | Err(ExternalIpAllocatorError::DuplicateExternalIp(
-                            _,
-                        )) => (),
-                        Err(err) => return Err(err.into()),
-                    }
-                }
-            }
+        // External DNS IPs are special:
+        //
+        // 1. Check that we don't have any in-use external DNS IPs that we don't
+        //    expect. Tere should be no way for this to happen at the time of
+        //    this writing, because there's no way to change the set of external
+        //    DNS IPs after RSS. Once we add a way to change it, presumably our
+        //    caller should handle this somehow (e.g., the planner should
+        //    expunge any external DNS zones on IPs that are no longer part of
+        //    the policy's set?).
+        // 2. The set of available IPs is the difference between the policy set
+        //    and the in use set.
+        let mut unexpected_external_dns_ips = used_external_dns_ips
+            .difference(external_ip_policy.external_dns_ips())
+            .filter(|ip| {
+                // As above, ignore localhost for the test suite.
+                !ip.is_loopback()
+            })
+            .peekable();
+        if unexpected_external_dns_ips.peek().is_some() {
+            bail!(
+                "unexpected in-service external DNS IPs: {:?}",
+                unexpected_external_dns_ips.collect::<Vec<_>>()
+            );
         }
+        let available_external_dns_ips = external_ip_policy
+            .external_dns_ips()
+            .difference(&used_external_dns_ips)
+            .copied()
+            .collect::<BTreeSet<_>>();
 
         // TODO-performance Building these iterators as "walk through the list
         // and skip anything we've used already" is fine as long as we're
@@ -380,23 +378,6 @@ impl ExternalNetworkingAllocator {
             nic_mac,
         })
     }
-
-    /// Allow a test to manually add an external DNS address,
-    /// which could otherwise only be added via RSS.
-    ///
-    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    pub(crate) fn add_external_dns_ip(
-        &mut self,
-        addr: IpAddr,
-    ) -> Result<(), ExternalNetworkingError> {
-        if self.available_external_dns_ips.insert(addr) {
-            Ok(())
-        } else {
-            return Err(ExternalNetworkingError::AddDuplicateExternalDnsIp {
-                ip: addr,
-            });
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -470,9 +451,13 @@ enum ExternalIpAllocatorError {
 }
 
 impl ExternalIpAllocator {
-    fn new(service_pool_ranges: Vec<IpRange>) -> Self {
-        let service_ip_pool_ips =
-            service_pool_ranges.into_iter().flat_map(|r| r.iter());
+    fn new(policy: &ExternalIpPolicy) -> Self {
+        let service_ip_pool_ranges = policy.service_ip_pool_ranges().to_vec();
+        let external_dns_ips = policy.external_dns_ips().clone();
+        let service_ip_pool_ips = service_ip_pool_ranges
+            .into_iter()
+            .flat_map(|r| r.iter())
+            .filter(move |ip| !external_dns_ips.contains(ip));
         Self {
             service_ip_pool_ips: DebugIgnore(Box::new(service_ip_pool_ips)),
             used_exclusive_ips: BTreeSet::new(),
@@ -671,8 +656,6 @@ impl TryFrom<(u16, u16)> for SnatPortRange {
 
 #[cfg(test)]
 pub mod test {
-    use std::net::SocketAddr;
-
     use super::*;
     use illumos_utils::zpool::ZpoolName;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
@@ -684,13 +667,14 @@ pub mod test {
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
-    use omicron_common::api::external::Generation;
+    use omicron_common::address::IpRange;
     use omicron_common::api::external::Vni;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use slog_error_chain::InlineErrorChain;
+    use std::net::SocketAddr;
     use test_strategy::proptest;
     use uuid::Uuid;
 
@@ -772,7 +756,8 @@ pub mod test {
         };
 
         // Build up the allocator and mark all used IPs.
-        let mut allocator = ExternalIpAllocator::new(ip_pool_ranges);
+        let mut allocator =
+            ExternalIpAllocator::new(&ExternalIpPolicy::new(ip_pool_ranges));
         for &ip in &used_exclusive {
             allocator
                 .mark_ip_used(&as_floating(ip))
@@ -872,13 +857,25 @@ pub mod test {
 
     #[test]
     fn external_dns_ips_are_partitioned_separately() {
-        // Construct a service IP range with 3 IPs.
+        // Construct a service IP range with 3 IPs. The first two are for
+        // external DNS, and the third is for other services.
         let service_ip_pool = IpRange::try_from((
             "192.0.2.1".parse::<IpAddr>().unwrap(),
             "192.0.2.3".parse::<IpAddr>().unwrap(),
         ))
         .unwrap();
         assert_eq!(service_ip_pool.len(), 3);
+
+        let external_ip_policy = {
+            let mut policy = ExternalIpPolicy::new(vec![service_ip_pool]);
+            policy
+                .set_ip_for_external_dns("192.0.2.1".parse().unwrap())
+                .unwrap();
+            policy
+                .set_ip_for_external_dns("192.0.2.2".parse().unwrap())
+                .unwrap();
+            policy
+        };
 
         let make_external_dns = |index, disposition| {
             let id = OmicronZoneUuid::new_v4();
@@ -922,27 +919,18 @@ pub mod test {
             }
         };
 
-        // Construct a set of inputs with 1 in-service external DNS zone (at IP
-        // 1) and 1 expunged external DNS zone (at IP 2). That should result in
-        // IP 2 being set aside for new external DNS zones, and one IP (IP 3)
-        // being set aside for other services (e.g., Nexus).
+        // Pass only a single running zone (external DNS at IP *.1). That should
+        // result in IP *.2 being set aside for a new external DNS zone and IP
+        // *.3 being set aside for other services (e.g., Nexus).
         let running_external_dns =
             make_external_dns(0, BlueprintZoneDisposition::InService);
-        let expunged_external_dns = make_external_dns(
-            1,
-            BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            },
-        );
 
         // Construct a builder; ask for external DNS IPs first (we should get IP
         // 1 then "none available") then Nexus IPs (we should get IP 2 then
         // "none available").
         let mut builder = ExternalNetworkingAllocator::new(
             [&running_external_dns].iter().copied(),
-            [&expunged_external_dns].iter().copied(),
-            vec![service_ip_pool],
+            &external_ip_policy,
         )
         .expect("constructed builder");
 
@@ -981,56 +969,7 @@ pub mod test {
         // partitioned off and do not depend on request ordering.
         let mut builder = ExternalNetworkingAllocator::new(
             [&running_external_dns].iter().copied(),
-            [&expunged_external_dns].iter().copied(),
-            vec![service_ip_pool],
-        )
-        .expect("constructed builder");
-
-        // Test Nexus
-        assert_eq!(
-            builder.for_new_nexus().expect("got Nexus IP").external_ip,
-            service_ip_pool.iter().nth(2).unwrap()
-        );
-        let err = builder.for_new_nexus().expect_err("no Nexus IPs left");
-        assert!(
-            matches!(
-                err,
-                ExternalNetworkingError::NoExternalServiceIpAvailable
-            ),
-            "unexpected error: {}",
-            InlineErrorChain::new(&err),
-        );
-
-        // Text external DNS
-        assert_eq!(
-            builder
-                .for_new_external_dns()
-                .expect("got external DNS IP")
-                .external_ip,
-            service_ip_pool.iter().nth(1).unwrap()
-        );
-        let err = builder.for_new_external_dns().expect_err("no DNS IPs left");
-        assert!(
-            matches!(err, ExternalNetworkingError::NoExternalDnsIpAvailable),
-            "unexpected error: {}",
-            InlineErrorChain::new(&err),
-        );
-
-        // Repeat the above test, but this time with two expunged DNS zones
-        // (different IDs, but both assigned the same IP, which is perfectly
-        // reasonable for expunged zones if they were never in service at the
-        // same time).
-        let expunged_external_dns2 = make_external_dns(
-            1,
-            BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            },
-        );
-        let mut builder = ExternalNetworkingAllocator::new(
-            [&running_external_dns].iter().copied(),
-            [&expunged_external_dns, &expunged_external_dns2].iter().copied(),
-            vec![service_ip_pool],
+            &external_ip_policy,
         )
         .expect("constructed builder");
 

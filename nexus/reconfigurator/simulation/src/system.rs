@@ -881,7 +881,7 @@ impl SimSystemBuilderInner {
             }
         }
 
-        self.system.description.external_ip_policy(
+        self.system.description.set_external_ip_policy(
             state.planning_input.external_ip_policy().clone(),
         );
         system_res.external_ip_policy =
