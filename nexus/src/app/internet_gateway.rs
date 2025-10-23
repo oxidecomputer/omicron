@@ -71,9 +71,6 @@ impl super::Nexus {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        // Networking restrictions are enforced by Polar rules (InternetGateway create_child permission)
-        // self.check_networking_restrictions(opctx).await?;
-
         let id = Uuid::new_v4();
         let router =
             db::model::InternetGateway::new(id, authz_vpc.id(), params.clone());
@@ -116,9 +113,6 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_vpc, authz_igw, _db_igw) =
             lookup.fetch_for(authz::Action::Delete).await?;
-
-        // Networking restrictions are enforced by Polar rules (InternetGateway delete permission)
-        // self.check_networking_restrictions(opctx).await?;
 
         let out = self
             .db_datastore
@@ -208,9 +202,6 @@ impl super::Nexus {
         let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;
 
-        // Networking restrictions are enforced by Polar rules (InternetGatewayIpPool create_child permission)
-        // self.check_networking_restrictions(opctx).await?;
-
         // need to use this method so it works for non-fleet users
         let (authz_pool, ..) =
             self.silo_ip_pool_fetch(&opctx, &params.ip_pool).await?;
@@ -245,9 +236,6 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_vpc, _authz_igw, authz_pool, db_pool) =
             lookup.fetch_for(authz::Action::Delete).await?;
-
-        // Networking restrictions are enforced by Polar rules (InternetGatewayIpPool delete permission)
-        // self.check_networking_restrictions(opctx).await?;
 
         let (.., igw) = LookupPath::new(opctx, &self.db_datastore)
             .internet_gateway_id(db_pool.internet_gateway_id)
@@ -344,9 +332,6 @@ impl super::Nexus {
         let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;
 
-        // Networking restrictions are enforced by Polar rules (InternetGatewayIpAddress create_child permission)
-        // self.check_networking_restrictions(opctx).await?;
-
         let id = Uuid::new_v4();
         let route = db::model::InternetGatewayIpAddress::new(
             id,
@@ -376,9 +361,6 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_vpc, _authz_igw, authz_addr, db_addr) =
             lookup.fetch_for(authz::Action::Delete).await?;
-
-        // Networking restrictions are enforced by Polar rules (InternetGatewayIpAddress delete permission)
-        // self.check_networking_restrictions(opctx).await?;
 
         let (.., igw) = LookupPath::new(opctx, &self.db_datastore)
             .internet_gateway_id(db_addr.internet_gateway_id)

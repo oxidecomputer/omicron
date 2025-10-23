@@ -78,8 +78,6 @@ impl super::Nexus {
                 .lookup_for(authz::Action::CreateChild)
                 .await?;
 
-        // Networking restrictions are enforced by Polar rules (VpcSubnet create_child permission)
-        // self.check_networking_restrictions(opctx).await?;
         let custom_router = match &params.custom_router {
             Some(k) => Some(
                 self.vpc_router_lookup_for_attach(opctx, k, &authz_vpc).await?,
@@ -192,9 +190,6 @@ impl super::Nexus {
         let (.., authz_vpc, authz_subnet) =
             vpc_subnet_lookup.lookup_for(authz::Action::Modify).await?;
 
-        // Networking restrictions are enforced by Polar rules (VpcSubnet modify permission)
-        // self.check_networking_restrictions(opctx).await?;
-
         let custom_router = match &params.custom_router {
             Some(k) => Some(
                 self.vpc_router_lookup_for_attach(opctx, k, &authz_vpc).await?,
@@ -234,9 +229,6 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_vpc, authz_subnet, db_subnet) =
             vpc_subnet_lookup.fetch_for(authz::Action::Delete).await?;
-
-        // Networking restrictions are enforced by Polar rules (VpcSubnet delete permission)
-        // self.check_networking_restrictions(opctx).await?;
 
         let saga_params = sagas::vpc_subnet_delete::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),

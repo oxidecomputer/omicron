@@ -111,7 +111,9 @@ impl super::Nexus {
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
         // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can create VPCs
+        // actions, only Silo Admins can create VPCs. Other networking resources
+        // use Polar rules to determine authorization, but VPC creation is a special
+        // case because it creates the top-level networking container.
         self.check_networking_restrictions(opctx).await?;
 
         let saga_params = sagas::vpc_create::Params {
@@ -153,9 +155,6 @@ impl super::Nexus {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::Modify).await?;
 
-        // Networking restrictions are enforced by Polar rules (VPC modify permission)
-        // self.check_networking_restrictions(opctx).await?;
-
         self.db_datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
             .await
@@ -168,9 +167,6 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_vpc, db_vpc) =
             vpc_lookup.fetch_for(authz::Action::Delete).await?;
-
-        // Networking restrictions are enforced by Polar rules (VPC delete permission)
-        // self.check_networking_restrictions(opctx).await?;
 
         let authz_vpc_router = authz::VpcRouter::new(
             authz_vpc.clone(),
@@ -225,9 +221,6 @@ impl super::Nexus {
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
         let (.., authz_vpc, db_vpc) =
             vpc_lookup.fetch_for(authz::Action::Modify).await?;
-
-        // Networking restrictions are enforced by Polar rules (VPC modify permission)
-        // self.check_networking_restrictions(opctx).await?;
 
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
