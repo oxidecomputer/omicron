@@ -799,6 +799,7 @@ newtype-uuid-macros = "0.1.0"
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
 scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs" }
+scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs" }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that
