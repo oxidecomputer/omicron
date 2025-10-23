@@ -555,17 +555,43 @@ impl BundleCollection {
                 // Timer fired mid-collection - check if we should stop.
                 yield_interval.tick().await;
                 trace!(
-                    &self.log,
+                    self.log,
                     "Checking if Bundle Collection cancelled";
                     "bundle" => %self.bundle.id
                 );
 
-                let bundle = self
+                match self
                     .datastore
                     .support_bundle_get(&self.opctx, self.bundle.id.into())
-                    .await?;
-                if !matches!(bundle.state, SupportBundleState::Collecting) {
-                    anyhow::bail!("Support Bundle Cancelled");
+                    .await
+                {
+                    Ok(bundle) => {
+                        if !matches!(
+                            bundle.state,
+                            SupportBundleState::Collecting
+                        ) {
+                            anyhow::bail!("Support Bundle Cancelled");
+                        }
+
+                        // Bundle still collecting; continue...
+                        continue;
+                    }
+                    Err(err)
+                        if matches!(err, Error::ObjectNotFound { .. })
+                            || matches!(err, Error::NotFound { .. }) =>
+                    {
+                        anyhow::bail!("Support Bundle Deleted");
+                    }
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "Database error checking bundle cancellation";
+                            InlineErrorChain::new(&err)
+                        );
+
+                        // If we cannot contact the database, retry later
+                        continue;
+                    }
                 }
             }
         };
