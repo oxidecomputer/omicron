@@ -12,6 +12,7 @@ use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::IncompleteNetworkInterface;
+use nexus_db_model::IpConfig;
 use nexus_db_model::IpPool;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -249,7 +250,20 @@ impl DataStore {
             // because that would require an extra DB lookup. We'll assume if
             // these main properties are correct, the subnet is too.
             for allocated_nic in &allocated_nics {
-                if allocated_nic.ip.ip() == nic.ip
+                // TODO-completeness: Need support for dual-stack internal
+                // network interfaces. See
+                // https://github.com/oxidecomputer/omicron/issues/9246.
+                //
+                // This should not be possible to hit until we actually allow
+                // creating a NIC with a VPC-private IP address.
+                let Some(ipv4) = allocated_nic.ipv4 else {
+                    return Err(Error::internal_error(&format!(
+                        "Allocated NICs should be single-stack IPv4, but \
+                        NIC with id '{}' is missing an IPv4 address",
+                        allocated_nic.identity.id,
+                    )));
+                };
+                if std::net::IpAddr::from(ipv4) == nic.ip
                     && *allocated_nic.mac == nic.mac
                     && *allocated_nic.slot == nic.slot
                     && allocated_nic.primary == nic.primary
@@ -371,6 +385,16 @@ impl DataStore {
         if self.is_nic_already_allocated(conn, service_id, nic, log).await? {
             return Ok(());
         }
+
+        // TODO-completeness: Handle dual-stack `shared::NetworkInterface`s.
+        // See https://github.com/oxidecomputer/omicron/issues/9246.
+        let std::net::IpAddr::V4(ip) = nic.ip else {
+            return Err(Error::internal_error(&format!(
+                "Unexpectedly found a service NIC without an IPv4 \
+                address, nic_id=\"{}\"",
+                nic.id,
+            )));
+        };
         let nic_arg = IncompleteNetworkInterface::new_service(
             nic.id,
             service_id.into_untyped_uuid(),
@@ -379,7 +403,7 @@ impl DataStore {
                 name: nic.name.clone(),
                 description: format!("{} service vNIC", zone_kind.report_str()),
             },
-            nic.ip,
+            IpConfig::from_ipv4(ip),
             nic.mac,
             nic.slot,
         )?;
@@ -783,7 +807,13 @@ mod tests {
             assert_eq!(db_nexus_nics[0].vpc_id, NEXUS_VPC_SUBNET.vpc_id);
             assert_eq!(db_nexus_nics[0].subnet_id, NEXUS_VPC_SUBNET.id());
             assert_eq!(*db_nexus_nics[0].mac, self.nexus_nic.mac);
-            assert_eq!(db_nexus_nics[0].ip, self.nexus_nic.ip.into());
+            // TODO-completeness: Handle the `nexus_nic` being dual-stack as
+            // well. See https://github.com/oxidecomputer/omicron/issues/9246.
+            assert_eq!(
+                db_nexus_nics[0].ipv4.map(IpAddr::from),
+                Some(self.nexus_nic.ip)
+            );
+            assert!(db_nexus_nics[0].ipv6.is_none());
             assert_eq!(*db_nexus_nics[0].slot, self.nexus_nic.slot);
             assert_eq!(db_nexus_nics[0].primary, self.nexus_nic.primary);
 
@@ -803,7 +833,13 @@ mod tests {
             assert_eq!(db_dns_nics[0].vpc_id, DNS_VPC_SUBNET.vpc_id);
             assert_eq!(db_dns_nics[0].subnet_id, DNS_VPC_SUBNET.id());
             assert_eq!(*db_dns_nics[0].mac, self.dns_nic.mac);
-            assert_eq!(db_dns_nics[0].ip, self.dns_nic.ip.into());
+            // TODO-completeness: Handle the `nexus_nic` being dual-stack as
+            // well. See https://github.com/oxidecomputer/omicron/issues/9246.
+            assert_eq!(
+                db_nexus_nics[0].ipv4.map(IpAddr::from),
+                Some(self.nexus_nic.ip)
+            );
+            assert!(db_nexus_nics[0].ipv6.is_none());
             assert_eq!(*db_dns_nics[0].slot, self.dns_nic.slot);
             assert_eq!(db_dns_nics[0].primary, self.dns_nic.primary);
 
@@ -823,7 +859,13 @@ mod tests {
             assert_eq!(db_ntp_nics[0].vpc_id, NTP_VPC_SUBNET.vpc_id);
             assert_eq!(db_ntp_nics[0].subnet_id, NTP_VPC_SUBNET.id());
             assert_eq!(*db_ntp_nics[0].mac, self.ntp_nic.mac);
-            assert_eq!(db_ntp_nics[0].ip, self.ntp_nic.ip.into());
+            // TODO-completeness: Handle the `nexus_nic` being dual-stack as
+            // well. See https://github.com/oxidecomputer/omicron/issues/9246.
+            assert_eq!(
+                db_nexus_nics[0].ipv4.map(IpAddr::from),
+                Some(self.nexus_nic.ip)
+            );
+            assert!(db_nexus_nics[0].ipv6.is_none());
             assert_eq!(*db_ntp_nics[0].slot, self.ntp_nic.slot);
             assert_eq!(db_ntp_nics[0].primary, self.ntp_nic.primary);
         }

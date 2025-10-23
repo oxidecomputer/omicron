@@ -59,7 +59,6 @@ use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
 use internal_dns_types::names::ServiceName;
-use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_errors::OptionalError;
@@ -168,6 +167,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::future::Future;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -5376,12 +5377,16 @@ async fn cmd_db_network_list_vnics(
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct NicRow {
-        ip: IpNetwork,
+        #[tabled(display_with = "option_impl_display")]
+        ipv4: Option<Ipv4Addr>,
+        #[tabled(display_with = "option_impl_display")]
+        ipv6: Option<Ipv6Addr>,
         mac: MacAddr,
         slot: u8,
         primary: bool,
         kind: &'static str,
-        subnet: String,
+        ipv4_subnet: String,
+        ipv6_subnet: String,
         parent_id: Uuid,
         parent_name: String,
     }
@@ -5471,7 +5476,7 @@ async fn cmd_db_network_list_vnics(
             }
         };
 
-        let subnet = {
+        let (ipv4_subnet, ipv6_subnet) = {
             use nexus_db_schema::schema::vpc_subnet::dsl;
             let subnet = match dsl::vpc_subnet
                 .filter(dsl::id.eq(nic.subnet_id))
@@ -5488,28 +5493,36 @@ async fn cmd_db_network_list_vnics(
                     continue;
                 }
             };
-
-            if nic.ip.is_ipv4() {
+            let ipv4_subnet = if nic.ipv4.is_some() {
                 subnet.ipv4_block.to_string()
             } else {
+                String::from("-")
+            };
+            let ipv6_subnet = if nic.ipv6.is_some() {
                 subnet.ipv6_block.to_string()
-            }
+            } else {
+                String::from("-")
+            };
+            (ipv4_subnet, ipv6_subnet)
         };
 
         let row = NicRow {
-            ip: nic.ip,
+            ipv4: nic.ipv4.map(Into::into),
+            ipv6: nic.ipv6.map(Into::into),
             mac: *nic.mac,
             slot: *nic.slot,
             primary: nic.primary,
             kind,
-            subnet,
+            ipv4_subnet,
+            ipv6_subnet,
             parent_id: nic.parent_id,
             parent_name,
         };
         rows.push(row);
     }
 
-    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    // Sort by IPv4 address, and then IPv6 address.
+    rows.sort_by(|a, b| a.ipv4.cmp(&b.ipv4).then_with(|| a.ipv6.cmp(&b.ipv6)));
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .to_string();

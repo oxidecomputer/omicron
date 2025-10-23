@@ -11,6 +11,7 @@ resource: authz::Database
   silo1-proj1-collaborator         ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✔  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Fleet id "001de000-1334-4000-8000-000000000000"
 
@@ -25,6 +26,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::BlueprintConfig
 
@@ -39,6 +41,7 @@ resource: authz::BlueprintConfig
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::ConsoleSessionList
 
@@ -53,6 +56,7 @@ resource: authz::ConsoleSessionList
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::DnsConfig
 
@@ -67,6 +71,7 @@ resource: authz::DnsConfig
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::DeviceAuthRequestList
 
@@ -81,6 +86,7 @@ resource: authz::DeviceAuthRequestList
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::Inventory
 
@@ -95,6 +101,7 @@ resource: authz::Inventory
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::IpPoolList
 
@@ -109,6 +116,7 @@ resource: authz::IpPoolList
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::QuiesceState
 
@@ -123,6 +131,7 @@ resource: authz::QuiesceState
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::UpdateTrustRootList
 
@@ -137,6 +146,7 @@ resource: authz::UpdateTrustRootList
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::TargetReleaseConfig
 
@@ -151,6 +161,7 @@ resource: authz::TargetReleaseConfig
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::AlertClassList
 
@@ -165,6 +176,7 @@ resource: authz::AlertClassList
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::AuditLog
 
@@ -179,6 +191,7 @@ resource: authz::AuditLog
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✔  ✘
 
 resource: Silo "silo1"
 
@@ -193,6 +206,7 @@ resource: Silo "silo1"
   silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Silo "silo1": certificate list
 
@@ -207,6 +221,7 @@ resource: Silo "silo1": certificate list
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Certificate "silo1-certificate"
 
@@ -221,6 +236,7 @@ resource: Certificate "silo1-certificate"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Silo "silo1": identity provider list
 
@@ -235,6 +251,7 @@ resource: Silo "silo1": identity provider list
   silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: IdentityProvider "silo1-identity-provider"
 
@@ -249,6 +266,7 @@ resource: IdentityProvider "silo1-identity-provider"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SamlIdentityProvider "silo1-saml-identity-provider"
 
@@ -263,6 +281,7 @@ resource: SamlIdentityProvider "silo1-saml-identity-provider"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Silo "silo1": user list
 
@@ -277,6 +296,7 @@ resource: Silo "silo1": user list
   silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloUser "silo1-user"
 
@@ -291,6 +311,7 @@ resource: SiloUser "silo1-user"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SshKey "silo1-user-ssh-key"
 
@@ -305,6 +326,7 @@ resource: SshKey "silo1-user-ssh-key"
   silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloGroup "silo1-group"
 
@@ -319,6 +341,7 @@ resource: SiloGroup "silo1-group"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloImage "silo1-silo-image"
 
@@ -333,6 +356,7 @@ resource: SiloImage "silo1-silo-image"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloUser "silo1-user": session list
 
@@ -347,6 +371,7 @@ resource: SiloUser "silo1-user": session list
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloUser "silo1-user": token list
 
@@ -361,6 +386,7 @@ resource: SiloUser "silo1-user": token list
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Image "silo1-image"
 
@@ -375,6 +401,7 @@ resource: Image "silo1-image"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Project "silo1-proj1"
 
@@ -389,6 +416,7 @@ resource: Project "silo1-proj1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Disk "silo1-proj1-disk1"
 
@@ -403,6 +431,7 @@ resource: Disk "silo1-proj1-disk1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: AffinityGroup "silo1-proj1-affinity-group1"
 
@@ -417,6 +446,7 @@ resource: AffinityGroup "silo1-proj1-affinity-group1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: AntiAffinityGroup "silo1-proj1-anti-affinity-group1"
 
@@ -431,6 +461,7 @@ resource: AntiAffinityGroup "silo1-proj1-anti-affinity-group1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Instance "silo1-proj1-instance1"
 
@@ -445,6 +476,7 @@ resource: Instance "silo1-proj1-instance1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InstanceNetworkInterface "silo1-proj1-instance1-nic1"
 
@@ -459,6 +491,7 @@ resource: InstanceNetworkInterface "silo1-proj1-instance1-nic1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Vpc "silo1-proj1-vpc1"
 
@@ -473,6 +506,7 @@ resource: Vpc "silo1-proj1-vpc1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: VpcSubnet "silo1-proj1-vpc1-subnet1"
 
@@ -487,6 +521,7 @@ resource: VpcSubnet "silo1-proj1-vpc1-subnet1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Snapshot "silo1-proj1-disk1-snapshot1"
 
@@ -501,6 +536,7 @@ resource: Snapshot "silo1-proj1-disk1-snapshot1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: ProjectImage "silo1-proj1-image1"
 
@@ -515,6 +551,7 @@ resource: ProjectImage "silo1-proj1-image1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: FloatingIp "silo1-proj1-fip1"
 
@@ -529,6 +566,7 @@ resource: FloatingIp "silo1-proj1-fip1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGateway "silo1-proj1-igw1"
 
@@ -543,6 +581,7 @@ resource: InternetGateway "silo1-proj1-igw1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGatewayIpPool "silo1-proj1-igw1-pool1"
 
@@ -557,6 +596,7 @@ resource: InternetGatewayIpPool "silo1-proj1-igw1-pool1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGatewayIpAddress "silo1-proj1-igw1-address1"
 
@@ -571,6 +611,7 @@ resource: InternetGatewayIpAddress "silo1-proj1-igw1-address1"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Project "silo1-proj2"
 
@@ -585,6 +626,7 @@ resource: Project "silo1-proj2"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Disk "silo1-proj2-disk1"
 
@@ -599,6 +641,7 @@ resource: Disk "silo1-proj2-disk1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: AffinityGroup "silo1-proj2-affinity-group1"
 
@@ -613,6 +656,7 @@ resource: AffinityGroup "silo1-proj2-affinity-group1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: AntiAffinityGroup "silo1-proj2-anti-affinity-group1"
 
@@ -627,6 +671,7 @@ resource: AntiAffinityGroup "silo1-proj2-anti-affinity-group1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Instance "silo1-proj2-instance1"
 
@@ -641,6 +686,7 @@ resource: Instance "silo1-proj2-instance1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InstanceNetworkInterface "silo1-proj2-instance1-nic1"
 
@@ -655,6 +701,7 @@ resource: InstanceNetworkInterface "silo1-proj2-instance1-nic1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Vpc "silo1-proj2-vpc1"
 
@@ -669,6 +716,7 @@ resource: Vpc "silo1-proj2-vpc1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: VpcSubnet "silo1-proj2-vpc1-subnet1"
 
@@ -683,6 +731,7 @@ resource: VpcSubnet "silo1-proj2-vpc1-subnet1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Snapshot "silo1-proj2-disk1-snapshot1"
 
@@ -697,6 +746,7 @@ resource: Snapshot "silo1-proj2-disk1-snapshot1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: ProjectImage "silo1-proj2-image1"
 
@@ -711,6 +761,7 @@ resource: ProjectImage "silo1-proj2-image1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: FloatingIp "silo1-proj2-fip1"
 
@@ -725,6 +776,7 @@ resource: FloatingIp "silo1-proj2-fip1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGateway "silo1-proj2-igw1"
 
@@ -739,6 +791,7 @@ resource: InternetGateway "silo1-proj2-igw1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGatewayIpPool "silo1-proj2-igw1-pool1"
 
@@ -753,6 +806,7 @@ resource: InternetGatewayIpPool "silo1-proj2-igw1-pool1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGatewayIpAddress "silo1-proj2-igw1-address1"
 
@@ -767,6 +821,37 @@ resource: InternetGatewayIpAddress "silo1-proj2-igw1-address1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: ScimClientBearerToken id "7885144e-9c75-47f7-a97d-7dfc58e1186c"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: Silo "silo1": scim client bearer token list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Silo "silo2"
 
@@ -781,6 +866,7 @@ resource: Silo "silo2"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Silo "silo2": certificate list
 
@@ -795,6 +881,7 @@ resource: Silo "silo2": certificate list
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Certificate "silo2-certificate"
 
@@ -809,6 +896,7 @@ resource: Certificate "silo2-certificate"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Silo "silo2": identity provider list
 
@@ -823,6 +911,7 @@ resource: Silo "silo2": identity provider list
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: IdentityProvider "silo2-identity-provider"
 
@@ -837,6 +926,7 @@ resource: IdentityProvider "silo2-identity-provider"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SamlIdentityProvider "silo2-saml-identity-provider"
 
@@ -851,6 +941,7 @@ resource: SamlIdentityProvider "silo2-saml-identity-provider"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Silo "silo2": user list
 
@@ -865,6 +956,7 @@ resource: Silo "silo2": user list
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloUser "silo2-user"
 
@@ -879,6 +971,7 @@ resource: SiloUser "silo2-user"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SshKey "silo2-user-ssh-key"
 
@@ -893,6 +986,7 @@ resource: SshKey "silo2-user-ssh-key"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloGroup "silo2-group"
 
@@ -907,6 +1001,7 @@ resource: SiloGroup "silo2-group"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloImage "silo2-silo-image"
 
@@ -921,6 +1016,7 @@ resource: SiloImage "silo2-silo-image"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloUser "silo2-user": session list
 
@@ -935,6 +1031,7 @@ resource: SiloUser "silo2-user": session list
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SiloUser "silo2-user": token list
 
@@ -949,6 +1046,7 @@ resource: SiloUser "silo2-user": token list
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Image "silo2-image"
 
@@ -963,6 +1061,7 @@ resource: Image "silo2-image"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Project "silo2-proj1"
 
@@ -977,6 +1076,7 @@ resource: Project "silo2-proj1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Disk "silo2-proj1-disk1"
 
@@ -991,6 +1091,7 @@ resource: Disk "silo2-proj1-disk1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: AffinityGroup "silo2-proj1-affinity-group1"
 
@@ -1005,6 +1106,7 @@ resource: AffinityGroup "silo2-proj1-affinity-group1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: AntiAffinityGroup "silo2-proj1-anti-affinity-group1"
 
@@ -1019,6 +1121,7 @@ resource: AntiAffinityGroup "silo2-proj1-anti-affinity-group1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Instance "silo2-proj1-instance1"
 
@@ -1033,6 +1136,7 @@ resource: Instance "silo2-proj1-instance1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InstanceNetworkInterface "silo2-proj1-instance1-nic1"
 
@@ -1047,6 +1151,7 @@ resource: InstanceNetworkInterface "silo2-proj1-instance1-nic1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Vpc "silo2-proj1-vpc1"
 
@@ -1061,6 +1166,7 @@ resource: Vpc "silo2-proj1-vpc1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: VpcSubnet "silo2-proj1-vpc1-subnet1"
 
@@ -1075,6 +1181,7 @@ resource: VpcSubnet "silo2-proj1-vpc1-subnet1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Snapshot "silo2-proj1-disk1-snapshot1"
 
@@ -1089,6 +1196,7 @@ resource: Snapshot "silo2-proj1-disk1-snapshot1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: ProjectImage "silo2-proj1-image1"
 
@@ -1103,6 +1211,7 @@ resource: ProjectImage "silo2-proj1-image1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: FloatingIp "silo2-proj1-fip1"
 
@@ -1117,6 +1226,7 @@ resource: FloatingIp "silo2-proj1-fip1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGateway "silo2-proj1-igw1"
 
@@ -1131,6 +1241,7 @@ resource: InternetGateway "silo2-proj1-igw1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGatewayIpPool "silo2-proj1-igw1-pool1"
 
@@ -1145,6 +1256,7 @@ resource: InternetGatewayIpPool "silo2-proj1-igw1-pool1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: InternetGatewayIpAddress "silo2-proj1-igw1-address1"
 
@@ -1159,6 +1271,37 @@ resource: InternetGatewayIpAddress "silo2-proj1-igw1-address1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: ScimClientBearerToken id "7885144e-9c75-47f7-a97d-7dfc58e1186c"
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: Silo "silo2": scim client bearer token list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Rack id "c037e882-8b6d-c8b5-bef4-97e848eb0a50"
 
@@ -1173,6 +1316,7 @@ resource: Rack id "c037e882-8b6d-c8b5-bef4-97e848eb0a50"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Sled id "8a785566-adaf-c8d8-e886-bee7f9b73ca7"
 
@@ -1187,6 +1331,7 @@ resource: Sled id "8a785566-adaf-c8d8-e886-bee7f9b73ca7"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Zpool id "aaaaaaaa-1233-af7d-9220-afe1d8090900"
 
@@ -1201,6 +1346,7 @@ resource: Zpool id "aaaaaaaa-1233-af7d-9220-afe1d8090900"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Service id "6b1f15ee-d6b3-424c-8436-94413a0b682d"
 
@@ -1215,6 +1361,7 @@ resource: Service id "6b1f15ee-d6b3-424c-8436-94413a0b682d"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Service id "7f7bb301-5dc9-41f1-ab29-d369f4835079"
 
@@ -1229,6 +1376,7 @@ resource: Service id "7f7bb301-5dc9-41f1-ab29-d369f4835079"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: PhysicalDisk id "c9f923f6-caf3-4c83-96f9-8ffe8c627dd2"
 
@@ -1243,6 +1391,7 @@ resource: PhysicalDisk id "c9f923f6-caf3-4c83-96f9-8ffe8c627dd2"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: SupportBundle id "d9f923f6-caf3-4c83-96f9-8ffe8c627dd2"
 
@@ -1257,6 +1406,7 @@ resource: SupportBundle id "d9f923f6-caf3-4c83-96f9-8ffe8c627dd2"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: DeviceAuthRequest "a-device-user-code"
 
@@ -1271,6 +1421,7 @@ resource: DeviceAuthRequest "a-device-user-code"
   silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: DeviceAccessToken id "3b80c7f9-bee0-4b42-8550-6cdfc74dafdb"
 
@@ -1285,6 +1436,7 @@ resource: DeviceAccessToken id "3b80c7f9-bee0-4b42-8550-6cdfc74dafdb"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Blueprint id "b9e923f6-caf3-4c83-96f9-8ffe8c627dd2"
 
@@ -1299,6 +1451,7 @@ resource: Blueprint id "b9e923f6-caf3-4c83-96f9-8ffe8c627dd2"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: TufRepo id "3c52d72f-cbf7-4951-a62f-a4154e74da87"
 
@@ -1313,6 +1466,7 @@ resource: TufRepo id "3c52d72f-cbf7-4951-a62f-a4154e74da87"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: TufArtifact id "6827813e-bfaa-4205-9b9f-9f7901e4aab1"
 
@@ -1327,6 +1481,7 @@ resource: TufArtifact id "6827813e-bfaa-4205-9b9f-9f7901e4aab1"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: TufTrustRoot id "b2c043c7-5eaa-40b5-a0a2-cdf97b2e66b3"
 
@@ -1341,6 +1496,7 @@ resource: TufTrustRoot id "b2c043c7-5eaa-40b5-a0a2-cdf97b2e66b3"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: AddressLot id "43259fdc-c5c0-4a21-8b1d-2f673ad00d93"
 
@@ -1355,6 +1511,7 @@ resource: AddressLot id "43259fdc-c5c0-4a21-8b1d-2f673ad00d93"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: LoopbackAddress id "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b"
 
@@ -1369,6 +1526,7 @@ resource: LoopbackAddress id "9efbf1b1-16f9-45ab-864a-f7ebe501ae5b"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Alert id "31cb17da-4164-4cbf-b9a3-b3e4a687c08b"
 
@@ -1383,6 +1541,7 @@ resource: Alert id "31cb17da-4164-4cbf-b9a3-b3e4a687c08b"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: AlertReceiver "webhooked-on-phonics"
 
@@ -1397,6 +1556,7 @@ resource: AlertReceiver "webhooked-on-phonics"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: WebhookSecret id "0c3e55cb-fcee-46e9-a2e3-0901dbd3b997"
 
@@ -1411,6 +1571,7 @@ resource: WebhookSecret id "0c3e55cb-fcee-46e9-a2e3-0901dbd3b997"
   silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 ACTIONS:
 
