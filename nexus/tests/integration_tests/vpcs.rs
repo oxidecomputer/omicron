@@ -1524,9 +1524,15 @@ impl PermissionTest {
     }
 
     fn print_table(tests: &[PermissionTest]) {
-        println!("\n┌─────────────────────────┬────────┬──────┬────────┬────────┐");
-        println!("│ Role                    │ CREATE │ READ │ MODIFY │ DELETE │");
-        println!("├─────────────────────────┼────────┼──────┼────────┼────────┤");
+        println!(
+            "\n┌─────────────────────────┬────────┬──────┬────────┬────────┐"
+        );
+        println!(
+            "│ Role                    │ CREATE │ READ │ MODIFY │ DELETE │"
+        );
+        println!(
+            "├─────────────────────────┼────────┼──────┼────────┼────────┤"
+        );
         for test in tests {
             println!(
                 "│ {:<23} │   {}    │  {}   │   {}    │   {}    │",
@@ -1537,7 +1543,9 @@ impl PermissionTest {
                 if test.delete { "✓" } else { "✗" },
             );
         }
-        println!("└─────────────────────────┴────────┴──────┴────────┴────────┘");
+        println!(
+            "└─────────────────────────┴────────┴──────┴────────┴────────┘"
+        );
     }
 }
 
@@ -1584,7 +1592,8 @@ async fn test_vpc_networking_permissions_unrestricted(
         quotas: params::SiloQuotasCreate::empty(),
     };
 
-    let silo: views::Silo = object_create(&client, silo_url, &silo_params).await;
+    let silo: views::Silo =
+        object_create(&client, silo_url, &silo_params).await;
 
     // Create users with different roles
     let silo_admin = create_local_user(
@@ -1692,10 +1701,11 @@ async fn test_vpc_networking_permissions_unrestricted(
         dns_name: "admin".parse().unwrap(),
     };
 
-    let _admin_vpc: Vpc = NexusRequest::objects_post(&client, &vpcs_url, &vpc_params)
-        .authn_as(AuthnMode::SiloUser(silo_admin.id))
-        .execute_and_parse_unwrap()
-        .await;
+    let _admin_vpc: Vpc =
+        NexusRequest::objects_post(&client, &vpcs_url, &vpc_params)
+            .authn_as(AuthnMode::SiloUser(silo_admin.id))
+            .execute_and_parse_unwrap()
+            .await;
     results[0].create = true;
 
     // ========================================================================
@@ -1711,10 +1721,11 @@ async fn test_vpc_networking_permissions_unrestricted(
         dns_name: None,
     };
 
-    let _: Vpc = NexusRequest::object_put(&client, &admin_vpc_url, Some(&vpc_update))
-        .authn_as(AuthnMode::SiloUser(silo_admin.id))
-        .execute_and_parse_unwrap()
-        .await;
+    let _: Vpc =
+        NexusRequest::object_put(&client, &admin_vpc_url, Some(&vpc_update))
+            .authn_as(AuthnMode::SiloUser(silo_admin.id))
+            .execute_and_parse_unwrap()
+            .await;
     results[0].modify = true;
 
     // ========================================================================
@@ -1730,17 +1741,19 @@ async fn test_vpc_networking_permissions_unrestricted(
         dns_name: "collab".parse().unwrap(),
     };
 
-    let _: Vpc = NexusRequest::objects_post(&client, &vpcs_url, &collab_vpc_params)
-        .authn_as(AuthnMode::SiloUser(silo_collaborator.id))
-        .execute_and_parse_unwrap()
-        .await;
+    let _: Vpc =
+        NexusRequest::objects_post(&client, &vpcs_url, &collab_vpc_params)
+            .authn_as(AuthnMode::SiloUser(silo_collaborator.id))
+            .execute_and_parse_unwrap()
+            .await;
     results[1].create = true;
 
     // ========================================================================
     // TEST: Silo Collaborator can MODIFY VPCs
     // ========================================================================
 
-    let collab_vpc_url = format!("/v1/vpcs/collab-vpc?project={}", project_name);
+    let collab_vpc_url =
+        format!("/v1/vpcs/collab-vpc?project={}", project_name);
     let vpc_update = params::VpcUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
@@ -1749,10 +1762,11 @@ async fn test_vpc_networking_permissions_unrestricted(
         dns_name: None,
     };
 
-    let _: Vpc = NexusRequest::object_put(&client, &collab_vpc_url, Some(&vpc_update))
-        .authn_as(AuthnMode::SiloUser(silo_collaborator.id))
-        .execute_and_parse_unwrap()
-        .await;
+    let _: Vpc =
+        NexusRequest::object_put(&client, &collab_vpc_url, Some(&vpc_update))
+            .authn_as(AuthnMode::SiloUser(silo_collaborator.id))
+            .execute_and_parse_unwrap()
+            .await;
     results[1].modify = true;
 
     // ========================================================================
@@ -1768,17 +1782,19 @@ async fn test_vpc_networking_permissions_unrestricted(
         dns_name: "proj-collab".parse().unwrap(),
     };
 
-    let _: Vpc = NexusRequest::objects_post(&client, &vpcs_url, &proj_collab_vpc_params)
-        .authn_as(AuthnMode::SiloUser(project_collaborator.id))
-        .execute_and_parse_unwrap()
-        .await;
+    let _: Vpc =
+        NexusRequest::objects_post(&client, &vpcs_url, &proj_collab_vpc_params)
+            .authn_as(AuthnMode::SiloUser(project_collaborator.id))
+            .execute_and_parse_unwrap()
+            .await;
     results[2].create = true;
 
     // ========================================================================
     // TEST: Project Collaborator can MODIFY VPCs
     // ========================================================================
 
-    let proj_collab_vpc_url = format!("/v1/vpcs/proj-collab-vpc?project={}", project_name);
+    let proj_collab_vpc_url =
+        format!("/v1/vpcs/proj-collab-vpc?project={}", project_name);
     let vpc_update = params::VpcUpdate {
         identity: IdentityMetadataUpdateParams {
             name: None,
@@ -1787,10 +1803,14 @@ async fn test_vpc_networking_permissions_unrestricted(
         dns_name: None,
     };
 
-    let _: Vpc = NexusRequest::object_put(&client, &proj_collab_vpc_url, Some(&vpc_update))
-        .authn_as(AuthnMode::SiloUser(project_collaborator.id))
-        .execute_and_parse_unwrap()
-        .await;
+    let _: Vpc = NexusRequest::object_put(
+        &client,
+        &proj_collab_vpc_url,
+        Some(&vpc_update),
+    )
+    .authn_as(AuthnMode::SiloUser(project_collaborator.id))
+    .execute_and_parse_unwrap()
+    .await;
     results[2].modify = true;
 
     // ========================================================================
@@ -1927,14 +1947,34 @@ async fn test_vpc_networking_permissions_unrestricted(
     PermissionTest::print_table(&results);
 
     // Verify expected results
-    assert!(results[0].create && results[0].read && results[0].modify && results[0].delete,
-        "Silo Admin should have all permissions");
-    assert!(results[1].create && results[1].read && results[1].modify && results[1].delete,
-        "Silo Collaborator should have all permissions");
-    assert!(results[2].create && results[2].read && results[2].modify && results[2].delete,
-        "Project Collaborator should have all permissions");
-    assert!(!results[3].create && results[3].read && !results[3].modify && !results[3].delete,
-        "Project Viewer should only have read permission");
+    assert!(
+        results[0].create
+            && results[0].read
+            && results[0].modify
+            && results[0].delete,
+        "Silo Admin should have all permissions"
+    );
+    assert!(
+        results[1].create
+            && results[1].read
+            && results[1].modify
+            && results[1].delete,
+        "Silo Collaborator should have all permissions"
+    );
+    assert!(
+        results[2].create
+            && results[2].read
+            && results[2].modify
+            && results[2].delete,
+        "Project Collaborator should have all permissions"
+    );
+    assert!(
+        !results[3].create
+            && results[3].read
+            && !results[3].modify
+            && !results[3].delete,
+        "Project Viewer should only have read permission"
+    );
 
     println!("\n✅ All unrestricted silo tests passed!");
 }
@@ -1982,7 +2022,8 @@ async fn test_vpc_networking_permissions_restricted(
         quotas: params::SiloQuotasCreate::empty(),
     };
 
-    let silo: views::Silo = object_create(&client, silo_url, &silo_params).await;
+    let silo: views::Silo =
+        object_create(&client, silo_url, &silo_params).await;
 
     // Create users with different roles
     let silo_admin = create_local_user(
@@ -2090,10 +2131,11 @@ async fn test_vpc_networking_permissions_restricted(
         dns_name: "admin".parse().unwrap(),
     };
 
-    let _admin_vpc: Vpc = NexusRequest::objects_post(&client, &vpcs_url, &vpc_params)
-        .authn_as(AuthnMode::SiloUser(silo_admin.id))
-        .execute_and_parse_unwrap()
-        .await;
+    let _admin_vpc: Vpc =
+        NexusRequest::objects_post(&client, &vpcs_url, &vpc_params)
+            .authn_as(AuthnMode::SiloUser(silo_admin.id))
+            .execute_and_parse_unwrap()
+            .await;
     results[0].create = true;
 
     // ========================================================================
@@ -2109,10 +2151,11 @@ async fn test_vpc_networking_permissions_restricted(
         dns_name: None,
     };
 
-    let _: Vpc = NexusRequest::object_put(&client, &admin_vpc_url, Some(&vpc_update))
-        .authn_as(AuthnMode::SiloUser(silo_admin.id))
-        .execute_and_parse_unwrap()
-        .await;
+    let _: Vpc =
+        NexusRequest::object_put(&client, &admin_vpc_url, Some(&vpc_update))
+            .authn_as(AuthnMode::SiloUser(silo_admin.id))
+            .execute_and_parse_unwrap()
+            .await;
     results[0].modify = true;
 
     // ========================================================================
@@ -2212,7 +2255,9 @@ async fn test_vpc_networking_permissions_restricted(
     .await
     .expect("Project Collaborator should NOT be able to CREATE VPCs in restricted silo");
 
-    println!("✓ Project Collaborator CANNOT CREATE VPCs (restricted by policy)");
+    println!(
+        "✓ Project Collaborator CANNOT CREATE VPCs (restricted by policy)"
+    );
 
     // ========================================================================
     // TEST: Project Collaborator CAN READ VPCs (read is allowed)
@@ -2246,7 +2291,9 @@ async fn test_vpc_networking_permissions_restricted(
     .await
     .expect("Project Collaborator should NOT be able to MODIFY VPCs in restricted silo");
 
-    println!("✓ Project Collaborator CANNOT MODIFY VPCs (restricted by policy)");
+    println!(
+        "✓ Project Collaborator CANNOT MODIFY VPCs (restricted by policy)"
+    );
 
     // ========================================================================
     // TEST: Project Collaborator CANNOT DELETE VPCs (restricted)
@@ -2261,7 +2308,9 @@ async fn test_vpc_networking_permissions_restricted(
     .await
     .expect("Project Collaborator should NOT be able to DELETE VPCs in restricted silo");
 
-    println!("✓ Project Collaborator CANNOT DELETE VPCs (restricted by policy)");
+    println!(
+        "✓ Project Collaborator CANNOT DELETE VPCs (restricted by policy)"
+    );
 
     // ========================================================================
     // TEST: Project Viewer CAN READ VPCs
@@ -2378,14 +2427,34 @@ async fn test_vpc_networking_permissions_restricted(
     PermissionTest::print_table(&results);
 
     // Verify expected results
-    assert!(results[0].create && results[0].read && results[0].modify && results[0].delete,
-        "Silo Admin should have all permissions (unrestricted by policy)");
-    assert!(!results[1].create && results[1].read && !results[1].modify && !results[1].delete,
-        "Silo Collaborator should only have read permission (restricted by policy)");
-    assert!(!results[2].create && results[2].read && !results[2].modify && !results[2].delete,
-        "Project Collaborator should only have read permission (restricted by policy)");
-    assert!(!results[3].create && results[3].read && !results[3].modify && !results[3].delete,
-        "Project Viewer should only have read permission");
+    assert!(
+        results[0].create
+            && results[0].read
+            && results[0].modify
+            && results[0].delete,
+        "Silo Admin should have all permissions (unrestricted by policy)"
+    );
+    assert!(
+        !results[1].create
+            && results[1].read
+            && !results[1].modify
+            && !results[1].delete,
+        "Silo Collaborator should only have read permission (restricted by policy)"
+    );
+    assert!(
+        !results[2].create
+            && results[2].read
+            && !results[2].modify
+            && !results[2].delete,
+        "Project Collaborator should only have read permission (restricted by policy)"
+    );
+    assert!(
+        !results[3].create
+            && results[3].read
+            && !results[3].modify
+            && !results[3].delete,
+        "Project Viewer should only have read permission"
+    );
 
     println!("\n✅ All restricted silo tests passed!");
 }
