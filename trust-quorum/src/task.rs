@@ -298,7 +298,9 @@ mod tests {
     #[tokio::test]
     async fn full_mesh_connectivity() {
         let logctx = test_setup_log("full_mesh_connectivity");
-        let (dir, _) = log_prefix_for_test("full_mesh_connectivity");
+        let (mut dir, s) = log_prefix_for_test("full_mesh_connectivity");
+        dir.push(&s);
+        std::fs::create_dir(&dir).unwrap();
         println!("Writing keys and certs to {dir}");
         let num_nodes = 4;
 
@@ -327,7 +329,7 @@ mod tests {
         let out = attest_mock::log::mock(attest_log_doc).unwrap();
         std::fs::write(dir.join("log.bin"), &out).unwrap();
 
-        let configs = pki_doc_to_node_configs(dir, num_nodes);
+        let configs = pki_doc_to_node_configs(dir.clone(), num_nodes);
 
         let mut node_handles = vec![];
         let mut join_handles = vec![];
@@ -471,5 +473,6 @@ mod tests {
         .unwrap();
 
         logctx.cleanup_successful();
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
