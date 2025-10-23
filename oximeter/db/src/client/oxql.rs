@@ -973,13 +973,13 @@ impl Client {
                 for field_schema in schema.field_schema.iter() {
                     select_map
                         .entry(field_schema.field_type)
-                        .or_insert(vec![String::from("timeseries_key")])
+                        .or_insert_with(|| vec![String::from("timeseries_key")])
                         .push(format!(
-                            "anyIf(field_value, field_name = '{}') AS `{}`",
+                            "anyIf(field_value, field_name = '{}') AS {}",
                             field_schema.name, field_schema.name
                         ));
                     top_selects.push(format!(
-                        "{}_pivot.`{}` AS `{}`",
+                        "{}_pivot.{} AS {}",
                         field_table_name(field_schema.field_type),
                         field_schema.name,
                         field_schema.name
@@ -992,10 +992,19 @@ impl Client {
                 let mut field_types: Vec<oximeter::FieldType> =
                     select_map.keys().cloned().collect();
                 field_types.sort_by(|a, b| {
-                    select_map[b].len().cmp(&select_map[a].len())
+                    select_map[b]
+                        .len()
+                        .cmp(&select_map[a].len())
+                        .then(field_table_name(*a).cmp(&field_table_name(*b)))
                 });
 
-                // Build a map from field type to pivot subquery.
+                // Build a map from field type to pivot subquery. We filter by
+                // timeseries_name, group by timeseries_key, and use anyIf to
+                // pivot fields to a wide table. We can use anyIf to take the
+                // first matching value because a given timeseries key is
+                // always associated with the same set of fields, so all rows
+                // with a given (timeseries_key, field_name) will have the same
+                // field_value.
                 let mut query_map: HashMap<oximeter::FieldType, String> =
                     HashMap::new();
                 for field_type in field_types.clone() {
@@ -1190,7 +1199,7 @@ mod tests {
         AuthzScope, DatumType, FieldSchema, FieldSource, FieldType, Sample,
         TimeseriesSchema, Units,
     };
-    use oximeter::{FieldValue, types::Cumulative};
+    use oximeter::{FieldValue, TimeseriesName, types::Cumulative};
     use oxql_types::{Table, Timeseries, point::Points};
     use std::collections::{BTreeMap, BTreeSet};
     use std::time::Duration;
@@ -1329,6 +1338,126 @@ mod tests {
             .await
             .expect("Failed to insert test data");
         TestContext { logctx, clickhouse: db, client, test_data }
+    }
+
+    #[tokio::test]
+    async fn test_get_fields_query() {
+        let ctx = setup_oxql_test("test_get_fields_query").await;
+
+        let schema = ctx
+            .client
+            .schema_for_timeseries(
+                &TimeseriesName::try_from("some_target:some_metric").unwrap(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let query = ctx.client.all_fields_query(&schema, None).unwrap();
+        let want = "SELECT
+            fields_i32_pivot.foo AS foo,
+            fields_u32_pivot.index AS index,
+            fields_string_pivot.name AS name,
+            fields_i32_pivot.timeseries_key AS timeseries_key
+        FROM
+        (
+            SELECT
+                timeseries_key,
+                anyIf(field_value, field_name = 'foo') AS foo
+            FROM oximeter.fields_i32
+            WHERE timeseries_name = 'some_target:some_metric'
+            GROUP BY timeseries_key
+        ) AS fields_i32_pivot
+        JOIN
+        (
+            SELECT
+                timeseries_key,
+                anyIf(field_value, field_name = 'name') AS name
+            FROM oximeter.fields_string
+            WHERE timeseries_name = 'some_target:some_metric'
+            GROUP BY timeseries_key
+        ) AS fields_string_pivot ON fields_i32_pivot.timeseries_key = fields_string_pivot.timeseries_key
+        JOIN
+        (
+            SELECT
+                timeseries_key,
+                anyIf(field_value, field_name = 'index') AS index
+            FROM oximeter.fields_u32
+            WHERE timeseries_name = 'some_target:some_metric'
+            GROUP BY timeseries_key
+        ) AS fields_u32_pivot ON fields_i32_pivot.timeseries_key = fields_u32_pivot.timeseries_key";
+        assert_eq!(
+            want.split_whitespace().collect::<Vec<&str>>().join(" "),
+            query.split_whitespace().collect::<Vec<&str>>().join(" ")
+        );
+
+        ctx.cleanup_successful().await;
+    }
+
+    #[tokio::test]
+    async fn test_get_fields() {
+        let ctx = setup_oxql_test("test_get_fields").await;
+
+        #[derive(Clone, Debug, oximeter::Metric)]
+        struct Metric1 {
+            foo: i32,
+            bar: i32,
+            datum: Cumulative<u64>,
+        }
+        #[derive(Clone, Debug, oximeter::Metric)]
+        struct Metric2 {
+            foo: i32,
+            baz: i32,
+            datum: Cumulative<u64>,
+        }
+
+        // Insert samples for multiple metrics with partially overlapping field
+        // names and types. Then we'll query for one of those metrics and
+        // assert that we only get the expected fields, and not fields of the
+        // same name and type from another metric.
+        let samples = [
+            Sample::new(
+                &SomeTarget { name: String::from("ts1"), index: 1 },
+                &Metric1 { foo: 1, bar: 2, datum: Cumulative::new(5) },
+            )
+            .unwrap(),
+            Sample::new(
+                &SomeTarget { name: String::from("ts1"), index: 1 },
+                &Metric1 { foo: 1, bar: 2, datum: Cumulative::new(6) },
+            )
+            .unwrap(),
+            Sample::new(
+                &SomeTarget { name: String::from("ts2"), index: 1 },
+                &Metric2 { foo: 3, baz: 4, datum: Cumulative::new(5) },
+            )
+            .unwrap(),
+            Sample::new(
+                &SomeTarget { name: String::from("ts2"), index: 1 },
+                &Metric2 { foo: 3, baz: 4, datum: Cumulative::new(6) },
+            )
+            .unwrap(),
+        ];
+        ctx.client
+            .insert_samples(&samples[..])
+            .await
+            .expect("failed to insert samples");
+
+        let query = "get some_target:metric2 | filter timestamp > @2020-01-01";
+        let result = ctx
+            .client
+            .oxql_query(query, QueryAuthzScope::Fleet)
+            .await
+            .expect("failed to run OxQL query");
+
+        assert_eq!(result.tables.len(), 1, "should be exactly 1 table");
+        let table = result.tables.get(0).unwrap();
+
+        assert_eq!(table.n_timeseries(), 1, "should be exactly 1 series");
+        let series: Vec<&Timeseries> = table.timeseries().collect();
+
+        assert_eq!(series[0].fields.get("foo").unwrap(), &FieldValue::I32(3));
+        assert_eq!(series[0].fields.get("baz").unwrap(), &FieldValue::I32(4));
+
+        ctx.cleanup_successful().await;
     }
 
     #[tokio::test]
