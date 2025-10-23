@@ -145,13 +145,17 @@ for check_run_id in $(jq -r .check_runs[].id api/check_suite_runs); do
     curl -fL -o git/junit.xml --retry 3 "${junit_url}"
 
     # Uploading to Trunk has to happen inside of the git repository at the current commit.
-    log_step "uploading the JUnit XML report of check run ${check_run_id} to Trunk..."
-    cd git/
-    env "${vars[@]}" \
-        ../trunk flakytests upload \
-        --junit-paths junit.xml \
-        --variant "${variant}" \
-        --org-url-slug "${TRUNK_ORG_SLUG}" \
-        --token "${TRUNK_TOKEN}"
-    cd ..
+    if [[ -z "${DRY_RUN+x}" ]]; then
+        log_step "uploading the JUnit XML report of check run ${check_run_id} to Trunk..."
+        cd git/
+        env "${vars[@]}" \
+            ../trunk flakytests upload \
+            --junit-paths junit.xml \
+            --variant "${variant}" \
+            --org-url-slug "${TRUNK_ORG_SLUG}" \
+            --token "${TRUNK_TOKEN}"
+        cd ..
+    else
+        log_step "skipped upload to Trunk, we are in a dry run"
+    fi
 done
