@@ -4,9 +4,7 @@
 
 //! An individual sprockets connection running in its own task
 
-use crate::{
-    BaseboardId, ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg,
-};
+use crate::{ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg};
 use bytes::Buf;
 use serde::Serialize;
 use slog::{Logger, debug, error, o, warn};
@@ -19,6 +17,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::time::{Instant, MissedTickBehavior, interval};
+use trust_quorum_protocol::BaseboardId;
 
 /// Max buffer size of a connection
 const CONN_BUF_SIZE: usize = 1024 * 1024;

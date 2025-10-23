@@ -5,7 +5,7 @@
 //! A mechanism for maintaining a full mesh of trust quorum node connections
 
 use crate::established_conn::EstablishedConn;
-use crate::{BaseboardId, PeerMsg};
+use trust_quorum_protocol::{BaseboardId, PeerMsg};
 // TODO: Move or copy this to this crate?
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
@@ -45,7 +45,7 @@ pub enum AcceptError {
 }
 
 /// Messages sent from the main task to the connection managing tasks
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum MainToConnMsg {
     #[expect(unused)]
     Msg(WireMsg),
@@ -58,7 +58,7 @@ pub enum MainToConnMsg {
 ///
 /// All `WireMsg`s sent between nodes is prefixed with a 4 byte size header used
 /// for framing.
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum WireMsg {
     /// Used for connection keep alive
     Ping,
@@ -84,19 +84,35 @@ pub enum WireMsg {
 /// We include `task_id` to differentiate which task they come from so we can
 /// exclude requests from tasks that have been cancelled or have been told to
 /// shutdown.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct ConnToMainMsg {
     pub task_id: task::Id,
     pub msg: ConnToMainMsgInner,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub enum ConnToMainMsgInner {
-    Accepted { addr: SocketAddrV6, peer_id: BaseboardId },
-    Connected { addr: SocketAddrV6, peer_id: BaseboardId },
-    Received { from: BaseboardId, msg: PeerMsg },
-    ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
-    Disconnected { peer_id: BaseboardId },
+    Accepted {
+        addr: SocketAddrV6,
+        peer_id: BaseboardId,
+    },
+    Connected {
+        addr: SocketAddrV6,
+        peer_id: BaseboardId,
+    },
+    #[expect(unused)]
+    Received {
+        from: BaseboardId,
+        msg: PeerMsg,
+    },
+    #[expect(unused)]
+    ReceivedNetworkConfig {
+        from: BaseboardId,
+        config: NetworkConfig,
+    },
+    Disconnected {
+        peer_id: BaseboardId,
+    },
 }
 
 pub struct TaskHandle {

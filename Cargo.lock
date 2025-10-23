@@ -14641,7 +14641,7 @@ dependencies = [
  "serde_json",
  "slog",
  "tabled 0.15.0",
- "trust-quorum",
+ "trust-quorum-protocol",
  "trust-quorum-test-utils",
 ]
 
@@ -14812,7 +14812,6 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "attest-mock",
- "bcs",
  "bootstore",
  "bytes",
  "camino",
@@ -14846,6 +14845,47 @@ dependencies = [
  "test-strategy",
  "thiserror 2.0.17",
  "tokio",
+ "trust-quorum-protocol",
+ "trust-quorum-test-utils",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "trust-quorum-protocol"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "attest-mock",
+ "bootstore",
+ "bytes",
+ "camino",
+ "chacha20poly1305",
+ "ciborium",
+ "daft",
+ "derive_more 0.99.20",
+ "dropshot",
+ "gfss",
+ "hex",
+ "hkdf",
+ "iddqd",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "proptest",
+ "rand 0.9.2",
+ "secrecy 0.10.3",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "sha3",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain",
+ "static_assertions",
+ "subtle",
+ "test-strategy",
+ "thiserror 2.0.17",
  "trust-quorum-test-utils",
  "uuid",
  "zeroize",
@@ -14868,7 +14908,7 @@ dependencies = [
  "serde_json",
  "sled-hardware-types",
  "slog",
- "trust-quorum",
+ "trust-quorum-protocol",
 ]
 
 [[package]]
