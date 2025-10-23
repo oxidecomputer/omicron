@@ -146,7 +146,7 @@ async fn test_iam_prep(
 /// users and role assignments.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_iam_roles_behavior() {
-    let logctx = dev::test_setup_log("test_iam_roles");
+    let logctx = dev::test_setup_log("test_iam_roles_behavior");
     let db = TestDatabase::new_with_datastore(&logctx.log).await;
     let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -206,6 +206,22 @@ async fn test_iam_roles_behavior() {
             user_log,
             Arc::clone(&authz),
             authn::Context::internal_unauthenticated(),
+            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+        ),
+    )));
+
+    // Create a SCIM Actor for this silo. It should have permission to access
+    // none of the resources in a silo (other than query the database and use
+    // the audit log).
+    let user_log = logctx.log.new(o!(
+        "actor" => "scim",
+    ));
+    user_contexts.push(Arc::new((
+        String::from("scim"),
+        OpContext::for_background(
+            user_log,
+            Arc::clone(&authz),
+            authn::Context::for_scim(main_silo_id),
             Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
         ),
     )));
@@ -321,11 +337,11 @@ async fn authorize_one_resource(
                     "result" => ?result,
                 );
                 let summary = match result {
-                    Ok(_) => '\u{2714}',
+                    Ok(_) => '\u{2714}', // ✔
                     Err(Error::Forbidden)
-                    | Err(Error::ObjectNotFound { .. }) => '\u{2718}',
+                    | Err(Error::ObjectNotFound { .. }) => '\u{2718}', // ✘
                     Err(Error::Unauthenticated { .. }) => '!',
-                    Err(_) => '\u{26a0}',
+                    Err(_) => '\u{26a0}', // ⚠
                 };
                 write!(out, " {:>2}", summary)?;
             }

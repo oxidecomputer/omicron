@@ -40,6 +40,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::IpConfig;
 use nexus_db_model::IpVersion;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
@@ -58,6 +59,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
+use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -73,6 +75,8 @@ use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog_error_chain::InlineErrorChain;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
@@ -546,12 +550,27 @@ impl DataStore {
         // explicit IP allocation and create a service NIC as well.
         let zone_type = &zone_config.zone_type;
         let zone_report_str = zone_type.kind().report_str();
+
+        // Extract an IPv4 address from the `shared::NetworkInterface` object.
+        //
+        // TODO-completeness: Handle IPv6 interface addresses. See
+        // https://github.com/oxidecomputer/omicron/issues/9246.
+        let extract_ipv4 = |nic: &NetworkInterface| -> Result<Ipv4Addr, Error> {
+            let IpAddr::V4(ipv4) = nic.ip else {
+                return Err(Error::invalid_request(
+                    "IPv6 addresses are not yet supported",
+                ));
+            };
+            Ok(ipv4)
+        };
+
         let service_ip_nic = match zone_type {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { nic, dns_address, .. },
             ) => {
                 let external_ip =
                     OmicronZoneExternalIp::Floating(dns_address.into_ip());
+                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -563,7 +582,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    nic.ip,
+                    IpConfig::from_ipv4(ip),
                     nic.mac,
                     nic.slot,
                 )
@@ -576,6 +595,7 @@ impl DataStore {
                 ..
             }) => {
                 let external_ip = OmicronZoneExternalIp::Floating(*external_ip);
+                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -587,7 +607,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    nic.ip,
+                    IpConfig::from_ipv4(ip),
                     nic.mac,
                     nic.slot,
                 )
@@ -598,6 +618,7 @@ impl DataStore {
                 blueprint_zone_type::BoundaryNtp { external_ip, nic, .. },
             ) => {
                 let external_ip = OmicronZoneExternalIp::Snat(*external_ip);
+                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -609,7 +630,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    nic.ip,
+                    IpConfig::from_ipv4(ip),
                     nic.mac,
                     nic.slot,
                 )
