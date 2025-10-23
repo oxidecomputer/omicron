@@ -394,7 +394,7 @@ pub struct Ipv4Config {
     pub transit_ips: Vec<Ipv4Net>,
 }
 
-/// Configuration for a network interface's IPv4 addressing.
+/// Configuration for a network interface's IPv6 addressing.
 #[derive(Clone, Debug, Default)]
 pub struct Ipv6Config {
     /// The VPC-private address to assign to the interface.
@@ -411,7 +411,7 @@ pub enum IpConfig {
     /// The interface has only an IPv6 stack.
     V6(Ipv6Config),
     /// The interface has both an IPv4 and IPv6 stack.
-    DualStack { ipv4: Ipv4Config, ipv6: Ipv6Config },
+    DualStack { v4: Ipv4Config, v6: Ipv6Config },
 }
 
 impl IpConfig {
@@ -433,22 +433,16 @@ impl IpConfig {
         match self {
             IpConfig::V4(Ipv4Config { ip, .. }) => Some(ip),
             IpConfig::V6(_) => None,
-            IpConfig::DualStack { ipv4: Ipv4Config { ip, .. }, .. } => Some(ip),
+            IpConfig::DualStack { v4: Ipv4Config { ip, .. }, .. } => Some(ip),
         }
     }
 
     /// Return the IPv4 address explicitly requested, if one exists.
     pub fn ipv4_addr(&self) -> Option<&std::net::Ipv4Addr> {
-        match self {
-            IpConfig::V4(Ipv4Config { ip, .. })
-            | IpConfig::DualStack { ipv4: Ipv4Config { ip, .. }, .. } => {
-                match ip {
-                    IpAssignment::Auto => None,
-                    IpAssignment::Explicit(addr) => Some(addr),
-                }
-            }
-            IpConfig::V6(_) => None,
-        }
+        self.ipv4_assignment().and_then(|assignment| match assignment {
+            IpAssignment::Auto => None,
+            IpAssignment::Explicit(addr) => Some(addr),
+        })
     }
 
     /// Construct an IPv6 configuration with no transit IPs.
@@ -469,22 +463,16 @@ impl IpConfig {
         match self {
             IpConfig::V6(Ipv6Config { ip, .. }) => Some(ip),
             IpConfig::V4(_) => None,
-            IpConfig::DualStack { ipv6: Ipv6Config { ip, .. }, .. } => Some(ip),
+            IpConfig::DualStack { v6: Ipv6Config { ip, .. }, .. } => Some(ip),
         }
     }
 
     /// Return the IPv6 address explicitly requested, if one exists.
-    pub fn ipv6(&self) -> Option<&std::net::Ipv6Addr> {
-        match self {
-            IpConfig::V6(Ipv6Config { ip, .. })
-            | IpConfig::DualStack { ipv6: Ipv6Config { ip, .. }, .. } => {
-                match ip {
-                    IpAssignment::Auto => None,
-                    IpAssignment::Explicit(addr) => Some(addr),
-                }
-            }
-            IpConfig::V4(_) => None,
-        }
+    pub fn ipv6_addr(&self) -> Option<&std::net::Ipv6Addr> {
+        self.ipv6_assignment().and_then(|assignment| match assignment {
+            IpAssignment::Auto => None,
+            IpAssignment::Explicit(addr) => Some(addr),
+        })
     }
 
     /// Return the transit IPs requested in this configuration.
@@ -497,14 +485,23 @@ impl IpConfig {
                 transit_ips.iter().copied().map(Into::into).collect()
             }
             IpConfig::DualStack {
-                ipv4: Ipv4Config { transit_ips: ipv4_addrs, .. },
-                ipv6: Ipv6Config { transit_ips: ipv6_addrs, .. },
+                v4: Ipv4Config { transit_ips: ipv4_addrs, .. },
+                v6: Ipv6Config { transit_ips: ipv6_addrs, .. },
             } => ipv4_addrs
                 .iter()
                 .copied()
                 .map(Into::into)
                 .chain(ipv6_addrs.iter().copied().map(Into::into))
                 .collect(),
+        }
+    }
+
+    /// Construct an IP configuration with both IPv4 / IPv6 addresses and no
+    /// transit IPs.
+    pub fn auto_dual_stack() -> Self {
+        IpConfig::DualStack {
+            v4: Ipv4Config::default(),
+            v6: Ipv6Config::default(),
         }
     }
 
@@ -518,8 +515,8 @@ impl IpConfig {
                 !transit_ips.is_empty()
             }
             IpConfig::DualStack {
-                ipv4: Ipv4Config { transit_ips: ipv4_addrs, .. },
-                ipv6: Ipv6Config { transit_ips: ipv6_addrs, .. },
+                v4: Ipv4Config { transit_ips: ipv4_addrs, .. },
+                v6: Ipv6Config { transit_ips: ipv6_addrs, .. },
             } => !ipv4_addrs.is_empty() || !ipv6_addrs.is_empty(),
         }
     }
@@ -553,7 +550,7 @@ impl IncompleteNetworkInterface {
         if let Some(ip) = ip_config.ipv4_addr() {
             subnet.check_requestable_addr(IpAddr::V4(*ip))?;
         };
-        if let Some(ip) = ip_config.ipv6() {
+        if let Some(ip) = ip_config.ipv6_addr() {
             subnet.check_requestable_addr(IpAddr::V6(*ip))?;
         };
         if let Some(mac) = mac {
@@ -654,11 +651,6 @@ impl IncompleteNetworkInterface {
         ip_config: IpConfig,
         mac: Option<external::MacAddr>,
     ) -> Result<Self, external::Error> {
-        if ip_config.has_transit_ips() {
-            return Err(external::Error::invalid_request(
-                "Cannot specify transit IPs for probe NICs",
-            ));
-        }
         Self::new(
             interface_id,
             NetworkInterfaceKind::Probe,

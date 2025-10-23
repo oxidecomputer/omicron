@@ -33,7 +33,7 @@ use nexus_db_schema::schema::network_interface::dsl;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{self, Error};
 use slog_error_chain::SlogInlineError;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::Ipv6Addr;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
@@ -477,57 +477,46 @@ fn decode_database_error(
 
 // Return the first available address in a subnet. This is not the network
 // address, since Oxide reserves the first few addresses.
-fn first_available_address(subnet: &IpNetwork) -> IpAddr {
-    match subnet {
-        IpNetwork::V4(network) => network
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _)
-            .unwrap_or_else(|| {
-                panic!("Unexpectedly small IPv4 subnetwork: '{}'", network)
-            })
-            .into(),
-        IpNetwork::V6(network) => {
-            // NOTE: This call to `nth()` will loop and call the `next()`
-            // implementation. That's inefficient, but the number of reserved
-            // addresses is very small, so it should not matter.
-            network
-                .iter()
-                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _)
-                .unwrap_or_else(|| {
-                    panic!("Unexpectedly small IPv6 subnetwork: '{}'", network)
-                })
-                .into()
-        }
-    }
+fn first_available_ipv4_address(network: &Ipv4Network) -> std::net::Ipv4Addr {
+    network.nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _).unwrap_or_else(|| {
+        panic!("Unexpectedly small IPv4 subnetwork: '{}'", network)
+    })
+}
+
+fn first_available_ipv6_address(network: &Ipv6Network) -> std::net::Ipv6Addr {
+    // NOTE: This call to `nth()` will loop and call the `next()`
+    // implementation. That's inefficient, but the number of reserved
+    // addresses is very small, so it should not matter.
+    network.iter().nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _).unwrap_or_else(
+        || panic!("Unexpectedly small IPv6 subnetwork: '{}'", network),
+    )
 }
 
 // Return the last available address in a subnet. This is not the broadcast
 // address, since that is reserved.
-fn last_available_address(subnet: &IpNetwork) -> IpAddr {
-    // NOTE: In both cases below, we subtract 2 from the network size. That's
-    // because we first subtract 1 to go from a size to an index, and then
-    // another 1 because the broadcast address isn't valid for an interface.
-    match subnet {
-        IpNetwork::V4(network) => network
-            .size()
-            .checked_sub(2)
-            .and_then(|n| network.nth(n))
-            .map(IpAddr::V4)
-            .unwrap_or_else(|| {
-                panic!("Unexpectedly small IPv4 subnetwork: '{}'", network);
-            }),
-        IpNetwork::V6(network) => {
-            // NOTE: The iterator implementation for `Ipv6Network` only
-            // implements the required `Iterator::next()` method. That means we
-            // get the default implementation of the `nth()` method, which will
-            // loop and call `next()`. That is ridiculously inefficient, so we
-            // manually compute the nth address through addition instead.
-            let base = u128::from(network.network());
-            let n = network.size().checked_sub(2).unwrap_or_else(|| {
-                panic!("Unexpectedly small IPv6 subnetwork: '{}'", network);
-            });
-            IpAddr::V6(Ipv6Addr::from(base + n))
-        }
-    }
+//
+// NOTE: In both functions below, we subtract 2 from the network size. That's
+// because we first subtract 1 to go from a size to an index, and then
+// another 1 because the broadcast address isn't valid for an interface.
+fn last_available_ipv4_address(network: &Ipv4Network) -> std::net::Ipv4Addr {
+    network.size().checked_sub(2).and_then(|n| network.nth(n)).unwrap_or_else(
+        || {
+            panic!("Unexpectedly small IPv4 subnetwork: '{}'", network);
+        },
+    )
+}
+
+fn last_available_ipv6_address(network: &Ipv6Network) -> std::net::Ipv6Addr {
+    // NOTE: The iterator implementation for `Ipv6Network` only
+    // implements the required `Iterator::next()` method. That means we
+    // get the default implementation of the `nth()` method, which will
+    // loop and call `next()`. That is ridiculously inefficient, so we
+    // manually compute the nth address through addition instead.
+    let base = u128::from(network.network());
+    let n = network.size().checked_sub(2).unwrap_or_else(|| {
+        panic!("Unexpectedly small IPv6 subnetwork: '{}'", network);
+    });
+    Ipv6Addr::from(base + n)
 }
 
 /// The `NextIpv4Address` query is a `NextItem` query for choosing the next
@@ -545,13 +534,8 @@ pub struct NextIpv4Address {
 
 impl NextIpv4Address {
     pub fn new(subnet: Ipv4Network, subnet_id: Uuid) -> Self {
-        let subnet = IpNetwork::from(subnet);
-        let IpAddr::V4(min) = first_available_address(&subnet) else {
-            unreachable!();
-        };
-        let IpAddr::V4(max) = last_available_address(&subnet) else {
-            unreachable!();
-        };
+        let min = first_available_ipv4_address(&subnet);
+        let max = last_available_ipv4_address(&subnet);
         Self {
             inner: NextItemSelfJoined::new_scoped(
                 subnet_id,
@@ -579,13 +563,8 @@ pub struct NextIpv6Address {
 
 impl NextIpv6Address {
     pub fn new(subnet: Ipv6Network, subnet_id: Uuid) -> Self {
-        let subnet = IpNetwork::from(subnet);
-        let IpAddr::V6(min) = first_available_address(&subnet) else {
-            unreachable!();
-        };
-        let IpAddr::V6(max) = last_available_address(&subnet) else {
-            unreachable!();
-        };
+        let min = first_available_ipv6_address(&subnet);
+        let max = last_available_ipv6_address(&subnet);
         Self {
             inner: NextItemSelfJoined::new_scoped(
                 subnet_id,
@@ -1970,7 +1949,6 @@ mod tests {
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-    use super::first_available_address;
     use crate::authz;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
@@ -1983,7 +1961,10 @@ mod tests {
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
     use crate::db::pub_test_utils::TestDatabase;
-    use crate::db::queries::network_interface::last_available_address;
+    use crate::db::queries::network_interface::first_available_ipv4_address;
+    use crate::db::queries::network_interface::first_available_ipv6_address;
+    use crate::db::queries::network_interface::last_available_ipv4_address;
+    use crate::db::queries::network_interface::last_available_ipv6_address;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use model::NetworkInterfaceKind;
@@ -3411,13 +3392,13 @@ mod tests {
     fn test_first_available_address() {
         let subnet = "172.30.0.0/28".parse().unwrap();
         assert_eq!(
-            first_available_address(&subnet),
-            "172.30.0.5".parse::<IpAddr>().unwrap(),
+            first_available_ipv4_address(&subnet),
+            "172.30.0.5".parse::<Ipv4Addr>().unwrap(),
         );
         let subnet = "fd00::/64".parse().unwrap();
         assert_eq!(
-            first_available_address(&subnet),
-            "fd00::5".parse::<IpAddr>().unwrap(),
+            first_available_ipv6_address(&subnet),
+            "fd00::5".parse::<Ipv6Addr>().unwrap(),
         );
     }
 
@@ -3425,13 +3406,13 @@ mod tests {
     fn test_last_available_address() {
         let subnet = "172.30.0.0/28".parse().unwrap();
         assert_eq!(
-            last_available_address(&subnet),
-            "172.30.0.14".parse::<IpAddr>().unwrap(),
+            last_available_ipv4_address(&subnet),
+            "172.30.0.14".parse::<Ipv4Addr>().unwrap(),
         );
         let subnet = "fd00::/64".parse().unwrap();
         assert_eq!(
-            last_available_address(&subnet),
-            "fd00::ffff:ffff:ffff:fffe".parse::<IpAddr>().unwrap(),
+            last_available_ipv6_address(&subnet),
+            "fd00::ffff:ffff:ffff:fffe".parse::<Ipv6Addr>().unwrap(),
         );
     }
 
