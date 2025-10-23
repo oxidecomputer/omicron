@@ -139,17 +139,21 @@ impl super::Nexus {
     }
 
     /// For an authenticataed Actor::Scim, return a scim2_rs::Provider
-    pub(crate) async fn scim_get_provider_from_opctx(
+    pub(crate) async fn scim_get_provider_from_opctx<'a>(
         &self,
-        opctx: &OpContext,
-    ) -> LookupResult<scim2_rs::Provider<CrdbScimProviderStore>> {
+        opctx: &'a OpContext,
+    ) -> LookupResult<scim2_rs::Provider<CrdbScimProviderStore<'a>>> {
         match opctx.authn.actor() {
             Some(Actor::Scim { silo_id }) => Ok(scim2_rs::Provider::new(
                 self.log.new(slog::o!(
                     "component" => "scim2_rs::Provider",
                     "silo" => silo_id.to_string(),
                 )),
-                CrdbScimProviderStore::new(*silo_id, self.datastore().clone()),
+                CrdbScimProviderStore::new(
+                    *silo_id,
+                    self.datastore().clone(),
+                    opctx,
+                ),
             )),
 
             _ => Err(Error::Unauthenticated {

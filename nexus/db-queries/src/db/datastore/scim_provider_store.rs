@@ -8,6 +8,7 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::context::OpContext;
 use crate::db::datastore::silo_group::SiloGroup;
 use crate::db::datastore::silo_group::SiloGroupScim;
 use crate::db::datastore::silo_user::SiloUser;
@@ -48,9 +49,10 @@ use scim2_rs::User;
 use scim2_rs::UserGroup;
 use scim2_rs::UserGroupType;
 
-pub struct CrdbScimProviderStore {
+pub struct CrdbScimProviderStore<'a> {
     silo_id: Uuid,
     datastore: Arc<DataStore>,
+    opctx: &'a OpContext,
 }
 
 // Define the lower case function here: some SCIM attributes like user name are
@@ -61,9 +63,13 @@ define_sql_function!(
     ) -> diesel::sql_types::Text
 );
 
-impl CrdbScimProviderStore {
-    pub fn new(silo_id: Uuid, datastore: Arc<DataStore>) -> Self {
-        CrdbScimProviderStore { silo_id, datastore }
+impl<'a> CrdbScimProviderStore<'a> {
+    pub fn new(
+        silo_id: Uuid,
+        datastore: Arc<DataStore>,
+        opctx: &'a OpContext,
+    ) -> Self {
+        CrdbScimProviderStore { silo_id, datastore, opctx }
     }
 
     /// Nuke sessions, tokens, etc, for deactivated users
@@ -1199,7 +1205,7 @@ fn convert_to_scim_group(
     }
 }
 
-impl ProviderStore for CrdbScimProviderStore {
+impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
     async fn get_user_by_id(
         &self,
         user_id: &str,
