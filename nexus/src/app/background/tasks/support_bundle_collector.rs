@@ -502,7 +502,7 @@ impl BundleCollection {
         self: &Arc<Self>,
         dir: &Utf8TempDir,
     ) -> anyhow::Result<SupportBundleCollectionReport> {
-        let mut collection = Box::pin(self.collect_bundle_as_file(&dir));
+        let collection = Box::pin(self.collect_bundle_as_file(&dir));
 
         // We periodically check the state of the support bundle - if a user
         // explicitly cancels it, we should stop the collection process and
@@ -513,54 +513,59 @@ impl BundleCollection {
             work_duration,
         );
 
-        // We run this task to "check for cancellation" as a whole tokio task
+        // TL;DR: This `tokio::select` is allowed to poll multiple futures, but
+        // should not do any async work within the body of any chosen branch. A
+        // previous iteration of this code polled the "collection" as "&mut
+        // collection", and checked the status of the support bundle within a
+        // branch of the "select" polling "yield_interval.tick()".
+        //
+        // We organize this work to "check for cancellation" as a whole future
         // for a critical, but subtle reason: After the tick timer yields,
-        // we may then try to "await" a database function.
+        // we may then try to `await` a database function.
         //
         // This, at a surface-level glance seems innocent enough. However, there
         // is something potentially insidious here: if calling a datastore
-        // function - such as "support_bundle_get" - blocks on acquiring access
+        // function - such as "support_bundle_get" - awaits acquiring access
         // to a connection from the connection pool, while creating the
-        // collection ALSO potentially blocks on acquiring access to the
+        // collection ALSO potentially awaits acquiring access to the
         // connection pool, it is possible for:
         //
-        // 1. The "&mut collection" arm to have created a future, currently
+        // 1. The `&mut collection` arm to have created a future, currently
         //    yielded, which wants access to this underlying resource.
-        // 2. The current task of execution, in "support_bundle_get", to be
-        //    blocked "await-ing" for this same underlying resource.
+        // 2. The current operation executing in `support_bundle_get` to
+        //    be awaiting access to this same underlying resource.
         //
         // In this specific case, the connection pool would be attempting to
-        // yield to the "&mut collection" arm, which cannot run, if we were
-        // blocking on the body of a different async select arm. This would
+        // yield to the `&mut collection` arm, which cannot run, if we were
+        // awaiting in the body of a different async select arm. This would
         // result in a deadlock.
         //
         // In the future, we may attempt to make access to the connection pool
         // safer from concurrent asynchronous access - it is unsettling that
-        // multiple concurrent ".claim()" functions can cause this behavior -
-        // but in the meantime, we spawn this cancellation check in an entirely
-        // new tokio task. Because of this separation, each task (the one
-        // checking for cancellation, and the main thread attempting to collect
-        // the bundle) do not risk preventing the other from being polled
-        // indefinitely.
-        let mut check_for_cancellation = tokio::task::spawn({
-            let s = self.clone();
-            async move {
-                loop {
-                    // Timer fired mid-collection - let's check if we should stop.
-                    yield_interval.tick().await;
-                    trace!(
-                        &s.log,
-                        "Checking if Bundle Collection cancelled";
-                        "bundle" => %s.bundle.id
-                    );
+        // multiple concurrent `.claim()` functions can cause this behavior -
+        // but in the meantime, we perform this cancellation check in a single
+        // future that always is polled concurrently with the collection work.
+        // Because of this separation, each future is polled until one
+        // completes, at which point we deterministically exit.
+        //
+        // For more details, see:
+        // https://github.com/oxidecomputer/omicron/issues/9259
+        let check_for_cancellation = Box::pin(async move {
+            loop {
+                // Timer fired mid-collection - check if we should stop.
+                yield_interval.tick().await;
+                trace!(
+                    &self.log,
+                    "Checking if Bundle Collection cancelled";
+                    "bundle" => %self.bundle.id
+                );
 
-                    let bundle = s
-                        .datastore
-                        .support_bundle_get(&s.opctx, s.bundle.id.into())
-                        .await?;
-                    if !matches!(bundle.state, SupportBundleState::Collecting) {
-                        anyhow::bail!("Support Bundle Cancelled");
-                    }
+                let bundle = self
+                    .datastore
+                    .support_bundle_get(&self.opctx, self.bundle.id.into())
+                    .await?;
+                if !matches!(bundle.state, SupportBundleState::Collecting) {
+                    anyhow::bail!("Support Bundle Cancelled");
                 }
             }
         });
@@ -568,8 +573,7 @@ impl BundleCollection {
         tokio::select! {
             // Returns if the bundle has been cancelled explicitly, or if we
             // cannot successfully check the bundle state.
-            why = &mut check_for_cancellation => {
-                let why = why.expect("Should not cancel the bundle-checking task without returning");
+            why = check_for_cancellation => {
                 warn!(
                     &self.log,
                     "Support Bundle cancelled - stopping collection";
@@ -579,8 +583,7 @@ impl BundleCollection {
                 return why;
             },
             // Otherwise, keep making progress on the collection itself.
-            report = &mut collection => {
-                check_for_cancellation.abort();
+            report = collection => {
                 info!(
                     &self.log,
                     "Bundle Collection completed";
