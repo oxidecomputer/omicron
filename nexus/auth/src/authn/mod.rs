@@ -276,7 +276,7 @@ impl Context {
                 Details { actor: Actor::Scim { silo_id } },
                 // This should never be non-empty, we don't want the SCIM user
                 // to ever have associated roles.
-                Some(SiloAuthnPolicy::new(BTreeMap::default())),
+                Some(SiloAuthnPolicy::new(BTreeMap::default(), false)),
             ),
             schemes_tried: Vec::new(),
         }
