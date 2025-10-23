@@ -2464,11 +2464,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
 /*
  * Index used to support quickly looking up children of the IP Pool range table,
- * when checking for allocated addresses during deletion.
+ * when checking for allocated addresses during deletion. Note that this cannot
+ * be unique, because SNAT addresses can share different port ranges of the same
+ * IP address.
  */
 CREATE INDEX IF NOT EXISTS external_ip_by_pool ON omicron.public.external_ip (
     ip_pool_id,
-    ip_pool_range_id
+    ip_pool_range_id,
+    ip
 )
     WHERE time_deleted IS NULL;
 
@@ -6854,7 +6857,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '201.0.0', NULL)
+    (TRUE, NOW(), NOW(), '202.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
