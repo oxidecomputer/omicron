@@ -391,9 +391,10 @@ impl Plan {
                 }
 
                 // LocalStorage isn't in the U2_EXPECTED_DATASETS list, add it
-                // here. XXX does RSS blueprint have to be blippy clean? Isn't
-                // the plan to RSS only enough to run Nexus and have it use
-                // blueprints to make the rest true?
+                // here. We expect Nexus to take over after RSS and not need to
+                // make any changes to the resulting current target blueprint.
+                // The `rss_blueprint_is_blippy_clean` test will fail if this
+                // isn't true, and removing this will cause that to fail.
                 let config = DatasetConfig {
                     id: DatasetUuid::new_v4(),
                     name: DatasetName::new(*zpool, DatasetKind::LocalStorage),
