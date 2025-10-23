@@ -77,7 +77,6 @@ impl super::Nexus {
                 .vpc_router_id(db_vpc.system_router_id)
                 .lookup_for(authz::Action::CreateChild)
                 .await?;
-
         let custom_router = match &params.custom_router {
             Some(k) => Some(
                 self.vpc_router_lookup_for_attach(opctx, k, &authz_vpc).await?,

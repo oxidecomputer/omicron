@@ -70,7 +70,6 @@ impl super::Nexus {
     ) -> CreateResult<db::model::InternetGateway> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
-
         let id = Uuid::new_v4();
         let router =
             db::model::InternetGateway::new(id, authz_vpc.id(), params.clone());

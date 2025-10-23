@@ -114,7 +114,6 @@ impl super::Nexus {
     ) -> CreateResult<db::model::VpcRouter> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::CreateChild).await?;
-
         let id = Uuid::new_v4();
         let router = db::model::VpcRouter::new(
             id,
@@ -156,7 +155,6 @@ impl super::Nexus {
     ) -> UpdateResult<VpcRouter> {
         let (.., authz_router) =
             vpc_router_lookup.lookup_for(authz::Action::Modify).await?;
-
         self.db_datastore
             .vpc_update_router(opctx, &authz_router, params.clone().into())
             .await
@@ -169,7 +167,6 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_router, db_router) =
             vpc_router_lookup.fetch_for(authz::Action::Delete).await?;
-
         // TODO-performance shouldn't this check be part of the "update"
         // database query?  This shouldn't affect correctness, assuming that a
         // router kind cannot be changed, but it might be able to save us a

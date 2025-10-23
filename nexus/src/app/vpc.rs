@@ -154,7 +154,6 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Vpc> {
         let (.., authz_vpc) =
             vpc_lookup.lookup_for(authz::Action::Modify).await?;
-
         self.db_datastore
             .project_update_vpc(opctx, &authz_vpc, params.clone().into())
             .await
@@ -221,7 +220,6 @@ impl super::Nexus {
     ) -> UpdateResult<Vec<db::model::VpcFirewallRule>> {
         let (.., authz_vpc, db_vpc) =
             vpc_lookup.fetch_for(authz::Action::Modify).await?;
-
         let rules = db::model::VpcFirewallRule::vec_from_params(
             authz_vpc.id(),
             params.clone(),
