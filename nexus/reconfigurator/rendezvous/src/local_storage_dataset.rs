@@ -7,37 +7,35 @@
 use anyhow::Context;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::model::LocalStorageDataset;
+use nexus_db_queries::db::model::RendezvousLocalStorageDataset;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use omicron_common::api::internal::shared::DatasetKind;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::info;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-pub(crate) async fn record_new_local_storage_datasets(
+pub(crate) async fn reconcile_local_storage_datasets(
     opctx: &OpContext,
     datastore: &DataStore,
+    blueprint_id: BlueprintUuid,
     blueprint_datasets: impl Iterator<Item = &BlueprintDatasetConfig>,
     inventory_datasets: &BTreeSet<DatasetUuid>,
 ) -> anyhow::Result<DatasetsRendezvousStats> {
-    // Before attempting to insert any datasets, first query for any existing
-    // dataset records so we can filter them out. This looks like a typical
-    // TOCTOU issue, but it is purely a performance optimization. We expect
-    // almost all executions of this function to do nothing: new datasets are
-    // created very rarely relative to how frequently blueprint realization
-    // happens. We could remove this check and filter and instead run the below
-    // "insert if not exists" query on every dataset, and the behavior would
-    // still be correct. However, that would issue far more queries than
-    // necessary in the very common case of "we don't need to do anything at
-    // all".
+    // We expect basically all executions of this task to do nothing: we're
+    // activated periodically, and only do work when a dataset has been
+    // newly-added or newly-expunged.
+    //
+    // This is a performance optimization. If we removed this fetch, the code
+    // below would still be correct, but it would issue a bunch of do-nothing
+    // queries for every individual dataset in `blueprint_datasets`.
     let existing_datasets = datastore
         .local_storage_dataset_list_all_batched(opctx)
         .await
-        .context("failed to list all datasets")?
+        .context("failed to list all local storage datasets")?
         .into_iter()
         .map(|dataset| (dataset.id(), dataset))
         .collect::<BTreeMap<DatasetUuid, _>>();
@@ -48,59 +46,105 @@ pub(crate) async fn record_new_local_storage_datasets(
         // Filter down to LocalStorage datasets...
         let dataset = match (&bp_dataset.kind, bp_dataset.address) {
             (DatasetKind::LocalStorage, None) => {
-                LocalStorageDataset::new(bp_dataset.id, bp_dataset.pool.id())
+                RendezvousLocalStorageDataset::new(
+                    bp_dataset.id,
+                    bp_dataset.pool.id(),
+                    blueprint_id,
+                )
             }
             _ => continue,
         };
         let id = dataset.id();
 
-        // ... that are in service ...
         match bp_dataset.disposition {
-            BlueprintDatasetDisposition::InService => (),
-            BlueprintDatasetDisposition::Expunged => continue,
-        }
+            // Add any datasets that are in-service
+            BlueprintDatasetDisposition::InService => {
+                // Skip adding if already in the database
+                if existing_datasets.contains_key(&id) {
+                    stats.num_already_exist += 1;
+                    continue;
+                }
 
-        // ... and not already present in the database ...
-        if existing_datasets.contains_key(&id) {
-            stats.num_already_exist += 1;
-            continue;
-        }
+                // Skip adding if not in the inventory
+                if !inventory_datasets.contains(&id) {
+                    stats.num_not_in_inventory += 1;
+                    continue;
+                }
 
-        // ... and also present in inventory.
-        if !inventory_datasets.contains(&id) {
-            stats.num_not_in_inventory += 1;
-            continue;
-        }
+                let did_insert = datastore
+                    .local_storage_dataset_insert_if_not_exists(opctx, dataset)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to upsert dataset record for dataset \
+                        {id}"
+                        )
+                    })?
+                    .is_some();
 
-        let did_insert = datastore
-            .local_storage_dataset_insert_if_not_exists(dataset)
-            .await
-            .with_context(|| {
-                format!("failed to upsert dataset record for dataset {id}")
-            })?
-            .is_some();
+                if did_insert {
+                    stats.num_inserted += 1;
 
-        if did_insert {
-            stats.num_inserted += 1;
+                    info!(
+                        opctx.log,
+                        "inserted LocalStorage dataset record in database";
+                        "action" => "insert",
+                        "id" => %id,
+                    );
+                } else {
+                    // This means we hit the TOCTOU race mentioned above: when
+                    // we queried the DB this row didn't exist, but another
+                    // Nexus must have beat us to actually inserting it.
+                    stats.num_already_exist += 1;
+                }
+            }
 
-            info!(
-                opctx.log,
-                "ensuring LocalStorage dataset record in database";
-                "action" => "insert",
-                "id" => %id,
-            );
-        } else {
-            // This means we hit the TOCTOU race mentioned above: when we
-            // queried the DB this row didn't exist, but another Nexus must have
-            // beat us to actually inserting it.
-            stats.num_already_exist += 1;
+            // Tombstone any datasets that are expunged
+            BlueprintDatasetDisposition::Expunged => {
+                // Only attempt to tombstone this dataset if it isn't already
+                // marked as tombstoned in the database.
+                let already_tombstoned = existing_datasets
+                    .get(&dataset.id())
+                    .map(|d| d.is_tombstoned())
+                    .unwrap_or(false);
+
+                if already_tombstoned {
+                    stats.num_already_tombstoned += 1;
+                } else {
+                    if datastore
+                        .local_storage_dataset_tombstone(
+                            opctx,
+                            dataset.id(),
+                            blueprint_id,
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "failed to tombstone dataset {}",
+                                dataset.id()
+                            )
+                        })?
+                    {
+                        stats.num_tombstoned += 1;
+                        info!(
+                            opctx.log,
+                            "tombstoned expunged local storage dataset";
+                            "dataset_id" => %dataset.id(),
+                        );
+                    } else {
+                        // Similar TOCTOU race lost as above; this dataset was
+                        // either already tombstoned by another racing Nexus, or
+                        // has been hard deleted.
+                        stats.num_already_tombstoned += 1;
+                    }
+                }
+            }
         }
     }
 
     info!(
         opctx.log,
-        "ensured all LocalStorage datasets present in inventory have database \
-         records";
+        "all LocalStorage datasets reconciled";
         &stats,
     );
 
@@ -137,6 +181,7 @@ mod tests {
     async fn proptest_do_prep(
         opctx: &OpContext,
         datastore: &DataStore,
+        blueprint_id: BlueprintUuid,
         prep: &BTreeMap<usize, DatasetPrep>,
     ) -> (Vec<BlueprintDatasetConfig>, BTreeSet<DatasetUuid>) {
         let mut datasets = Vec::with_capacity(prep.len());
@@ -144,7 +189,7 @@ mod tests {
 
         // Clean up from any previous proptest cases
         {
-            use nexus_db_schema::schema::local_storage_dataset::dsl as dataset_dsl;
+            use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
             use nexus_db_schema::schema::sled::dsl as sled_dsl;
             use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -156,7 +201,7 @@ mod tests {
                     diesel::delete(zpool_dsl::zpool)
                         .execute_async(&conn)
                         .await?;
-                    diesel::delete(dataset_dsl::local_storage_dataset)
+                    diesel::delete(dsl::rendezvous_local_storage_dataset)
                         .execute_async(&conn)
                         .await?;
                     Ok::<_, diesel::result::Error>(())
@@ -228,7 +273,12 @@ mod tests {
             if prep.in_database {
                 datastore
                     .local_storage_dataset_insert_if_not_exists(
-                        LocalStorageDataset::new(d.id, d.pool.id()),
+                        opctx,
+                        RendezvousLocalStorageDataset::new(
+                            d.id,
+                            d.pool.id(),
+                            blueprint_id,
+                        ),
                     )
                     .await
                     .expect("query should have succeeded")
@@ -264,16 +314,20 @@ mod tests {
             0..20,
         ))| {
             let prep: BTreeMap<_, _> = prep.into_iter().enumerate().collect();
+            let blueprint_id = BlueprintUuid::new_v4();
+
             let (result_stats, datastore_datasets) = runtime.block_on(async {
                 let (blueprint_datasets, inventory_datasets) = proptest_do_prep(
                     opctx,
                     datastore,
+                    blueprint_id,
                     &prep,
                 ).await;
 
-                let result_stats = record_new_local_storage_datasets(
+                let result_stats = reconcile_local_storage_datasets(
                     opctx,
                     datastore,
+                    blueprint_id,
                     blueprint_datasets.iter(),
                     &inventory_datasets,
                 )
@@ -297,6 +351,9 @@ mod tests {
                 let id: DatasetUuid = usize_to_id(id);
 
                 let in_db_before = prep.in_database;
+                let in_db_tombstoned = datastore_datasets
+                    .get(&id)
+                    .map(|d| d.is_tombstoned());
                 let in_db_after = datastore_datasets.contains_key(&id);
                 let in_service =
                     prep.disposition == ArbitraryDisposition::InService;
@@ -304,8 +361,16 @@ mod tests {
 
                 // Validate rendezvous output
                 match (in_db_before, in_service, in_inventory) {
-                    // Datasets not in service should be skipped entirely.
-                    (_, false, _) => (),
+                    // "Not in database and expunged" is consistent with "hard
+                    // deleted", which we can't separate from "already
+                    // tombstoned".
+                    (false, false, _) => {
+                        expected_stats.num_already_tombstoned += 1;
+                    }
+                    // "In database and expunged" should result in tombstoning.
+                    (true, false, _) => {
+                        expected_stats.num_tombstoned += 1;
+                    }
                     // In service but already existed
                     (true, true, _) => {
                         expected_stats.num_already_exist += 1;
@@ -322,36 +387,46 @@ mod tests {
 
                 // Validate database state
                 match (in_db_before, in_service, in_inventory) {
-                    // We only add rows; if this dataset was present before, it
-                    // should still be after we've executed.
-                    (true, _, _) => {
-                        assert!(
-                            in_db_after,
-                            "existing dataset missing from database: \
-                            {id}, {prep:?}"
-                        );
-                    }
-                    // If it wasn't in service, we shouldn't have inserted it.
+                    // Wasn't in DB, isn't in service: should still not be in db
                     (false, false, _) => {
                         assert!(
                             !in_db_after,
-                            "expunged dataset inserted: {id}, {prep:?}"
+                            "expunged dataset inserted: {id}, {prep:?}",
                         );
                     }
-                    // If it wasn't in inventory, we shouldn't have inserted it.
+                    // Wasn't in DB, isn't in inventory: should still not be in
+                    // db
                     (false, true, false) => {
                         assert!(
                             !in_db_after,
-                            "dataset inserted when not in inventory: \
-                             {id}, {prep:?}"
+                            "dataset inserted but not in inventory: \
+                             {id}, {prep:?}",
                         );
                     }
-                    // If it was in service and in inventory, we should have
-                    // inserted it.
+                    // Was in DB, expunged: should be in the DB and tombstoned
+                    (true, false, _) => {
+                        assert_eq!(
+                            in_db_tombstoned, Some(true),
+                            "expunged dataset should be tombstoned: \
+                             {id}, {prep:?}",
+                        );
+                    }
+                    // Wasn't in DB, in-service, and in inventory: should have
+                    // been added to the DB and not tombstoned
                     (false, true, true) => {
-                        assert!(
-                            in_db_after,
-                            "new dataset missing from database: {id}, {prep:?}"
+                        assert_eq!(
+                            in_db_tombstoned, Some(false),
+                            "in-service dataset should have been inserted: \
+                             {id}, {prep:?}",
+                        );
+                    }
+                    // Was in DB, in-service: should still be in the DB, not
+                    // tombstoned, regardless of inventory presence
+                    (true, true, _) => {
+                        assert_eq!(
+                            in_db_tombstoned, Some(false),
+                            "in-service dataset should not be tombstoned: \
+                             {id}, {prep:?}",
                         );
                     }
                 }

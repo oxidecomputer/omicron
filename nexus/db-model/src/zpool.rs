@@ -4,14 +4,14 @@
 
 use super::CrucibleDataset;
 use super::Generation;
-use super::LocalStorageDataset;
+use super::RendezvousLocalStorageDataset;
 use crate::ByteCount;
 use crate::collection::DatastoreCollectionConfig;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::crucible_dataset;
-use nexus_db_schema::schema::local_storage_dataset;
+use nexus_db_schema::schema::rendezvous_local_storage_dataset;
 use nexus_db_schema::schema::zpool;
 use omicron_uuid_kinds::PhysicalDiskKind;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -95,9 +95,9 @@ impl DatastoreCollectionConfig<CrucibleDataset> for Zpool {
     type CollectionIdColumn = crucible_dataset::dsl::pool_id;
 }
 
-impl DatastoreCollectionConfig<LocalStorageDataset> for Zpool {
+impl DatastoreCollectionConfig<RendezvousLocalStorageDataset> for Zpool {
     type CollectionId = DbTypedUuid<ZpoolKind>;
     type GenerationNumberColumn = zpool::dsl::rcgen;
     type CollectionTimeDeletedColumn = zpool::dsl::time_deleted;
-    type CollectionIdColumn = local_storage_dataset::dsl::pool_id;
+    type CollectionIdColumn = rendezvous_local_storage_dataset::dsl::pool_id;
 }

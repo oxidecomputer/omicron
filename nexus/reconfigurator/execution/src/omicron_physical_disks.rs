@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Manges deployment of Omicron physical disks to Sled Agents.
+//! Manages deployment of Omicron physical disks to Sled Agents.
 
 use anyhow::anyhow;
 use futures::StreamExt;
@@ -76,12 +76,12 @@ mod test {
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
     use nexus_db_model::CrucibleDataset;
-    use nexus_db_model::LocalStorageDataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
     use nexus_db_model::Region;
+    use nexus_db_model::RendezvousLocalStorageDataset;
     use nexus_db_model::Zpool;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::SLED_AGENT_UUID;
@@ -90,6 +90,7 @@ mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::DataPageParams;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -182,7 +183,12 @@ mod test {
 
         datastore
             .local_storage_dataset_insert_if_not_exists(
-                LocalStorageDataset::new(DatasetUuid::new_v4(), zpool.id()),
+                opctx,
+                RendezvousLocalStorageDataset::new(
+                    DatasetUuid::new_v4(),
+                    zpool.id(),
+                    BlueprintUuid::new_v4(),
+                ),
             )
             .await
             .unwrap()
@@ -232,9 +238,9 @@ mod test {
     ) -> Vec<Uuid> {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
-        use nexus_db_schema::schema::local_storage_dataset::dsl;
-        dsl::local_storage_dataset
-            .filter(dsl::time_deleted.is_null())
+        use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
+        dsl::rendezvous_local_storage_dataset
+            .filter(dsl::time_tombstoned.is_null())
             .filter(dsl::pool_id.eq(id.into_untyped_uuid()))
             .select(dsl::id)
             .load_async(&*conn)
@@ -350,6 +356,9 @@ mod test {
         assert_eq!(datasets.len(), 1);
         let regions = get_regions(&datastore, datasets[0]).await;
         assert_eq!(regions.len(), 1);
+
+        // Similarly, until instances are torn down and release the child
+        // datasets of the local storage parent dataset, these remain too.
         let datasets = get_local_storage_datasets(&datastore, pools[0]).await;
         assert_eq!(datasets.len(), 1);
 

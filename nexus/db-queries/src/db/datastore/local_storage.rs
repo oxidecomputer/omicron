@@ -10,21 +10,24 @@ use crate::context::OpContext;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::SQL_BATCH_SIZE;
-use crate::db::model::LocalStorageDataset;
+use crate::db::model::RendezvousLocalStorageDataset;
 use crate::db::model::Zpool;
+use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
-use nexus_types::identity::Asset;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
 
@@ -38,7 +41,7 @@ impl DataStore {
     pub async fn local_storage_dataset_list_all_batched(
         &self,
         opctx: &OpContext,
-    ) -> ListResultVec<LocalStorageDataset> {
+    ) -> ListResultVec<RendezvousLocalStorageDataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         opctx.check_complex_operations_allowed()?;
 
@@ -53,7 +56,7 @@ impl DataStore {
                 .await?;
             paginator = p.found_batch(
                 &batch,
-                &|d: &nexus_db_model::LocalStorageDataset| {
+                &|d: &nexus_db_model::RendezvousLocalStorageDataset| {
                     d.id().into_untyped_uuid()
                 },
             );
@@ -64,17 +67,19 @@ impl DataStore {
     }
 
     /// List one page of local storage datasets
+    ///
+    /// This fetches all debug datasets, including those that have been
+    /// tombstoned.
     async fn local_storage_dataset_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<LocalStorageDataset> {
+    ) -> ListResultVec<RendezvousLocalStorageDataset> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        use nexus_db_schema::schema::local_storage_dataset::dsl;
+        use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
 
-        paginated(dsl::local_storage_dataset, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .select(LocalStorageDataset::as_select())
+        paginated(dsl::rendezvous_local_storage_dataset, dsl::id, pagparams)
+            .select(RendezvousLocalStorageDataset::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -87,14 +92,17 @@ impl DataStore {
     /// exists, returns `Ok(None)`.
     pub async fn local_storage_dataset_insert_if_not_exists(
         &self,
-        dataset: LocalStorageDataset,
-    ) -> CreateResult<Option<LocalStorageDataset>> {
-        use nexus_db_schema::schema::local_storage_dataset::dsl;
+        opctx: &OpContext,
+        dataset: RendezvousLocalStorageDataset,
+    ) -> CreateResult<Option<RendezvousLocalStorageDataset>> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
 
         let zpool_id = dataset.pool_id;
         Zpool::insert_resource(
             zpool_id,
-            diesel::insert_into(dsl::local_storage_dataset)
+            diesel::insert_into(dsl::rendezvous_local_storage_dataset)
                 .values(dataset)
                 .on_conflict(dsl::id)
                 .do_nothing(),
@@ -112,5 +120,36 @@ impl DataStore {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
         })
+    }
+
+    /// Tombstone a local storage dataset, if it isn't already
+    pub async fn local_storage_dataset_tombstone(
+        &self,
+        opctx: &OpContext,
+        dataset_id: DatasetUuid,
+        blueprint_id_when_tombstoned: BlueprintUuid,
+    ) -> Result<bool, Error> {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+
+        use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
+
+        diesel::update(dsl::rendezvous_local_storage_dataset)
+            .filter(dsl::id.eq(to_db_typed_uuid(dataset_id)))
+            .filter(dsl::time_tombstoned.is_null())
+            .set((
+                dsl::time_tombstoned.eq(Utc::now()),
+                dsl::blueprint_id_when_tombstoned
+                    .eq(to_db_typed_uuid(blueprint_id_when_tombstoned)),
+            ))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|rows_modified| match rows_modified {
+                0 => false,
+                1 => true,
+                n => unreachable!(
+                    "update restricted to 1 row return {n} rows modified"
+                ),
+            })
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

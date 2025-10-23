@@ -12,7 +12,7 @@ use nexus_db_queries::db::model::CrucibleDataset;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::identity::Asset;
-use nexus_types::internal_api::background::DatasetsRendezvousStats;
+use nexus_types::internal_api::background::CrucibleDatasetsRendezvousStats;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use slog::info;
@@ -24,7 +24,7 @@ pub(crate) async fn record_new_crucible_datasets(
     datastore: &DataStore,
     blueprint_datasets: impl Iterator<Item = &BlueprintDatasetConfig>,
     inventory_datasets: &BTreeSet<DatasetUuid>,
-) -> anyhow::Result<DatasetsRendezvousStats> {
+) -> anyhow::Result<CrucibleDatasetsRendezvousStats> {
     // Before attempting to insert any datasets, first query for any existing
     // dataset records so we can filter them out. This looks like a typical
     // TOCTOU issue, but it is purely a performance optimization. We expect
@@ -43,7 +43,7 @@ pub(crate) async fn record_new_crucible_datasets(
         .map(|dataset| (dataset.id(), dataset))
         .collect::<BTreeMap<DatasetUuid, _>>();
 
-    let mut stats = DatasetsRendezvousStats::default();
+    let mut stats = CrucibleDatasetsRendezvousStats::default();
 
     for bp_dataset in blueprint_datasets {
         // Filter down to Crucible datasets...
@@ -306,7 +306,7 @@ mod tests {
                  (result_stats, datastore_datasets)
             });
 
-            let mut expected_stats = DatasetsRendezvousStats::default();
+            let mut expected_stats = CrucibleDatasetsRendezvousStats::default();
 
             for (id, prep) in prep {
                 let id: DatasetUuid = usize_to_id(id);

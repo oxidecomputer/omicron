@@ -53,9 +53,10 @@ pub async fn reconcile_blueprint_rendezvous_tables(
     .await?;
 
     let local_storage_dataset =
-        local_storage_dataset::record_new_local_storage_datasets(
+        local_storage_dataset::reconcile_local_storage_datasets(
             opctx,
             datastore,
+            blueprint.id,
             blueprint
                 .all_omicron_datasets(BlueprintDatasetDisposition::any)
                 .map(|(_sled_id, dataset)| dataset),

@@ -176,7 +176,6 @@ mod tests {
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
     use nexus_db_model::CrucibleDataset;
-    use nexus_db_model::LocalStorageDataset;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
@@ -220,7 +219,7 @@ mod tests {
         opctx: &OpContext,
         id: PhysicalDiskUuid,
         sled_id: SledUuid,
-    ) -> (ZpoolUuid, DatasetUuid, DatasetUuid, RegionUuid) {
+    ) -> (ZpoolUuid, DatasetUuid, RegionUuid) {
         let zpool = datastore
             .zpool_insert(
                 opctx,
@@ -271,18 +270,9 @@ mod tests {
             .await
             .unwrap();
 
-        let local_storage_dataset = datastore
-            .local_storage_dataset_insert_if_not_exists(
-                LocalStorageDataset::new(DatasetUuid::new_v4(), zpool.id()),
-            )
-            .await
-            .unwrap()
-            .unwrap();
-
         (
             zpool.id(),
             crucible_dataset.id(),
-            local_storage_dataset.id(),
             RegionUuid::from_untyped_uuid(region_id),
         )
     }
@@ -290,7 +280,6 @@ mod tests {
     struct TestFixture {
         zpool_id: ZpoolUuid,
         crucible_dataset_id: DatasetUuid,
-        local_storage_dataset_id: DatasetUuid,
         region_id: RegionUuid,
         disk_id: PhysicalDiskUuid,
     }
@@ -301,15 +290,11 @@ mod tests {
 
             let disk_id = make_disk_in_db(datastore, opctx, 0, sled_id).await;
 
-            let (
-                zpool_id,
-                crucible_dataset_id,
-                local_storage_dataset_id,
-                region_id,
-            ) = add_zpool_dataset_and_region(
-                &datastore, &opctx, disk_id, sled_id,
-            )
-            .await;
+            let (zpool_id, crucible_dataset_id, region_id) =
+                add_zpool_dataset_and_region(
+                    &datastore, &opctx, disk_id, sled_id,
+                )
+                .await;
 
             datastore
                 .physical_disk_update_policy(
@@ -320,13 +305,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            Self {
-                zpool_id,
-                crucible_dataset_id,
-                local_storage_dataset_id,
-                region_id,
-                disk_id,
-            }
+            Self { zpool_id, crucible_dataset_id, region_id, disk_id }
         }
 
         async fn delete_region(&self, datastore: &DataStore) {
@@ -373,30 +352,12 @@ mod tests {
                 .optional()
                 .expect("Dataset query should succeed");
 
-            use nexus_db_schema::schema::local_storage_dataset::dsl as local_storage_dsl;
-            let fetched_local_storage_dataset =
-                local_storage_dsl::local_storage_dataset
-                    .filter(
-                        local_storage_dsl::id.eq(self
-                            .local_storage_dataset_id
-                            .into_untyped_uuid()),
-                    )
-                    .filter(local_storage_dsl::time_deleted.is_null())
-                    .select(LocalStorageDataset::as_select())
-                    .first_async(&*conn)
-                    .await
-                    .optional()
-                    .expect("Dataset query should succeed");
-
-            match (
-                fetched_zpool,
-                fetched_crucible_dataset,
-                fetched_local_storage_dataset,
-            ) {
-                (Some(_), Some(_), Some(_)) => false,
-                (None, None, None) => true,
+            match (fetched_zpool, fetched_crucible_dataset) {
+                (Some(_), Some(_)) => false,
+                (None, None) => true,
                 _ => panic!(
-                    "If zpool and datasets were cleaned, they should be cleaned together"
+                    "If zpool and datasets were cleaned, they should be \
+                    cleaned together"
                 ),
             }
         }

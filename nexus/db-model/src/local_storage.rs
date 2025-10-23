@@ -3,23 +3,26 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::DbTypedUuid;
-use super::Generation;
 use chrono::DateTime;
 use chrono::Utc;
-use db_macros::Asset;
-use nexus_db_schema::schema::local_storage_dataset;
+use nexus_db_schema::schema::rendezvous_local_storage_dataset;
+use omicron_uuid_kinds::BlueprintKind;
+use omicron_uuid_kinds::BlueprintUuid;
+use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
 
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, PartialEq)]
-#[diesel(table_name = local_storage_dataset)]
-#[asset(uuid_kind = DatasetKind)]
-pub struct LocalStorageDataset {
-    #[diesel(embed)]
-    identity: LocalStorageDatasetIdentity,
-    time_deleted: Option<DateTime<Utc>>,
-    rcgen: Generation,
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, PartialEq)]
+#[diesel(table_name = rendezvous_local_storage_dataset)]
+pub struct RendezvousLocalStorageDataset {
+    id: DbTypedUuid<DatasetKind>,
+
+    time_created: DateTime<Utc>,
+    time_tombstoned: Option<DateTime<Utc>>,
+
+    blueprint_id_when_created: DbTypedUuid<BlueprintKind>,
+    blueprint_id_when_tombstoned: Option<DbTypedUuid<BlueprintKind>>,
 
     pub pool_id: DbTypedUuid<ZpoolKind>,
 
@@ -30,19 +33,33 @@ pub struct LocalStorageDataset {
     no_provision: bool,
 }
 
-impl LocalStorageDataset {
-    pub fn new(id: DatasetUuid, pool_id: ZpoolUuid) -> Self {
+impl RendezvousLocalStorageDataset {
+    pub fn new(
+        id: DatasetUuid,
+        pool_id: ZpoolUuid,
+        blueprint_id_when_created: BlueprintUuid,
+    ) -> Self {
         Self {
-            identity: LocalStorageDatasetIdentity::new(id),
-            time_deleted: None,
-            rcgen: Generation::new(),
+            id: id.into(),
+            time_created: Utc::now(),
+            time_tombstoned: None,
+            blueprint_id_when_created: blueprint_id_when_created.into(),
+            blueprint_id_when_tombstoned: None,
             pool_id: pool_id.into(),
             size_used: 0,
             no_provision: false,
         }
     }
 
+    pub fn id(&self) -> DatasetUuid {
+        self.id.into()
+    }
+
     pub fn pool_id(&self) -> ZpoolUuid {
         self.pool_id.into()
+    }
+
+    pub fn is_tombstoned(&self) -> bool {
+        self.time_tombstoned.is_some()
     }
 }

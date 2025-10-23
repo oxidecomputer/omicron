@@ -175,8 +175,9 @@ impl DataStore {
                     .or(physical_disk_dsl::id.is_null())
                     .or(
                         // NOTE: We should probably get rid of this altogether
-                        // (it's kinda implied by "Decommissioned", being a terminal
-                        // state) but this is an extra cautious statement.
+                        // (it's kinda implied by "Decommissioned", being a
+                        // terminal state) but this is an extra cautious
+                        // statement.
                         physical_disk_dsl::time_deleted.is_not_null(),
                     ),
             )
@@ -217,7 +218,6 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let now = Utc::now();
         use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
-        use nexus_db_schema::schema::local_storage_dataset::dsl as local_storage_dsl;
         use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
 
         let zpool_id = *zpool_id.as_untyped_uuid();
@@ -255,7 +255,8 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if region_snapshot_count > 0 {
             return Err(Error::unavail(&format!(
-                "Cannot delete this zpool; it has {region_snapshot_count} region snapshots"
+                "Cannot delete this zpool; it has {region_snapshot_count} \
+                region snapshots"
             )));
         }
 
@@ -264,16 +265,6 @@ impl DataStore {
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))
             .set(dataset_dsl::time_deleted.eq(now))
-            .execute_async(conn)
-            .await
-            .map(|_rows_modified| ())
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        // Ensure the local storage datasets are deleted
-        diesel::update(local_storage_dsl::local_storage_dataset)
-            .filter(local_storage_dsl::time_deleted.is_null())
-            .filter(local_storage_dsl::pool_id.eq(zpool_id))
-            .set(local_storage_dsl::time_deleted.eq(now))
             .execute_async(conn)
             .await
             .map(|_rows_modified| ())
