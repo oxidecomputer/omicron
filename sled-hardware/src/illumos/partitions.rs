@@ -302,7 +302,7 @@ fn ensure_size_and_formatting(
     // Check that we are on real Oxide hardware so that we avoid:
     // - Messing with NVMe devices in other environments
     // - Failing tests which use zvols rather than real NVMe devices
-    // - Breaking virutal environments like a4x2 which likely don't expose or
+    // - Breaking virtual environments like a4x2 which likely don't expose or
     //   implement changing the LBA on emulated devices.
     if !is_oxide_sled().map_err(NvmeFormattingError::SystemDetection)? {
         return Ok(());
