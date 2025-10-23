@@ -575,7 +575,11 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        // NOTE: This is the IPv4 address, despite the name. We kept the
+        // original name of `ip` because renaming columns is not idempotent in
+        // CRDB as of today.
+        ip -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
         transit_ips -> Array<Inet>,
@@ -594,7 +598,8 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
         transit_ips -> Array<Inet>,
@@ -614,7 +619,8 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
     }
@@ -2790,6 +2796,20 @@ table! {
         error_code -> Nullable<Text>,
         error_message -> Nullable<Text>,
         result_kind -> crate::enums::AuditLogResultKindEnum,
+    }
+}
+
+table! {
+    scim_client_bearer_token (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        time_expires -> Nullable<Timestamptz>,
+
+        silo_id -> Uuid,
+
+        bearer_token -> Text,
     }
 }
 

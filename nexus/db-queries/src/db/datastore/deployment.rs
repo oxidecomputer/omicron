@@ -4347,7 +4347,7 @@ mod tests {
                                 id: *zone_id.as_untyped_uuid(),
                             },
                             name: Name::from_str("mynic").unwrap(),
-                            ip: "fd77:e9d2:9cd9:2::8".parse().unwrap(),
+                            ip: "172.30.2.6".parse().unwrap(),
                             mac: MacAddr::random_system(),
                             subnet: IpNet::host_net(IpAddr::V6(
                                 Ipv6Addr::LOCALHOST,

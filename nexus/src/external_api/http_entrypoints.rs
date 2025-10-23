@@ -1032,10 +1032,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn scim_token_delete_all(
+    async fn scim_v2_list_users(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::SiloSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
+        query_params: Query<scim2_rs::QueryParams>,
+    ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -1045,46 +1045,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
             let result = async {
                 let query = query_params.into_inner();
-                let silo_lookup = nexus.silo_lookup(&opctx, query.silo)?;
-
-                nexus
-                    .scim_idp_delete_tokens_for_silo(&opctx, &silo_lookup)
-                    .await?;
-
-                Ok(HttpResponseDeleted())
-            }
-            .await;
-
-            let _ =
-                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
-            result
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn scim_v2_list_users(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<scim2_rs::QueryParams>,
-    ) -> Result<Response<Body>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-
-            // SCIM operations are authenticated by resolving a token (that does
-            // _not_ resolve to any Actor) to a silo-specific SCIM server
-            // implementation. There isn't any opctx to use, so the "external
-            // authentication" one is used here for audit purposes.
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
-
-            let result = async {
-                let query = query_params.into_inner();
-                nexus.scim_v2_list_users(&rqctx.request, query).await
+                nexus.scim_v2_list_users(&opctx, query).await
             }
             .await;
 
@@ -1106,21 +1067,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
                 let query = query_params.into_inner();
                 let path_params = path_params.into_inner();
 
                 nexus
-                    .scim_v2_get_user_by_id(
-                        &rqctx.request,
-                        query,
-                        path_params.user_id,
-                    )
+                    .scim_v2_get_user_by_id(&opctx, query, path_params.user_id)
                     .await
             }
             .await;
@@ -1142,15 +1099,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
-                nexus
-                    .scim_v2_create_user(&rqctx.request, body.into_inner())
-                    .await
+                nexus.scim_v2_create_user(&opctx, body.into_inner()).await
             }
             .await;
 
@@ -1172,17 +1127,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
                 let path_params = path_params.into_inner();
 
                 nexus
                     .scim_v2_replace_user(
-                        &rqctx.request,
+                        &opctx,
                         path_params.user_id,
                         body.into_inner(),
                     )
@@ -1208,17 +1163,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
                 let path_params = path_params.into_inner();
 
                 nexus
                     .scim_v2_patch_user(
-                        &rqctx.request,
+                        &opctx,
                         path_params.user_id,
                         body.into_inner(),
                     )
@@ -1243,17 +1198,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
                 let path_params = path_params.into_inner();
 
-                nexus
-                    .scim_v2_delete_user(&rqctx.request, path_params.user_id)
-                    .await
+                nexus.scim_v2_delete_user(&opctx, path_params.user_id).await
             }
             .await;
 
@@ -1274,15 +1227,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
                 let query = query_params.into_inner();
 
-                nexus.scim_v2_list_groups(&rqctx.request, query).await
+                nexus.scim_v2_list_groups(&opctx, query).await
             }
             .await;
 
@@ -1304,10 +1257,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
                 let query = query_params.into_inner();
@@ -1315,7 +1268,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
                 nexus
                     .scim_v2_get_group_by_id(
-                        &rqctx.request,
+                        &opctx,
                         query,
                         path_params.group_id,
                     )
@@ -1340,15 +1293,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
-                nexus
-                    .scim_v2_create_group(&rqctx.request, body.into_inner())
-                    .await
+                nexus.scim_v2_create_group(&opctx, body.into_inner()).await
             }
             .await;
 
@@ -1370,17 +1321,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
                 let path_params = path_params.into_inner();
 
                 nexus
                     .scim_v2_replace_group(
-                        &rqctx.request,
+                        &opctx,
                         path_params.group_id,
                         body.into_inner(),
                     )
@@ -1406,17 +1357,17 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
                 let path_params = path_params.into_inner();
 
                 nexus
                     .scim_v2_patch_group(
-                        &rqctx.request,
+                        &opctx,
                         path_params.group_id,
                         body.into_inner(),
                     )
@@ -1441,17 +1392,15 @@ impl NexusExternalApi for NexusExternalApiImpl {
     ) -> Result<Response<Body>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
-            let opctx = nexus.opctx_external_scim();
-            let audit =
-                nexus.audit_log_entry_init_unauthed(&opctx, &rqctx).await?;
+            let audit = nexus.audit_log_entry_init(&opctx, &rqctx).await?;
 
             let result = async {
                 let path_params = path_params.into_inner();
 
-                nexus
-                    .scim_v2_delete_group(&rqctx.request, path_params.group_id)
-                    .await
+                nexus.scim_v2_delete_group(&opctx, path_params.group_id).await
             }
             .await;
 

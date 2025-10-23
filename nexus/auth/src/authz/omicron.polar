@@ -112,6 +112,8 @@ resource Fleet {
 }
 
 # For fleets specifically, roles can be conferred by roles on the user's Silo.
+# Note that certain Actors may not ever have any roles assigned to them, like
+# SCIM Actors.
 has_role(actor: AuthenticatedActor, role: String, _: Fleet) if
 	silo_role in actor.confers_fleet_role(role) and
 	has_role(actor, silo_role, actor.silo.unwrap());
@@ -173,7 +175,7 @@ has_relation(fleet: Fleet, "parent_fleet", silo: Silo)
 #
 # It's unclear what else would break if users couldn't see their own Silo.
 has_permission(actor: AuthenticatedActor, "read", silo: Silo)
-	if silo in actor.silo;
+	if actor.is_user and silo in actor.silo;
 
 resource Project {
 	permissions = [
@@ -255,7 +257,7 @@ has_permission(actor: AuthenticatedActor, _perm: String, silo_user: SiloUser)
     if actor.equals_silo_user(silo_user);
 
 has_permission(actor: AuthenticatedActor, "read", silo_user: SiloUser)
-    if silo_user.silo in actor.silo;
+    if actor.is_user and silo_user.silo in actor.silo;
 
 resource SiloGroup {
 	permissions = [
@@ -335,6 +337,27 @@ has_relation(silo: Silo, "parent_silo", saml_identity_provider: SamlIdentityProv
 	if saml_identity_provider.silo = silo;
 has_relation(fleet: Fleet, "parent_fleet", collection: SamlIdentityProvider)
 	if collection.silo.fleet = fleet;
+
+resource ScimClientBearerToken {
+	permissions = [ "read", "modify" ];
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+    # necessary to authenticate SCIM actors
+	"read" if "external-authenticator" on "parent_fleet";
+
+	# Silo-level roles grant privileges for SCIM client tokens.
+	"read" if "admin" on "parent_silo";
+	"modify" if "admin" on "parent_silo";
+
+	# Fleet-level roles also grant privileges for SCIM client tokens.
+	"read" if "admin" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", scim_client_bearer_token: ScimClientBearerToken)
+	if scim_client_bearer_token.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: ScimClientBearerToken)
+	if collection.silo.fleet = fleet;
+
 
 #
 # SYNTHETIC RESOURCES OUTSIDE THE SILO HIERARCHY
@@ -453,7 +476,7 @@ has_relation(fleet: Fleet, "parent_fleet", ip_pool_list: IpPoolList)
 # Any authenticated user can create a child of a provided IP Pool.
 # This is necessary to use the pools when provisioning instances.
 has_permission(actor: AuthenticatedActor, "create_child", ip_pool: IpPool)
-	if silo in actor.silo and silo.fleet = ip_pool.fleet;
+	if actor.is_user and silo in actor.silo and silo.fleet = ip_pool.fleet;
 
 # Describes the policy for reading and writing the audit log 
 resource AuditLog {
@@ -631,8 +654,10 @@ has_permission(actor: AuthenticatedActor, "modify", session: ConsoleSession)
 # even Silo) the device auth is associated with.  Any user can claim a device
 # auth request with the right user code (that's how it works) -- it's the user
 # code and associated logic that prevents unauthorized access here.
-has_permission(_actor: AuthenticatedActor, "read", _device_auth: DeviceAuthRequest);
-has_permission(_actor: AuthenticatedActor, "modify", _device_auth: DeviceAuthRequest);
+has_permission(actor: AuthenticatedActor, "read", _device_auth: DeviceAuthRequest)
+    if actor.is_user;
+has_permission(actor: AuthenticatedActor, "modify", _device_auth: DeviceAuthRequest)
+    if actor.is_user;
 
 has_permission(actor: AuthenticatedActor, "read", device_token: DeviceAccessToken)
 	if has_role(actor, "external-authenticator", device_token.fleet);
@@ -703,3 +728,23 @@ resource AlertClassList {
 
 has_relation(fleet: Fleet, "parent_fleet", collection: AlertClassList)
 	if collection.fleet = fleet;
+
+resource ScimClientBearerTokenList {
+	permissions = [ "create_child", "list_children" ];
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Silo-level roles grant privileges for SCIM client tokens.
+    # These are all admin because being able to create these tokens would allow
+    # a user to grant themselves admin by modifying group membership through SCIM calls
+	"create_child" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_silo";
+
+    # Fleet-level roles also grant privileges for SCIM client tokens, for
+    # configuration before silo admins are present.
+	"create_child" if "admin" on "parent_fleet";
+	"list_children" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", scim_client_bearer_token_list: ScimClientBearerTokenList)
+	if scim_client_bearer_token_list.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: ScimClientBearerTokenList)
+	if collection.silo.fleet = fleet;

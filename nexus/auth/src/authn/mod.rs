@@ -32,7 +32,6 @@ pub use nexus_db_fixed_data::silo_user::USER_TEST_PRIVILEGED;
 pub use nexus_db_fixed_data::silo_user::USER_TEST_UNPRIVILEGED;
 pub use nexus_db_fixed_data::user_builtin::USER_DB_INIT;
 pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
-pub use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_SCIM;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_API;
 pub use nexus_db_fixed_data::user_builtin::USER_INTERNAL_READ;
 pub use nexus_db_fixed_data::user_builtin::USER_SAGA_RECOVERY;
@@ -46,6 +45,7 @@ use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::BuiltInUserUuid;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use serde::Deserialize;
 use serde::Serialize;
@@ -126,6 +126,8 @@ impl Context {
     /// Built-in users have no Silo, and so they usually can't do anything that
     /// might use a Silo.  You usually want to use [`Context::silo_required()`]
     /// if you don't expect to be looking at a built-in user.
+    ///
+    /// Additionally, non-user Actors may also be associated with a Silo.
     pub fn silo_or_builtin(
         &self,
     ) -> Result<Option<authz::Silo>, omicron_common::api::external::Error> {
@@ -136,14 +138,25 @@ impl Context {
                 LookupType::ById(*silo_id),
             )),
             Actor::UserBuiltin { .. } => None,
+            Actor::Scim { silo_id } => Some(authz::Silo::new(
+                authz::FLEET,
+                *silo_id,
+                LookupType::ById(*silo_id),
+            )),
         })
     }
 
-    /// Returns the `SiloAuthnPolicy` for the authenticated actor's Silo, if any
+    /// Returns the `SiloAuthnPolicy` for the authenticated actor's Silo, if
+    /// any.
     pub fn silo_authn_policy(&self) -> Option<&SiloAuthnPolicy> {
         match &self.kind {
             Kind::Unauthenticated => None,
-            Kind::Authenticated(_, policy) => policy.as_ref(),
+            Kind::Authenticated(_, policy) => {
+                // note: must be Some if `details.actor` is also Some, otherwise
+                // you'll see a 500 in the impl of
+                // `ApiResourceWithRoles::conferred_roles_by` for Fleet.
+                policy.as_ref()
+            }
         }
     }
 
@@ -200,12 +213,6 @@ impl Context {
         Context::context_for_builtin_user(USER_SERVICE_BALANCER.id)
     }
 
-    /// Returns an authenticated context for use for authenticating SCIM
-    /// requests
-    pub fn external_scim() -> Context {
-        Context::context_for_builtin_user(USER_EXTERNAL_SCIM.id)
-    }
-
     fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid) -> Context {
         Context {
             kind: Kind::Authenticated(
@@ -260,6 +267,20 @@ impl Context {
             schemes_tried: Vec::new(),
         }
     }
+
+    /// Returns an authenticated context for a Silo's SCIM Actor. Not marked as
+    /// #[cfg(test)] so that this is available in integration tests.
+    pub fn for_scim(silo_id: Uuid) -> Context {
+        Context {
+            kind: Kind::Authenticated(
+                Details { actor: Actor::Scim { silo_id } },
+                // This should never be non-empty, we don't want the SCIM user
+                // to ever have associated roles.
+                Some(SiloAuthnPolicy::new(BTreeMap::default())),
+            ),
+            schemes_tried: Vec::new(),
+        }
+    }
 }
 
 /// Authentication-related policy derived from a user's Silo
@@ -307,7 +328,6 @@ mod test {
     use super::USER_TEST_PRIVILEGED;
     use super::USER_TEST_UNPRIVILEGED;
     use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_AUTHN;
-    use nexus_db_fixed_data::user_builtin::USER_EXTERNAL_SCIM;
     use nexus_types::identity::Asset;
 
     #[test]
@@ -350,10 +370,6 @@ mod test {
         let authn = Context::internal_api();
         let actor = authn.actor().unwrap();
         assert_eq!(actor.built_in_user_id(), Some(USER_INTERNAL_API.id));
-
-        let authn = Context::external_scim();
-        let actor = authn.actor().unwrap();
-        assert_eq!(actor.built_in_user_id(), Some(USER_EXTERNAL_SCIM.id));
     }
 }
 
@@ -382,6 +398,7 @@ pub struct Details {
 pub enum Actor {
     UserBuiltin { user_builtin_id: BuiltInUserUuid },
     SiloUser { silo_user_id: SiloUserUuid, silo_id: Uuid },
+    Scim { silo_id: Uuid },
 }
 
 impl Actor {
@@ -389,6 +406,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_id, .. } => Some(*silo_id),
+            Actor::Scim { silo_id } => Some(*silo_id),
         }
     }
 
@@ -396,6 +414,7 @@ impl Actor {
         match self {
             Actor::UserBuiltin { .. } => None,
             Actor::SiloUser { silo_user_id, .. } => Some(*silo_user_id),
+            Actor::Scim { .. } => None,
         }
     }
 
@@ -403,17 +422,28 @@ impl Actor {
         match self {
             Actor::UserBuiltin { user_builtin_id } => Some(*user_builtin_id),
             Actor::SiloUser { .. } => None,
+            Actor::Scim { .. } => None,
         }
     }
-}
 
-impl From<&Actor> for nexus_db_model::IdentityType {
-    fn from(actor: &Actor) -> nexus_db_model::IdentityType {
-        match actor {
-            Actor::UserBuiltin { .. } => {
-                nexus_db_model::IdentityType::UserBuiltin
-            }
-            Actor::SiloUser { .. } => nexus_db_model::IdentityType::SiloUser,
+    /// Return a generic UUID and db-model IdentityType for use with looking up
+    /// role assignments, or None if a role assignment for this type of Actor is
+    /// invalid.
+    pub fn id_and_type_for_role_assignment(
+        &self,
+    ) -> Option<(Uuid, nexus_db_model::IdentityType)> {
+        match &self {
+            Actor::UserBuiltin { user_builtin_id } => Some((
+                user_builtin_id.into_untyped_uuid(),
+                nexus_db_model::IdentityType::UserBuiltin,
+            )),
+            Actor::SiloUser { silo_user_id, .. } => Some((
+                silo_user_id.into_untyped_uuid(),
+                nexus_db_model::IdentityType::SiloUser,
+            )),
+            // a role assignment for this Actor is invalid, they have a fixed
+            // policy.
+            Actor::Scim { .. } => None,
         }
     }
 }
@@ -435,6 +465,10 @@ impl std::fmt::Debug for Actor {
             Actor::SiloUser { silo_user_id, silo_id } => f
                 .debug_struct("Actor::SiloUser")
                 .field("silo_user_id", &silo_user_id)
+                .field("silo_id", &silo_id)
+                .finish_non_exhaustive(),
+            Actor::Scim { silo_id } => f
+                .debug_struct("Actor::Scim")
                 .field("silo_id", &silo_id)
                 .finish_non_exhaustive(),
         }
