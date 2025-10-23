@@ -502,7 +502,7 @@ impl BundleCollection {
         self: &Arc<Self>,
         dir: &Utf8TempDir,
     ) -> anyhow::Result<SupportBundleCollectionReport> {
-        let collection = Box::pin(self.collect_bundle_as_file(&dir));
+        let collection = self.collect_bundle_as_file(&dir);
 
         // We periodically check the state of the support bundle - if a user
         // explicitly cancels it, we should stop the collection process and
@@ -550,7 +550,7 @@ impl BundleCollection {
         //
         // For more details, see:
         // https://github.com/oxidecomputer/omicron/issues/9259
-        let check_for_cancellation = Box::pin(async move {
+        let check_for_cancellation = async move {
             loop {
                 // Timer fired mid-collection - check if we should stop.
                 yield_interval.tick().await;
@@ -568,7 +568,7 @@ impl BundleCollection {
                     anyhow::bail!("Support Bundle Cancelled");
                 }
             }
-        });
+        };
 
         tokio::select! {
             // Returns if the bundle has been cancelled explicitly, or if we
