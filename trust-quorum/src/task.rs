@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! A runnable async trust quorum node that wraps the sans-io [`crate::Node`]
+//! A runnable async trust quorum node that wraps the sans-io
+//! [`trust_quorum_protocol::Node`]
 
 use crate::connection_manager::{
     ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner,
 };
-use crate::{BaseboardId, Node, NodeCtx};
 use slog::{Logger, debug, error, info, o};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
@@ -16,6 +16,7 @@ use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
+use trust_quorum_protocol::{BaseboardId, Node, NodeCtx};
 
 #[derive(Debug, Clone)]
 pub struct Config {

@@ -15,7 +15,7 @@ use secrecy::ExposeSecret;
 use slog::{Logger, info, o};
 use std::collections::BTreeSet;
 use test_strategy::{Arbitrary, proptest};
-use trust_quorum::{
+use trust_quorum_protocol::{
     BaseboardId, CoordinatorOperation, Epoch, NodeCallerCtx, NodeCommonCtx,
     Threshold,
 };
