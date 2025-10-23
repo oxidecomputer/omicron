@@ -94,28 +94,71 @@ for check_run_id in $(jq -r .check_runs[].id api/check_suite_runs); do
 
     gh api "repos/${GITHUB_REPOSITORY}/check-runs/${check_run_id}" > api/check_run
     job_url="$(jq -r .details_url api/check_run)"
-
-    # Figure out where the JUnit XML report lives and the Trunk variant based on the job name. If new
-    # jobs are added or renamed, you will need to change this too.
-    #
-    # The Trunk variant allows to differentiate flaky tests by platform, and should be the OS name.
     job_name="$(jq -r .name api/check_run)"
-    case "${github_app} / ${job_name}" in
-        "buildomat / build-and-test (helios)")
-            artifact_series="junit-helios"
-            artifact_name="junit.xml"
-            variant="helios"
-            ;;
-        "buildomat / build-and-test (ubuntu-22.04)")
-            artifact_series="junit-linux"
-            artifact_name="junit.xml"
-            variant="ubuntu"
-            ;;
-        *)
-            echo "unsupported job name, skipping upload: ${job_name}"
-            continue
-            ;;
-    esac
+
+    # We need to somehow download the JUnit XML from the job artifacts, and there are no good
+    # solutions available in Buildomat to do so:
+    #
+    # - Buildomat supports publishing artifacts at pre-defined URLs with its [[publish]] config
+    #   block, and that's what this script originally used. The problem is, if jobs run multiple
+    #   times for the same commit (for example in case of a retry) Buildomat will only publish the
+    #   artifact of the first job, not for any followup jobs.
+    #
+    # - Buildomat has a JSON API that does expose the job outputs, but it's behind authentication
+    #   and this workflow cannot access it. It would also require everyone tweaking the script to
+    #   obtain credentials before running the script locally.
+    #
+    # - Buildomat provides an unauthenticated HTML page with all the job details, including download
+    #   links for the job outpouts. It requires scraping the HTML to figure out the correct link.
+    #
+    # Out of the three options, the second would be ideal, but cannot implemented now. The first
+    # option was implemented previously, but to detect flaky tests Trunk needs the correct JUnit
+    # files when a job is retried. This only leaves us with the third option, which while not ideal
+    # seems to work fine for now. Sorry.
+    log_step "detecting the presence of a JUnit report in job ${job_name}"
+    found_link=""
+    # curl flags:
+    # -f: exit 1 if the response is a 4xx or a 5xx
+    # -L: follow redirects
+    #
+    # grep flags:
+    # -h: don't output file names
+    # -o: only print what matches, not the whole line
+    # -P: use perl regexes (needed for \K)
+    #
+    # Regex details:
+    # - We first match `href="`, to only get links as part of an <a> tag.
+    # - The \K then instructs grep to only print matching text *after* the \K.
+    # - We finally include everything that looks like a link until a `"` is found.
+    for link in $(curl -fL --retry 3 "${job_url}" | grep -hoP 'href="\Khttps://[^"]+'); do
+        case "${link}" in
+            # Look for Buildomat links for an artefact called "junit.xml".
+            https://buildomat.eng.oxide.computer/wg/0/artefact/*/junit.xml)
+                if [[ "${found_link}" == "${link}" ]]; then
+                    echo "note: found the same JUnit link multiple times, only using the first" >&2
+                elif [[ "${found_link}" == "" ]]; then
+                    echo "success: found ${link}" >&2
+                    rm -f git/junit.xml
+                    curl -fL -o git/junit.xml --retry 3 "${link}"
+                    found_link="${link}"
+                else
+                    # It could be possible to support multiple JUnit files, but we don't need that
+                    # so far. If you encounter this error feel free to add support for it.
+                    echo "error: found more than one JUnit reports:" >&2
+                    echo "- ${found_link}" >&2
+                    echo "- ${link}" >&2
+                    exit 1
+                fi
+                ;;
+            *)
+                echo "note: ignoring non-JUnit URL ${link}" >&2
+                ;;
+        esac
+    done
+    if [[ "${found_link}" == "" ]]; then
+        echo "skipping job ${job_name}, as it doesn't contain any JUnit report"
+        continue
+    fi
 
     # Configure the environment to override Trunk's CI detection (with CUSTOM=true) and to provide all
     # the relevant information about the CI run. Otherwise Trunk will either pick up nothing (when
@@ -133,16 +176,11 @@ for check_run_id in $(jq -r .check_runs[].id api/check_suite_runs); do
         vars+=("PR_TITLE=${pr_title}")
     fi
 
+    echo >&2
     echo "these environmnent variables will be set:" >&2
     for var in "${vars[@]}"; do
         echo "${var}" >&2
     done
-
-    # The URL is configured through a [[publish]] block in the Buildomat job configuration.
-    log_step "downloading the JUnit XML report for check run ${check_run_id}..."
-    junit_url="https://buildomat.eng.oxide.computer/public/file/${GITHUB_REPOSITORY}/${artifact_series}/${commit}/${artifact_name}"
-    rm -f git/junit.xml
-    curl -fL -o git/junit.xml --retry 3 "${junit_url}"
 
     # Uploading to Trunk has to happen inside of the git repository at the current commit.
     if [[ -z "${DRY_RUN+x}" ]]; then
