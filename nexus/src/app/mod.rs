@@ -30,6 +30,7 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::fm;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
@@ -286,6 +287,11 @@ pub struct Nexus {
     #[allow(dead_code)]
     repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
 
+    /// Watch channel containing the currently-loaded fault management sitrep.
+    #[allow(dead_code)]
+    sitrep_load_rx:
+        watch::Receiver<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
+
     /// handle to pull update status data
     update_status: UpdateStatusHandle,
 
@@ -485,6 +491,8 @@ impl Nexus {
         let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
+        let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -540,6 +548,7 @@ impl Nexus {
             repo_depot_resolver,
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
+            sitrep_load_rx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -624,6 +633,7 @@ impl Nexus {
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
                     blueprint_load_tx,
+                    sitrep_load_tx,
                 },
             );
 
