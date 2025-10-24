@@ -375,8 +375,9 @@ impl NodeTask {
         match msg.msg {
             ConnToMainMsgInner::Accepted { addr, peer_id } => {
                 self.conn_mgr
-                    .server_handshake_completed(task_id, addr, peer_id)
+                    .server_handshake_completed(task_id, addr, peer_id.clone())
                     .await;
+                self.node.on_connect(&mut self.ctx, peer_id);
             }
             ConnToMainMsgInner::Connected { addr, peer_id } => {
                 self.conn_mgr
@@ -400,7 +401,7 @@ impl NodeTask {
         }
     }
 
-    // TODO: Process `ctx`: save persist state
+    // TODO: Process `ctx`: save persistent state
     async fn on_api_request(&mut self, request: NodeApiRequest) {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {
