@@ -265,6 +265,11 @@ enum PolarSnippet {
     /// Generate it as a resource nested within a Project (either directly or
     /// indirectly)
     InProject,
+
+    /// Generate it as a networking resource nested within a Project
+    /// (like InProject, but without default permission rules - all rules
+    /// defined in omicron.polar for networking restrictions)
+    InProjectNetworking,
 }
 
 /// Implementation of [`authz_resource!`]
@@ -417,6 +422,67 @@ fn do_authz_resource(
                     "read" if "viewer" on "containing_project";
                     "modify" if "collaborator" on "containing_project";
                     "create_child" if "collaborator" on "containing_project";
+                }}
+
+                has_relation(project: Project, "containing_project", child: {})
+                    if has_relation(project, "containing_project", child.{});
+
+                has_relation(parent: {}, "parent", child: {})
+                    if child.{} = parent;
+            "#,
+            resource_name,
+            parent_resource_name,
+            resource_name,
+            parent_as_snake,
+            parent_resource_name,
+            resource_name,
+            parent_as_snake,
+        ),
+
+        // InProjectNetworking: Like InProject, but NO default permission rules.
+        // All permission rules are defined in omicron.polar to enforce
+        // networking restrictions. Only defines resource structure + relations.
+        (PolarSnippet::InProjectNetworking, "Project") => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                        "delete",
+                    ];
+
+                    relations = {{ containing_project: Project }};
+                    # NOTE: No permission rules defined here!
+                    # All permissions controlled by custom networking restriction
+                    # rules in omicron.polar (can_modify_networking_resource)
+                }}
+
+                has_relation(parent: Project, "containing_project", child: {})
+                        if child.project = parent;
+            "#,
+            resource_name, resource_name,
+        ),
+
+        (PolarSnippet::InProjectNetworking, _) => format!(
+            r#"
+                resource {} {{
+                    permissions = [
+                        "list_children",
+                        "modify",
+                        "read",
+                        "create_child",
+                        "delete",
+                    ];
+
+                    relations = {{
+                        containing_project: Project,
+                        parent: {}
+                    }};
+                    # NOTE: No permission rules defined here!
+                    # All permissions controlled by custom networking restriction
+                    # rules in omicron.polar (can_modify_networking_resource)
                 }}
 
                 has_relation(project: Project, "containing_project", child: {})
