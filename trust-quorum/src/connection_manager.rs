@@ -379,6 +379,7 @@ impl ConnMgr {
 
     pub async fn send(&self, envelope: Envelope) {
         let Envelope { to, msg, .. } = envelope;
+        info!(self.log, "Sending {msg:?}"; "peer_id" => %to);
         if let Some(handle) = self.established.get1(&to) {
             handle.send(msg).await;
         }

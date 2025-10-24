@@ -380,11 +380,13 @@ impl NodeTask {
             }
             ConnToMainMsgInner::Connected { addr, peer_id } => {
                 self.conn_mgr
-                    .client_handshake_completed(task_id, addr, peer_id)
+                    .client_handshake_completed(task_id, addr, peer_id.clone())
                     .await;
+                self.node.on_connect(&mut self.ctx, peer_id);
             }
             ConnToMainMsgInner::Disconnected { peer_id } => {
-                self.conn_mgr.on_disconnected(task_id, peer_id).await;
+                self.conn_mgr.on_disconnected(task_id, peer_id.clone()).await;
+                self.node.on_disconnect(&mut self.ctx, peer_id);
             }
             ConnToMainMsgInner::Received { from, msg } => {
                 self.node.handle(&mut self.ctx, from, msg);
