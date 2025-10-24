@@ -102,6 +102,7 @@ impl ReplicaConfig {
         let user_files_path = data_path.clone().join("user_files");
         let temp_files_path = data_path.clone().join("tmp");
         let format_schema_path = data_path.clone().join("format_schemas");
+        let backup_path = data_path.clone().join("backup");
         format!(
             "<!-- generation:{generation} -->
 <clickhouse>
@@ -204,9 +205,13 @@ impl ReplicaConfig {
 
         <!-- Controls how many tasks could be in the queue -->
         <max_tasks_in_queue>1000</max_tasks_in_queue>
-     </distributed_ddl>
+    </distributed_ddl>
 
-     <merge_tree>
+    <backups>
+        <allowed_path>{backup_path}</allowed_path>
+    </backups>
+
+    <merge_tree>
         <!-- Disable sparse column serialization, which we expect to not need -->
         <ratio_of_defaults_for_sparse_serialization>1.0</ratio_of_defaults_for_sparse_serialization>
 

@@ -107,9 +107,13 @@
 
         <!-- Controls how many tasks could be in the queue -->
         <max_tasks_in_queue>1000</max_tasks_in_queue>
-     </distributed_ddl>
+    </distributed_ddl>
 
-     <merge_tree>
+    <backups>
+        <allowed_path>./data/backup</allowed_path>
+    </backups>
+
+    <merge_tree>
         <!-- Disable sparse column serialization, which we expect to not need -->
         <ratio_of_defaults_for_sparse_serialization>1.0</ratio_of_defaults_for_sparse_serialization>
 
