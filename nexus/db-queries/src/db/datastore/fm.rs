@@ -15,7 +15,7 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
-use nexus_db_schema::schema::fm_sitrep_version::dsl as current_sitrep_dsl;
+use nexus_db_schema::schema::fm_sitrep_history::dsl as current_sitrep_dsl;
 use nexus_types::fm::Sitrep;
 use omicron_common::api::external::Error;
 use omicron_uuid_kinds::GenericUuid;
@@ -35,7 +35,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Option<SitrepVersion>, Error> {
-        current_sitrep_dsl::fm_sitrep_version
+        current_sitrep_dsl::fm_sitrep_history
             .order_by(current_sitrep_dsl::version.desc())
             .select(SitrepVersion::as_select())
             .first_async(conn)

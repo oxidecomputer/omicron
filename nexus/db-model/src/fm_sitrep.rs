@@ -7,7 +7,7 @@
 use crate::SqlU32;
 use crate::typed_uuid::DbTypedUuid;
 use chrono::{DateTime, Utc};
-use nexus_db_schema::schema::{fm_sitrep, fm_sitrep_version};
+use nexus_db_schema::schema::{fm_sitrep, fm_sitrep_history};
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind, SitrepKind};
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -43,7 +43,7 @@ impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
 }
 
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
-#[diesel(table_name = fm_sitrep_version)]
+#[diesel(table_name = fm_sitrep_history)]
 pub struct SitrepVersion {
     pub version: SqlU32,
     pub sitrep_id: DbTypedUuid<SitrepKind>,
