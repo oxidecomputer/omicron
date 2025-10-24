@@ -128,6 +128,10 @@ async fn get_crucible_disk(
 
     match disk {
         datastore::Disk::Crucible(disk) => disk,
+
+        datastore::Disk::LocalStorage(_) => {
+            unreachable!();
+        }
     }
 }
 
@@ -351,7 +355,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
     let disks_url = get_disks_url();
 
     // Create a disk.
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -755,7 +759,7 @@ async fn test_disk_region_creation_failure(
     );
 
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -806,7 +810,7 @@ async fn test_disk_invalid_block_size_rejected(
 
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -849,7 +853,7 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
     );
 
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -883,7 +887,7 @@ async fn test_disk_reject_total_size_less_than_min_disk_size_bytes(
 
     // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -926,7 +930,7 @@ async fn test_disk_reject_total_size_greater_than_max_disk_size_bytes(
 
     // Atempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -970,7 +974,7 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
 
     // Attempt to allocate the disk, observe a server error.
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1020,7 +1024,7 @@ async fn test_disk_backed_by_multiple_region_sets(
     // Ask for a 20 gibibyte disk.
     let disk_size = ByteCount::from_gibibytes_u32(20);
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1056,7 +1060,7 @@ async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     // Ask for a 300 gibibyte disk (but only 16 is available)
     let disk_size = ByteCount::from_gibibytes_u32(300);
     let disks_url = get_disks_url();
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1143,7 +1147,7 @@ async fn test_disk_virtual_provisioning_collection(
     // in which it was allocated
     let disk_size = ByteCount::from_gibibytes_u32(1);
     let disks_url = get_disks_url();
-    let disk_one = params::DiskCreate {
+    let disk_one = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1202,7 +1206,7 @@ async fn test_disk_virtual_provisioning_collection(
     // Each project should be using "one disk" of real storage, but the org
     // should be using both.
     let disks_url = format!("/v1/disks?project={}", PROJECT_NAME_2);
-    let disk_one = params::DiskCreate {
+    let disk_one = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1304,7 +1308,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     // Create a 1 GB disk
     let disk_size = ByteCount::from_gibibytes_u32(1);
     let disks_url = get_disks_url();
-    let disk_one = params::DiskCreate {
+    let disk_one = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1438,7 +1442,7 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
     // Create a 1 GB disk
     let disk_size = ByteCount::from_gibibytes_u32(1);
     let disks_url = get_disks_url();
-    let disk_one = params::DiskCreate {
+    let disk_one = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1578,7 +1582,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     let disk_size = ByteCount::from_gibibytes_u32(7);
     let disks_url = get_disks_url();
 
-    let disk_one = params::DiskCreate {
+    let disk_one = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1613,7 +1617,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // Ask for a 6 gibibyte disk, this should fail because there isn't space
     // available.
     let disk_size = ByteCount::from_gibibytes_u32(6);
-    let disk_two = params::DiskCreate {
+    let disk_two = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1665,7 +1669,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
 
     // Ask for a 10 gibibyte disk.
     let disk_size = ByteCount::from_gibibytes_u32(10);
-    let disk_three = params::DiskCreate {
+    let disk_three = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk-three".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1716,7 +1720,7 @@ async fn test_multiple_disks_multiple_zpools(
     let disk_size = ByteCount::from_gibibytes_u32(10);
     let disks_url = get_disks_url();
 
-    let disk_one = params::DiskCreate {
+    let disk_one = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk-one".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1739,7 +1743,7 @@ async fn test_multiple_disks_multiple_zpools(
 
     // Ask for another 10 gibibyte disk
     let disk_size = ByteCount::from_gibibytes_u32(10);
-    let disk_two = params::DiskCreate {
+    let disk_two = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk-two".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1768,7 +1772,7 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -1813,7 +1817,7 @@ async fn test_project_delete_disk_no_auth_idempotent(
     // Create a disk
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -2441,7 +2445,7 @@ async fn test_do_not_provision_on_dataset_not_enough(
 
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -2506,7 +2510,7 @@ async fn test_zpool_control_plane_storage_buffer(
     let disks_url = get_disks_url();
 
     // Creating a 8G disk will work (10G size used due to reservation overhead)
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk1".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -2529,7 +2533,7 @@ async fn test_zpool_control_plane_storage_buffer(
 
     // Creating a 4G disk will also work (5G size used due to reservation
     // overhead plus the previous 10G size used is less than 16G)
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk2".parse().unwrap(),
             description: String::from("sells rainsticks"),

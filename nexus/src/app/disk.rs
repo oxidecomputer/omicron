@@ -77,21 +77,22 @@ impl super::Nexus {
         self.db_datastore.disk_get(opctx, authz_disk.id()).await
     }
 
-    pub(super) async fn validate_disk_create_params(
+    pub(super) async fn validate_crucible_disk_create_params(
         self: &Arc<Self>,
         opctx: &OpContext,
         authz_project: &authz::Project,
-        params: &params::DiskCreate,
-    ) -> Result<(), Error> {
-        let block_size: u64 = match params.disk_source {
+        disk_source: &params::DiskSource,
+        size: ByteCount,
+    ) -> Result<u64, Error> {
+        let block_size: u64 = match disk_source {
             params::DiskSource::Blank { block_size }
             | params::DiskSource::ImportingBlocks { block_size } => {
-                block_size.into()
+                (*block_size).into()
             }
             params::DiskSource::Snapshot { snapshot_id } => {
                 let (.., db_snapshot) =
                     LookupPath::new(opctx, &self.db_datastore)
-                        .snapshot_id(snapshot_id)
+                        .snapshot_id(*snapshot_id)
                         .fetch()
                         .await?;
 
@@ -105,10 +106,10 @@ impl super::Nexus {
 
                 // If the size of the snapshot is greater than the size of the
                 // disk, return an error.
-                if db_snapshot.size.to_bytes() > params.size.to_bytes() {
+                if db_snapshot.size.to_bytes() > size.to_bytes() {
                     return Err(Error::invalid_request(&format!(
                         "disk size {} must be greater than or equal to snapshot size {}",
-                        params.size.to_bytes(),
+                        size.to_bytes(),
                         db_snapshot.size.to_bytes(),
                     )));
                 }
@@ -117,7 +118,7 @@ impl super::Nexus {
             }
             params::DiskSource::Image { image_id } => {
                 let (.., db_image) = LookupPath::new(opctx, &self.db_datastore)
-                    .image_id(image_id)
+                    .image_id(*image_id)
                     .fetch()
                     .await?;
 
@@ -133,10 +134,10 @@ impl super::Nexus {
 
                 // If the size of the image is greater than the size of the
                 // disk, return an error.
-                if db_image.size.to_bytes() > params.size.to_bytes() {
+                if db_image.size.to_bytes() > size.to_bytes() {
                     return Err(Error::invalid_request(&format!(
                         "disk size {} must be greater than or equal to image size {}",
-                        params.size.to_bytes(),
+                        size.to_bytes(),
                         db_image.size.to_bytes(),
                     )));
                 }
@@ -145,9 +146,35 @@ impl super::Nexus {
             }
         };
 
+        Ok(block_size)
+    }
+
+    pub(super) async fn validate_disk_create_params(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        params: &params::DiskCreate,
+    ) -> Result<(), Error> {
+        let block_size: u64 = match &params {
+            params::DiskCreate::Crucible { disk_source, size, .. } => {
+                self.validate_crucible_disk_create_params(
+                    opctx,
+                    &authz_project,
+                    &disk_source,
+                    *size,
+                )
+                .await?
+            }
+
+            params::DiskCreate::LocalStorage { .. } => {
+                // All LocalStorage disks have a 4k block size
+                4096
+            }
+        };
+
         // Reject disks where the block size doesn't evenly divide the
         // total size
-        if (params.size.to_bytes() % block_size) != 0 {
+        if (params.size().to_bytes() % block_size) != 0 {
             return Err(Error::invalid_value(
                 "size and block_size",
                 format!(
@@ -159,7 +186,7 @@ impl super::Nexus {
 
         // Reject disks where the size isn't at least
         // MIN_DISK_SIZE_BYTES
-        if params.size.to_bytes() < u64::from(MIN_DISK_SIZE_BYTES) {
+        if params.size().to_bytes() < u64::from(MIN_DISK_SIZE_BYTES) {
             return Err(Error::invalid_value(
                 "size",
                 format!(
@@ -171,7 +198,7 @@ impl super::Nexus {
 
         // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
         // divide the size
-        if (params.size.to_bytes() % u64::from(MIN_DISK_SIZE_BYTES)) != 0 {
+        if (params.size().to_bytes() % u64::from(MIN_DISK_SIZE_BYTES)) != 0 {
             return Err(Error::invalid_value(
                 "size",
                 format!(
@@ -181,15 +208,52 @@ impl super::Nexus {
             ));
         }
 
-        // Reject disks where the size is greated than MAX_DISK_SIZE_BYTES
-        if params.size.to_bytes() > MAX_DISK_SIZE_BYTES {
-            return Err(Error::invalid_value(
-                "size",
-                format!(
-                    "total size must be less than {}",
-                    ByteCount::try_from(MAX_DISK_SIZE_BYTES).unwrap()
-                ),
-            ));
+        // Check for disk type specific restrictions
+        match &params {
+            params::DiskCreate::Crucible { .. } => {
+                // Reject disks where the size is greated than
+                // MAX_DISK_SIZE_BYTES. This restriction will be changed or
+                // removed when multi-subvolume Volumes can be created by Nexus,
+                // or if the region allocation algorithm changes.
+                if params.size().to_bytes() > MAX_DISK_SIZE_BYTES {
+                    return Err(Error::invalid_value(
+                        "size",
+                        format!(
+                            "total size must be less than {}",
+                            ByteCount::try_from(MAX_DISK_SIZE_BYTES).unwrap()
+                        ),
+                    ));
+                }
+            }
+
+            params::DiskCreate::LocalStorage { .. } => {
+                // If a user requests some outlandish number of TB for local
+                // storage, and there isn't a sled allocation that can fulfill
+                // this, instance create will work but instance start (which
+                // performs the actual vmm + local storage dataset allocation)
+                // will fail.
+                //
+                // There's an opportunity to consult the latest inventory
+                // collection here, and if there aren't zpools that are as large
+                // as this local storage request, reject it. If the user
+                // mistakenly asks for 30 TB instead of 3 TB, such a check would
+                // prevent the instance start request from succeeding. Later, if
+                // new disks are inserted that have a much larger capacity, then
+                // the same instance create request that could use that larger
+                // capacity.
+                //
+                // We don't want to reject creating a bunch of instances
+                // requesting local storage, where if all of them were started
+                // it wouldn't work, but the user's intention is not to ever
+                // start them all at the same time. But we also don't reserve or
+                // allocate any local storage here, so we can't prevent users
+                // from requesting too much local storage to ever start the
+                // instances for.
+                //
+                // TODO consult the latest inventory collection if it isn't too
+                // expensive, and reject local storage disk requests that are
+                // too large to be served by any sled.
+            }
         }
 
         Ok(())
@@ -203,6 +267,7 @@ impl super::Nexus {
     ) -> CreateResult<db::datastore::Disk> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
+
         self.validate_disk_create_params(opctx, &authz_project, params).await?;
 
         let saga_params = sagas::disk_create::Params {
@@ -217,11 +282,11 @@ impl super::Nexus {
             .await?;
 
         let disk_created = saga_outputs
-            .lookup_node_output::<db::datastore::CrucibleDisk>("created_disk")
+            .lookup_node_output::<db::datastore::Disk>("created_disk")
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
             .internal_context("looking up output from disk create saga")?;
 
-        Ok(db::datastore::Disk::Crucible(disk_created))
+        Ok(disk_created)
     }
 
     pub(crate) async fn disk_list(
@@ -339,6 +404,13 @@ impl super::Nexus {
                 self.volume_remove_read_only_parent(&opctx, disk.volume_id())
                     .await?;
             }
+
+            datastore::Disk::LocalStorage(_) => {
+                return Err(Error::internal_error(&format!(
+                    "cannot remove rop for local storage disk {}",
+                    disk.id()
+                )));
+            }
         }
 
         Ok(())
@@ -360,6 +432,13 @@ impl super::Nexus {
         match db_disk.disk_type {
             db::model::DiskType::Crucible => {
                 // ok
+            }
+
+            db::model::DiskType::LocalStorage => {
+                return Err(Error::internal_error(&format!(
+                    "cannot import to local storage disk {}",
+                    authz_disk.id()
+                )));
             }
         }
 
@@ -402,6 +481,13 @@ impl super::Nexus {
         let disk =
             match self.datastore().disk_get(opctx, authz_disk.id()).await? {
                 db::datastore::Disk::Crucible(disk) => disk,
+
+                db::datastore::Disk::LocalStorage(_) => {
+                    return Err(Error::internal_error(&format!(
+                        "cannot import to local storage disk {}",
+                        authz_disk.id()
+                    )));
+                }
             };
 
         let disk_state: DiskState = disk.state().into();
@@ -531,6 +617,13 @@ impl super::Nexus {
             db::model::DiskType::Crucible => {
                 // ok
             }
+
+            db::model::DiskType::LocalStorage => {
+                return Err(Error::internal_error(&format!(
+                    "cannot import to local storage disk {}",
+                    authz_disk.id()
+                )));
+            }
         }
 
         let disk_state: DiskState = db_disk.state().into();
@@ -572,6 +665,13 @@ impl super::Nexus {
         let disk: datastore::CrucibleDisk =
             match self.datastore().disk_get(&opctx, authz_disk.id()).await? {
                 datastore::Disk::Crucible(disk) => disk,
+
+                datastore::Disk::LocalStorage(_) => {
+                    return Err(Error::internal_error(&format!(
+                        "cannot finalize local storage disk {}",
+                        authz_disk.id()
+                    )));
+                }
             };
 
         let saga_params = sagas::finalize_disk::Params {

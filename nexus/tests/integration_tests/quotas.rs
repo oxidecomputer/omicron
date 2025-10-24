@@ -177,7 +177,7 @@ impl ResourceAllocator {
                 Method::POST,
                 "/v1/disks?project=project",
             )
-            .body(Some(&params::DiskCreate {
+            .body(Some(&params::DiskCreate::Crucible {
                 identity: IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
                     description: "".into(),

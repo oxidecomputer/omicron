@@ -26,6 +26,7 @@ impl_enum_type!(
 
     // Enum values
     Crucible => b"crucible"
+    LocalStorage => b"local_storage"
 );
 
 /// A Disk, where how the blocks are stored depend on the disk_type.
@@ -75,7 +76,8 @@ pub struct Disk {
     /// (where rows are matched based on the disk_id field in that table) and
     /// combined into a higher level `datastore::Disk` enum.
     ///
-    /// For `Crucible` disks, see the DiskTypeCrucible model.
+    /// For `Crucible` disks, see the DiskTypeCrucible model. For `LocalStorage`
+    /// disks, see the DiskTypeLocalStorage model.
     pub disk_type: DiskType,
 }
 
@@ -88,7 +90,7 @@ impl Disk {
         runtime_initial: DiskRuntimeState,
         disk_type: DiskType,
     ) -> Self {
-        let identity = DiskIdentity::new(disk_id, params.identity.clone());
+        let identity = DiskIdentity::new(disk_id, params.identity().clone());
 
         Self {
             identity,
@@ -96,7 +98,7 @@ impl Disk {
             project_id,
             runtime_state: runtime_initial,
             slot: None,
-            size: params.size.into(),
+            size: params.size().into(),
             block_size,
             disk_type,
         }

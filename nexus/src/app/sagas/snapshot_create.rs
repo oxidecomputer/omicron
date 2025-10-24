@@ -921,6 +921,12 @@ async fn ssc_get_pantry_address(
         .map_err(ActionError::action_failed)?
     {
         db::datastore::Disk::Crucible(disk) => disk,
+
+        db::datastore::Disk::LocalStorage(_) => {
+            // This is unreachable because the saga only accepts a CrucibleDisk,
+            // and disks cannot ever change type.
+            unreachable!();
+        }
     };
 
     let pantry_address = if let Some(pantry_address) = disk.pantry_address() {
@@ -2013,7 +2019,10 @@ mod test {
                 .expect("Failed to look up created disk");
 
         let Disk::Crucible(disk) =
-            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap();
+            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let silo_id = authz_silo.id();
         let project_id = authz_project.id();
@@ -2241,7 +2250,10 @@ mod test {
                             .datastore()
                             .disk_get(&opctx, disk_id)
                             .await
-                            .unwrap();
+                            .unwrap()
+                        else {
+                            unreachable!()
+                        };
 
                         // If the pantry isn't being used, make sure the disk is
                         // attached. Note that under normal circumstances, a
@@ -2378,7 +2390,10 @@ mod test {
                 .expect("Failed to look up created disk");
 
         let Disk::Crucible(disk) =
-            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap();
+            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let silo_id = authz_silo.id();
         let project_id = authz_project.id();
@@ -2435,7 +2450,10 @@ mod test {
             .expect("Failed to look up created disk");
 
         let Disk::Crucible(disk) =
-            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap();
+            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         assert!(
             nexus
@@ -2493,7 +2511,10 @@ mod test {
                 .expect("Failed to look up created disk");
 
         let Disk::Crucible(disk) =
-            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap();
+            nexus.datastore().disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let silo_id = authz_silo.id();
         let project_id = authz_project.id();

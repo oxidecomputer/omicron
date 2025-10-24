@@ -1171,7 +1171,7 @@ impl Default for InstanceNetworkInterfaceAttachment {
 
 /// Describe the instance's disks at creation time
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", content = "content", rename_all = "snake_case")]
 pub enum InstanceDiskAttachment {
     /// During instance creation, create and attach disks
     Create(DiskCreate),
@@ -1184,7 +1184,7 @@ impl InstanceDiskAttachment {
     /// Get the name of the disk described by this attachment.
     pub fn name(&self) -> Name {
         match self {
-            Self::Create(create) => create.identity.name.clone(),
+            Self::Create(create) => create.identity().name.clone(),
             Self::Attach(InstanceDiskAttach { name }) => name.clone(),
         }
     }
@@ -1731,7 +1731,7 @@ impl From<DiskVariant> for PhysicalDiskKind {
     }
 }
 
-/// Different sources for a disk
+/// Different sources for a Crucible Disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiskSource {
@@ -1751,14 +1751,44 @@ pub enum DiskSource {
 
 /// Create-time parameters for a `Disk`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct DiskCreate {
-    /// The common identifying metadata for the disk
-    #[serde(flatten)]
-    pub identity: IdentityMetadataCreateParams,
-    /// The initial source for this disk
-    pub disk_source: DiskSource,
-    /// The total size of the Disk (in bytes)
-    pub size: ByteCount,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DiskCreate {
+    Crucible {
+        /// The common identifying metadata for the disk
+        #[serde(flatten)]
+        identity: IdentityMetadataCreateParams,
+
+        /// The initial source for this disk
+        disk_source: DiskSource,
+
+        /// The total size of the Disk (in bytes)
+        size: ByteCount,
+    },
+
+    LocalStorage {
+        /// The common identifying metadata for the disk
+        #[serde(flatten)]
+        identity: IdentityMetadataCreateParams,
+
+        /// The total size of the Disk (in bytes)
+        size: ByteCount,
+    },
+}
+
+impl DiskCreate {
+    pub fn identity(&self) -> &IdentityMetadataCreateParams {
+        match &self {
+            DiskCreate::Crucible { identity, .. } => identity,
+            DiskCreate::LocalStorage { identity, .. } => identity,
+        }
+    }
+
+    pub fn size(&self) -> ByteCount {
+        match &self {
+            DiskCreate::Crucible { size, .. } => *size,
+            DiskCreate::LocalStorage { size, .. } => *size,
+        }
+    }
 }
 
 // equivalent to crucible_pantry_client::types::ExpectedDigest

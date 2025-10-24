@@ -156,7 +156,7 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
             .execute_and_parse_unwrap::<views::Image>()
             .await;
 
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -195,7 +195,7 @@ async fn test_make_disk_from_other_project_image_fails(
             .execute_and_parse_unwrap::<views::Image>()
             .await;
 
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "stolen-disk".parse().unwrap(),
             description: String::from("yoink"),
@@ -244,7 +244,7 @@ async fn test_make_disk_from_image_too_small(
             .execute_and_parse_unwrap::<views::Image>()
             .await;
 
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
@@ -252,7 +252,6 @@ async fn test_make_disk_from_image_too_small(
         disk_source: params::DiskSource::Image {
             image_id: alpine_image.identity.id,
         },
-
         // Nexus defines YouCanBootAnythingAsLongAsItsAlpine size as 100M
         size: ByteCount::from(90 * 1024 * 1024),
     };
@@ -413,7 +412,7 @@ async fn test_image_from_other_project_snapshot_fails(
             .execute_and_parse_unwrap()
             .await;
     // Create a disk from this image
-    let disk_create_params = params::DiskCreate {
+    let disk_create_params = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: "meow".into(),

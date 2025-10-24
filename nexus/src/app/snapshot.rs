@@ -100,6 +100,12 @@ impl super::Nexus {
         let disk: datastore::CrucibleDisk =
             match self.datastore().disk_get(&opctx, authz_disk.id()).await? {
                 datastore::Disk::Crucible(disk) => disk,
+
+                datastore::Disk::LocalStorage(_) => {
+                    return Err(Error::invalid_request(
+                        "can't create a snapshot of a local storage disk",
+                    ));
+                }
             };
 
         // If there isn't a running propolis, Nexus needs to use the Crucible

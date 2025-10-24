@@ -22,7 +22,9 @@ use crate::db::model::DiskRuntimeState;
 use crate::db::model::DiskState;
 use crate::db::model::DiskTypeCrucible;
 use crate::db::model::DiskTypeCrucibleUpdate;
+use crate::db::model::DiskTypeLocalStorage;
 use crate::db::model::Instance;
+use crate::db::model::LocalStorageDatasetAllocation;
 use crate::db::model::Name;
 use crate::db::model::Project;
 use crate::db::model::VirtualProvisioningResource;
@@ -41,6 +43,7 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use omicron_common::api;
+use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -49,6 +52,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use ref_cast::RefCast;
@@ -61,12 +65,15 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Disk {
     Crucible(CrucibleDisk),
+
+    LocalStorage(LocalStorageDisk),
 }
 
 impl Disk {
     pub fn model(&self) -> &model::Disk {
         match &self {
             Disk::Crucible(disk) => disk.model(),
+            Disk::LocalStorage(disk) => disk.model(),
         }
     }
 
@@ -159,6 +166,95 @@ impl CrucibleDisk {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalStorageDisk {
+    pub disk: model::Disk,
+    pub disk_type_local_storage: DiskTypeLocalStorage,
+    pub local_storage_dataset_allocation: Option<LocalStorageDatasetAllocation>,
+}
+
+impl LocalStorageDisk {
+    /// Create a new unallocated LocalStorageDisk
+    pub fn new(
+        disk: model::Disk,
+        disk_type_local_storage: DiskTypeLocalStorage,
+    ) -> LocalStorageDisk {
+        LocalStorageDisk {
+            disk,
+            disk_type_local_storage,
+            local_storage_dataset_allocation: None,
+        }
+    }
+
+    pub fn model(&self) -> &model::Disk {
+        &self.disk
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.model().id()
+    }
+
+    pub fn name(&self) -> &api::external::Name {
+        self.model().name()
+    }
+
+    pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
+        self.model().time_deleted()
+    }
+
+    pub fn project_id(&self) -> Uuid {
+        self.model().project_id
+    }
+
+    pub fn runtime(&self) -> DiskRuntimeState {
+        self.model().runtime()
+    }
+
+    pub fn state(&self) -> DiskState {
+        self.model().state()
+    }
+
+    pub fn size(&self) -> model::ByteCount {
+        self.model().size
+    }
+
+    pub fn slot(&self) -> Option<u8> {
+        self.model().slot()
+    }
+
+    pub fn required_dataset_overhead(&self) -> external::ByteCount {
+        self.disk_type_local_storage.required_dataset_overhead()
+    }
+
+    /// Return the full path to the local storage zvol's device
+    pub fn zvol_path(&self) -> Result<String, Error> {
+        let Some(local_storage_dataset_allocation) =
+            &self.local_storage_dataset_allocation
+        else {
+            return Err(Error::internal_error(&format!(
+                "LocalStorageDisk {} not allocated!",
+                self.id(),
+            )));
+        };
+
+        let pool_id = local_storage_dataset_allocation.pool_id();
+        let dataset_id = local_storage_dataset_allocation.id();
+
+        let zpool_name = ZpoolName::External(pool_id);
+
+        let path = [
+            // Each zvol's path to the device starts with this
+            String::from("/dev/zvol/rdsk"),
+            // All local storage datasets have the same path template, and will
+            // all be called "vol" for now.
+            format!("{zpool_name}/crypt/local_storage/{dataset_id}/vol"),
+        ]
+        .join("/");
+
+        Ok(path)
+    }
+}
+
 /// Conversion to the external API type.
 impl Into<api::external::Disk> for Disk {
     fn into(self) -> api::external::Disk {
@@ -178,6 +274,26 @@ impl Into<api::external::Disk> for Disk {
                     disk_type: api::external::DiskType::Crucible,
                 }
             }
+
+            Disk::LocalStorage(LocalStorageDisk {
+                disk,
+                disk_type_local_storage: _,
+                local_storage_dataset_allocation: _,
+            }) => {
+                // XXX can we remove this?
+                let device_path = format!("/mnt/{}", disk.name().as_str());
+                api::external::Disk {
+                    identity: disk.identity(),
+                    project_id: disk.project_id,
+                    snapshot_id: None,
+                    image_id: None,
+                    size: disk.size.into(),
+                    block_size: disk.block_size.into(),
+                    state: disk.state().into(),
+                    device_path,
+                    disk_type: api::external::DiskType::LocalStorage,
+                }
+            }
         }
     }
 }
@@ -191,10 +307,10 @@ impl DataStore {
         let (.., disk) =
             LookupPath::new(opctx, self).disk_id(disk_id).fetch().await?;
 
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         let disk = match disk.disk_type {
             db::model::DiskType::Crucible => {
-                let conn = self.pool_connection_authorized(opctx).await?;
-
                 use nexus_db_schema::schema::disk_type_crucible::dsl;
 
                 let disk_type_crucible = dsl::disk_type_crucible
@@ -207,6 +323,50 @@ impl DataStore {
                     })?;
 
                 Disk::Crucible(CrucibleDisk { disk, disk_type_crucible })
+            }
+
+            db::model::DiskType::LocalStorage => {
+                use nexus_db_schema::schema::disk_type_local_storage::dsl;
+
+                let disk_type_local_storage = dsl::disk_type_local_storage
+                    .filter(dsl::disk_id.eq(disk_id))
+                    .select(DiskTypeLocalStorage::as_select())
+                    .first_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+                let local_storage_dataset_allocation = if let Some(
+                    allocation_id,
+                ) =
+                    disk_type_local_storage
+                        .local_storage_dataset_allocation_id()
+                {
+                    use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
+
+                    Some(
+                        dsl::local_storage_dataset_allocation
+                            .filter(dsl::id.eq(to_db_typed_uuid(allocation_id)))
+                            .select(LocalStorageDatasetAllocation::as_select())
+                            .first_async(&*conn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            })?,
+                    )
+                } else {
+                    None
+                };
+
+                Disk::LocalStorage(LocalStorageDisk {
+                    disk,
+                    disk_type_local_storage,
+                    local_storage_dataset_allocation,
+                })
             }
         };
 
@@ -268,8 +428,11 @@ impl DataStore {
     ) -> ListResultVec<Disk> {
         use nexus_db_schema::schema::disk::dsl;
         use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
+        use nexus_db_schema::schema::disk_type_local_storage::dsl as disk_type_local_storage_dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let results = match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -285,13 +448,18 @@ impl DataStore {
             disk_type_crucible_dsl::disk_type_crucible
                 .on(dsl::id.eq(disk_type_crucible_dsl::disk_id)),
         )
+        .left_join(
+            disk_type_local_storage_dsl::disk_type_local_storage
+                .on(dsl::id.eq(disk_type_local_storage_dsl::disk_id)),
+        )
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::attach_instance_id.eq(authz_instance.id()))
         .select((
             model::Disk::as_select(),
             Option::<DiskTypeCrucible>::as_select(),
+            Option::<DiskTypeLocalStorage>::as_select(),
         ))
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .get_results_async(&*conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -299,14 +467,51 @@ impl DataStore {
 
         for result in results {
             match result {
-                (disk, Some(disk_type_crucible)) => {
+                (disk, Some(disk_type_crucible), None) => {
                     list.push(Disk::Crucible(CrucibleDisk {
                         disk,
                         disk_type_crucible,
                     }));
                 }
 
-                (disk, None) => {
+                (disk, None, Some(disk_type_local_storage)) => {
+                    let local_storage_dataset_allocation = if let Some(
+                        allocation_id,
+                    ) =
+                        disk_type_local_storage
+                            .local_storage_dataset_allocation_id()
+                    {
+                        use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
+
+                        Some(
+                            dsl::local_storage_dataset_allocation
+                                .filter(
+                                    dsl::id.eq(to_db_typed_uuid(allocation_id)),
+                                )
+                                .select(
+                                    LocalStorageDatasetAllocation::as_select(),
+                                )
+                                .first_async(&*conn)
+                                .await
+                                .map_err(|e| {
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                })?,
+                        )
+                    } else {
+                        None
+                    };
+
+                    list.push(Disk::LocalStorage(LocalStorageDisk {
+                        disk,
+                        disk_type_local_storage,
+                        local_storage_dataset_allocation,
+                    }));
+                }
+
+                (disk, _, _) => {
                     // The above paginated query attempts to get all types of
                     // disk in one query, instead of matching on the disk type
                     // of each returned disk row and doing additional queries.
@@ -334,7 +539,6 @@ impl DataStore {
         disk: Disk,
     ) -> Result<Disk, diesel::result::Error> {
         use nexus_db_schema::schema::disk::dsl;
-        use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
 
         let gen = disk.runtime().gen;
         let name = disk.name().clone();
@@ -364,9 +568,35 @@ impl DataStore {
 
         match &disk {
             Disk::Crucible(CrucibleDisk { disk: _, disk_type_crucible }) => {
-                diesel::insert_into(disk_type_crucible_dsl::disk_type_crucible)
+                use nexus_db_schema::schema::disk_type_crucible::dsl;
+
+                diesel::insert_into(dsl::disk_type_crucible)
                     .values(disk_type_crucible.clone())
-                    .on_conflict(disk_type_crucible_dsl::disk_id)
+                    .on_conflict(dsl::disk_id)
+                    .do_nothing()
+                    .execute_async(conn)
+                    .await?;
+            }
+
+            Disk::LocalStorage(LocalStorageDisk {
+                disk,
+                disk_type_local_storage,
+                local_storage_dataset_allocation,
+            }) => {
+                if local_storage_dataset_allocation.is_some() {
+                    // This allocation is currently only performed during
+                    // instance allocation, return an error here.
+                    return Err(err.bail(Error::internal_error(&format!(
+                        "local storage disk {} has an allocation!",
+                        disk.id(),
+                    ))));
+                }
+
+                use nexus_db_schema::schema::disk_type_local_storage::dsl;
+
+                diesel::insert_into(dsl::disk_type_local_storage)
+                    .values(disk_type_local_storage.clone())
+                    .on_conflict(dsl::disk_id)
                     .do_nothing()
                     .execute_async(conn)
                     .await?;
@@ -1194,7 +1424,6 @@ mod tests {
 
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::external_api::params;
-    use omicron_common::api::external;
     use omicron_test_utils::dev;
 
     #[tokio::test]
@@ -1224,14 +1453,17 @@ mod tests {
             .unwrap();
 
         let disk_id = Uuid::new_v4();
-        let create_params = params::DiskCreate {
+
+        let disk_source = params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        };
+
+        let create_params = params::DiskCreate::Crucible {
             identity: external::IdentityMetadataCreateParams {
                 name: "first-post".parse().unwrap(),
                 description: "just trying things out".to_string(),
             },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
-            },
+            disk_source: disk_source.clone(),
             size: external::ByteCount::from(2147483648),
         };
 
@@ -1247,7 +1479,7 @@ mod tests {
         let disk_type_crucible = db::model::DiskTypeCrucible::new(
             disk_id,
             VolumeUuid::new_v4(),
-            &create_params,
+            &disk_source,
         );
 
         let disk = db_datastore
