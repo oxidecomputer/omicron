@@ -91,7 +91,8 @@ const TUF_PACKAGES: [&PackageName; 12] = [
     &PackageName::new_const("probe"),
 ];
 
-const HELIOS_REPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
+const HELIOS_PKGREPO: &str = "https://pkg.oxide.computer/helios/2/dev/";
+const HELIOS_REPO: &str = "https://github.com/oxidecomputer/helios.git";
 
 static WORKSPACE_DIR: LazyLock<Utf8PathBuf> = LazyLock::new(|| {
     // $CARGO_MANIFEST_DIR is at `.../omicron/dev-tools/releng`
@@ -329,13 +330,13 @@ async fn main() -> Result<()> {
                     // HEAD in a remote repository refers to the default
                     // branch, even if the default branch is renamed.
                     // `--no-write-fetch-head` avoids modifying FETCH_HEAD.
-                    .args(["fetch", "--no-write-fetch-head", "origin", "HEAD"])
+                    .args(["fetch", HELIOS_REPO, "HEAD"])
                     .ensure_success(&logger)
                     .await?;
                 let upstream_commit = git_resolve_commit(
                     &args.git_bin,
                     &args.helios_dir,
-                    "origin/HEAD",
+                    "FETCH_HEAD",
                     &logger,
                 )
                 .await?;
@@ -355,7 +356,7 @@ async fn main() -> Result<()> {
     } else {
         info!(logger, "cloning helios to {}", args.helios_dir);
         Command::new(&args.git_bin)
-            .args(["clone", "https://github.com/oxidecomputer/helios.git"])
+            .args(["clone", HELIOS_REPO])
             .arg(&args.helios_dir)
             .ensure_success(&logger)
             .await?;
@@ -674,7 +675,7 @@ async fn main() -> Result<()> {
         if !args.helios_local {
             image_cmd = image_cmd
                 .arg("-p") // use an external package repository
-                .arg(format!("helios-dev={HELIOS_REPO}"))
+                .arg(format!("helios-dev={HELIOS_PKGREPO}"))
         }
 
         // helios-build experiment-image
