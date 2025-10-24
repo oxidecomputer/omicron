@@ -502,17 +502,6 @@ impl BundleCollection {
         self: &Arc<Self>,
         dir: &Utf8TempDir,
     ) -> anyhow::Result<SupportBundleCollectionReport> {
-        let collection = self.collect_bundle_as_file(&dir);
-
-        // We periodically check the state of the support bundle - if a user
-        // explicitly cancels it, we should stop the collection process and
-        // return.
-        let work_duration = tokio::time::Duration::from_secs(5);
-        let mut yield_interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + work_duration,
-            work_duration,
-        );
-
         // TL;DR: This `tokio::select` is allowed to poll multiple futures, but
         // should not do any async work within the body of any chosen branch. A
         // previous iteration of this code polled the "collection" as "&mut
@@ -550,66 +539,20 @@ impl BundleCollection {
         //
         // For more details, see:
         // https://github.com/oxidecomputer/omicron/issues/9259
-        let check_for_cancellation = async move {
-            loop {
-                // Timer fired mid-collection - check if we should stop.
-                yield_interval.tick().await;
-                trace!(
-                    self.log,
-                    "Checking if Bundle Collection cancelled";
-                    "bundle" => %self.bundle.id
-                );
-
-                match self
-                    .datastore
-                    .support_bundle_get(&self.opctx, self.bundle.id.into())
-                    .await
-                {
-                    Ok(bundle) => {
-                        if !matches!(
-                            bundle.state,
-                            SupportBundleState::Collecting
-                        ) {
-                            anyhow::bail!("Support Bundle Cancelled");
-                        }
-
-                        // Bundle still collecting; continue...
-                        continue;
-                    }
-                    Err(err)
-                        if matches!(err, Error::ObjectNotFound { .. })
-                            || matches!(err, Error::NotFound { .. }) =>
-                    {
-                        anyhow::bail!("Support Bundle Deleted");
-                    }
-                    Err(err) => {
-                        warn!(
-                            self.log,
-                            "Database error checking bundle cancellation";
-                            InlineErrorChain::new(&err)
-                        );
-
-                        // If we cannot contact the database, retry later
-                        continue;
-                    }
-                }
-            }
-        };
 
         tokio::select! {
-            // Returns if the bundle has been cancelled explicitly, or if we
-            // cannot successfully check the bundle state.
-            why = check_for_cancellation => {
+            // Returns if the bundle should no longer be collected.
+            why = self.check_for_cancellation() => {
                 warn!(
                     &self.log,
                     "Support Bundle cancelled - stopping collection";
                     "bundle" => %self.bundle.id,
                     "state" => ?self.bundle.state
                 );
-                return why;
+                return Err(why);
             },
             // Otherwise, keep making progress on the collection itself.
-            report = collection => {
+            report = self.collect_bundle_as_file(&dir) => {
                 info!(
                     &self.log,
                     "Bundle Collection completed";
@@ -724,6 +667,65 @@ impl BundleCollection {
         // Returning from this method should drop all temporary storage
         // allocated locally for this support bundle.
         Ok(())
+    }
+
+    // Indefinitely perform periodic checks about whether or not we should
+    // cancel the bundle.
+    //
+    // Returns an error if:
+    // - The bundle state is no longer SupportBundleState::Collecting
+    // (which happens if the bundle has been explicitly cancelled, or
+    // if the backing storage has been expunged).
+    // - The bundle has been deleted
+    //
+    // Otherwise, keeps checking indefinitely while polled.
+    async fn check_for_cancellation(&self) -> anyhow::Error {
+        let work_duration = tokio::time::Duration::from_secs(5);
+        let mut yield_interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + work_duration,
+            work_duration,
+        );
+
+        loop {
+            // Timer fired mid-collection - check if we should stop.
+            yield_interval.tick().await;
+            trace!(
+                self.log,
+                "Checking if Bundle Collection cancelled";
+                "bundle" => %self.bundle.id
+            );
+
+            match self
+                .datastore
+                .support_bundle_get(&self.opctx, self.bundle.id.into())
+                .await
+            {
+                Ok(bundle) => {
+                    if !matches!(bundle.state, SupportBundleState::Collecting) {
+                        return anyhow::anyhow!("Support Bundle Cancelled");
+                    }
+
+                    // Bundle still collecting; continue...
+                    continue;
+                }
+                Err(err)
+                    if matches!(err, Error::ObjectNotFound { .. })
+                        || matches!(err, Error::NotFound { .. }) =>
+                {
+                    return anyhow::anyhow!("Support Bundle Deleted");
+                }
+                Err(err) => {
+                    warn!(
+                        self.log,
+                        "Database error checking bundle cancellation";
+                        InlineErrorChain::new(&err)
+                    );
+
+                    // If we cannot contact the database, retry later
+                    continue;
+                }
+            }
+        }
     }
 
     // Perform the work of collecting the support bundle into a temporary directory
