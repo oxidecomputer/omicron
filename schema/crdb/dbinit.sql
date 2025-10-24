@@ -6817,7 +6817,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
 -- The history of current sitreps.
 --
 -- The sitrep with the highest `version` in this table is the current sitrep.
-CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_version (
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_history (
     -- Monotonically increasing version for all FM sitreps.
     version INT8 PRIMARY KEY,
 
@@ -6831,7 +6831,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_version (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS
-   lookup_sitrep_history_by_id
+   lookup_sitrep_version_by_id
 ON omicron.public.fm_sitrep_history (sitrep_id);
 
 -- Metadata for the schema itself.

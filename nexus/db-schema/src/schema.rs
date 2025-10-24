@@ -2827,11 +2827,11 @@ table! {
 allow_tables_to_appear_in_same_query!(fm_sitrep, inv_collection);
 
 table! {
-    fm_sitrep_version (version) {
+    fm_sitrep_history (version) {
         version -> Int8,
         sitrep_id -> Uuid,
         time_made_current -> Timestamptz,
     }
 }
 
-allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_version);
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);
