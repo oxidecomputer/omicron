@@ -24,7 +24,7 @@ use std::fmt::Write;
 use std::fs;
 use std::io::IsTerminal;
 use tabled::Tabled;
-use trust_quorum::BaseboardId;
+use trust_quorum_protocol::BaseboardId;
 use trust_quorum_test_utils::{Event, TqState};
 
 fn main() -> Result<(), anyhow::Error> {
