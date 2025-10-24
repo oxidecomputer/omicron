@@ -6129,6 +6129,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
         -- For silo_user: must have both actor_id and actor_silo_id
         (actor_kind = 'silo_user' AND actor_id IS NOT NULL AND actor_silo_id IS NOT NULL)
         OR
+        -- For a scim actor: must have a actor_silo_id
+        (actor_kind = 'scim' AND actor_id IS NULL AND actor_silo_id IS NOT NULL)
+        OR
         -- For unauthenticated: must not have actor_id or actor_silo_id
         (actor_kind = 'unauthenticated' AND actor_id IS NULL AND actor_silo_id IS NULL)
     )
@@ -6854,7 +6857,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '201.0.0', NULL)
+    (TRUE, NOW(), NOW(), '202.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

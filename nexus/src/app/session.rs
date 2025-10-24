@@ -43,6 +43,12 @@ impl super::Nexus {
         opctx: &OpContext,
         user: &SiloUser,
     ) -> CreateResult<db::model::ConsoleSession> {
+        // If the user is disabled, disallow session creation.
+        if !user.is_active() {
+            return Err(Error::Unauthenticated {
+                internal_message: String::from("user is not active"),
+            });
+        }
         let session =
             db::model::ConsoleSession::new(generate_session_token(), user.id());
         self.db_datastore.session_create(opctx, session).await

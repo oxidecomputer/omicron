@@ -65,6 +65,7 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -395,6 +396,23 @@ pub async fn create_silo(
     discoverable: bool,
     identity_mode: shared::SiloIdentityMode,
 ) -> Silo {
+    create_silo_with_admin_group_name(
+        client,
+        silo_name,
+        discoverable,
+        identity_mode,
+        None,
+    )
+    .await
+}
+
+pub async fn create_silo_with_admin_group_name(
+    client: &ClientTestContext,
+    silo_name: &str,
+    discoverable: bool,
+    identity_mode: shared::SiloIdentityMode,
+    admin_group_name: Option<String>,
+) -> Silo {
     object_create(
         client,
         "/v1/system/silos",
@@ -406,7 +424,7 @@ pub async fn create_silo(
             quotas: params::SiloQuotasCreate::arbitrarily_high_default(),
             discoverable,
             identity_mode,
-            admin_group_name: None,
+            admin_group_name,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
         },
@@ -1130,6 +1148,48 @@ pub async fn grant_iam<T>(
             .expect("failed to parse policy");
     let new_role_assignment =
         shared::RoleAssignment::for_silo_user(grant_user, grant_role);
+    let new_role_assignments = existing_policy
+        .role_assignments
+        .into_iter()
+        .chain(std::iter::once(new_role_assignment))
+        .collect();
+
+    let new_policy = shared::Policy { role_assignments: new_role_assignments };
+
+    // TODO-correctness use etag when we have it
+    NexusRequest::object_put(client, &policy_url, Some(&new_policy))
+        .authn_as(run_as)
+        .execute()
+        .await
+        .expect("failed to update policy");
+}
+
+/// Grant a role on a resource to a group
+///
+/// * `grant_resource_url`: URL of the resource we're granting the role on
+/// * `grant_role`: the role we're granting
+/// * `grant_group`: the uuid of the group we're granting the role to
+/// * `run_as`: the user _doing_ the granting
+pub async fn grant_iam_for_group<T>(
+    client: &ClientTestContext,
+    grant_resource_url: &str,
+    grant_role: T,
+    grant_group: SiloGroupUuid,
+    run_as: AuthnMode,
+) where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let policy_url = format!("{}/policy", grant_resource_url);
+    let existing_policy: shared::Policy<T> =
+        NexusRequest::object_get(client, &policy_url)
+            .authn_as(run_as.clone())
+            .execute()
+            .await
+            .expect("failed to fetch policy")
+            .parsed_body()
+            .expect("failed to parse policy");
+    let new_role_assignment =
+        shared::RoleAssignment::for_silo_group(grant_group, grant_role);
     let new_role_assignments = existing_policy
         .role_assignments
         .into_iter()
