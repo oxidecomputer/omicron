@@ -37,11 +37,12 @@ pub use coordinator_state::{
 };
 pub use rack_secret_loader::{LoadRackSecretError, RackSecretLoaderDiff};
 pub use validators::{
-    ValidatedLrtqUpgradeMsgDiff, ValidatedReconfigureMsgDiff,
+    ReconfigurationError, ValidatedLrtqUpgradeMsgDiff,
+    ValidatedReconfigureMsgDiff,
 };
 
 pub use alarm::Alarm;
-pub use crypto::RackSecret;
+pub use crypto::{RackSecret, ReconstructedRackSecret};
 pub use messages::*;
 pub use node::{Node, NodeDiff};
 // public only for docs.

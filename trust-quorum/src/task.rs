@@ -12,11 +12,16 @@ use slog::{Logger, debug, error, info, o};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
-use trust_quorum_protocol::{BaseboardId, Node, NodeCtx};
+use tokio::time::{Sleep, sleep};
+use trust_quorum_protocol::{
+    BaseboardId, Epoch, LoadRackSecretError, Node, NodeCtx,
+    ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
+};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -37,6 +42,20 @@ pub enum NodeApiRequest {
     /// Retrieve connectivity status via the `ConnMgr`
     ConnMgrStatus { responder: oneshot::Sender<ConnMgrStatus> },
 
+    /// Load a rack secret for the given epoch
+    LoadRackSecret {
+        epoch: Epoch,
+        responder: oneshot::Sender<
+            Result<Option<ReconstructedRackSecret>, LoadRackSecretError>,
+        >,
+    },
+
+    /// Coordinate a reconfiguration at this node
+    Reconfigure {
+        msg: ReconfigureMsg,
+        responder: oneshot::Sender<Result<(), ReconfigurationError>>,
+    },
+
     /// Shutdown the node's tokio tasks
     Shutdown,
 }
@@ -44,10 +63,14 @@ pub enum NodeApiRequest {
 /// An error response from a `NodeApiRequest`
 #[derive(Error, Debug, PartialEq)]
 pub enum NodeApiError {
-    #[error("Failed to send request to node task")]
+    #[error("failed to send request to node task")]
     Send,
-    #[error("Failed to receive response from node task")]
+    #[error("failed to receive response from node task")]
     Recv,
+    #[error("failed to reconfigure trust quorum")]
+    Reconfigure(#[from] ReconfigurationError),
+    #[error("failed to load rack secret")]
+    LoadRackSecret(#[from] LoadRackSecretError),
 }
 
 impl<T> From<SendError<T>> for NodeApiError {
@@ -79,6 +102,42 @@ impl NodeTaskHandle {
 
     pub fn baseboard_id(&self) -> &BaseboardId {
         &self.baseboard_id
+    }
+
+    /// Initiate a trust quorum reconfiguration at this node
+    ///
+    /// This can block for an indefinite period of time before returning
+    /// and depends on availability of the trust quorum.
+    pub async fn reconfigure(
+        &self,
+        msg: ReconfigureMsg,
+    ) -> Result<(), NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::Reconfigure { msg, responder: tx })
+            .await?;
+        rx.await??;
+        Ok(())
+    }
+
+    /// Load the rack secret for the given epoch
+    ///
+    /// This can block for an indefinite period of time before returning
+    /// and depends on availability of the trust quorum.
+    pub async fn load_rack_secret(
+        &self,
+        epoch: Epoch,
+    ) -> Result<ReconstructedRackSecret, NodeApiError> {
+        loop {
+            let (tx, rx) = oneshot::channel();
+            self.tx
+                .send(NodeApiRequest::LoadRackSecret { epoch, responder: tx })
+                .await?;
+            if let Some(rack_secret) = rx.await?? {
+                return Ok(rack_secret);
+            };
+            sleep(Duration::from_secs(1)).await;
+        }
     }
 
     /// Inform the node of currently known IP addresses on the bootstrap network
@@ -208,8 +267,8 @@ impl NodeTask {
             ConnToMainMsgInner::Disconnected { peer_id } => {
                 self.conn_mgr.on_disconnected(task_id, peer_id).await;
             }
-            ConnToMainMsgInner::Received { from: _, msg: _ } => {
-                todo!();
+            ConnToMainMsgInner::Received { from, msg } => {
+                self.node.handle(&mut self.ctx, from, msg);
             }
             ConnToMainMsgInner::ReceivedNetworkConfig {
                 from: _,
