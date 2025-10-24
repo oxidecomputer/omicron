@@ -22,8 +22,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::sleep;
 use trust_quorum_protocol::{
     BaseboardId, CommitError, Configuration, Epoch, LoadRackSecretError,
-    LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCommonCtx, NodeCtx,
-    PrepareAndCommitError, ReconfigurationError, ReconfigureMsg,
+    LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCallerCtx, NodeCommonCtx,
+    NodeCtx, PrepareAndCommitError, ReconfigurationError, ReconfigureMsg,
     ReconstructedRackSecret,
 };
 
@@ -361,7 +361,10 @@ impl NodeTask {
                 Some(msg) = self.conn_mgr_rx.recv() => {
                     self.on_conn_msg(msg).await
                 }
+            }
 
+            for envelope in self.ctx.drain_envelopes() {
+                self.conn_mgr.send(envelope).await;
             }
         }
     }
@@ -395,7 +398,7 @@ impl NodeTask {
         }
     }
 
-    // TODO: Process `ctx`: persist state and send messages as necessary
+    // TODO: Process `ctx`: save persist state
     async fn on_api_request(&mut self, request: NodeApiRequest) {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {

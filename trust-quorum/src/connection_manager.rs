@@ -5,7 +5,7 @@
 //! A mechanism for maintaining a full mesh of trust quorum node connections
 
 use crate::established_conn::EstablishedConn;
-use trust_quorum_protocol::{BaseboardId, PeerMsg};
+use trust_quorum_protocol::{BaseboardId, Envelope, PeerMsg};
 // TODO: Move or copy this to this crate?
 use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
@@ -47,7 +47,6 @@ pub enum AcceptError {
 /// Messages sent from the main task to the connection managing tasks
 #[derive(Debug)]
 pub enum MainToConnMsg {
-    #[expect(unused)]
     Msg(WireMsg),
 }
 
@@ -116,7 +115,6 @@ pub enum ConnToMainMsgInner {
 
 pub struct TaskHandle {
     pub abort_handle: AbortHandle,
-    #[expect(unused)]
     pub tx: mpsc::Sender<MainToConnMsg>,
     pub conn_type: ConnectionType,
 }
@@ -132,6 +130,10 @@ impl TaskHandle {
 
     pub fn abort(&self) {
         self.abort_handle.abort()
+    }
+
+    pub async fn send(&self, msg: PeerMsg) {
+        let _ = self.tx.send(MainToConnMsg::Msg(WireMsg::Tq(msg))).await;
     }
 }
 
@@ -173,6 +175,10 @@ impl EstablishedTaskHandle {
 
     pub fn abort(&self) {
         self.task_handle.abort();
+    }
+
+    pub async fn send(&self, msg: PeerMsg) {
+        let _ = self.task_handle.send(msg).await;
     }
 }
 
@@ -369,6 +375,13 @@ impl ConnMgr {
 
     pub fn listen_addr(&self) -> SocketAddrV6 {
         self.listen_addr
+    }
+
+    pub async fn send(&self, envelope: Envelope) {
+        let Envelope { to, msg, .. } = envelope;
+        if let Some(handle) = self.established.get1(&to) {
+            handle.send(msg).await;
+        }
     }
 
     /// Perform any polling related operations that the connection
