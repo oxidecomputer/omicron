@@ -509,10 +509,15 @@ fn cpuid_from_vmm_cpu_platform(
 ) -> Option<Cpuid> {
     let cpuid = match platform {
         db::model::VmmCpuPlatform::SledDefault => return None,
-        db::model::VmmCpuPlatform::AmdMilan
-        | db::model::VmmCpuPlatform::AmdTurin => Cpuid {
+        db::model::VmmCpuPlatform::AmdMilan => Cpuid {
             entries: cpu_platform::dump_to_cpuid_entries(
                 cpu_platform::milan_rfd314(),
+            ),
+            vendor: CpuidVendor::Amd,
+        },
+        db::model::VmmCpuPlatform::AmdTurin => Cpuid {
+            entries: cpu_platform::dump_to_cpuid_entries(
+                cpu_platform::turin_v1(),
             ),
             vendor: CpuidVendor::Amd,
         },
