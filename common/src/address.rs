@@ -524,6 +524,17 @@ impl IpRange {
             IpRange::V6(_) => IpVersion::V6,
         }
     }
+
+    /// Returns `true` if `self` has any IPs in common with `other`; false
+    /// otherwise.
+    pub fn overlaps(&self, other: &IpRange) -> bool {
+        match (self, other) {
+            (IpRange::V4(r0), IpRange::V4(r1)) => r0.overlaps(r1),
+            (IpRange::V6(r0), IpRange::V6(r1)) => r0.overlaps(r1),
+            (IpRange::V4(_), IpRange::V6(_))
+            | (IpRange::V6(_), IpRange::V4(_)) => false,
+        }
+    }
 }
 
 impl From<IpAddr> for IpRange {
@@ -628,6 +639,16 @@ impl Ipv4Range {
         let end_num = u32::from(self.last);
         end_num - start_num + 1
     }
+
+    /// Returns `true` if `self` has any IPs in common with `other`; false
+    /// otherwise.
+    pub fn overlaps(&self, other: &Ipv4Range) -> bool {
+        // We're disjoint if we either end before other or begin after it; any
+        // other combination means we have some IP(s) in common.
+        let is_disjoint = self.last_address() < other.first_address()
+            || self.first_address() > other.last_address();
+        !is_disjoint
+    }
 }
 
 impl From<Ipv4Addr> for Ipv4Range {
@@ -700,6 +721,16 @@ impl Ipv6Range {
         let start_num = u128::from(self.first);
         let end_num = u128::from(self.last);
         end_num - start_num + 1
+    }
+
+    /// Returns `true` if `self` has any IPs in common with `other`; false
+    /// otherwise.
+    pub fn overlaps(&self, other: &Ipv6Range) -> bool {
+        // We're disjoint if we either end before other or begin after it; any
+        // other combination means we have some IP(s) in common.
+        let is_disjoint = self.last_address() < other.first_address()
+            || self.first_address() > other.last_address();
+        !is_disjoint
     }
 }
 
