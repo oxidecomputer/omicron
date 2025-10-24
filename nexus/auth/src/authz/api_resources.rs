@@ -882,6 +882,55 @@ impl AuthorizedResource for SiloUserTokenList {
     }
 }
 
+/// Synthetic resource describing the list of VPCs in a Project
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VpcList(Project);
+
+impl VpcList {
+    pub fn new(project: Project) -> VpcList {
+        VpcList(project)
+    }
+
+    pub fn project(&self) -> &Project {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for VpcList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("project", |list: &VpcList| project.0.clone())
+    }
+}
+
+impl AuthorizedResource for VpcList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Project-related roles.
+        self.project().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct UpdateTrustRootList;
 

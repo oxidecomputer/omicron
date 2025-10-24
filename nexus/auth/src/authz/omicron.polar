@@ -184,16 +184,17 @@ resource Project {
 	    "read",
 	    "create_child",
 	];
-	roles = [ "admin", "collaborator", "viewer" ];
+	roles = [ "admin", "collaborator", "collaborator-no-networking", "viewer" ];
 
 	# Roles implied by other roles on this resource
-	"viewer" if "collaborator";
+	"viewer" if "collaborator-no-networking";
+	"collaborator-no-networking" if "collaborator";
 	"collaborator" if "admin";
 
 	# Permissions granted directly by roles on this resource
 	"list_children" if "viewer";
 	"read" if "viewer";
-	"create_child" if "collaborator";
+	"create_child" if "collaborator-no-networking";
 	"modify" if "admin";
 
 	# Roles implied by roles on this resource's parent (Silo)
@@ -749,12 +750,25 @@ has_relation(silo: Silo, "parent_silo", scim_client_bearer_token_list: ScimClien
 has_relation(fleet: Fleet, "parent_fleet", collection: ScimClientBearerTokenList)
 	if collection.silo.fleet = fleet;
 
+# Describes the policy for managing project networking
+resource VpcList {
+	permissions = [ "list_children", "create_child" ];
+
+	relations = { containing_project: Project };
+
+	"list_children" if "read" on "containing_project";
+	"create_child" if "collaborator" on "containing_project";
+}
+has_relation(project: Project, "containing_project", collection: VpcList)
+	if collection.project = project;
+
 # NETWORKING RESTRICTIONS BASED ON SILO SETTINGS
 #
 # These rules enforce networking restrictions when a silo has restrict_network_actions = true.
 # For silos with this restriction, only Silo Admins can perform networking create/modify/delete actions,
 # while read/list actions remain available to all project collaborators.
 
+<<<<<<< HEAD
 # Determine if the actor has permissions to modify networking resources
 can_modify_networking_resource(actor: AuthenticatedActor, project: Project) if
 	# Always allow silo admins to update networking resources
@@ -827,3 +841,71 @@ has_permission(actor: AuthenticatedActor, action: String, addr: InternetGatewayI
 
 has_permission(actor: AuthenticatedActor, action: String, addr: InternetGatewayIpAddress) if
     networking_read_perm(actor, action, addr.internet_gateway.vpc.project);
+=======
+## Determine if the actor has permissions to modify networking resources
+#can_modify_networking_resource(actor: AuthenticatedActor, project: Project) if
+#	# Always allow silo admins to update networking resources
+#	has_role(actor, "admin", project.silo) or
+#	# Allow project collaborators to update networking resources if the actor's silo allows it
+#	# Note that the restriction is checked on the actor's silo, not embedded in the project
+#    (has_role(actor, "collaborator", project) and not actor.silo_restricts_networking());
+#
+## Helper predicates to reduce duplication across networking resources
+#networking_write_perm(actor: AuthenticatedActor, action: String, project: Project) if
+#    action in ["create_child", "modify", "delete"] and
+#    can_modify_networking_resource(actor, project);
+#
+#networking_read_perm(actor: AuthenticatedActor, action: String, project: Project) if
+#    action in ["read", "list_children"] and
+#    has_role(actor, "viewer", project);
+#
+## Apply networking restrictions to all networking resources
+## VPCs (project path: vpc.project)
+#has_permission(actor: AuthenticatedActor, action: String, vpc: Vpc) if
+#    networking_write_perm(actor, action, vpc.project);
+#
+#has_permission(actor: AuthenticatedActor, action: String, vpc: Vpc) if
+#    networking_read_perm(actor, action, vpc.project);
+#
+## VPC Routers (project path: router.vpc.project)
+#has_permission(actor: AuthenticatedActor, action: String, router: VpcRouter) if
+#    networking_write_perm(actor, action, router.vpc.project);
+#
+#has_permission(actor: AuthenticatedActor, action: String, router: VpcRouter) if
+#    networking_read_perm(actor, action, router.vpc.project);
+#
+## VPC Subnets (project path: subnet.vpc.project)
+#has_permission(actor: AuthenticatedActor, action: String, subnet: VpcSubnet) if
+#    networking_write_perm(actor, action, subnet.vpc.project);
+#
+#has_permission(actor: AuthenticatedActor, action: String, subnet: VpcSubnet) if
+#    networking_read_perm(actor, action, subnet.vpc.project);
+#
+## Internet Gateways (project path: gateway.vpc.project)
+#has_permission(actor: AuthenticatedActor, action: String, gateway: InternetGateway) if
+#    networking_write_perm(actor, action, gateway.vpc.project);
+#
+#has_permission(actor: AuthenticatedActor, action: String, gateway: InternetGateway) if
+#    networking_read_perm(actor, action, gateway.vpc.project);
+#
+## Router Routes (project path: route.vpc_router.vpc.project)
+#has_permission(actor: AuthenticatedActor, action: String, route: RouterRoute) if
+#    networking_write_perm(actor, action, route.vpc_router.vpc.project);
+#
+#has_permission(actor: AuthenticatedActor, action: String, route: RouterRoute) if
+#    networking_read_perm(actor, action, route.vpc_router.vpc.project);
+#
+## Internet Gateway IP Pool attachments (project path: pool.internet_gateway.vpc.project)
+#has_permission(actor: AuthenticatedActor, action: String, pool: InternetGatewayIpPool) if
+#    networking_write_perm(actor, action, pool.internet_gateway.vpc.project);
+#
+#has_permission(actor: AuthenticatedActor, action: String, pool: InternetGatewayIpPool) if
+#    networking_read_perm(actor, action, pool.internet_gateway.vpc.project);
+#
+## Internet Gateway IP Address attachments (project path: addr.internet_gateway.vpc.project)
+#has_permission(actor: AuthenticatedActor, action: String, addr: InternetGatewayIpAddress) if
+#    networking_write_perm(actor, action, addr.internet_gateway.vpc.project);
+#
+#has_permission(actor: AuthenticatedActor, action: String, addr: InternetGatewayIpAddress) if
+#    networking_read_perm(actor, action, addr.internet_gateway.vpc.project);
+>>>>>>> b1a5441a5 (before removing VpcList synthetic resource)

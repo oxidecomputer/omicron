@@ -509,6 +509,9 @@ impl DatabaseString for ProjectRole {
         match self {
             ProjectRole::Admin => "admin",
             ProjectRole::Collaborator => "collaborator",
+            ProjectRole::CollaboratorNoNetworking => {
+                "collaborator-no-networking"
+            }
             ProjectRole::Viewer => "viewer",
         }
         .into()
@@ -521,6 +524,9 @@ impl DatabaseString for ProjectRole {
         match s {
             "admin" => Ok(ProjectRole::Admin),
             "collaborator" => Ok(ProjectRole::Collaborator),
+            "collaborator-no-networking" => {
+                Ok(ProjectRole::CollaboratorNoNetworking)
+            }
             "viewer" => Ok(ProjectRole::Viewer),
             _ => {
                 Err(anyhow!("unsupported Project role from database: {:?}", s))
