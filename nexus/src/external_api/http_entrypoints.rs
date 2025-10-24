@@ -2376,7 +2376,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .disk_list(&opctx, &project_lookup, &paginated_by)
                 .await?
                 .into_iter()
-                .map(|disk| disk.into())
                 .collect();
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
                 &query,
@@ -2442,8 +2441,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 disk: path.disk,
                 project: query.project,
             };
-            let (.., disk) =
-                nexus.disk_lookup(&opctx, disk_selector)?.fetch().await?;
+            let disk = nexus.disk_get(&opctx, disk_selector).await?;
             Ok(HttpResponseOk(disk.into()))
         };
         apictx
@@ -2540,7 +2538,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let disk_lookup = nexus.disk_lookup(&opctx, disk_selector)?;
 
-            nexus.disk_manual_import(&disk_lookup, params).await?;
+            nexus.disk_manual_import(&opctx, &disk_lookup, params).await?;
 
             Ok(HttpResponseUpdatedNoContent())
         };

@@ -864,11 +864,19 @@ impl DataStore {
 
         let (maybe_disk, maybe_instance) = {
             use nexus_db_schema::schema::disk::dsl as disk_dsl;
+            use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
             use nexus_db_schema::schema::instance::dsl as instance_dsl;
 
             let maybe_disk: Option<Disk> = disk_dsl::disk
+                .inner_join(
+                    disk_type_crucible_dsl::disk_type_crucible
+                        .on(disk_type_crucible_dsl::disk_id.eq(disk_dsl::id)),
+                )
                 .filter(disk_dsl::time_deleted.is_null())
-                .filter(disk_dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
+                .filter(
+                    disk_type_crucible_dsl::volume_id
+                        .eq(to_db_typed_uuid(volume_id)),
+                )
                 .select(Disk::as_select())
                 .get_result_async(conn)
                 .await

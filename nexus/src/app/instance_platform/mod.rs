@@ -70,21 +70,23 @@
 // CPU platforms are broken out only because they're wordy.
 mod cpu_platform;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 
 use crate::app::instance::InstanceRegisterReason;
 use crate::cidata::InstanceCiData;
 
+use crate::db::datastore::Disk;
 use nexus_db_queries::db;
-use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::NetworkInterface;
 use sled_agent_client::types::{
     BlobStorageBackend, Board, BootOrderEntry, BootSettings, Chipset,
-    ComponentV0, Cpuid, CpuidVendor, CrucibleStorageBackend, I440Fx,
-    InstanceSpecV0, NvmeDisk, PciPath, QemuPvpanic, SerialPort,
-    SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend, VirtioNic,
-    VmmSpec,
+    ComponentV0, Cpuid, CpuidVendor, CrucibleStorageBackend,
+    FileStorageBackend, I440Fx, InstanceSpecV0, NvmeDisk, PciPath, QemuPvpanic,
+    SerialPort, SerialPortNumber, SpecKey, VirtioDisk, VirtioNetworkBackend,
+    VirtioNic, VmmSpec,
 };
 use uuid::Uuid;
 
@@ -174,73 +176,106 @@ pub fn zero_padded_nvme_serial_from_str(s: &str) -> [u8; 20] {
     sn
 }
 
-/// Describes a Crucible-backed disk that should be added to an instance
-/// specification.
-#[derive(Debug)]
-struct CrucibleDisk {
+/// Describes a Crucible-backed or file-backed disk that should be added to an
+/// instance specification.
+pub struct DiskComponents {
     device_name: String,
     device: ComponentV0,
-    backend: CrucibleStorageBackend,
+    backend: ComponentV0,
 }
 
-/// Stores a mapping from Nexus disk IDs to Crucible disk descriptors. This
+/// Stores a mapping from Nexus disk IDs to disk component descriptors. This
 /// allows the platform construction process to quickly determine the *device
 /// name* for a disk with a given ID so that that name can be inserted into the
 /// instance spec's boot settings.
-struct DisksById(BTreeMap<Uuid, CrucibleDisk>);
+struct DisksById(BTreeMap<Uuid, DiskComponents>);
 
-impl DisksById {
-    /// Creates a disk list from an iterator over a set of disk and volume
-    /// records.
-    ///
-    /// The caller must ensure that the supplied `Volume`s have been checked out
-    /// (i.e., that their Crucible generation numbers are up-to-date) before
-    /// calling this function.
-    fn from_disks<'i>(
-        disks: impl Iterator<Item = (&'i db::model::Disk, &'i db::model::Volume)>,
-    ) -> Result<Self, Error> {
-        let mut map = BTreeMap::new();
-        for (disk, volume) in disks {
-            let slot = match disk.slot {
-                Some(s) => s.0,
-                None => {
-                    return Err(Error::internal_error(&format!(
-                        "disk {} is attached but has no PCI slot assignment",
-                        disk.id()
-                    )));
-                }
-            };
+struct DisksByIdBuilder {
+    map: BTreeMap<Uuid, DiskComponents>,
+    slot_usage: BTreeSet<u8>,
+}
 
-            let pci_path = slot_to_pci_bdf(slot, PciDeviceKind::Disk)?;
-            let device = ComponentV0::NvmeDisk(NvmeDisk {
-                backend_id: SpecKey::Uuid(disk.id()),
-                pci_path,
-                serial_number: zero_padded_nvme_serial_from_str(
-                    disk.name().as_str(),
-                ),
-            });
+impl DisksByIdBuilder {
+    fn new() -> Self {
+        Self { map: BTreeMap::new(), slot_usage: BTreeSet::new() }
+    }
 
-            let backend = CrucibleStorageBackend {
-                readonly: false,
-                request_json: volume.data().to_owned(),
-            };
+    fn add_generic_disk(
+        &mut self,
+        disk: &Disk,
+        backend: ComponentV0,
+    ) -> Result<(), Error> {
+        let slot = disk.slot().ok_or(Error::internal_error(&format!(
+            "disk {} is attached but has no PCI slot assignment",
+            disk.id()
+        )))?;
 
-            let device_name = component_names::device_name_from_id(&disk.id());
-            if map
-                .insert(
-                    disk.id(),
-                    CrucibleDisk { device_name, device, backend },
-                )
-                .is_some()
-            {
-                return Err(Error::internal_error(&format!(
-                    "instance has multiple attached disks with ID {}",
-                    disk.id()
-                )));
-            }
+        if self.slot_usage.contains(&slot) {
+            return Err(Error::internal_error(&format!(
+                "disk PCI slot {slot} used more than once",
+            )));
         }
 
-        Ok(Self(map))
+        self.slot_usage.insert(slot);
+
+        let pci_path = slot_to_pci_bdf(slot, PciDeviceKind::Disk)?;
+
+        let device = ComponentV0::NvmeDisk(NvmeDisk {
+            backend_id: SpecKey::Uuid(disk.id()),
+            pci_path,
+            serial_number: zero_padded_nvme_serial_from_str(
+                disk.name().as_str(),
+            ),
+        });
+
+        let device_name = component_names::device_name_from_id(&disk.id());
+
+        let components = DiskComponents { device, device_name, backend };
+
+        if self.map.insert(disk.id(), components).is_some() {
+            return Err(Error::internal_error(&format!(
+                "instance has multiple attached disks with ID {}",
+                disk.id()
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn add_crucible_disk(
+        &mut self,
+        disk: &Disk,
+        volume: &db::model::Volume,
+    ) -> Result<(), Error> {
+        let backend =
+            ComponentV0::CrucibleStorageBackend(CrucibleStorageBackend {
+                readonly: false,
+                request_json: volume.data().to_owned(),
+            });
+
+        self.add_generic_disk(disk, backend)
+    }
+
+    #[allow(unused)] // for now!
+    fn add_file_backed_disk(
+        &mut self,
+        disk: &Disk,
+        path: String,
+    ) -> Result<(), Error> {
+        let backend = ComponentV0::FileStorageBackend(FileStorageBackend {
+            path,
+            readonly: false,
+            block_size: disk.block_size().to_bytes(),
+            workers: None,
+        });
+
+        self.add_generic_disk(disk, backend)
+    }
+}
+
+impl From<DisksByIdBuilder> for DisksById {
+    fn from(v: DisksByIdBuilder) -> DisksById {
+        DisksById(v.map)
     }
 }
 
@@ -325,14 +360,13 @@ impl Components {
         // This operation will add a device and a backend for every disk in the
         // input set.
         self.0.reserve(disks.0.len() * 2);
-        for (id, CrucibleDisk { device_name, device, backend }) in
-            disks.0.into_iter()
-        {
+
+        for (id, disk_components) in disks.0.into_iter() {
+            let DiskComponents { device_name, device, backend } =
+                disk_components;
+
             self.add(device_name, device)?;
-            self.add(
-                id.to_string(),
-                ComponentV0::CrucibleStorageBackend(backend),
-            )?;
+            self.add(id.to_string(), backend)?;
         }
 
         Ok(())
@@ -411,7 +445,7 @@ impl super::Nexus {
         reason: &InstanceRegisterReason,
         instance: &db::model::Instance,
         vmm: &db::model::Vmm,
-        disks: &[db::model::Disk],
+        disks: &[db::datastore::Disk],
         nics: &[NetworkInterface],
         ssh_keys: &[db::model::SshKey],
     ) -> Result<VmmSpec, Error> {
@@ -422,39 +456,45 @@ impl super::Nexus {
             )
         })?;
 
-        let mut components = Components::default();
+        let mut builder = DisksByIdBuilder::new();
 
-        // Get the volume information needed to fill in the disks' backends'
-        // volume construction requests. Calling `volume_checkout` bumps
-        // the volumes' generation numbers.
-        let mut volumes = Vec::with_capacity(disks.len());
         for disk in disks {
-            use db::datastore::VolumeCheckoutReason;
-            let volume = self
-                .db_datastore
-                .volume_checkout(
-                    disk.volume_id(),
-                    match reason {
-                        InstanceRegisterReason::Start { vmm_id } => {
-                            VolumeCheckoutReason::InstanceStart {
-                                vmm_id: *vmm_id,
-                            }
-                        }
-                        InstanceRegisterReason::Migrate {
-                            vmm_id,
-                            target_vmm_id,
-                        } => VolumeCheckoutReason::InstanceMigrate {
-                            vmm_id: *vmm_id,
-                            target_vmm_id: *target_vmm_id,
-                        },
-                    },
-                )
-                .await?;
+            match &disk {
+                db::datastore::Disk::Crucible(crucible_disk) => {
+                    // Get the volume information needed to fill in the disks'
+                    // backends' volume construction requests. Calling
+                    // `volume_checkout` bumps the volumes' generation numbers.
 
-            volumes.push(volume);
+                    use db::datastore::VolumeCheckoutReason;
+
+                    let volume = self
+                        .db_datastore
+                        .volume_checkout(
+                            crucible_disk.volume_id(),
+                            match reason {
+                                InstanceRegisterReason::Start { vmm_id } => {
+                                    VolumeCheckoutReason::InstanceStart {
+                                        vmm_id: *vmm_id,
+                                    }
+                                }
+                                InstanceRegisterReason::Migrate {
+                                    vmm_id,
+                                    target_vmm_id,
+                                } => VolumeCheckoutReason::InstanceMigrate {
+                                    vmm_id: *vmm_id,
+                                    target_vmm_id: *target_vmm_id,
+                                },
+                            },
+                        )
+                        .await?;
+
+                    builder.add_crucible_disk(disk, &volume)?;
+                }
+            }
         }
 
-        let disks = DisksById::from_disks(disks.iter().zip(volumes.iter()))?;
+        let disks: DisksById = builder.into();
+        let mut components = Components::default();
 
         // Add the instance's boot settings. Propolis expects boot order entries
         // that specify disks to refer to the *device* components of those
@@ -462,6 +502,9 @@ impl super::Nexus {
         // module's selected device name for the appropriate disk.
         if let Some(boot_disk_id) = instance.boot_disk_id {
             if let Some(disk) = disks.0.get(&boot_disk_id) {
+                // XXX here is where we would restrict the type of disk used for
+                // a boot disk. should we?
+
                 let entry = BootOrderEntry {
                     id: SpecKey::Name(disk.device_name.clone()),
                 };

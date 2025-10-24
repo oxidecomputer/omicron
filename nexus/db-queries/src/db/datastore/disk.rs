@@ -15,10 +15,13 @@ use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::DbConnection;
 use crate::db::identity::Resource;
-use crate::db::model::Disk;
+use crate::db::model;
 use crate::db::model::DiskRuntimeState;
-use crate::db::model::DiskUpdate;
+use crate::db::model::DiskState;
+use crate::db::model::DiskTypeCrucible;
+use crate::db::model::DiskTypeCrucibleUpdate;
 use crate::db::model::Instance;
 use crate::db::model::Name;
 use crate::db::model::Project;
@@ -34,6 +37,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
 use omicron_common::api;
@@ -45,13 +49,216 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::VolumeUuid;
 use ref_cast::RefCast;
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::HashSet;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Disk {
+    Crucible(CrucibleDisk),
+}
+
+impl Disk {
+    pub fn model(&self) -> &model::Disk {
+        match &self {
+            Disk::Crucible(disk) => disk.model(),
+        }
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.model().id()
+    }
+
+    pub fn name(&self) -> &api::external::Name {
+        self.model().name()
+    }
+
+    pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
+        self.model().time_deleted()
+    }
+
+    pub fn project_id(&self) -> Uuid {
+        self.model().project_id
+    }
+
+    pub fn runtime(&self) -> DiskRuntimeState {
+        self.model().runtime()
+    }
+
+    pub fn state(&self) -> DiskState {
+        self.model().state()
+    }
+
+    pub fn size(&self) -> model::ByteCount {
+        self.model().size
+    }
+
+    pub fn slot(&self) -> Option<u8> {
+        self.model().slot()
+    }
+
+    pub fn block_size(&self) -> model::BlockSize {
+        self.model().block_size
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrucibleDisk {
+    pub disk: model::Disk,
+    pub disk_type_crucible: DiskTypeCrucible,
+}
+
+impl CrucibleDisk {
+    pub fn model(&self) -> &model::Disk {
+        &self.disk
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.model().id()
+    }
+
+    pub fn name(&self) -> &api::external::Name {
+        self.model().name()
+    }
+
+    pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
+        self.model().time_deleted()
+    }
+
+    pub fn project_id(&self) -> Uuid {
+        self.model().project_id
+    }
+
+    pub fn runtime(&self) -> DiskRuntimeState {
+        self.model().runtime()
+    }
+
+    pub fn state(&self) -> DiskState {
+        self.model().state()
+    }
+
+    pub fn size(&self) -> model::ByteCount {
+        self.model().size
+    }
+
+    pub fn slot(&self) -> Option<u8> {
+        self.model().slot()
+    }
+
+    pub fn volume_id(&self) -> VolumeUuid {
+        self.disk_type_crucible.volume_id()
+    }
+
+    pub fn pantry_address(&self) -> Option<SocketAddrV6> {
+        self.disk_type_crucible.pantry_address()
+    }
+}
+
+/// Conversion to the external API type.
+impl Into<api::external::Disk> for Disk {
+    fn into(self) -> api::external::Disk {
+        match self {
+            Disk::Crucible(CrucibleDisk { disk, disk_type_crucible }) => {
+                // XXX can we remove this?
+                let device_path = format!("/mnt/{}", disk.name().as_str());
+                api::external::Disk {
+                    identity: disk.identity(),
+                    project_id: disk.project_id,
+                    snapshot_id: disk_type_crucible.create_snapshot_id,
+                    image_id: disk_type_crucible.create_image_id,
+                    size: disk.size.into(),
+                    block_size: disk.block_size.into(),
+                    state: disk.state().into(),
+                    device_path,
+                    disk_type: api::external::DiskType::Crucible,
+                }
+            }
+        }
+    }
+}
+
 impl DataStore {
+    pub async fn disk_get(
+        &self,
+        opctx: &OpContext,
+        disk_id: Uuid,
+    ) -> LookupResult<Disk> {
+        let (.., disk) =
+            LookupPath::new(opctx, self).disk_id(disk_id).fetch().await?;
+
+        let disk = match disk.disk_type {
+            db::model::DiskType::Crucible => {
+                let conn = self.pool_connection_authorized(opctx).await?;
+
+                use nexus_db_schema::schema::disk_type_crucible::dsl;
+
+                let disk_type_crucible = dsl::disk_type_crucible
+                    .filter(dsl::disk_id.eq(disk_id))
+                    .select(DiskTypeCrucible::as_select())
+                    .first_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+                Disk::Crucible(CrucibleDisk { disk, disk_type_crucible })
+            }
+        };
+
+        Ok(disk)
+    }
+
+    /// Return all the Crucible Disks matching a list of volume ids. Currently
+    /// this is only used by omdb.
+    pub async fn disks_get_matching_volumes(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        volume_ids: &HashSet<VolumeUuid>,
+        include_deleted: bool,
+        limit: i64,
+    ) -> ListResultVec<CrucibleDisk> {
+        use nexus_db_schema::schema::disk::dsl;
+        use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
+
+        let mut query = dsl::disk.into_boxed();
+        if !include_deleted {
+            query = query.filter(dsl::time_deleted.is_null());
+        }
+
+        let volume_ids: Vec<Uuid> = volume_ids
+            .iter()
+            .map(|volume_id| volume_id.into_untyped_uuid())
+            .collect();
+
+        let result: Vec<CrucibleDisk> = query
+            .inner_join(
+                disk_type_crucible_dsl::disk_type_crucible
+                    .on(disk_type_crucible_dsl::disk_id.eq(dsl::id)),
+            )
+            .filter(disk_type_crucible_dsl::volume_id.eq_any(volume_ids))
+            .limit(limit)
+            .select((
+                db::model::Disk::as_select(),
+                db::model::DiskTypeCrucible::as_select(),
+            ))
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .map(|(disk, disk_type_crucible)| CrucibleDisk {
+                disk,
+                disk_type_crucible,
+            })
+            .collect();
+
+        Ok(result)
+    }
+
     /// List disks associated with a given instance by name.
     pub async fn instance_list_disks(
         &self,
@@ -60,10 +267,11 @@ impl DataStore {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Disk> {
         use nexus_db_schema::schema::disk::dsl;
+        use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
 
         opctx.authorize(authz::Action::ListChildren, authz_instance).await?;
 
-        match pagparams {
+        let results = match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::disk, dsl::id, &pagparams)
             }
@@ -73,12 +281,110 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
+        .left_join(
+            disk_type_crucible_dsl::disk_type_crucible
+                .on(dsl::id.eq(disk_type_crucible_dsl::disk_id)),
+        )
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::attach_instance_id.eq(authz_instance.id()))
-        .select(Disk::as_select())
-        .load_async::<Disk>(&*self.pool_connection_authorized(opctx).await?)
+        .select((
+            model::Disk::as_select(),
+            Option::<DiskTypeCrucible>::as_select(),
+        ))
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let mut list = Vec::with_capacity(results.len());
+
+        for result in results {
+            match result {
+                (disk, Some(disk_type_crucible)) => {
+                    list.push(Disk::Crucible(CrucibleDisk {
+                        disk,
+                        disk_type_crucible,
+                    }));
+                }
+
+                (disk, None) => {
+                    return Err(Error::internal_error(&format!(
+                        "disk {} is invalid!",
+                        disk.id(),
+                    )));
+                }
+            }
+        }
+
+        Ok(list)
+    }
+
+    pub(super) async fn project_create_disk_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<Error>,
+        authz_project: &authz::Project,
+        disk: Disk,
+    ) -> Result<Disk, diesel::result::Error> {
+        use nexus_db_schema::schema::disk::dsl;
+        use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
+
+        let gen = disk.runtime().gen;
+        let name = disk.name().clone();
+        let project_id = disk.project_id();
+
+        let disk_model: model::Disk = Project::insert_resource(
+            project_id,
+            diesel::insert_into(dsl::disk)
+                .values(disk.model().clone())
+                .on_conflict(dsl::id)
+                .do_update()
+                .set(dsl::time_modified.eq(dsl::time_modified)),
+        )
+        .insert_and_get_result_async(conn)
+        .await
+        .map_err(|e| {
+            err.bail(match e {
+                AsyncInsertError::CollectionNotFound => {
+                    authz_project.not_found()
+                }
+                AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(ResourceType::Disk, name.as_str()),
+                ),
+            })
+        })?;
+
+        match &disk {
+            Disk::Crucible(CrucibleDisk { disk: _, disk_type_crucible }) => {
+                diesel::insert_into(disk_type_crucible_dsl::disk_type_crucible)
+                    .values(disk_type_crucible.clone())
+                    .on_conflict(disk_type_crucible_dsl::disk_id)
+                    .do_nothing()
+                    .execute_async(conn)
+                    .await?;
+            }
+        }
+
+        // Perform a few checks in the transaction on the inserted Disk to
+        // ensure that the newly created Disk is valid (even if there was an
+        // insertion conflict).
+
+        if disk_model.state().state() != &api::external::DiskState::Creating {
+            return Err(err.bail(Error::internal_error(&format!(
+                "newly-created Disk has unexpected state: {:?}",
+                disk_model.state(),
+            ))));
+        }
+
+        let runtime = disk_model.runtime();
+
+        if runtime.gen != gen {
+            return Err(err.bail(Error::internal_error(&format!(
+                "newly-created Disk has unexpected generation: {:?}",
+                runtime.gen
+            ))));
+        }
+
+        Ok(disk)
     }
 
     pub async fn project_create_disk(
@@ -87,45 +393,35 @@ impl DataStore {
         authz_project: &authz::Project,
         disk: Disk,
     ) -> CreateResult<Disk> {
-        use nexus_db_schema::schema::disk::dsl;
-
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        let gen = disk.runtime().gen;
-        let name = disk.name().clone();
-        let project_id = disk.project_id;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-        let disk: Disk = Project::insert_resource(
-            project_id,
-            diesel::insert_into(dsl::disk)
-                .values(disk)
-                .on_conflict(dsl::id)
-                .do_update()
-                .set(dsl::time_modified.eq(dsl::time_modified)),
-        )
-        .insert_and_get_result_async(
-            &*self.pool_connection_authorized(opctx).await?,
-        )
-        .await
-        .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => authz_project.not_found(),
-            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
-                e,
-                ErrorHandler::Conflict(ResourceType::Disk, name.as_str()),
-            ),
-        })?;
+        let disk = self
+            .transaction_retry_wrapper("project_create_disk")
+            .transaction(&conn, |conn| {
+                let disk = disk.clone();
+                let err = err.clone();
+                async move {
+                    Self::project_create_disk_in_txn(
+                        &conn,
+                        err,
+                        authz_project,
+                        disk,
+                    )
+                    .await
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
 
-        let runtime = disk.runtime();
-        bail_unless!(
-            runtime.state().state() == &api::external::DiskState::Creating,
-            "newly-created Disk has unexpected state: {:?}",
-            runtime.disk_state
-        );
-        bail_unless!(
-            runtime.gen == gen,
-            "newly-created Disk has unexpected generation: {:?}",
-            runtime.gen
-        );
         Ok(disk)
     }
 
@@ -138,7 +434,9 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, authz_project).await?;
 
         use nexus_db_schema::schema::disk::dsl;
-        match pagparams {
+        use nexus_db_schema::schema::disk_type_crucible::dsl as disk_type_crucible_dsl;
+
+        let results = match pagparams {
             PaginatedBy::Id(pagparams) => {
                 paginated(dsl::disk, dsl::id, &pagparams)
             }
@@ -148,12 +446,41 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
+        .left_join(
+            disk_type_crucible_dsl::disk_type_crucible
+                .on(dsl::id.eq(disk_type_crucible_dsl::disk_id)),
+        )
         .filter(dsl::time_deleted.is_null())
         .filter(dsl::project_id.eq(authz_project.id()))
-        .select(Disk::as_select())
-        .load_async::<Disk>(&*self.pool_connection_authorized(opctx).await?)
+        .select((
+            model::Disk::as_select(),
+            Option::<DiskTypeCrucible>::as_select(),
+        ))
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let mut list = Vec::with_capacity(results.len());
+
+        for result in results {
+            match result {
+                (disk, Some(disk_type_crucible)) => {
+                    list.push(Disk::Crucible(CrucibleDisk {
+                        disk,
+                        disk_type_crucible,
+                    }));
+                }
+
+                (disk, None) => {
+                    return Err(Error::internal_error(&format!(
+                        "disk {} is invalid!",
+                        disk.id(),
+                    )));
+                }
+            }
+        }
+
+        Ok(list)
     }
 
     /// Attaches a disk to an instance, if both objects:
@@ -206,9 +533,11 @@ impl DataStore {
             diesel::update(disk::dsl::disk).set(attach_update),
         );
 
-        let (instance, disk) = query.attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let (instance, _db_disk) = query.attach_and_get_result_async(&conn)
         .await
-        .or_else(|e: AttachError<Disk, _, _>| {
+        .or_else(|e: AttachError<model::Disk, _, _>| {
             match e {
                 AttachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
@@ -298,6 +627,8 @@ impl DataStore {
             }
         })?;
 
+        let disk = self.disk_get(&opctx, authz_disk.id()).await?;
+
         Ok((instance, disk))
     }
 
@@ -330,7 +661,9 @@ impl DataStore {
 
         let detached_label = api::external::DiskState::Detached.label();
 
-        let disk = Instance::detach_resource(
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let _db_disk = Instance::detach_resource(
             authz_instance.id(),
             authz_disk.id(),
             instance::table
@@ -352,9 +685,9 @@ impl DataStore {
                     disk::dsl::slot.eq(Option::<i16>::None)
                 ))
         )
-        .detach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        .detach_and_get_result_async(&conn)
         .await
-        .or_else(|e: DetachError<Disk, _, _>| {
+        .or_else(|e: DetachError<model::Disk, _, _>| {
             match e {
                 DetachError::CollectionNotFound => {
                     Err(Error::not_found_by_id(
@@ -445,6 +778,8 @@ impl DataStore {
             }
         })?;
 
+        let disk = self.disk_get(&opctx, authz_disk.id()).await?;
+
         Ok(disk)
     }
 
@@ -472,7 +807,7 @@ impl DataStore {
             .filter(dsl::id.eq(disk_id))
             .filter(dsl::state_generation.lt(new_runtime.gen))
             .set(new_runtime.clone())
-            .check_if_exists::<Disk>(disk_id)
+            .check_if_exists::<model::Disk>(disk_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
@@ -495,15 +830,22 @@ impl DataStore {
         authz_disk: &authz::Disk,
         pantry_address: SocketAddrV6,
     ) -> UpdateResult<bool> {
+        use nexus_db_schema::schema::disk::dsl as disk_dsl;
+        use nexus_db_schema::schema::disk_type_crucible::dsl;
+
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         let disk_id = authz_disk.id();
-        use nexus_db_schema::schema::disk::dsl;
-        let updated = diesel::update(dsl::disk)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(disk_id))
+
+        let updated = diesel::update(dsl::disk_type_crucible)
+            .filter(diesel::dsl::exists(
+                disk_dsl::disk
+                    .filter(disk_dsl::id.eq(disk_id))
+                    .filter(disk_dsl::time_deleted.is_null()),
+            ))
+            .filter(dsl::disk_id.eq(disk_id))
             .set(dsl::pantry_address.eq(pantry_address.to_string()))
-            .check_if_exists::<Disk>(disk_id)
+            .check_if_exists::<model::DiskTypeCrucible>(disk_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
@@ -525,15 +867,22 @@ impl DataStore {
         opctx: &OpContext,
         authz_disk: &authz::Disk,
     ) -> UpdateResult<bool> {
+        use nexus_db_schema::schema::disk::dsl as disk_dsl;
+        use nexus_db_schema::schema::disk_type_crucible::dsl;
+
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
         let disk_id = authz_disk.id();
-        use nexus_db_schema::schema::disk::dsl;
-        let updated = diesel::update(dsl::disk)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(disk_id))
-            .set(&DiskUpdate { pantry_address: None })
-            .check_if_exists::<Disk>(disk_id)
+
+        let updated = diesel::update(dsl::disk_type_crucible)
+            .filter(diesel::dsl::exists(
+                disk_dsl::disk
+                    .filter(disk_dsl::id.eq(disk_id))
+                    .filter(disk_dsl::time_deleted.is_null()),
+            ))
+            .filter(dsl::disk_id.eq(disk_id))
+            .set(&DiskTypeCrucibleUpdate { pantry_address: None })
+            .check_if_exists::<model::DiskTypeCrucible>(disk_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
@@ -548,33 +897,6 @@ impl DataStore {
             })?;
 
         Ok(updated)
-    }
-
-    /// Fetches information about a Disk that the caller has previously fetched
-    ///
-    /// The only difference between this function and a new fetch by id is that
-    /// this function preserves the `authz_disk` that you started with -- which
-    /// keeps track of how you looked it up.  So if you looked it up by name,
-    /// the authz you get back will reflect that, whereas if you did a fresh
-    /// lookup by id, it wouldn't.
-    /// TODO-cleanup this could be provided by the Lookup API for any resource
-    pub async fn disk_refetch(
-        &self,
-        opctx: &OpContext,
-        authz_disk: &authz::Disk,
-    ) -> LookupResult<Disk> {
-        let (.., db_disk) = LookupPath::new(opctx, self)
-            .disk_id(authz_disk.id())
-            .fetch()
-            .await
-            .map_err(|e| match e {
-                // Use the "not found" message of the authz object we were
-                // given, which will reflect however the caller originally
-                // looked it up.
-                Error::ObjectNotFound { .. } => authz_disk.not_found(),
-                e => e,
-            })?;
-        Ok(db_disk)
     }
 
     /// Updates a disk record to indicate it has been deleted.
@@ -604,7 +926,7 @@ impl DataStore {
         &self,
         disk_id: &Uuid,
         ok_to_delete_states: &[api::external::DiskState],
-    ) -> Result<db::model::Disk, Error> {
+    ) -> Result<model::Disk, Error> {
         use nexus_db_schema::schema::disk::dsl;
         let conn = self.pool_connection_unauthorized().await?;
         let now = Utc::now();
@@ -619,7 +941,7 @@ impl DataStore {
             .filter(dsl::disk_state.eq_any(ok_to_delete_state_labels))
             .filter(dsl::attach_instance_id.is_null())
             .set((dsl::disk_state.eq(destroyed), dsl::time_deleted.eq(now)))
-            .check_if_exists::<Disk>(*disk_id)
+            .check_if_exists::<model::Disk>(*disk_id)
             .execute_and_check(&conn)
             .await
             .map_err(|e| {
@@ -706,7 +1028,7 @@ impl DataStore {
                 dsl::disk_state.eq(faulted),
                 dsl::name.eq(new_name),
             ))
-            .check_if_exists::<Disk>(*disk_id)
+            .check_if_exists::<model::Disk>(*disk_id)
             .execute_and_check(&conn)
             .await
             .map_err(|e| {
@@ -750,26 +1072,31 @@ impl DataStore {
     /// in customer-support#58) would mean the disk was deleted but the project
     /// it was in could not be deleted (due to an erroneous number of bytes
     /// "still provisioned").
-    pub async fn find_phantom_disks(&self) -> ListResultVec<Disk> {
-        use nexus_db_schema::schema::disk::dsl;
+    pub async fn find_phantom_disks(&self) -> ListResultVec<model::Disk> {
+        use nexus_db_schema::schema::disk::dsl as disk_dsl;
+        use nexus_db_schema::schema::disk_type_crucible::dsl;
         use nexus_db_schema::schema::virtual_provisioning_resource::dsl as resource_dsl;
         use nexus_db_schema::schema::volume::dsl as volume_dsl;
 
         let conn = self.pool_connection_unauthorized().await?;
 
         let potential_phantom_disks: Vec<(
-            Disk,
+            model::Disk,
             Option<VirtualProvisioningResource>,
             Option<Volume>,
-        )> = dsl::disk
-            .filter(dsl::time_deleted.is_not_null())
+        )> = disk_dsl::disk
+            // only Crucible disks have volumes
+            .inner_join(
+                dsl::disk_type_crucible.on(dsl::disk_id.eq(disk_dsl::id)),
+            )
             .left_join(
                 resource_dsl::virtual_provisioning_resource
-                    .on(resource_dsl::id.eq(dsl::id)),
+                    .on(resource_dsl::id.eq(disk_dsl::id)),
             )
             .left_join(volume_dsl::volume.on(dsl::volume_id.eq(volume_dsl::id)))
+            .filter(disk_dsl::time_deleted.is_not_null())
             .select((
-                Disk::as_select(),
+                model::Disk::as_select(),
                 Option::<VirtualProvisioningResource>::as_select(),
                 Option::<Volume>::as_select(),
             ))
@@ -827,17 +1154,25 @@ impl DataStore {
     pub async fn disk_for_volume_id(
         &self,
         volume_id: VolumeUuid,
-    ) -> LookupResult<Option<Disk>> {
+    ) -> LookupResult<Option<CrucibleDisk>> {
         let conn = self.pool_connection_unauthorized().await?;
 
-        use nexus_db_schema::schema::disk::dsl;
-        dsl::disk
+        use nexus_db_schema::schema::disk::dsl as disk_dsl;
+        use nexus_db_schema::schema::disk_type_crucible::dsl;
+
+        let maybe_tuple = dsl::disk_type_crucible
+            .inner_join(disk_dsl::disk.on(disk_dsl::id.eq(dsl::disk_id)))
             .filter(dsl::volume_id.eq(to_db_typed_uuid(volume_id)))
-            .select(Disk::as_select())
+            .select((model::Disk::as_select(), DiskTypeCrucible::as_select()))
             .first_async(&*conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(maybe_tuple.map(|(disk, disk_type_crucible)| CrucibleDisk {
+            disk,
+            disk_type_crucible,
+        }))
     }
 }
 
@@ -876,29 +1211,41 @@ mod tests {
             .await
             .unwrap();
 
+        let disk_id = Uuid::new_v4();
+        let create_params = params::DiskCreate {
+            identity: external::IdentityMetadataCreateParams {
+                name: "first-post".parse().unwrap(),
+                description: "just trying things out".to_string(),
+            },
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
+            size: external::ByteCount::from(2147483648),
+        };
+
+        let disk = db::model::Disk::new(
+            disk_id,
+            authz_project.id(),
+            &create_params,
+            db::model::BlockSize::Traditional,
+            DiskRuntimeState::new(),
+            db::model::DiskType::Crucible,
+        );
+
+        let disk_type_crucible = db::model::DiskTypeCrucible::new(
+            disk_id,
+            VolumeUuid::new_v4(),
+            &create_params,
+        );
+
         let disk = db_datastore
             .project_create_disk(
                 &opctx,
                 &authz_project,
-                Disk::new(
-                    Uuid::new_v4(),
-                    authz_project.id(),
-                    VolumeUuid::new_v4(),
-                    params::DiskCreate {
-                        identity: external::IdentityMetadataCreateParams {
-                            name: "first-post".parse().unwrap(),
-                            description: "just trying things out".to_string(),
-                        },
-                        disk_source: params::DiskSource::Blank {
-                            block_size: params::BlockSize::try_from(512)
-                                .unwrap(),
-                        },
-                        size: external::ByteCount::from(2147483648),
-                    },
-                    db::model::BlockSize::Traditional,
-                    DiskRuntimeState::new(),
-                )
-                .unwrap(),
+                db::datastore::Disk::Crucible(db::datastore::CrucibleDisk {
+                    disk,
+                    disk_type_crucible,
+                }),
             )
             .await
             .unwrap();

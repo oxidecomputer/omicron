@@ -1419,6 +1419,12 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 
 // DISKS
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskType {
+    Crucible,
+}
+
 /// View of a Disk
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
@@ -1433,6 +1439,7 @@ pub struct Disk {
     pub block_size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
+    pub disk_type: DiskType,
 }
 
 /// State of a Disk
