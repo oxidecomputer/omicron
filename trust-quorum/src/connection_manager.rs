@@ -100,7 +100,6 @@ pub enum ConnToMainMsgInner {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     },
-    #[expect(unused)]
     Received {
         from: BaseboardId,
         msg: PeerMsg,

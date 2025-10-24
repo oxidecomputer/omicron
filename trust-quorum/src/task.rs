@@ -22,8 +22,9 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::sleep;
 use trust_quorum_protocol::{
     BaseboardId, CommitError, Configuration, Epoch, LoadRackSecretError,
-    LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCtx, PrepareAndCommitError,
-    ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
+    LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCommonCtx, NodeCtx,
+    PrepareAndCommitError, ReconfigurationError, ReconfigureMsg,
+    ReconstructedRackSecret,
 };
 
 #[derive(Debug, Clone)]
@@ -286,9 +287,7 @@ pub struct NodeTask {
     log: Logger,
     #[expect(unused)]
     config: Config,
-    #[expect(unused)]
     node: Node,
-    #[expect(unused)]
     ctx: NodeCtx,
     conn_mgr: ConnMgr,
     conn_mgr_rx: mpsc::Receiver<ConnToMainMsg>,
@@ -396,6 +395,7 @@ impl NodeTask {
         }
     }
 
+    // TODO: Process `ctx`: persist state and send messages as necessary
     async fn on_api_request(&mut self, request: NodeApiRequest) {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {
@@ -404,9 +404,54 @@ impl NodeTask {
                 let corpus = vec![];
                 self.conn_mgr.update_bootstrap_connections(addrs, corpus).await;
             }
+            NodeApiRequest::ClearSecrets => {
+                self.node.clear_secrets();
+            }
+            NodeApiRequest::Commit { rack_id, epoch, responder } => {
+                let res = self
+                    .node
+                    .commit_configuration(&mut self.ctx, rack_id, epoch)
+                    .map(|_| {
+                        self.ctx.persistent_state().commits.contains(&epoch)
+                    });
+                let _ = responder.send(res);
+            }
             NodeApiRequest::ConnMgrStatus { responder } => {
                 debug!(self.log, "Received Request for ConnMgrStatus");
                 let _ = responder.send(self.conn_mgr.status());
+            }
+            NodeApiRequest::CoordinatorStatus { responder } => {
+                let status = self.node.get_coordinator_state().map(|cs| {
+                    CoordinatorStatus {
+                        config: cs.config().clone(),
+                        acked_prepares: cs.op().acked_prepares(),
+                    }
+                });
+                let _ = responder.send(status);
+            }
+            NodeApiRequest::LoadRackSecret { epoch, responder } => {
+                let res = self.node.load_rack_secret(&mut self.ctx, epoch);
+                let _ = responder.send(res);
+            }
+            NodeApiRequest::LrtqUpgrade { msg, responder } => {
+                let res =
+                    self.node.coordinate_upgrade_from_lrtq(&mut self.ctx, msg);
+                let _ = responder.send(res);
+            }
+            NodeApiRequest::PrepareAndCommit { config, responder } => {
+                let epoch = config.epoch;
+                let res = self
+                    .node
+                    .prepare_and_commit(&mut self.ctx, config)
+                    .map(|_| {
+                        self.ctx.persistent_state().commits.contains(&epoch)
+                    });
+                let _ = responder.send(res);
+            }
+            NodeApiRequest::Reconfigure { msg, responder } => {
+                let res =
+                    self.node.coordinate_reconfiguration(&mut self.ctx, msg);
+                let _ = responder.send(res);
             }
             NodeApiRequest::Shutdown => {
                 info!(self.log, "Shutting down Node tokio tasks");
