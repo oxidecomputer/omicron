@@ -396,12 +396,30 @@ mod tests {
             GitReq::Default => "main",
             _ => unreachable!(),
         };
-        let raw_url = format!(
-            "https://raw.githubusercontent.com/oxidecomputer/crucible/{part}/openapi/crucible-pantry.json",
+        // Construct the URL for the pointer to the current document.
+        let latest_url_pointer = format!(
+            "https://raw.githubusercontent.com/oxidecomputer/crucible/{part}/openapi/crucible-pantry/crucible-pantry-latest.json",
         );
+        println!("latest url pointer: {:?}", latest_url_pointer);
 
         // The default timeout of 30 seconds was sometimes not enough
         // heavy load.
+        let latest_name = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap()
+            .get(&latest_url_pointer)
+            .send()
+            .unwrap()
+            .text()
+            .unwrap();
+
+        // From that pointer name, construct the URL for the actual API document
+        println!("latest_name: {:?}", latest_name);
+        let raw_url = format!(
+            "https://raw.githubusercontent.com/oxidecomputer/crucible/{part}/openapi/crucible-pantry/{latest_name}",
+        );
+        println!("raw_url: {:?}", raw_url);
         let raw_json = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
@@ -411,6 +429,7 @@ mod tests {
             .unwrap()
             .text()
             .unwrap();
+
         serde_json::from_str(&raw_json).unwrap()
     }
 
