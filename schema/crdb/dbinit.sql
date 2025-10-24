@@ -6817,7 +6817,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
 -- The history of current sitreps.
 --
 -- The sitrep with the highest `version` in this table is the current sitrep.
-CREATE TABLE IF NOT EXISTS omicron.public.fm_current_sitrep (
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_version (
     -- Monotonically increasing version for all FM sitreps.
     version INT8 PRIMARY KEY,
 
@@ -6825,21 +6825,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_current_sitrep (
     -- reference a fm_sitrep that has been deleted (if this sitrep is
     --  no longer current; the current sitrep must not be deleted).
     sitrep_id UUID NOT NULL,
-
-    -- Whether potentially-destructive automated response actions
-    -- are cleared hot.
-    --
-    -- This is similar to the `enabled` column in `bp_target`, in
-    -- that it allows automated response to be disabled by an
-    -- operator in case of danger.
-    --
-    -- However, it's a bit different from its blueprint counterpart:
-    -- it only disables potentially destructive automated response
-    -- actions. The FM system will still continue to request polling
-    -- and diagnose active problems. It seems important to still be
-    -- able to both detect and diagnose Active Problems even when
-    -- disabling destructive automated response.
-    response_authorized BOOL NOT NULL,
 
     -- Timestamp for when this sitrep was made current.
     time_made_current TIMESTAMPTZ NOT NULL

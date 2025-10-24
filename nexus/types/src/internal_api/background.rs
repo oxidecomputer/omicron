@@ -757,6 +757,19 @@ pub struct EreporterStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_sitrep_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepLoadStatus {
+    /// An error occurred.
+    Error(String),
+
+    /// There is no current sitrep.
+    NoSitrep,
+
+    /// We've loaded the most recent sitrep as of `time_loaded`.
+    Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
+}
+
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;

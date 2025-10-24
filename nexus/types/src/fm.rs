@@ -10,6 +10,19 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct Sitrep {
+    pub metadata: SitrepMetadata,
+    // TODO(eliza): draw the rest of the sitrep
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct SitrepVersion {
+    pub id: SitrepUuid,
+    pub version: u32,
+    pub time_made_current: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct SitrepMetadata {
     pub id: SitrepUuid,
     pub parent_sitrep_id: Option<SitrepUuid>,

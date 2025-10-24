@@ -441,6 +441,8 @@ pub struct BackgroundTaskConfig {
     pub webhook_deliverator: WebhookDeliveratorConfig,
     /// configuration for SP ereport ingester task
     pub sp_ereport_ingester: SpEreportIngesterConfig,
+    /// configuration for fault management background tasks
+    pub fm: FmTasksConfig,
 }
 
 #[serde_as]
@@ -867,6 +869,21 @@ pub struct SpEreportIngesterConfig {
 impl Default for SpEreportIngesterConfig {
     fn default() -> Self {
         Self { period_secs: Duration::from_secs(30), disable: false }
+    }
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FmTasksConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads the latest fault management sitrep from the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_load_period_secs: Duration,
+}
+
+impl Default for FmTasksConfig {
+    fn default() -> Self {
+        Self { sitrep_load_period_secs: Duration::from_secs(15) }
     }
 }
 
