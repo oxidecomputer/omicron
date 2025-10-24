@@ -700,18 +700,18 @@ impl BundleCollection {
                 .support_bundle_get(&self.opctx, self.bundle.id.into())
                 .await
             {
-                Ok(bundle) => {
-                    if !matches!(bundle.state, SupportBundleState::Collecting) {
-                        return anyhow::anyhow!("Support Bundle Cancelled");
-                    }
-
+                Ok(SupportBundle {
+                    state: SupportBundleState::Collecting,
+                    ..
+                }) => {
                     // Bundle still collecting; continue...
                     continue;
                 }
-                Err(err)
-                    if matches!(err, Error::ObjectNotFound { .. })
-                        || matches!(err, Error::NotFound { .. }) =>
-                {
+                Ok(_) => {
+                    // Not collecting, for any reason: Time to exit
+                    return anyhow::anyhow!("Support Bundle Cancelled");
+                }
+                Err(Error::ObjectNotFound { .. } | Error::NotFound { .. }) => {
                     return anyhow::anyhow!("Support Bundle Deleted");
                 }
                 Err(err) => {
