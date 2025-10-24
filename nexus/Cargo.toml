@@ -53,6 +53,7 @@ internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
+jiff.workspace = true
 lldpd_client.workspace = true
 macaddr.workspace = true
 maplit.workspace = true
@@ -144,7 +145,7 @@ update-common.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
-zip.workspace = true
+zip = { workspace = true, features = ["jiff-02"] }
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
