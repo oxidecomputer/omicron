@@ -306,21 +306,15 @@ impl super::Nexus {
 
         let disk = self.datastore().disk_get(opctx, authz_disk.id()).await?;
 
-        match disk {
-            db::datastore::Disk::Crucible(disk) => {
-                let saga_params = sagas::disk_delete::Params {
-                    serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-                    project_id: project.id(),
-                    disk,
-                };
+        let saga_params = sagas::disk_delete::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_id: project.id(),
+            disk,
+        };
 
-                self.sagas
-                    .saga_execute::<sagas::disk_delete::SagaDiskDelete>(
-                        saga_params,
-                    )
-                    .await?;
-            }
-        }
+        self.sagas
+            .saga_execute::<sagas::disk_delete::SagaDiskDelete>(saga_params)
+            .await?;
 
         Ok(())
     }

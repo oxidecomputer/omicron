@@ -24,7 +24,7 @@ use uuid::Uuid;
 pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub project_id: Uuid,
-    pub disk: datastore::CrucibleDisk,
+    pub disk: datastore::Disk,
 }
 
 // disk delete saga: actions
@@ -60,36 +60,41 @@ impl NexusSaga for SagaDiskDelete {
         builder.append(delete_disk_record_action());
         builder.append(space_account_action());
 
-        let subsaga_params = volume_delete::Params {
-            serialized_authn: params.serialized_authn.clone(),
-            volume_id: params.disk.volume_id(),
-        };
+        match &params.disk {
+            datastore::Disk::Crucible(disk) => {
+                let subsaga_params = volume_delete::Params {
+                    serialized_authn: params.serialized_authn.clone(),
+                    volume_id: disk.volume_id(),
+                };
 
-        let subsaga_dag = {
-            let subsaga_builder = steno::DagBuilder::new(steno::SagaName::new(
-                volume_delete::SagaVolumeDelete::NAME,
-            ));
-            volume_delete::SagaVolumeDelete::make_saga_dag(
-                &subsaga_params,
-                subsaga_builder,
-            )?
-        };
+                let subsaga_dag = {
+                    let subsaga_builder =
+                        steno::DagBuilder::new(steno::SagaName::new(
+                            volume_delete::SagaVolumeDelete::NAME,
+                        ));
+                    volume_delete::SagaVolumeDelete::make_saga_dag(
+                        &subsaga_params,
+                        subsaga_builder,
+                    )?
+                };
 
-        builder.append(Node::constant(
-            "params_for_volume_delete_subsaga",
-            serde_json::to_value(&subsaga_params).map_err(|e| {
-                SagaInitError::SerializeError(
-                    "params_for_volume_delete_subsaga".to_string(),
-                    e,
-                )
-            })?,
-        ));
+                builder.append(Node::constant(
+                    "params_for_volume_delete_subsaga",
+                    serde_json::to_value(&subsaga_params).map_err(|e| {
+                        SagaInitError::SerializeError(
+                            "params_for_volume_delete_subsaga".to_string(),
+                            e,
+                        )
+                    })?,
+                ));
 
-        builder.append(Node::subsaga(
-            "volume_delete_subsaga_no_result",
-            subsaga_dag,
-            "params_for_volume_delete_subsaga",
-        ));
+                builder.append(Node::subsaga(
+                    "volume_delete_subsaga_no_result",
+                    subsaga_dag,
+                    "params_for_volume_delete_subsaga",
+                ));
+            }
+        }
 
         Ok(builder.build()?)
     }
@@ -186,7 +191,6 @@ pub(crate) mod test {
     };
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::db::datastore::CrucibleDisk;
     use nexus_db_queries::db::datastore::Disk;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_project;
@@ -206,7 +210,7 @@ pub(crate) mod test {
         )
     }
 
-    async fn create_disk(cptestctx: &ControlPlaneTestContext) -> CrucibleDisk {
+    async fn create_disk(cptestctx: &ControlPlaneTestContext) -> Disk {
         let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
@@ -217,18 +221,14 @@ pub(crate) mod test {
         let project_lookup =
             nexus.project_lookup(&opctx, project_selector).unwrap();
 
-        let disk = nexus
+        nexus
             .project_create_disk(
                 &opctx,
                 &project_lookup,
                 &crate::app::sagas::disk_create::test::new_disk_create_params(),
             )
             .await
-            .expect("Failed to create disk");
-
-        match disk {
-            Disk::Crucible(disk) => disk,
-        }
+            .expect("Failed to create disk")
     }
 
     #[nexus_test(server = crate::Server)]
