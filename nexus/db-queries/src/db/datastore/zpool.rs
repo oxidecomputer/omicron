@@ -175,8 +175,9 @@ impl DataStore {
                     .or(physical_disk_dsl::id.is_null())
                     .or(
                         // NOTE: We should probably get rid of this altogether
-                        // (it's kinda implied by "Decommissioned", being a terminal
-                        // state) but this is an extra cautious statement.
+                        // (it's kinda implied by "Decommissioned", being a
+                        // terminal state) but this is an extra cautious
+                        // statement.
                         physical_disk_dsl::time_deleted.is_not_null(),
                     ),
             )
@@ -230,7 +231,8 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // Verify that there are no regions nor region snapshots using this dataset
+        // Verify that there are no regions nor region snapshots using this
+        // dataset
         use nexus_db_schema::schema::region::dsl as region_dsl;
         let region_count = region_dsl::region
             .filter(region_dsl::dataset_id.eq_any(dataset_ids.clone()))
@@ -253,11 +255,12 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if region_snapshot_count > 0 {
             return Err(Error::unavail(&format!(
-                "Cannot delete this zpool; it has {region_snapshot_count} region snapshots"
+                "Cannot delete this zpool; it has {region_snapshot_count} \
+                region snapshots"
             )));
         }
 
-        // Ensure the datasets are deleted
+        // Ensure the crucible datasets are deleted
         diesel::update(dataset_dsl::crucible_dataset)
             .filter(dataset_dsl::time_deleted.is_null())
             .filter(dataset_dsl::pool_id.eq(zpool_id))

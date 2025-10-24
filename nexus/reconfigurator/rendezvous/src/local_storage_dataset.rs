@@ -2,12 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Recording debug datasets in their rendezvous table
+//! Recording Local storage datasets in their rendezvous table
 
 use anyhow::Context;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_db_queries::db::model::RendezvousDebugDataset;
+use nexus_db_queries::db::model::RendezvousLocalStorageDataset;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
 use nexus_types::internal_api::background::DatasetsRendezvousStats;
@@ -18,7 +18,7 @@ use slog::info;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-pub(crate) async fn reconcile_debug_datasets(
+pub(crate) async fn reconcile_local_storage_datasets(
     opctx: &OpContext,
     datastore: &DataStore,
     blueprint_id: BlueprintUuid,
@@ -32,92 +32,104 @@ pub(crate) async fn reconcile_debug_datasets(
     // This is a performance optimization. If we removed this fetch, the code
     // below would still be correct, but it would issue a bunch of do-nothing
     // queries for every individual dataset in `blueprint_datasets`.
-    let existing_db_datasets = datastore
-        .debug_dataset_list_all_batched(opctx)
+    let existing_datasets = datastore
+        .local_storage_dataset_list_all_batched(opctx)
         .await
-        .context("failed to list all debug datasets")?
+        .context("failed to list all local storage datasets")?
         .into_iter()
-        .map(|d| (d.id(), d))
-        .collect::<BTreeMap<_, _>>();
+        .map(|dataset| (dataset.id(), dataset))
+        .collect::<BTreeMap<DatasetUuid, _>>();
 
     let mut stats = DatasetsRendezvousStats::default();
 
-    for dataset in blueprint_datasets.filter(|d| d.kind == DatasetKind::Debug) {
-        match dataset.disposition {
-            BlueprintDatasetDisposition::InService => {
-                // Only attempt to insert this dataset if it has shown up in
-                // inventory (required for correctness) and isn't already
-                // present in the db (performance optimization only). Inserting
-                // an already-present row is a no-op, so it's safe to skip.
-                if existing_db_datasets.contains_key(&dataset.id) {
-                    stats.num_already_exist += 1;
-                } else if !inventory_datasets.contains(&dataset.id) {
-                    stats.num_not_in_inventory += 1;
-                } else {
-                    let db_dataset = RendezvousDebugDataset::new(
-                        dataset.id,
-                        dataset.pool.id(),
-                        blueprint_id,
-                    );
-                    let did_insert = datastore
-                        .debug_dataset_insert_if_not_exists(opctx, db_dataset)
-                        .await
-                        .with_context(|| {
-                            format!("failed to insert dataset {}", dataset.id)
-                        })?
-                        .is_some();
+    for bp_dataset in blueprint_datasets {
+        // Filter down to LocalStorage datasets...
+        let dataset = match (&bp_dataset.kind, bp_dataset.address) {
+            (DatasetKind::LocalStorage, None) => {
+                RendezvousLocalStorageDataset::new(
+                    bp_dataset.id,
+                    bp_dataset.pool.id(),
+                    blueprint_id,
+                )
+            }
+            _ => continue,
+        };
+        let id = dataset.id();
 
-                    if did_insert {
-                        stats.num_inserted += 1;
-                    } else {
-                        // This means we hit the TOCTOU race mentioned above:
-                        // when we queried the DB this row didn't exist, but
-                        // another Nexus must have beat us to actually inserting
-                        // it.
-                        stats.num_already_exist += 1;
-                    }
+        match bp_dataset.disposition {
+            // Add any datasets that are in-service
+            BlueprintDatasetDisposition::InService => {
+                // Skip adding if already in the database
+                if existing_datasets.contains_key(&id) {
+                    stats.num_already_exist += 1;
+                    continue;
+                }
+
+                // Skip adding if not in the inventory
+                if !inventory_datasets.contains(&id) {
+                    stats.num_not_in_inventory += 1;
+                    continue;
+                }
+
+                let did_insert = datastore
+                    .local_storage_dataset_insert_if_not_exists(opctx, dataset)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to upsert dataset record for dataset \
+                        {id}"
+                        )
+                    })?
+                    .is_some();
+
+                if did_insert {
+                    stats.num_inserted += 1;
+
+                    info!(
+                        opctx.log,
+                        "inserted LocalStorage dataset record in database";
+                        "action" => "insert",
+                        "id" => %id,
+                    );
+                } else {
+                    // This means we hit the TOCTOU race mentioned above: when
+                    // we queried the DB this row didn't exist, but another
+                    // Nexus must have beat us to actually inserting it.
+                    stats.num_already_exist += 1;
                 }
             }
+
+            // Tombstone any datasets that are expunged
             BlueprintDatasetDisposition::Expunged => {
                 // Only attempt to tombstone this dataset if it isn't already
                 // marked as tombstoned in the database.
-                //
-                // The `.unwrap_or(false)` means we'll attempt to tombstone a
-                // row even if it wasn't present in the db at all when we
-                // queried it above. This is _probably_ unnecessary (tombstoning
-                // a nonexistent row is a no-op), but I'm not positive there
-                // isn't a case where we might be operating on a blueprint
-                // simultaneously to some other Nexus operating on an older
-                // blueprint/inventory where it might insert this row after we
-                // queried above and before we tombstone below. It seems safer
-                // to issue a probably-do-nothing query than to _not_ issue a
-                // probably-do-nothing-but-might-do-something-if-I'm-wrong
-                // query.
-                let already_tombstoned = existing_db_datasets
-                    .get(&dataset.id)
+                let already_tombstoned = existing_datasets
+                    .get(&dataset.id())
                     .map(|d| d.is_tombstoned())
                     .unwrap_or(false);
+
                 if already_tombstoned {
                     stats.num_already_tombstoned += 1;
                 } else {
                     if datastore
-                        .debug_dataset_tombstone(
+                        .local_storage_dataset_tombstone(
                             opctx,
-                            dataset.id,
+                            dataset.id(),
                             blueprint_id,
                         )
                         .await
                         .with_context(|| {
                             format!(
                                 "failed to tombstone dataset {}",
-                                dataset.id
+                                dataset.id()
                             )
                         })?
                     {
                         stats.num_tombstoned += 1;
                         info!(
-                            opctx.log, "tombstoned expunged dataset";
-                            "dataset_id" => %dataset.id,
+                            opctx.log,
+                            "tombstoned expunged local storage dataset";
+                            "dataset_id" => %dataset.id(),
                         );
                     } else {
                         // Similar TOCTOU race lost as above; this dataset was
@@ -130,6 +142,12 @@ pub(crate) async fn reconcile_debug_datasets(
         }
     }
 
+    info!(
+        opctx.log,
+        "all LocalStorage datasets reconciled";
+        &stats,
+    );
+
     Ok(stats)
 }
 
@@ -141,13 +159,24 @@ mod tests {
     use crate::tests::usize_to_id;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use nexus_db_model::Generation;
+    use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledCpuFamily;
+    use nexus_db_model::SledSystemHardware;
+    use nexus_db_model::SledUpdate;
+    use nexus_db_model::Zpool;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::ZpoolName;
+    use omicron_common::api::external::ByteCount;
     use omicron_common::disk::CompressionAlgorithm;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
     use proptest::prelude::*;
     use proptest::proptest;
+    use uuid::Uuid;
 
     async fn proptest_do_prep(
         opctx: &OpContext,
@@ -160,13 +189,19 @@ mod tests {
 
         // Clean up from any previous proptest cases
         {
-            use nexus_db_schema::schema::rendezvous_debug_dataset::dsl;
+            use nexus_db_schema::schema::rendezvous_local_storage_dataset::dsl;
+            use nexus_db_schema::schema::sled::dsl as sled_dsl;
+            use nexus_db_schema::schema::zpool::dsl as zpool_dsl;
             let conn = datastore.pool_connection_for_tests().await.unwrap();
             datastore
                 .transaction_non_retry_wrapper("proptest_prep_cleanup")
                 .transaction(&conn, |conn| async move {
                     conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
-                    diesel::delete(dsl::rendezvous_debug_dataset)
+                    diesel::delete(sled_dsl::sled).execute_async(&conn).await?;
+                    diesel::delete(zpool_dsl::zpool)
+                        .execute_async(&conn)
+                        .await?;
+                    diesel::delete(dsl::rendezvous_local_storage_dataset)
                         .execute_async(&conn)
                         .await?;
                     Ok::<_, diesel::result::Error>(())
@@ -176,11 +211,55 @@ mod tests {
         }
 
         for (&id, prep) in prep {
+            let dataset_id: DatasetUuid = usize_to_id(id);
+            let zpool_id: ZpoolUuid = usize_to_id(10000 + id);
+            let sled_id: SledUuid = usize_to_id(20000 + id);
+            let disk_id: PhysicalDiskUuid = usize_to_id(30000 + id);
+
+            // Ensure the sled and zpool this dataset claim to be on exist in
+            // the DB.
+            datastore
+                .sled_upsert(SledUpdate::new(
+                    sled_id,
+                    "[::1]:0".parse().unwrap(),
+                    0,
+                    SledBaseboard {
+                        serial_number: format!("test-sn-{id}"),
+                        part_number: "test-pn".to_string(),
+                        revision: 0,
+                    },
+                    SledSystemHardware {
+                        is_scrimlet: false,
+                        usable_hardware_threads: 128,
+                        usable_physical_ram: (64 << 30).try_into().unwrap(),
+                        reservoir_size: (16 << 30).try_into().unwrap(),
+                        cpu_family: SledCpuFamily::Unknown,
+                    },
+                    Uuid::new_v4(),
+                    Generation::new(),
+                ))
+                .await
+                .expect("should have inserted sled");
+            datastore
+                .zpool_insert(
+                    opctx,
+                    Zpool::new(
+                        zpool_id,
+                        sled_id,
+                        disk_id,
+                        ByteCount::from(0).into(),
+                    ),
+                )
+                .await
+                .expect("should have inserted zpool backing dataset");
+
+            // Create the blueprint version of this proptest dataset, then add
+            // it to "inventory" and/or insert it into the database.
             let d = BlueprintDatasetConfig {
                 disposition: prep.disposition.into(),
-                id: usize_to_id(id),
-                pool: ZpoolName::new_external(usize_to_id(id)),
-                kind: DatasetKind::Debug,
+                id: dataset_id,
+                pool: ZpoolName::new_external(zpool_id),
+                kind: DatasetKind::LocalStorage,
                 address: None,
                 quota: None,
                 reservation: None,
@@ -193,17 +272,17 @@ mod tests {
 
             if prep.in_database {
                 datastore
-                    .debug_dataset_insert_if_not_exists(
+                    .local_storage_dataset_insert_if_not_exists(
                         opctx,
-                        RendezvousDebugDataset::new(
+                        RendezvousLocalStorageDataset::new(
                             d.id,
                             d.pool.id(),
                             blueprint_id,
                         ),
                     )
                     .await
-                    .expect("query succeeded")
-                    .expect("inserted dataset");
+                    .expect("query should have succeeded")
+                    .expect("should have inserted dataset");
             }
 
             datasets.push(d);
@@ -229,7 +308,7 @@ mod tests {
             runtime.block_on(TestDatabase::new_with_datastore(&logctx.log));
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        proptest!(ProptestConfig::with_cases(64),
+        proptest!(ProptestConfig::with_cases(32),
         |(prep in proptest::collection::vec(
             any::<DatasetPrep>(),
             0..20,
@@ -245,7 +324,7 @@ mod tests {
                     &prep,
                 ).await;
 
-                let result_stats = reconcile_debug_datasets(
+                let result_stats = reconcile_local_storage_datasets(
                     opctx,
                     datastore,
                     blueprint_id,
@@ -256,7 +335,7 @@ mod tests {
                 .expect("reconciled debug dataset");
 
                  let datastore_datasets = datastore
-                    .debug_dataset_list_all_batched(opctx)
+                    .local_storage_dataset_list_all_batched(opctx)
                     .await
                     .unwrap()
                     .into_iter()

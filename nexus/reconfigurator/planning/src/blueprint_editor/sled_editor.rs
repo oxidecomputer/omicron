@@ -661,13 +661,19 @@ impl ActiveSledEditor {
 
         self.disks.ensure(disk)?;
 
-        // Every disk also gets a Debug and Transient Zone Root dataset; ensure
-        // both of those exist as well.
-        let debug = PartialDatasetConfig::for_debug(zpool);
-        let zone_root = PartialDatasetConfig::for_transient_zone_root(zpool);
+        // Every disk also gets:
+        let dataset_configs = [
+            // a Debug dataset
+            PartialDatasetConfig::for_debug(zpool),
+            // Transient Zone Root dataset
+            PartialDatasetConfig::for_transient_zone_root(zpool),
+            // a LocalStorage dataset
+            PartialDatasetConfig::for_local_storage_root(zpool),
+        ];
 
-        self.datasets.ensure_in_service(debug, rng);
-        self.datasets.ensure_in_service(zone_root, rng);
+        for dataset_config in dataset_configs {
+            self.datasets.ensure_in_service(dataset_config, rng);
+        }
 
         Ok(())
     }
