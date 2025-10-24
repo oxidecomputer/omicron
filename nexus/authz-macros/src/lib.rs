@@ -389,8 +389,8 @@ fn do_authz_resource(
                     relations = {{ containing_project: Project }};
                     "list_children" if "viewer" on "containing_project";
                     "read" if "viewer" on "containing_project";
-                    "modify" if "collaborator" on "containing_project";
-                    "create_child" if "collaborator" on "containing_project";
+                    "modify" if "collaborator-no-networking" on "containing_project";
+                    "create_child" if "collaborator-no-networking" on "containing_project";
                 }}
 
                 has_relation(parent: Project, "containing_project", child: {})
@@ -420,8 +420,8 @@ fn do_authz_resource(
                     }};
                     "list_children" if "viewer" on "containing_project";
                     "read" if "viewer" on "containing_project";
-                    "modify" if "collaborator" on "containing_project";
-                    "create_child" if "collaborator" on "containing_project";
+                    "modify" if "collaborator-no-networking" on "containing_project";
+                    "create_child" if "collaborator-no-networking" on "containing_project";
                 }}
 
                 has_relation(project: Project, "containing_project", child: {})
@@ -439,9 +439,8 @@ fn do_authz_resource(
             parent_as_snake,
         ),
 
-        // InProjectNetworking: Like InProject, but NO default permission rules.
-        // All permission rules are defined in omicron.polar to enforce
-        // networking restrictions. Only defines resource structure + relations.
+        // InProjectNetworking: Like InProject, but modifying these things
+        // requires "collaborator".
         (PolarSnippet::InProjectNetworking, "Project") => format!(
             r#"
                 resource {} {{
@@ -450,13 +449,13 @@ fn do_authz_resource(
                         "modify",
                         "read",
                         "create_child",
-                        "delete",
                     ];
 
                     relations = {{ containing_project: Project }};
-                    # NOTE: No permission rules defined here!
-                    # All permissions controlled by custom networking restriction
-                    # rules in omicron.polar (can_modify_networking_resource)
+                    "list_children" if "viewer" on "containing_project";
+                    "read" if "viewer" on "containing_project";
+                    "modify" if "collaborator-no-networking" on "containing_project";
+                    "create_child" if "collaborator-no-networking" on "containing_project";
                 }}
 
                 has_relation(parent: Project, "containing_project", child: {})
@@ -464,7 +463,6 @@ fn do_authz_resource(
             "#,
             resource_name, resource_name,
         ),
-
         (PolarSnippet::InProjectNetworking, _) => format!(
             r#"
                 resource {} {{
@@ -480,9 +478,11 @@ fn do_authz_resource(
                         containing_project: Project,
                         parent: {}
                     }};
-                    # NOTE: No permission rules defined here!
-                    # All permissions controlled by custom networking restriction
-                    # rules in omicron.polar (can_modify_networking_resource)
+
+                    "list_children" if "viewer" on "containing_project";
+                    "read" if "viewer" on "containing_project";
+                    "modify" if "collaborator" on "containing_project";
+                    "create_child" if "collaborator" on "containing_project";
                 }}
 
                 has_relation(project: Project, "containing_project", child: {})

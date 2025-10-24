@@ -65,42 +65,6 @@ impl super::Nexus {
         }
     }
 
-    /// Check if the actor's silo restricts networking actions, and if so,
-    /// verify the actor has Silo Admin permissions.
-    ///
-    /// Only used at VPC creation time; other networking resources use Polar rules
-    ///
-    /// Returns Ok(()) if either:
-    /// - The silo does not restrict networking actions, or
-    /// - The silo restricts networking and the actor is a Silo Admin
-    ///
-    /// Returns Err if the silo restricts networking and the actor is not
-    /// a Silo Admin.
-    pub(crate) async fn check_networking_restrictions(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(), Error> {
-        if let Some(actor) = opctx.authn.actor() {
-            if let Some(silo_id) = actor.silo_id() {
-                let silo_policy = opctx.authn.silo_authn_policy();
-                if let Some(policy) = silo_policy {
-                    if policy.restrict_network_actions() {
-                        // The silo restricts networking - verify the actor is a Silo Admin
-                        let authz_silo = authz::Silo::new(
-                            authz::FLEET,
-                            silo_id,
-                            LookupType::ById(silo_id),
-                        );
-                        opctx
-                            .authorize(authz::Action::Modify, &authz_silo)
-                            .await?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) async fn project_create_vpc(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -110,11 +74,8 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        // Check networking restrictions: if the actor's silo restricts networking
-        // actions, only Silo Admins can create VPCs. Other networking resources
-        // use Polar rules to determine authorization, but VPC creation is a special
-        // case because it creates the top-level networking container.
-        self.check_networking_restrictions(opctx).await?;
+        let authz_vpc_list = authz::VpcList::new(authz_project.clone());
+        opctx.authorize(authz::Action::CreateChild, authz_vpc_list).await?;
 
         let saga_params = sagas::vpc_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),

@@ -20,6 +20,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -55,23 +56,9 @@ impl super::Nexus {
 
         // Determine if we should create a default VPC.
         // Skip VPC creation if networking is restricted and user is not a Silo Admin.
-        let create_default_vpc =
-            if let Some(policy) = opctx.authn.silo_authn_policy() {
-                if policy.restrict_network_actions() {
-                    // Networking is restricted - only create VPC if user is Silo Admin
-                    // (i.e., has Modify permission on the Silo)
-                    opctx
-                        .authorize(authz::Action::Modify, &authz_silo)
-                        .await
-                        .is_ok()
-                } else {
-                    // No networking restrictions, create VPC
-                    true
-                }
-            } else {
-                // No policy, create VPC
-                true
-            };
+
+        // XXX can we get rid of this configurable?
+        let create_default_vpc = true;
 
         let saga_params = sagas::project_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
