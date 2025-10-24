@@ -8,6 +8,8 @@
 use crate::connection_manager::{
     ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner,
 };
+use omicron_uuid_kinds::RackUuid;
+use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, error, info, o};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
@@ -17,9 +19,10 @@ use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Sleep, sleep};
+use tokio::time::sleep;
 use trust_quorum_protocol::{
-    BaseboardId, Epoch, LoadRackSecretError, Node, NodeCtx,
+    BaseboardId, CommitError, Configuration, Epoch, LoadRackSecretError,
+    LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCtx, PrepareAndCommitError,
     ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
 };
 
@@ -32,6 +35,14 @@ pub struct Config {
     pub sprockets: SprocketsConfig,
 }
 
+/// Status of the node coordinating the `Prepare` phase of a reconfiguration or
+/// LRTQ upgrade.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoordinatorStatus {
+    config: Configuration,
+    acked_prepares: BTreeSet<BaseboardId>,
+}
+
 /// A request sent to the `NodeTask` from the `NodeTaskHandle`
 pub enum NodeApiRequest {
     /// Inform the `Node` of currently known IP addresses on the bootstrap network
@@ -39,8 +50,14 @@ pub enum NodeApiRequest {
     /// These are generated from DDM prefixes learned by the bootstrap agent.
     BootstrapAddresses(BTreeSet<SocketAddrV6>),
 
+    /// Remove any secrets cached in memory at this node
+    ClearSecrets,
+
     /// Retrieve connectivity status via the `ConnMgr`
     ConnMgrStatus { responder: oneshot::Sender<ConnMgrStatus> },
+
+    /// Return the status of this node if it is a coordinator
+    CoordinatorStatus { responder: oneshot::Sender<Option<CoordinatorStatus>> },
 
     /// Load a rack secret for the given epoch
     LoadRackSecret {
@@ -48,6 +65,25 @@ pub enum NodeApiRequest {
         responder: oneshot::Sender<
             Result<Option<ReconstructedRackSecret>, LoadRackSecretError>,
         >,
+    },
+
+    /// Coordinate an upgrade from LRTQ at this node
+    LrtqUpgrade {
+        msg: LrtqUpgradeMsg,
+        responder: oneshot::Sender<Result<(), LrtqUpgradeError>>,
+    },
+
+    /// `PrepareAndCommit` a configuration at this node
+    PrepareAndCommit {
+        config: Configuration,
+        responder: oneshot::Sender<Result<bool, PrepareAndCommitError>>,
+    },
+
+    /// `Commit` a configuration at this node
+    Commit {
+        rack_id: RackUuid,
+        epoch: Epoch,
+        responder: oneshot::Sender<Result<bool, CommitError>>,
     },
 
     /// Coordinate a reconfiguration at this node
@@ -71,6 +107,12 @@ pub enum NodeApiError {
     Reconfigure(#[from] ReconfigurationError),
     #[error("failed to load rack secret")]
     LoadRackSecret(#[from] LoadRackSecretError),
+    #[error("failed to upgrade from LRTQ")]
+    LrtqUpgrade(#[from] LrtqUpgradeError),
+    #[error("failed to prepare and commit")]
+    PrepareAndCommit(#[from] PrepareAndCommitError),
+    #[error("failed to commit")]
+    Commit(#[from] CommitError),
 }
 
 impl<T> From<SendError<T>> for NodeApiError {
@@ -120,6 +162,33 @@ impl NodeTaskHandle {
         Ok(())
     }
 
+    /// Initiate an LRTQ upgrade at this node
+    pub async fn upgrade_from_lrtq(
+        &self,
+        msg: LrtqUpgradeMsg,
+    ) -> Result<(), NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::LrtqUpgrade { msg, responder: tx })
+            .await?;
+        rx.await??;
+        Ok(())
+    }
+
+    /// Return the status of this node if it is coordinating the `Prepare` phase
+    /// of a reconfiguration or LRTQ upgrade. Return `Ok(None)` or an error
+    /// otherwise.
+    pub async fn coordinator_status(
+        &self,
+    ) -> Result<Option<CoordinatorStatus>, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::CoordinatorStatus { responder: tx })
+            .await?;
+        let res = rx.await?;
+        Ok(res)
+    }
+
     /// Load the rack secret for the given epoch
     ///
     /// This can block for an indefinite period of time before returning
@@ -136,8 +205,56 @@ impl NodeTaskHandle {
             if let Some(rack_secret) = rx.await?? {
                 return Ok(rack_secret);
             };
+
+            // The task returns immediately with `None` if the secret is still
+            // being loaded. We must therefore retry.
             sleep(Duration::from_secs(1)).await;
         }
+    }
+
+    /// Return `Ok(true)` if the configuration has committed, `Ok(false)` if
+    /// it hasn't committed yet, or an error otherwise.
+    ///
+    /// Nexus will retry this operation and so we should only try once here.
+    /// This is in contrast to operations like `load_rack_secret` that are
+    /// called directly from sled agent.
+    pub async fn prepare_and_commit(
+        &self,
+        config: Configuration,
+    ) -> Result<bool, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::PrepareAndCommit { config, responder: tx })
+            .await?;
+        let res = rx.await??;
+        Ok(res)
+    }
+
+    /// Return `Ok(true)` if the configuration has committed, `Ok(false)` if
+    /// it hasn't committed yet, or an error otherwise.
+    ///
+    /// Nexus will retry this operation and so we should only try once here.
+    /// This is in contrast to operations like `load_rack_secret` that are
+    /// called directly from sled agent.
+    pub async fn commit(
+        &self,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> Result<bool, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::Commit { rack_id, epoch, responder: tx })
+            .await?;
+        let res = rx.await??;
+        Ok(res)
+    }
+
+    /// Clear all secrets loaded in memory at this node
+    ///
+    /// Rack secrets are cached after loading and must be manually cleared.
+    pub async fn clear_secrets(&mut self) -> Result<(), NodeApiError> {
+        self.tx.send(NodeApiRequest::ClearSecrets).await?;
+        Ok(())
     }
 
     /// Inform the node of currently known IP addresses on the bootstrap network
