@@ -243,16 +243,19 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         data: IncompleteExternalIp,
     ) -> Result<ExternalIp, TransactionError<Error>> {
-        use diesel::result::DatabaseErrorKind::UniqueViolation;
         // Name needs to be cloned out here (if present) to give users a
         // sensible error message on name collision.
         let name = data.name().clone();
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
+            use diesel::result::DatabaseErrorKind::NotNullViolation;
+            use diesel::result::DatabaseErrorKind::UniqueViolation;
             use diesel::result::Error::DatabaseError;
             use diesel::result::Error::NotFound;
             match e {
-                NotFound => {
+                DatabaseError(NotNullViolation, ref info)
+                    if info.message().contains("in column \"ip\"") =>
+                {
                     if explicit_ip {
                         TransactionError::CustomError(Error::invalid_request(
                             "Requested external IP address not available",
@@ -261,22 +264,43 @@ impl DataStore {
                         TransactionError::CustomError(
                             Error::insufficient_capacity(
                                 "No external IP addresses available",
-                                "NextExternalIp::new returned NotFound",
+                                "NextExternalIp::new tried to insert NULL ip",
                             ),
                         )
                     }
                 }
-                // Floating IP: name conflict
-                DatabaseError(UniqueViolation, ..) if name.is_some() => {
-                    TransactionError::CustomError(public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::FloatingIp,
-                            name.as_ref()
-                                .map(|m| m.as_str())
-                                .unwrap_or_default(),
-                        ),
+                NotFound => {
+                    TransactionError::CustomError(Error::insufficient_capacity(
+                        "No external IP addresses available",
+                        "NextExternalIp::new returned NotFound",
                     ))
+                }
+                DatabaseError(UniqueViolation, ref info) => {
+                    // Attempt to re-use same IP address.
+                    if info.constraint_name() == Some("external_ip_unique") {
+                        TransactionError::CustomError(Error::invalid_request(
+                            "Requested external IP address not available",
+                        ))
+                    // Floating IP: name conflict
+                    } else if info
+                        .constraint_name()
+                        .map(|name| name.starts_with("lookup_floating_"))
+                        .unwrap_or(false)
+                    {
+                        TransactionError::CustomError(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::FloatingIp,
+                                name.as_ref()
+                                    .map(|m| m.as_str())
+                                    .unwrap_or_default(),
+                            ),
+                        ))
+                    } else {
+                        TransactionError::CustomError(
+                            crate::db::queries::external_ip::from_diesel(e),
+                        )
+                    }
                 }
                 _ => {
                     if retryable(&e) {
