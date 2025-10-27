@@ -794,6 +794,12 @@ has_permission(actor: AuthenticatedActor, action: String, subnet: VpcSubnet) if
 has_permission(actor: AuthenticatedActor, action: String, subnet: VpcSubnet) if
     networking_read_perm(actor, action, subnet.vpc.project);
 
+# Special case: Allow project collaborators to create children of subnets (NICs)
+# even in restricted silos, since NICs are instance networking resources that
+# project collaborators need to attach to their instances.
+has_permission(actor: AuthenticatedActor, "create_child", subnet: VpcSubnet) if
+    has_role(actor, "collaborator", subnet.vpc.project);
+
 # Internet Gateways (project path: gateway.vpc.project)
 has_permission(actor: AuthenticatedActor, action: String, gateway: InternetGateway) if
     networking_write_perm(actor, action, gateway.vpc.project);
