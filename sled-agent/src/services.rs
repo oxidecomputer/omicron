@@ -3976,8 +3976,8 @@ impl ServiceManager {
             request,
             filesystems,
             data_links,
-            ..
-        } = &*sled_zone
+            worker,
+        } = sled_zone
         else {
             return Ok(None);
         };
@@ -3997,10 +3997,19 @@ impl ServiceManager {
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
         let underlay_info = request.underlay_info.clone();
+
+        // Even though we've initialized the zone, the `worker` task may still
+        // be running to configure uplinks. If we drop `worker` now it will
+        // cause that task to exit before it gets a chance to do so. This is all
+        // very unsatisfying and needs some serious rework:
+        // https://github.com/oxidecomputer/omicron/issues/8970 and
+        // https://github.com/oxidecomputer/omicron/issues/9182 are strongly
+        // related.
+        let worker = worker.take();
         *sled_zone = SwitchZoneState::Running {
             request: request.clone(),
             zone: Box::new(zone),
-            worker: None,
+            worker,
         };
         Ok(underlay_info)
     }
