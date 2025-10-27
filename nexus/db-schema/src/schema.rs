@@ -763,7 +763,6 @@ table! {
         rcgen -> Int8,
 
         admin_group_name -> Nullable<Text>,
-        restrict_network_actions -> Bool,
     }
 }
 

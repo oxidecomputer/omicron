@@ -80,7 +80,6 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
                 admin_group_name: None,
                 tls_certificates: vec![],
                 mapped_fleet_roles: Default::default(),
-                restrict_network_actions: None,
             },
         )
         .authn_as(AuthnMode::PrivilegedUser)
@@ -298,7 +297,6 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
             admin_group_name: Some("administrator".into()),
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
-            restrict_network_actions: None,
         },
     )
     .await;
@@ -2379,7 +2377,6 @@ async fn test_silo_authn_policy(cptestctx: &ControlPlaneTestContext) {
                 admin_group_name: None,
                 tls_certificates: vec![],
                 mapped_fleet_roles: policy,
-                restrict_network_actions: None,
             },
         )
         .authn_as(AuthnMode::PrivilegedUser)
@@ -2457,7 +2454,6 @@ async fn check_fleet_privileges(
         admin_group_name: None,
         tls_certificates: vec![],
         mapped_fleet_roles: BTreeMap::new(),
-        restrict_network_actions: None,
     };
     let (do_delete, nexus_request) = match expected {
         ExpectedFleetPrivileges::None | ExpectedFleetPrivileges::ReadOnly => (
@@ -2487,7 +2483,6 @@ async fn check_fleet_privileges(
                     admin_group_name: None,
                     tls_certificates: vec![],
                     mapped_fleet_roles: BTreeMap::new(),
-                    restrict_network_actions: None,
                 },
             ),
         ),
@@ -2519,7 +2514,6 @@ async fn check_fleet_privileges(
             SiloRole::Admin,
             BTreeSet::from([FleetRole::Viewer]),
         )]),
-        restrict_network_actions: None,
     };
     let (do_delete, nexus_request) = match expected {
         ExpectedFleetPrivileges::None
@@ -2550,7 +2544,6 @@ async fn check_fleet_privileges(
                     admin_group_name: None,
                     tls_certificates: vec![],
                     mapped_fleet_roles: BTreeMap::new(),
-                    restrict_network_actions: None,
                 },
             ),
         ),

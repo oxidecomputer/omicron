@@ -305,7 +305,6 @@ impl super::Nexus {
             admin_group_name: None,
             tls_certificates,
             mapped_fleet_roles,
-            restrict_network_actions: None,
         };
 
         let rack_network_config = &request.rack_network_config;

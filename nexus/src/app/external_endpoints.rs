@@ -833,7 +833,6 @@ mod test {
             admin_group_name: None,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
-            restrict_network_actions: None,
         };
 
         if let Some(silo_id) = silo_id {

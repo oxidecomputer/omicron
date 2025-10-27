@@ -900,7 +900,7 @@ impl oso::PolarClass for VpcList {
     fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
         oso::Class::builder()
             .with_equality_check()
-            .add_attribute_getter("project", |list: &VpcList| project.0.clone())
+            .add_attribute_getter("project", |list: &VpcList| list.0.clone())
     }
 }
 

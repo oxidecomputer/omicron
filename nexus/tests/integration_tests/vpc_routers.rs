@@ -742,7 +742,6 @@ async fn test_vpc_router_networking_restrictions(
         admin_group_name: None,
         tls_certificates: Vec::new(),
         mapped_fleet_roles: Default::default(),
-        restrict_network_actions: Some(true), // Enable networking restrictions
         quotas: params::SiloQuotasCreate::empty(),
     };
 

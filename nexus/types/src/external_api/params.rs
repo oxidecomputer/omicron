@@ -448,11 +448,6 @@ pub struct SiloCreate {
     #[serde(default)]
     pub mapped_fleet_roles:
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
-
-    /// When set to true, restricts networking actions (VPC, subnet, etc.) to Silo Admins only.
-    /// When false or unset (default), Project Collaborators can perform networking actions.
-    #[serde(default)]
-    pub restrict_network_actions: Option<bool>,
 }
 
 /// The amount of provisionable resources for a Silo

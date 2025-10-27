@@ -408,7 +408,6 @@ pub async fn create_silo(
             identity_mode,
             admin_group_name: None,
             tls_certificates: vec![],
-            restrict_network_actions: None,
             mapped_fleet_roles: Default::default(),
         },
     )

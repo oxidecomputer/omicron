@@ -483,7 +483,7 @@ async fn test_conferred_roles() {
         let mut out = StdoutTee::new(&mut buffer);
         for policy in policies {
             write!(out, "policy: {:?}\n", policy).unwrap();
-            let policy = SiloAuthnPolicy::new(policy, false);
+            let policy = SiloAuthnPolicy::new(policy);
 
             let user_contexts: Vec<Arc<(String, OpContext)>> = silo_resources
                 .users()

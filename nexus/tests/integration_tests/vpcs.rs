@@ -272,7 +272,6 @@ async fn test_vpc_networking_restrictions(cptestctx: &ControlPlaneTestContext) {
         admin_group_name: None,
         tls_certificates: Vec::new(),
         mapped_fleet_roles: Default::default(),
-        restrict_network_actions: Some(true),
         quotas: params::SiloQuotasCreate::empty(),
     };
 
@@ -507,7 +506,6 @@ async fn test_vpc_subnet_networking_restrictions(
         admin_group_name: None,
         tls_certificates: Vec::new(),
         mapped_fleet_roles: Default::default(),
-        restrict_network_actions: Some(true),
         quotas: params::SiloQuotasCreate::empty(),
     };
 
@@ -748,7 +746,6 @@ async fn test_internet_gateway_firewall_networking_restrictions(
         admin_group_name: None,
         tls_certificates: Vec::new(),
         mapped_fleet_roles: Default::default(),
-        restrict_network_actions: Some(true),
         quotas: params::SiloQuotasCreate::empty(),
     };
 
@@ -1007,7 +1004,6 @@ async fn test_igw_ip_pool_address_attach_detach_restrictions(
         admin_group_name: None,
         tls_certificates: Vec::new(),
         mapped_fleet_roles: Default::default(),
-        restrict_network_actions: Some(true),
         quotas: params::SiloQuotasCreate::empty(),
     };
 
@@ -1332,7 +1328,6 @@ async fn test_project_create_networking_restrictions(
         admin_group_name: None,
         tls_certificates: Vec::new(),
         mapped_fleet_roles: Default::default(),
-        restrict_network_actions: Some(true),
         quotas: params::SiloQuotasCreate::empty(),
     };
 
@@ -1549,7 +1544,6 @@ impl PermissionTest {
     }
 }
 
-/// Test VPC networking permissions when restrict_network_actions = FALSE
 ///
 /// In unrestricted silos:
 /// - Silo Admins can: create, read, modify, delete VPCs
@@ -1588,7 +1582,6 @@ async fn test_vpc_networking_permissions_unrestricted(
         admin_group_name: None,
         tls_certificates: Vec::new(),
         mapped_fleet_roles: Default::default(),
-        restrict_network_actions: Some(false), // NO RESTRICTIONS
         quotas: params::SiloQuotasCreate::empty(),
     };
 
@@ -1979,7 +1972,6 @@ async fn test_vpc_networking_permissions_unrestricted(
     println!("\n✅ All unrestricted silo tests passed!");
 }
 
-/// Test VPC networking permissions when restrict_network_actions = TRUE
 ///
 /// In restricted silos:
 /// - Silo Admins can: create, read, modify, delete VPCs (unrestricted)
@@ -2018,7 +2010,6 @@ async fn test_vpc_networking_permissions_restricted(
         admin_group_name: None,
         tls_certificates: Vec::new(),
         mapped_fleet_roles: Default::default(),
-        restrict_network_actions: Some(true), // RESTRICTIONS ENABLED
         quotas: params::SiloQuotasCreate::empty(),
     };
 
