@@ -1412,13 +1412,13 @@ mod test {
         let sled2 = create_test_sled(&datastore, SledUuid::new_v4()).await;
         let sled3 = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
-        let external_ip_policy = ExternalIpPolicy::new(vec![
+        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
             IpRange::try_from((
                 Ipv4Addr::new(1, 2, 3, 4),
                 Ipv4Addr::new(1, 2, 3, 6),
             ))
             .unwrap(),
-        ]);
+        );
 
         let mut system = SystemDescription::new();
         system
@@ -1767,10 +1767,10 @@ mod test {
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
-        let external_ip_policy = ExternalIpPolicy::new(vec![
+        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
             IpRange::try_from((nexus_ip_start, nexus_ip_end))
                 .expect("Cannot create IP Range"),
-        ]);
+        );
 
         let mut system = SystemDescription::new();
         system
@@ -2062,10 +2062,10 @@ mod test {
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 1);
         let nexus_ip_end =
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 10);
-        let external_ip_policy = ExternalIpPolicy::new(vec![
+        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
             IpRange::try_from((nexus_ip_start, nexus_ip_end))
                 .expect("Cannot create IP Range"),
-        ]);
+        );
 
         let mut system = SystemDescription::new();
         system
@@ -2417,7 +2417,8 @@ mod test {
         let sled = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
-        let external_ip_policy = ExternalIpPolicy::new(vec![IpRange::from(ip)]);
+        let external_ip_policy =
+            ExternalIpPolicy::single_pool_no_external_dns(IpRange::from(ip));
 
         let mut system = SystemDescription::new();
         system

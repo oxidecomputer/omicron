@@ -3528,8 +3528,13 @@ pub mod test {
             assert!(!used_ip_ranges.is_empty());
             let input = {
                 let mut builder = input.into_builder();
-                builder.policy_mut().external_ips =
-                    ExternalIpPolicy::new(used_ip_ranges);
+                builder.policy_mut().external_ips = {
+                    let mut ip_policy = ExternalIpPolicy::builder();
+                    for r in used_ip_ranges {
+                        ip_policy.push_service_ip_pool(r).unwrap();
+                    }
+                    ip_policy.build()
+                };
                 builder.build()
             };
 

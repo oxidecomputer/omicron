@@ -1537,6 +1537,7 @@ mod test {
                 sled_rows: &sled_rows,
                 zpool_rows: &zpool_rows,
                 ip_pool_range_rows: &ip_pool_range_rows,
+                external_dns_external_ips: BTreeSet::new(),
                 internal_dns_version: dns_initial_internal.generation.into(),
                 external_dns_version: dns_latest_external.generation.into(),
                 // These are not used because we're not actually going through
@@ -1566,10 +1567,16 @@ mod test {
             .into_builder();
 
             // We'll need another (fake) external IP for this new Nexus.
-            builder
-                .policy_mut()
-                .external_ips
-                .push(IpRange::from(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+            builder.policy_mut().external_ips = {
+                let mut ip_policy =
+                    builder.policy_mut().external_ips.clone().into_builder();
+                ip_policy
+                    .push_service_ip_pool(IpRange::from(IpAddr::V4(
+                        Ipv4Addr::LOCALHOST,
+                    )))
+                    .unwrap();
+                ip_policy.build()
+            };
 
             builder.build()
         };

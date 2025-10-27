@@ -756,8 +756,14 @@ pub mod test {
         };
 
         // Build up the allocator and mark all used IPs.
-        let mut allocator =
-            ExternalIpAllocator::new(&ExternalIpPolicy::new(ip_pool_ranges));
+        let policy = {
+            let mut builder = ExternalIpPolicy::builder();
+            for r in ip_pool_ranges {
+                builder.push_service_ip_pool(r).unwrap();
+            }
+            builder.build()
+        };
+        let mut allocator = ExternalIpAllocator::new(&policy);
         for &ip in &used_exclusive {
             allocator
                 .mark_ip_used(&as_floating(ip))
@@ -867,14 +873,11 @@ pub mod test {
         assert_eq!(service_ip_pool.len(), 3);
 
         let external_ip_policy = {
-            let mut policy = ExternalIpPolicy::new(vec![service_ip_pool]);
-            policy
-                .set_ip_for_external_dns("192.0.2.1".parse().unwrap())
-                .unwrap();
-            policy
-                .set_ip_for_external_dns("192.0.2.2".parse().unwrap())
-                .unwrap();
-            policy
+            let mut builder = ExternalIpPolicy::builder();
+            builder.push_service_ip_pool(service_ip_pool).unwrap();
+            builder.add_external_dns_ip("192.0.2.1".parse().unwrap()).unwrap();
+            builder.add_external_dns_ip("192.0.2.2".parse().unwrap()).unwrap();
+            builder.build()
         };
 
         let make_external_dns = |index, disposition| {

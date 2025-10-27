@@ -3277,19 +3277,23 @@ pub(crate) mod test {
             });
         let input = {
             let mut builder = input.into_builder();
+            let mut ip_policy =
+                builder.policy_mut().external_ips.clone().into_builder();
             // Add a "service IP pool" covering our external DNS IP range.
-            builder.policy_mut().external_ips.push(
-                IpRange::try_from((external_dns_ips[0], external_dns_ips[2]))
+            ip_policy
+                .push_service_ip_pool(
+                    IpRange::try_from((
+                        external_dns_ips[0],
+                        external_dns_ips[2],
+                    ))
                     .unwrap(),
-            );
+                )
+                .unwrap();
             // Set these IPs as "for external DNS".
             for ip in external_dns_ips {
-                builder
-                    .policy_mut()
-                    .external_ips
-                    .set_ip_for_external_dns(ip)
-                    .unwrap();
+                ip_policy.add_external_dns_ip(ip).unwrap();
             }
+            builder.policy_mut().external_ips = ip_policy.build();
             builder.build()
         };
 

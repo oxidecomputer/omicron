@@ -36,25 +36,28 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 
 impl DataStore {
-    pub async fn policy_external_dns_ips(
+    /// Return the set of external IPs configured for our external DNS servers
+    /// when the rack was set up.
+    ///
+    /// We should have explicit storage for the external IPs on which we run
+    /// external DNS that an operator can update. Today, we do not: whatever
+    /// external DNS IPs are provided at rack setup time are the IPs we use
+    /// forever. (Fixing this is tracked by
+    /// https://github.com/oxidecomputer/omicron/issues/8255.)
+    pub async fn external_dns_external_ips_specified_by_rack_setup(
         &self,
         opctx: &OpContext,
     ) -> Result<BTreeSet<IpAddr>, Error> {
-        // We should have explicit storage for external DNS IPs that an operator
-        // can update. Today, we do not: whatever external DNS IPs are provided
-        // at rack setup time are the IPs we use forever. (Fixing this is
-        // tracked by https://github.com/oxidecomputer/omicron/issues/3732.)
-        //
-        // We can _implicitly_ determine the current set of external DNS IPs by
-        // examining the current target blueprint and looking at the IPs of all
-        // of its external DNS zones. We _must_ include expunged zones as well
-        // as in-service zones: during an update, we'll create a blueprint that
-        // expunges an external DNS zones, waits for it to go away, then wants
-        // to reassign that zone's external IP to a new external DNS zones. But
-        // because we are scanning expunged zones, we also have to allow for
-        // duplicates - this isn't an error and is expected if we've performed
-        // more than one update, at least until we start pruning old expunged
-        // zones out of the blueprint (tracked by
+        // We can _implicitly_ determine the set of external DNS IPs provied
+        // during rack setup by examining the current target blueprint and
+        // looking at the IPs of all of its external DNS zones. We _must_
+        // include expunged zones as well as in-service zones: during an update,
+        // we'll create a blueprint that expunges an external DNS zones, waits
+        // for it to go away, then wants to reassign that zone's external IP to
+        // a new external DNS zones. But because we are scanning expunged zones,
+        // we also have to allow for duplicates - this isn't an error and is
+        // expected if we've performed more than one update, at least until we
+        // start pruning old expunged zones out of the blueprint (tracked by
         // https://github.com/oxidecomputer/omicron/issues/5552).
         //
         // Because we can't (yet) change external DNS IPs, we don't have to
@@ -1345,8 +1348,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_policy_external_dns_ips() {
-        const TEST_NAME: &str = "test_policy_external_dns_ips";
+    async fn test_external_dns_external_ips_specified_by_rack_setup() {
+        const TEST_NAME: &str =
+            "test_external_dns_external_ips_specified_by_rack_setup";
 
         // Helper closures to reduce boilerplate below.
         let make_bp_target = |blueprint_id| BlueprintTarget {
@@ -1411,7 +1415,7 @@ mod tests {
 
         // No external DNS zones => no external DNS IPs.
         let external_dns_ips = datastore
-            .policy_external_dns_ips(opctx)
+            .external_dns_external_ips_specified_by_rack_setup(opctx)
             .await
             .expect("got external DNS IPs");
         assert_eq!(external_dns_ips, BTreeSet::new());
@@ -1439,7 +1443,7 @@ mod tests {
             .await
             .expect("made bp1 the target");
         let external_dns_ips = datastore
-            .policy_external_dns_ips(opctx)
+            .external_dns_external_ips_specified_by_rack_setup(opctx)
             .await
             .expect("got external DNS IPs");
         assert_eq!(external_dns_ips, expected_ips);
@@ -1477,7 +1481,7 @@ mod tests {
             .await
             .expect("made bp2 the target");
         let external_dns_ips = datastore
-            .policy_external_dns_ips(opctx)
+            .external_dns_external_ips_specified_by_rack_setup(opctx)
             .await
             .expect("got external DNS IPs");
         let expected_ips =

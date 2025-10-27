@@ -184,13 +184,19 @@ impl SystemDescription {
         // Nexus / Boundary NTPs IPs from TEST-NET-1 (RFC 5737).
         //
         // This policy doesn't configure any external DNS IPs.
-        let external_ip_policy = ExternalIpPolicy::new(vec![
-            IpRange::try_from((
-                "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
-                "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
-            ))
-            .unwrap(),
-        ]);
+        let external_ip_policy = {
+            let mut builder = ExternalIpPolicy::builder();
+            builder
+                .push_service_ip_pool(
+                    IpRange::try_from((
+                        "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
+                        "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
+                    ))
+                    .unwrap(),
+                )
+                .unwrap();
+            builder.build()
+        };
 
         SystemDescription {
             sleds: IndexMap::new(),

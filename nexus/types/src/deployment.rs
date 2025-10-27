@@ -103,6 +103,7 @@ pub use planning_input::CockroachDbPreserveDowngrade;
 pub use planning_input::CockroachDbSettings;
 pub use planning_input::DiskFilter;
 pub use planning_input::ExternalIpPolicy;
+pub use planning_input::ExternalIpPolicyBuilder;
 pub use planning_input::ExternalIpPolicyError;
 pub use planning_input::OximeterReadMode;
 pub use planning_input::OximeterReadPolicy;
