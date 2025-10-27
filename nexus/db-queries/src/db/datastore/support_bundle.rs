@@ -324,7 +324,7 @@ impl DataStore {
                             .execute_async(conn)
                             .await?;
 
-                    // Find all bundles on nexuses that no longer exist.
+                    // Find all bundles managed by nexuses that no longer exist.
                     let bundles_with_bad_nexuses = dsl::support_bundle
                         .filter(dsl::assigned_nexus.eq_any(invalid_nexus_zones))
                         .select(SupportBundle::as_select())
@@ -333,15 +333,42 @@ impl DataStore {
 
                     let bundles_to_mark_failing = bundles_with_bad_nexuses
                         .iter()
-                        .map(|b| b.id)
+                        .filter_map(|bundle| {
+                            match bundle.state {
+                                // If the Nexus died mid-collection, we'll mark
+                                // this bundle failing. This should ensure that
+                                // any storage it might have been using is
+                                // cleaned up.
+                                SupportBundleState::Collecting => Some(bundle.id),
+                                // If the bundle was marked "active", we need to
+                                // re-assign the "owning Nexus" so it can later
+                                // be deleted, but the bundle itself has already
+                                // been stored on a sled.
+                                //
+                                // There's no need to fail it.
+                                SupportBundleState::Active |
+                                    // If the bundle has already been marked
+                                    // "Destroying/Failing/Failed", it's already
+                                    // irreversibly marked for deletion.
+                                    SupportBundleState::Destroying |
+                                    SupportBundleState::Failing |
+                                    SupportBundleState::Failed => None,
+                            }
+                        })
                         .collect::<Vec<_>>();
+
                     let bundles_to_reassign = bundles_with_bad_nexuses
                         .iter()
                         .filter_map(|bundle| {
-                            if bundle.state != SupportBundleState::Failed {
-                                Some(bundle.id)
-                            } else {
-                                None
+                            match bundle.state {
+                                // If the bundle might be using any storage on
+                                // the provisioned sled, it gets assigned to a
+                                // new Nexus.
+                                SupportBundleState::Collecting |
+                                    SupportBundleState::Active |
+                                    SupportBundleState::Destroying |
+                                    SupportBundleState::Failing => Some(bundle.id),
+                                SupportBundleState::Failed => None,
                             }
                         })
                         .collect::<Vec<_>>();
@@ -371,29 +398,20 @@ impl DataStore {
                         bundles_reassigned: 0,
                     };
 
-                    // Exit a little early if there are no bundles to re-assign.
-                    //
-                    // This is a tiny optimization, but really, it means that
-                    // tests without Nexuses in their blueprints can succeed if
-                    // they also have no support bundles. In practice, this is
-                    // rare, but in our existing test framework, it's fairly
-                    // common.
-                    if bundles_to_reassign.is_empty() {
-                        return Ok(report);
+                    if !bundles_to_reassign.is_empty() {
+                        // Reassign bundles that haven't been marked "fully failed"
+                        // to ourselves, so we can free their storage if they have
+                        // been provisioned on a sled.
+                        report.bundles_reassigned =
+                            diesel::update(dsl::support_bundle)
+                                .filter(dsl::id.eq_any(bundles_to_reassign))
+                                .set(
+                                    dsl::assigned_nexus
+                                        .eq(our_nexus_id.into_untyped_uuid()),
+                                )
+                                .execute_async(conn)
+                                .await?;
                     }
-
-                    // Reassign bundles that haven't been marked "fully failed"
-                    // to ourselves, so we can free their storage if they have
-                    // been provisioned on a sled.
-                    report.bundles_reassigned =
-                        diesel::update(dsl::support_bundle)
-                            .filter(dsl::id.eq_any(bundles_to_reassign))
-                            .set(
-                                dsl::assigned_nexus
-                                    .eq(our_nexus_id.into_untyped_uuid()),
-                            )
-                            .execute_async(conn)
-                            .await?;
 
                     Ok(report)
                 }
@@ -1442,7 +1460,7 @@ mod test {
 
         assert_eq!(
             SupportBundleExpungementReport {
-                bundles_failing_missing_nexus: 1,
+                bundles_failing_missing_nexus: 0,
                 bundles_reassigned: 1,
                 ..Default::default()
             },
@@ -1452,13 +1470,11 @@ mod test {
         let observed_bundle = datastore
             .support_bundle_get(&opctx, bundle.id.into())
             .await
-            .expect("Should be able to get bundle we just failed");
-        assert_eq!(SupportBundleState::Failing, observed_bundle.state);
-        assert!(
-            observed_bundle
-                .reason_for_failure
-                .unwrap()
-                .contains(FAILURE_REASON_NO_NEXUS)
+            .expect("Should be able to get bundle we reassigned");
+        assert_eq!(SupportBundleState::Active, observed_bundle.state);
+        assert_eq!(
+            observed_bundle.assigned_nexus.unwrap(),
+            nexus_ids[1].into(),
         );
 
         db.terminate().await;
