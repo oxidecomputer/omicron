@@ -43,7 +43,7 @@ impl DataStore {
     /// external DNS that an operator can update. Today, we do not: whatever
     /// external DNS IPs are provided at rack setup time are the IPs we use
     /// forever. (Fixing this is tracked by
-    /// https://github.com/oxidecomputer/omicron/issues/8255.)
+    /// <https://github.com/oxidecomputer/omicron/issues/8255>.)
     pub async fn external_dns_external_ips_specified_by_rack_setup(
         &self,
         opctx: &OpContext,
