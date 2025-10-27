@@ -377,7 +377,6 @@ mod test {
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::internal_api::params::Srv;
     use nexus_types::silo::silo_dns_name;
-    use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::REPO_DEPOT_PORT;
@@ -1532,54 +1531,37 @@ mod test {
             .into_iter()
             .map(|z| z.nexus_id())
             .collect();
-        let planning_input = {
-            let mut builder = PlanningInputFromDb {
-                sled_rows: &sled_rows,
-                zpool_rows: &zpool_rows,
-                ip_pool_range_rows: &ip_pool_range_rows,
-                external_dns_external_ips: BTreeSet::new(),
-                internal_dns_version: dns_initial_internal.generation.into(),
-                external_dns_version: dns_latest_external.generation.into(),
-                // These are not used because we're not actually going through
-                // the planner.
-                cockroachdb_settings: &CockroachDbSettings::empty(),
-                external_ip_rows: &[],
-                service_nic_rows: &[],
-                target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
-                target_nexus_zone_count: NEXUS_REDUNDANCY,
-                target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
-                target_oximeter_zone_count: OXIMETER_REDUNDANCY,
-                target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
-                target_cockroachdb_cluster_version:
-                    CockroachDbClusterVersion::POLICY,
-                target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
-                clickhouse_policy: None,
-                oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: TufRepoPolicy::initial(),
-                old_repo: TufRepoPolicy::initial(),
-                planner_config: PlannerConfig::default(),
-                active_nexus_zones,
-                not_yet_nexus_zones: BTreeSet::new(),
-                log,
-            }
-            .build()
-            .unwrap()
-            .into_builder();
-
-            // We'll need another (fake) external IP for this new Nexus.
-            builder.policy_mut().external_ips = {
-                let mut ip_policy =
-                    builder.policy_mut().external_ips.clone().into_builder();
-                ip_policy
-                    .push_service_ip_pool(IpRange::from(IpAddr::V4(
-                        Ipv4Addr::LOCALHOST,
-                    )))
-                    .unwrap();
-                ip_policy.build()
-            };
-
-            builder.build()
-        };
+        let planning_input = PlanningInputFromDb {
+            sled_rows: &sled_rows,
+            zpool_rows: &zpool_rows,
+            ip_pool_range_rows: &ip_pool_range_rows,
+            external_dns_external_ips: BTreeSet::new(),
+            internal_dns_version: dns_initial_internal.generation.into(),
+            external_dns_version: dns_latest_external.generation.into(),
+            // These are not used because we're not actually going through
+            // the planner.
+            cockroachdb_settings: &CockroachDbSettings::empty(),
+            external_ip_rows: &[],
+            service_nic_rows: &[],
+            target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
+            target_nexus_zone_count: NEXUS_REDUNDANCY,
+            target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
+            target_oximeter_zone_count: OXIMETER_REDUNDANCY,
+            target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
+            target_cockroachdb_cluster_version:
+                CockroachDbClusterVersion::POLICY,
+            target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
+            clickhouse_policy: None,
+            oximeter_read_policy: OximeterReadPolicy::new(1),
+            tuf_repo: TufRepoPolicy::initial(),
+            old_repo: TufRepoPolicy::initial(),
+            planner_config: PlannerConfig::default(),
+            active_nexus_zones,
+            not_yet_nexus_zones: BTreeSet::new(),
+            log,
+        }
+        .build()
+        .unwrap();
         let collection = CollectionBuilder::new("test").build();
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
@@ -1592,6 +1574,19 @@ mod test {
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
+
+        // Adding a Nexus zone requires an available external IP address. If we
+        // were to look at the current blueprint and the external IP policy,
+        // we'd see three IP pools, each containing a single IP address used by
+        // one service:
+        //
+        // * 1.2.3.4 (boundary NTP)
+        // * 127.0.0.1 (Nexus)
+        // * ::1 (external DNS)
+        //
+        // However, when the builder compiles its list of "IPs already in use",
+        // it _ignores_ loopback addresses, meaning we still have two external
+        // IPs available for new zones (127.0.0.1 and ::1).
         builder
             .sled_add_zone_nexus(
                 sled_id,
