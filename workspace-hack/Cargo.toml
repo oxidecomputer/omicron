@@ -44,10 +44,10 @@ daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "u
 data-encoding = { version = "2.9.0" }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
-ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"] }
+ed25519-dalek = { version = "2.1.1", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
-env_logger = { version = "0.11.5", default-features = false, features = ["auto-color"] }
+env_logger = { version = "0.11.8", default-features = false, features = ["auto-color"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.2", features = ["zlib-rs"] }
 form_urlencoded = { version = "1.2.2" }
@@ -119,8 +119,10 @@ semver = { version = "1.0.27", features = ["serde"] }
 serde = { version = "1.0.226", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.226", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.145", features = ["raw_value", "unbounded_depth"] }
+serde_with = { version = "3.14.0" }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
+sha3 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
@@ -181,10 +183,10 @@ daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "u
 data-encoding = { version = "2.9.0" }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
-ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"] }
+ed25519-dalek = { version = "2.1.1", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
-env_logger = { version = "0.11.5", default-features = false, features = ["auto-color"] }
+env_logger = { version = "0.11.8", default-features = false, features = ["auto-color"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.2", features = ["zlib-rs"] }
 form_urlencoded = { version = "1.2.2" }
@@ -256,8 +258,10 @@ semver = { version = "1.0.27", features = ["serde"] }
 serde = { version = "1.0.226", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.226", features = ["alloc", "rc"] }
 serde_json = { version = "1.0.145", features = ["raw_value", "unbounded_depth"] }
+serde_with = { version = "3.14.0" }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
+sha3 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
@@ -299,7 +303,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
@@ -312,7 +316,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
@@ -323,7 +327,7 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.x86_64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
@@ -333,7 +337,7 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
@@ -343,7 +347,7 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.aarch64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
@@ -353,7 +357,7 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
@@ -365,7 +369,7 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
@@ -383,7 +387,7 @@ clang-sys = { version = "1.8.1", default-features = false, features = ["clang_11
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }

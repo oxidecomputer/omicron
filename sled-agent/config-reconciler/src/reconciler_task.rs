@@ -41,6 +41,7 @@ use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
+use crate::dump_setup_task::FormerZoneRootArchiver;
 use crate::host_phase_2::BootPartitionReconciler;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;
@@ -70,6 +71,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     internal_disks_rx: InternalDisksReceiver,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
     sled_agent_facilities: T,
     sled_agent_artifact_store: U,
@@ -79,6 +81,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
         Arc::clone(&mount_config),
         currently_managed_zpools_tx,
         external_disks_tx,
+        former_zone_root_archiver.clone(),
     );
     let datasets = OmicronDatasets::new(dataset_task);
     let zones = OmicronZones::new(mount_config, time_sync_config);
@@ -92,6 +95,7 @@ pub(crate) fn spawn<T: SledAgentFacilities, U: SledAgentArtifactStore>(
             raw_disks_rx,
             internal_disks_rx,
             external_disks,
+            former_zone_root_archiver,
             datasets,
             zones,
             boot_partitions,
@@ -271,6 +275,7 @@ struct ReconcilerTask {
     raw_disks_rx: RawDisksReceiver,
     internal_disks_rx: InternalDisksReceiver,
     external_disks: ExternalDisks,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     datasets: OmicronDatasets,
     zones: OmicronZones,
     boot_partitions: BootPartitionReconciler,
@@ -477,6 +482,7 @@ impl ReconcilerTask {
                 &resolver_status,
                 &internal_disks,
                 sled_agent_facilities,
+                self.former_zone_root_archiver.clone(),
                 &self.log,
             )
             .await;
@@ -492,11 +498,6 @@ impl ReconcilerTask {
         // Finally, remove any "orphaned" datasets (i.e., datasets of a kind
         // that we ought to be managing that exist on disks we're managing but
         // don't have entries in our current config).
-        //
-        // Note: this doesn't actually delete them yet! We only report the
-        // orphans; after some bake time where we build confidence this won't
-        // remove datasets it shouldn't, we'll change this to actually remove
-        // them. https://github.com/oxidecomputer/omicron/issues/6177
         self.datasets
             .remove_datasets_if_needed(
                 &sled_config.datasets,
@@ -558,6 +559,7 @@ impl ReconcilerTask {
                         sled_agent_facilities,
                         timesync_status.is_synchronized(),
                         &self.datasets,
+                        self.former_zone_root_archiver.clone(),
                         &self.log,
                     )
                     .await;

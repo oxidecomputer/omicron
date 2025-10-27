@@ -307,7 +307,7 @@ where
                 Ok(hash)
             }
             Err(error) => {
-                error!(
+                warn!(
                     log,
                     "zone {} not found in the boot disk zone manifest, \
                      not returning it as a source",
@@ -321,7 +321,7 @@ where
     } else {
         // The boot disk is not available, so we cannot add the
         // install dataset path from it.
-        error!(
+        warn!(
             log,
             "boot disk install dataset not available, \
              not returning it as a source";
