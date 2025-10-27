@@ -474,6 +474,14 @@ struct BundleCollection {
     transfer_chunk_size: NonZeroU64,
 }
 
+// This type describes a single step in the Support Bundle collection.
+//
+// - All steps have access to the "BundleCollection", which includes
+// tools for actually acquiring data.
+// - All steps have access to an output directory where they can store
+// serialized data to a file.
+// - Finally, all steps can emit a "CollectionStepOutput", which can either
+// update the collection report, or generate more steps.
 type CollectionStepFn = Box<
     dyn for<'b> FnOnce(
             &'b Arc<BundleCollection>,
@@ -487,7 +495,7 @@ enum CollectionStepOutput {
     HostEreports(SupportBundleEreportStatus),
     SpEreports(SupportBundleEreportStatus),
     SavingSpDumps { listed_sps: bool },
-    // NOTE: The ditinction between this and "Spawn" is pretty artificial -
+    // NOTE: The distinction between this and "Spawn" is pretty artificial -
     // it's just to preserve a part of the report which says "we tried to
     // list in-service sleds".
     //
@@ -789,7 +797,7 @@ impl BundleCollection {
         let mut tasks =
             ParallelTaskSet::new_with_parallelism(MAX_CONCURRENT_STEPS);
 
-        loop {
+        'run: loop {
             // Process all the currently-planned steps
             while let Some((step_name, step)) = steps.pop() {
                 let previous_result = tasks.spawn({
@@ -813,11 +821,16 @@ impl BundleCollection {
                 };
             }
 
-            // If we've run out of tasks to spawn, join all the existing steps.
+            // If we've run out of tasks to spawn, join any of the existing steps.
             while let Some(previous_result) = tasks.join_next().await {
                 if let Ok(output) = previous_result {
                     output.process(&mut report, &mut steps);
                 };
+
+                // As soon as any task completes, see if we can spawn more work
+                // immediately. This ensures that the ParallelTaskSet is
+                // saturated as much as it can be.
+                continue 'run;
             }
 
             // Executing steps may create additional steps, as follow-up work.
@@ -1056,17 +1069,16 @@ impl BundleCollection {
         sp: SpIdentifier,
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
-        save_sp_dumps(mgs_client, sp, dir)
-            .await
-            .with_context(|| format!("SP {} {}", sp.type_, sp.slot))?;
+        save_sp_dumps(mgs_client, sp, dir).await.with_context(|| {
+            format!("failed to save SP dump from: {} {}", sp.type_, sp.slot)
+        })?;
 
         Ok(CollectionStepOutput::SavingSpDumps { listed_sps: true })
     }
 
     // Perform the work of collecting the support bundle into a temporary directory
     //
-    // - "dir" is a directory where data can be stored.
-    // - "bundle" is metadata about the bundle being collected.
+    // "dir" is an output directory where data can be stored.
     //
     // If a partial bundle can be collected, it should be returned as
     // an Ok(SupportBundleCollectionReport). Any failures from this function
@@ -1078,6 +1090,10 @@ impl BundleCollection {
     //
     // As a result, it is important that this function be implemented as
     // cancel-safe.
+    //
+    // The "steps" used within this function - passed to
+    // [`Self::run_collect_bundle_steps`] - are run on a [`ParallelTaskSet`],
+    // which automatically aborts tasks when it is dropped.
     async fn collect_bundle_as_file(
         self: &Arc<Self>,
         dir: &Utf8TempDir,
@@ -1091,7 +1107,7 @@ impl BundleCollection {
         // Shared, lazy, fallible initialization for MGS client
         let mgs_client: OnceCell<Arc<Option<MgsClient>>> = OnceCell::new();
 
-        let steps: Vec<(&str, CollectionStepFn)> = vec![
+        let steps: Vec<(&'static str, CollectionStepFn)> = vec![
             (
                 "bundle id",
                 Box::new(|collection, dir| {
@@ -1771,7 +1787,9 @@ async fn save_sp_dumps(
         .into_inner();
 
     let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.type_, sp.slot));
-    tokio::fs::create_dir_all(&output_dir).await?;
+    tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
+        format!("Failed to create output directory {output_dir}")
+    })?;
 
     for i in 0..dump_count {
         let task_dump = mgs_client
