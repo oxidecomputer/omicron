@@ -553,7 +553,7 @@ resource: Vpc "silo1-proj1-vpc1"
   silo1-viewer                            ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-proj1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-proj1-collaborator-no-networking  ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo1-proj1-collaborator-no-networking  ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                         !  !  !  !  !  !  !  !
   scim                                    ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘

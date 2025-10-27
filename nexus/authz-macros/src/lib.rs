@@ -454,8 +454,8 @@ fn do_authz_resource(
                     relations = {{ containing_project: Project }};
                     "list_children" if "viewer" on "containing_project";
                     "read" if "viewer" on "containing_project";
-                    "modify" if "collaborator-no-networking" on "containing_project";
-                    "create_child" if "collaborator-no-networking" on "containing_project";
+                    "modify" if "collaborator" on "containing_project";
+                    "create_child" if "collaborator" on "containing_project";
                 }}
 
                 has_relation(parent: Project, "containing_project", child: {})
