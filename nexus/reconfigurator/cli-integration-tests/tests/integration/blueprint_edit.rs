@@ -127,12 +127,14 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         .planning_input
         .sled_lookup(SledFilter::Commissioned, sled_id)
         .expect("state1 has initial sled");
-    assert!(
-        !state1
+    assert_ne!(
+        state1
             .planning_input
             .external_ip_policy()
-            .service_ip_pool_ranges()
-            .is_empty()
+            .clone()
+            .into_non_external_dns_ips()
+            .next(),
+        None,
     );
     assert!(!state1.silo_names.is_empty());
     assert!(!state1.external_dns_zone_names.is_empty());

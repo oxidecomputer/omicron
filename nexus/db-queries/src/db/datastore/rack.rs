@@ -1412,17 +1412,17 @@ mod test {
         let sled2 = create_test_sled(&datastore, SledUuid::new_v4()).await;
         let sled3 = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
-        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
-            IpRange::try_from((
-                Ipv4Addr::new(1, 2, 3, 4),
-                Ipv4Addr::new(1, 2, 3, 6),
-            ))
-            .unwrap(),
-        );
+        let service_ip_pool = IpRange::try_from((
+            Ipv4Addr::new(1, 2, 3, 4),
+            Ipv4Addr::new(1, 2, 3, 6),
+        ))
+        .unwrap();
+        let external_ip_policy =
+            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
 
         let mut system = SystemDescription::new();
         system
-            .set_external_ip_policy(external_ip_policy.clone())
+            .set_external_ip_policy(external_ip_policy)
             .sled(SledBuilder::new().id(sled1.id()))
             .expect("failed to add sled1")
             .sled(SledBuilder::new().id(sled2.id()))
@@ -1646,9 +1646,7 @@ mod test {
                 &opctx,
                 RackInit {
                     blueprint: blueprint.clone(),
-                    service_ip_pool_ranges: external_ip_policy
-                        .service_ip_pool_ranges()
-                        .to_vec(),
+                    service_ip_pool_ranges: vec![service_ip_pool],
                     ..Default::default()
                 },
             )
@@ -1767,14 +1765,16 @@ mod test {
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
-        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
+        let service_ip_pool =
             IpRange::try_from((nexus_ip_start, nexus_ip_end))
-                .expect("Cannot create IP Range"),
+                .expect("Cannot create IP Range");
+        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
+            service_ip_pool
         );
 
         let mut system = SystemDescription::new();
         system
-            .set_external_ip_policy(external_ip_policy.clone())
+            .set_external_ip_policy(external_ip_policy)
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
@@ -1919,9 +1919,7 @@ mod test {
                 RackInit {
                     blueprint: blueprint.clone(),
                     datasets: datasets.clone(),
-                    service_ip_pool_ranges: external_ip_policy
-                        .service_ip_pool_ranges()
-                        .to_vec(),
+                    service_ip_pool_ranges: vec![service_ip_pool],
                     internal_dns,
                     external_dns,
                     ..Default::default()
@@ -2062,14 +2060,16 @@ mod test {
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 1);
         let nexus_ip_end =
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 10);
-        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
+        let service_ip_pool =
             IpRange::try_from((nexus_ip_start, nexus_ip_end))
-                .expect("Cannot create IP Range"),
+                .expect("Cannot create IP Range");
+        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
+            service_ip_pool
         );
 
         let mut system = SystemDescription::new();
         system
-            .set_external_ip_policy(external_ip_policy.clone())
+            .set_external_ip_policy(external_ip_policy)
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
@@ -2172,9 +2172,7 @@ mod test {
                 RackInit {
                     blueprint: blueprint.clone(),
                     datasets: datasets.clone(),
-                    service_ip_pool_ranges: external_ip_policy
-                        .service_ip_pool_ranges()
-                        .to_vec(),
+                    service_ip_pool_ranges: vec![service_ip_pool],
                     internal_dns,
                     external_dns,
                     ..Default::default()
@@ -2417,12 +2415,13 @@ mod test {
         let sled = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let service_ip_pool = IpRange::from(ip);
         let external_ip_policy =
-            ExternalIpPolicy::single_pool_no_external_dns(IpRange::from(ip));
+            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
 
         let mut system = SystemDescription::new();
         system
-            .set_external_ip_policy(external_ip_policy.clone())
+            .set_external_ip_policy(external_ip_policy)
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
@@ -2539,9 +2538,7 @@ mod test {
                 RackInit {
                     rack_id: rack_id(),
                     blueprint: blueprint.clone(),
-                    service_ip_pool_ranges: external_ip_policy
-                        .service_ip_pool_ranges()
-                        .to_vec(),
+                    service_ip_pool_ranges: vec![service_ip_pool],
                     ..Default::default()
                 },
             )

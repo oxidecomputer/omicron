@@ -452,12 +452,7 @@ enum ExternalIpAllocatorError {
 
 impl ExternalIpAllocator {
     fn new(policy: &ExternalIpPolicy) -> Self {
-        let service_ip_pool_ranges = policy.service_ip_pool_ranges().to_vec();
-        let external_dns_ips = policy.external_dns_ips().clone();
-        let service_ip_pool_ips = service_ip_pool_ranges
-            .into_iter()
-            .flat_map(|r| r.iter())
-            .filter(move |ip| !external_dns_ips.contains(ip));
+        let service_ip_pool_ips = policy.clone().into_non_external_dns_ips();
         Self {
             service_ip_pool_ips: DebugIgnore(Box::new(service_ip_pool_ips)),
             used_exclusive_ips: BTreeSet::new(),

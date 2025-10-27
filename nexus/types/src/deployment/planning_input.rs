@@ -1128,11 +1128,19 @@ impl ExternalIpPolicy {
         ExternalIpPolicyBuilder { service_ip_pool_ranges, external_dns_ips }
     }
 
-    // TODO-john comment / remove?
-    pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
-        &self.service_ip_pool_ranges
+    /// Consume this `ExternalIpPolicy`, returning an iterator over all IPs that
+    /// should be used for services other than external DNS (i.e., Nexus and
+    /// boundary NTP).
+    pub fn into_non_external_dns_ips(self) -> impl Iterator<Item = IpAddr> {
+        let Self { service_ip_pool_ranges, external_dns_ips } = self;
+        service_ip_pool_ranges
+            .into_iter()
+            .flat_map(|r| r.iter())
+            .filter(move |ip| !external_dns_ips.contains(ip))
     }
 
+    /// The set of external IP addresses on which we should run external DNS
+    /// servers.
     pub fn external_dns_ips(&self) -> &BTreeSet<IpAddr> {
         &self.external_dns_ips
     }
