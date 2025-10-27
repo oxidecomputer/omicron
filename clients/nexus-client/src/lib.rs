@@ -6,7 +6,7 @@
 //! from within the control plane
 
 progenitor::generate_api!(
-    spec = "../../openapi/nexus-internal.json",
+    spec = "../../openapi/nexus-internal/nexus-internal-1.0.0-6d8ade.json",
     interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,

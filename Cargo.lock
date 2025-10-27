@@ -953,6 +953,7 @@ name = "bootstrap-agent-api"
 version = "0.1.0"
 dependencies = [
  "dropshot",
+ "dropshot-api-manager-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5262,6 +5263,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dropshot",
+ "dropshot-api-manager-types",
  "hyper",
  "installinator-common",
  "omicron-common",
@@ -6749,6 +6751,7 @@ name = "nexus-internal-api"
 version = "0.1.0"
 dependencies = [
  "dropshot",
+ "dropshot-api-manager-types",
  "http",
  "nexus-types",
  "omicron-common",
@@ -8555,6 +8558,7 @@ dependencies = [
  "dropshot",
  "futures",
  "libc",
+ "omicron-common",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "repo-depot-api",
@@ -11349,6 +11353,7 @@ name = "repo-depot-api"
 version = "0.1.0"
 dependencies = [
  "dropshot",
+ "dropshot-api-manager-types",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",

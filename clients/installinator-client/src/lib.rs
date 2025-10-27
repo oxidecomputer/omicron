@@ -5,7 +5,7 @@
 //! Interface for installinator to make API requests.
 
 progenitor::generate_api!(
-    spec = "../../openapi/installinator.json",
+    spec = "../../openapi/installinator/installinator-1.0.0-cdf050.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {

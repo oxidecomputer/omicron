@@ -9,6 +9,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, ResultsPage,
     TypedBody,
 };
+use dropshot_api_manager_types::api_versions;
 use nexus_types::{
     external_api::{
         shared::ProbeInfo,
@@ -33,6 +34,12 @@ use omicron_uuid_kinds::*;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+api_versions!([
+    // Do not create new versions of this client-side versioned API.
+    // https://github.com/oxidecomputer/omicron/issues/9290
+    (1, INITIAL),
+]);
 
 #[dropshot::api_description]
 pub trait NexusInternalApi {
