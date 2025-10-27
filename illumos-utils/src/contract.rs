@@ -130,8 +130,10 @@ impl Watcher {
             // The event endpoint was not opened as non-blocking, so
             // ct_event_read_critical(3CONTRACT) will block until a new
             // critical event is available on the channel.
+            slog::debug!(log, "entering contract ioctl");
             match unsafe { ct_event_read_critical(self.fd, evp) } {
                 0 => {
+                    slog::debug!(log, "back from contract ioctl");
                     let typ = unsafe { ct_event_get_type(event) };
                     let event_id = unsafe { ct_event_get_evid(event) };
                     let ctid = unsafe { ct_event_get_ctid(event) };
@@ -252,7 +254,12 @@ impl Drop for Template {
     }
 }
 
-fn get_tfpkt_device_path() -> Option<Vec<i8>> {
+// This follows the symlink from /dev/tfpkt0 to the full path in the /devices
+// tree.  If found, it returns the path as both a string (for error reporting)
+// and as a vector of bytes (for passing to subsequent system calls).  This
+// redundancy comes from illumos/x86_64 expecting characters to be signed,
+// while Rust expects them to be unsigned.
+fn get_tfpkt_device_path() -> Option<(String, Vec<i8>)> {
     let dev_path = CString::new("/dev/tfpkt0").unwrap();
     let mut path_buf = [0i8; 1024];
     let sz = unsafe {
@@ -261,13 +268,23 @@ fn get_tfpkt_device_path() -> Option<Vec<i8>> {
     if sz < 0 {
         None
     } else {
-        // readlink returns "/devices/pseudo/..." but the contract
-        // filesystem only wants to know about the "/pseudo/..." part,
-        // so we strip off the first path element before returning it.
-        // We also need to drop any bytes after the terminating NULL.
-        let left = 10;
-        let right = path_buf.iter().position(|a| *a == 0).unwrap();
-        Some(path_buf[left..right + 1].to_vec())
+        let u8path: Vec<u8> = path_buf
+            .iter()
+            .take_while(|c| **c != 0)
+            .map(|c| *c as u8)
+            .collect();
+
+        match str::from_utf8(&u8path) {
+            Ok(p) if p.starts_with("../devices/") => {
+                // readlink returns "../devices/pseudo/..." but the contract
+                // filesystem only wants to know about the "/pseudo/..." part,
+                // so we strip off the first path element before returning it.
+                // We also need to drop any bytes after the terminating NULL.
+                let i8path = path_buf[10..u8path.len() + 1].to_vec();
+                Some((p.to_string(), i8path))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -329,8 +346,8 @@ impl Template {
                 // watch here for the removal of "tfpkt", which is a child of
                 // the "tofino", and whose removal is a reliable indicator that
                 // the tofino is gone.
-                let cpath = match get_tfpkt_device_path() {
-                    Some(c) => Ok(c),
+                let (path, cpath) = match get_tfpkt_device_path() {
+                    Some((p, c)) => Ok((p, c)),
                     None => {
                         unsafe { libc::close(fd) };
                         Err(err("unable to find tfpkt in device tree"))
@@ -343,12 +360,7 @@ impl Template {
                 } else if unsafe { ct_dev_tmpl_set_minor(fd, cpath.as_ptr()) }
                     != 0
                 {
-                    let cpath: Vec<u8> =
-                        cpath.iter().map(|c| *c as u8).collect();
-                    Err(err(format!(
-                        "set_minor to {} in device template",
-                        str::from_utf8(&cpath[..]).unwrap()
-                    )))
+                    Err(err(format!("set_minor to {path} in device template")))
                 } else if unsafe { ct_tmpl_activate(fd) } != 0 {
                     Err(err("activating device template"))
                 } else {

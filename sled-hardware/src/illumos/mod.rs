@@ -7,8 +7,6 @@ use crate::{DendriteAsic, HardwareUpdate, SledMode, UnparsedDisk};
 use camino::Utf8PathBuf;
 use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
-use illumos_utils::contract;
-use illumos_utils::contract::{ContractType, Control, Template, Watcher};
 use libnvme::{Nvme, controller::Controller};
 use omicron_common::disk::{DiskIdentity, DiskVariant};
 use sled_hardware_types::{Baseboard, OxideSled, SledCpuFamily};
@@ -30,8 +28,7 @@ mod sysconf;
 
 pub use partitions::{NvmeFormattingError, ensure_partition_layout};
 
-const PFEXEC: &'static str = "/usr/bin/pfexec";
-const ZONEADM: &'static str = "/usr/sbin/zoneadm";
+const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
@@ -288,13 +285,6 @@ impl HardwareView {
                 self.tofino = TofinoView::Real(polled_hw.tofino);
             }
             TofinoView::Stub { .. } => (),
-        }
-    }
-
-    fn tofino_exists(&self) -> bool {
-        match self.tofino {
-            TofinoView::Real(TofinoSnapshot { exists, .. }) => exists,
-            TofinoView::Stub { active } => active,
         }
     }
 
@@ -711,117 +701,45 @@ fn poll_device_tree(
     Ok(())
 }
 
-// The list() operation in the zone crate returns all the installed zones, when
-// we really only care about whether the switch zone is running.
-fn get_running_zones() -> Result<Vec<String>, zone::ZoneError> {
-    let zoneadm_output = std::process::Command::new(PFEXEC)
-        .env_clear()
-        .arg(ZONEADM)
-        .arg("list")
-        .arg("-p")
-        .output()
-        .map_err(zone::ZoneError::Command)?;
-    Ok(zone::Adm::parse_list_output(&zoneadm_output)?
-        .iter()
-        .map(|z| z.name.to_string())
-        .collect::<Vec<String>>())
-}
-
-// Block until the switch zone is gone
-fn block_on_switch_zone(log: &slog::Logger) {
-    let mut logged = false;
-    loop {
-        match get_running_zones() {
-            Ok(zones) => {
-                if !zones.iter().any(|name| name == "oxz_switch") {
-                    info!(log, "switch zone gone");
-                    break;
-                }
-            }
-            Err(e) => {
-                error!(log, "failed to get list of zones: {e:?}");
-                break;
-            }
-        }
-        if !logged {
-            info!(&log, "Waiting for switch zone to halt");
-            logged = true;
-        }
-        std::thread::sleep(std::time::Duration::from_secs(1));
+// Using an external process, watch for the disappearance of a tofino device.
+fn monitor_tofino(log: slog::Logger, tx: broadcast::Sender<HardwareUpdate>) {
+    if std::fs::exists(TOFINO_MONITOR).is_err() {
+        error!(&log, "tofino monitor tool not found at {}", TOFINO_MONITOR);
+        return;
     }
-}
 
-fn monitor_tofino(
-    log: slog::Logger,
-    inner: Arc<Mutex<HardwareView>>,
-    tx: broadcast::Sender<HardwareUpdate>,
-) {
-    let log = log.new(o!("component" => "SledAgent-tofino_contractor"));
-    info!(&log, "tofino monitoring thread started");
     loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        let mut child = match std::process::Command::new(TOFINO_MONITOR).spawn()
         {
-            if !inner.lock().unwrap().tofino_exists() {
-                continue;
+            Ok(c) => {
+                debug!(
+                    &log,
+                    "launched tofino monitor process as pid {}",
+                    c.id()
+                );
+                c
             }
-        }
-
-        let ctid = match Template::new(ContractType::Device) {
-            Ok(template) => match template.create() {
-                Ok(c) => c,
-                Err(e) => {
-                    error!(log, "unable to create tofino contract: {e:?}");
-                    continue;
-                }
-            },
             Err(e) => {
-                error!(log, "unable to open tofino contract template: {e:?}");
-                continue;
-            }
-        };
-        let ctl = match Control::new(ContractType::Device, ctid) {
-            Ok(c) => c,
-            Err(e) => {
-                error!(log, "unable to create tofino contract: {e:?}");
-                continue;
+                error!(&log, "failed to launch tofino monitor: {e:?}");
+                return;
             }
         };
 
-        let watcher = Watcher::new(ContractType::Device);
-        loop {
-            let ev = watcher.watch(&log);
-            match ev.typ {
-                contract::CT_DEV_EV_OFFLINE => {
-                    info!(&log, "Got tofino removed notification");
-                    if ev.ctid != ctid {
-                        debug!(&log, "event for wrong contract");
-                        continue;
-                    }
-                    let _ = tx.send(HardwareUpdate::TofinoUnavailable);
-
-                    // The device detach mechanism in the kernel will block for
-                    // up to a minute, waiting for us to acknowledge this event.
-                    // Illumos will not detach the device driver while the
-                    // device is still in use.  If a device is assigned to a
-                    // zone, that counts as "in use".  By halting the zone and
-                    // deferring that "ack" until the zone is gone, we enable
-                    // the device to be detached cleanly, which will
-                    // subsequently allow the device to be re-attached cleanly
-                    // if/when the sidecar is powered back on.
-                    block_on_switch_zone(&log);
-                    if let Err(e) = ctl.ack(ev.event_id) {
-                        error!(&log, "{e:?}");
-                    }
-                }
-                contract::CT_EV_NEGEND => {
-                    if let Err(e) = ctl.abandon() {
-                        error!(&log, "{e:?}");
-                    }
-                    break;
-                }
-                x => warn!(&log, "unexpected device event: {x}"),
-            }
+        // This child process should only exit if it has seen a tofino ASIC and
+        // then received a "tofino removed" event from the kernel.  If that
+        // happens, it should exit cleanly with an exit code of 0.  If the child
+        // exits for any other reason, we don't know what it means, and can only
+        // log the event for posterity.
+        match child.wait() {
+            Err(e) => error!(&log, "failed to collect exit status: {e:?}"),
+            Ok(s) => info!(&log, "child exited with code: {:?}", s.code()),
         }
+        let _ = tx.send(HardwareUpdate::TofinoUnavailable);
+
+        // By the time we get here, the switch zone should be gone and the
+        // device tree cleaned up.  Still, it doesn't hurt to give things a
+        // moment to stabilize before restarting the monitor.
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
 
@@ -934,9 +852,8 @@ impl HardwareManager {
         // interval will allow.  To that end, we fire off a task that maintains a
         // device contract with the kernel to handle those disappearances.
         let log2 = log.clone();
-        let inner2 = inner.clone();
         let tx2 = tx.clone();
-        std::thread::spawn(move || monitor_tofino(log2, inner2, tx2));
+        std::thread::spawn(move || monitor_tofino(log2, tx2));
 
         let log2 = log.clone();
         let inner2 = inner.clone();

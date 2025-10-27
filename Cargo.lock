@@ -8588,6 +8588,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sha3",
+ "signal-hook",
  "sled-agent-api",
  "sled-agent-client",
  "sled-agent-config-reconciler",
