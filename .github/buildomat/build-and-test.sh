@@ -15,6 +15,11 @@ source .github/buildomat/ci-env.sh
 
 target_os=$1
 
+# ARTEMIS TESTING
+if [[ $target_os == "illumos" ]]; then
+    pfexec zfs set compression=lz4 rpool
+fi
+
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)

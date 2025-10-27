@@ -13,6 +13,9 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+# ARTEMIS TESTING
+pfexec zfs set compression=lz4 rpool
+
 # shellcheck source=/dev/null
 source .github/buildomat/ci-env.sh
 
