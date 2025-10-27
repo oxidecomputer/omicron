@@ -53,17 +53,10 @@ impl super::Nexus {
             .internal_context("creating a Project")?;
         opctx.authorize(authz::Action::CreateChild, &authz_silo).await?;
 
-        // Determine if we should create a default VPC.
-        // Skip VPC creation if networking is restricted and user is not a Silo Admin.
-
-        // XXX can we get rid of this configurable?
-        let create_default_vpc = true;
-
         let saga_params = sagas::project_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_create: new_project.clone(),
             authz_silo,
-            create_default_vpc,
         };
         let saga_outputs = self
             .sagas
