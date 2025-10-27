@@ -183,7 +183,7 @@ impl ExternalNetworkingAllocator {
         // External DNS IPs are special:
         //
         // 1. Check that we don't have any in-use external DNS IPs that we don't
-        //    expect. Tere should be no way for this to happen at the time of
+        //    expect. There should be no way for this to happen at the time of
         //    this writing, because there's no way to change the set of external
         //    DNS IPs after RSS. Once we add a way to change it, presumably our
         //    caller should handle this somehow (e.g., the planner should
