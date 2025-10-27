@@ -23056,6 +23056,7 @@
         "enum": [
           "admin",
           "collaborator",
+          "collaborator_no_networking",
           "viewer"
         ]
       },
