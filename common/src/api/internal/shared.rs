@@ -1109,6 +1109,16 @@ pub struct SledIdentifiers {
     pub serial: String,
 }
 
+/// Delegate a ZFS volume to a zone
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DelegatedZvol {
+    /// The fully qualified name of the parent dataset
+    pub parent_dataset: String,
+
+    /// The volume name
+    pub name: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

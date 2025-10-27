@@ -1293,6 +1293,7 @@ impl super::Nexus {
                 host_domain: None,
                 search_domains: Vec::new(),
             },
+            delegated_zvols: vec![],
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(db_instance.id());
