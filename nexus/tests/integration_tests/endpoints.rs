@@ -1276,6 +1276,18 @@ pub static AUDIT_LOG_URL: LazyLock<String> = LazyLock::new(|| {
     String::from("/v1/system/audit-log?start_time=2025-01-01T00:00:00Z")
 });
 
+pub static SCIM_TOKENS_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/system/scim/tokens?silo={}", DEFAULT_SILO.identity().name,)
+});
+
+pub static SCIM_TOKEN_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/system/scim/tokens/{}?silo={}",
+        "7885144e-9c75-47f7-a97d-7dfc58e1186c",
+        DEFAULT_SILO.identity().name,
+    )
+});
+
 /// Describes an API endpoint to be verified by the "unauthorized" test
 ///
 /// These structs are also used to check whether we're covering all endpoints in
@@ -3044,6 +3056,25 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
+            },
+            // SCIM client tokens
+            VerifyEndpoint {
+                url: &SCIM_TOKENS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(serde_json::Value::Null),
+                ],
+            },
+            VerifyEndpoint {
+                url: &SCIM_TOKEN_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
             },
         ]
     },

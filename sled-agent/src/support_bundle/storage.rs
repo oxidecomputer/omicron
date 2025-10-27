@@ -14,7 +14,6 @@ use dropshot::HttpError;
 use futures::Stream;
 use futures::StreamExt;
 use illumos_utils::zfs::DatasetProperties;
-use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
@@ -35,9 +34,9 @@ use sled_agent_config_reconciler::NestedDatasetListError;
 use sled_agent_config_reconciler::NestedDatasetMountError;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
 use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME;
-use sled_storage::manager::NestedDatasetConfig;
-use sled_storage::manager::NestedDatasetListOptions;
-use sled_storage::manager::NestedDatasetLocation;
+use sled_storage::nested_dataset::NestedDatasetConfig;
+use sled_storage::nested_dataset::NestedDatasetListOptions;
+use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::io::Write;
@@ -85,9 +84,6 @@ pub enum Error {
     TryFromInt(#[from] std::num::TryFromIntError),
 
     #[error(transparent)]
-    Storage(#[from] sled_storage::error::Error),
-
-    #[error(transparent)]
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
@@ -132,7 +128,6 @@ impl From<Error> for HttpError {
             Error::NotAFile => {
                 HttpError::for_bad_request(None, "Not a file".to_string())
             }
-            Error::Storage(err) => HttpError::from(ExternalError::from(err)),
             Error::Zip(err) => match err {
                 ZipError::FileNotFound => HttpError::for_not_found(
                     None,
