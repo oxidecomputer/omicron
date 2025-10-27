@@ -1172,7 +1172,6 @@ mod test {
                     admin_group_name: None,
                     tls_certificates: vec![],
                     mapped_fleet_roles: Default::default(),
-                    restrict_network_actions: None,
                 },
                 recovery_silo_fq_dns_name: format!(
                     "test-silo.sys.{}",
