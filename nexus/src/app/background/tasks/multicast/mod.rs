@@ -52,22 +52,47 @@
 //! - Used for internal rack forwarding to guests
 //! - Mapped 1:1 with external groups via deterministic mapping
 //!
-//! ### Forwarding Architecture
+//! ### Forwarding Architecture (Incoming multicast traffic to guests)
 //!
-//! Traffic flow: `External Network ←NAT→ External Group ←Bridge→ Underlay Group ←Switch(es)→ Instance`
+//! Traffic flow for multicast into the rack and to guest instances:
+//! `External Network → Switch ASIC → Underlay Group → OPTE (decap) → Instance`
 //!
-//! 1. **External traffic** arrives at external multicast address
-//! 2. **NAT translation** via 1:1 mapping between external → underlay group
-//! 3. **Dataplane forwarding** configured via DPD
-//! 4. **Instance delivery** via underlay multicast to target sleds
+//! 1. **External traffic** arrives into the rack on an external multicast address
+//! 2. **Switch ASIC translation** performs NAT/encapsulation from external to underlay multicast
+//! 3. **Underlay forwarding** via DPD-programmed P4 tables across switch fabric
+//! 4. **OPTE decapsulation** removes Geneve/IPv6/Ethernet outer headers on target sleds
+//! 5. **Instance delivery** of inner (guest-facing) packet to guest
+//!
+//! TODO: Other traffic flows like egress from instances will be documented separately
 //!
 //! ## Reconciliation Components
 //!
 //! The reconciler handles:
-//! - **Group lifecycle**: "Creating" → "Active" → "Deleting" → "Deleted"
-//! - **Member lifecycle**: "Joining" → "Joined" → "Left" (3-state model) -> (timestamp deleted)
+//! - **Group lifecycle**: "Creating" → "Active" → "Deleting" → hard-deleted
+//! - **Member lifecycle**: "Joining" → "Joined" → "Left" → soft-deleted → hard-deleted
 //! - **Dataplane updates**: DPD API calls for P4 table updates
 //! - **Topology mapping**: Sled-to-switch-port resolution with caching
+//!
+//! ## Deletion Semantics: Groups vs Members
+//!
+//! **Groups** use state machine deletion:
+//! - User deletes group → state="Deleting" (no `time_deleted` set yet)
+//! - RPW cleans up switch config and associated resources
+//! - RPW hard-deletes the row (uses `diesel::delete`)
+//! - Note: `deallocate_external_multicast_group` (IP pool deallocation) sets
+//!   `time_deleted` directly, but this is separate from user-initiated deletion
+//!
+//! **Members** use dual-purpose "Left" state with soft-delete:
+//! - Instance stopped: state="Left", time_deleted=NULL
+//!   - Can rejoin when instance starts again
+//!   - RPW can transition back to "Joining" when instance becomes valid
+//! - Instance deleted: state="Left", time_deleted=SET (PERMANENT - soft-deleted)
+//!   - Cannot be reactivated (new attach creates new member record)
+//!   - RPW removes DPD configuration
+//!   - Cleanup task eventually hard-deletes the row
+//!
+//! This design allows stopped instances to resume multicast on restart while
+//! ensuring deleted instances have their memberships fully cleaned up.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
@@ -78,10 +103,12 @@ use anyhow::Result;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
+use ipnet::Ipv6Net;
 use serde_json::json;
 use slog::{error, info, trace};
 use tokio::sync::RwLock;
 
+use nexus_config::DEFAULT_UNDERLAY_MULTICAST_NET;
 use nexus_db_model::MulticastGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -99,10 +126,6 @@ pub mod members;
 /// Type alias for the sled mapping cache.
 type SledMappingCache =
     Arc<RwLock<(SystemTime, HashMap<SledUuid, Vec<MulticastSwitchPort>>)>>;
-
-/// Admin-scoped IPv6 multicast prefix (ff04::/16) as u16 for address
-/// construction.
-const IPV6_ADMIN_SCOPED_MULTICAST_PREFIX: u16 = 0xff04;
 
 /// Result of processing a state transition for multicast entities.
 #[derive(Debug)]
@@ -132,6 +155,7 @@ pub(crate) struct MulticastGroupReconciler {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     sagas: Arc<dyn StartSaga>,
+    underlay_admin_prefix: Ipv6Net,
     /// Cache for sled-to-switch-port mappings.
     /// Maps (`cache_id`, `sled_id`) → switch port for multicast traffic.
     sled_mapping_cache: SledMappingCache,
@@ -151,10 +175,17 @@ impl MulticastGroupReconciler {
         sagas: Arc<dyn StartSaga>,
         enabled: bool,
     ) -> Self {
+        // Use the configured underlay admin-local prefix (DEFAULT_UNDERLAY_MULTICAST_NET)
+        let underlay_admin_prefix: Ipv6Net = DEFAULT_UNDERLAY_MULTICAST_NET
+            .to_string()
+            .parse()
+            .expect("DEFAULT_UNDERLAY_MULTICAST_NET must be valid Ipv6Net");
+
         Self {
             datastore,
             resolver,
             sagas,
+            underlay_admin_prefix,
             sled_mapping_cache: Arc::new(RwLock::new((
                 SystemTime::now(),
                 HashMap::new(),
@@ -174,6 +205,97 @@ impl MulticastGroupReconciler {
     pub(crate) fn generate_multicast_tag(group: &MulticastGroup) -> String {
         group.name().to_string()
     }
+
+    /// Generate admin-scoped IPv6 multicast address from an external multicast
+    /// address within the configured underlay admin-local prefix
+    /// (DEFAULT_UNDERLAY_MULTICAST_NET) using bitmask mapping. This preserves
+    /// exactly `host_bits = 128 - prefix_len` low bits (LSBs) from the external
+    /// address (i.e., the lower bits of the group ID) and sets the high bits
+    /// from the prefix.
+    ///
+    /// Admin-local scope (ff04::/16) is defined in RFC 7346.
+    /// See: <https://www.rfc-editor.org/rfc/rfc7346>
+    pub(crate) fn map_external_to_underlay_ip(
+        &self,
+        external_ip: IpAddr,
+    ) -> Result<IpAddr, anyhow::Error> {
+        map_external_to_underlay_ip_impl(
+            self.underlay_admin_prefix,
+            external_ip,
+        )
+    }
+}
+
+/// Pure function implementation of external-to-underlay IP mapping.
+/// This can be tested independently without requiring a full reconciler instance.
+fn map_external_to_underlay_ip_impl(
+    underlay_admin_prefix: Ipv6Net,
+    external_ip: IpAddr,
+) -> Result<IpAddr, anyhow::Error> {
+    // Compute base (prefix network) and host mask
+    let base = underlay_admin_prefix.network();
+    let prefix_len = underlay_admin_prefix.prefix_len();
+    let host_bits = 128u32.saturating_sub(u32::from(prefix_len));
+    let base_u128 = u128::from_be_bytes(base.octets());
+    let mask: u128 = if host_bits == 128 {
+        u128::MAX
+    } else if host_bits == 0 {
+        0
+    } else {
+        (1u128 << host_bits) - 1
+    };
+
+    // Derive a value to fit in the available host bits
+    let host_value: u128 = match external_ip {
+        IpAddr::V4(ipv4) => {
+            // IPv4 addresses need at least 32 host bits to preserve full address
+            // (IPv4 multicast validation happens at IP pool allocation time)
+            if host_bits < 32 {
+                return Err(anyhow::Error::msg(format!(
+                    "Prefix {underlay_admin_prefix} has only {host_bits} host \
+                     bits, but IPv4 requires at least 32 bits"
+                )));
+            }
+            u128::from(u32::from_be_bytes(ipv4.octets()))
+        }
+        IpAddr::V6(ipv6) => {
+            // IPv6 multicast validation (including ff01::/ff02:: exclusions)
+            // happens at IP pool allocation time
+            let full_addr = u128::from_be_bytes(ipv6.octets());
+
+            // XOR-fold the full 128-bit address into the available host bits
+            // to avoid collisions. This ensures different external addresses
+            // (even with identical lower bits but different scopes) map to
+            // different underlay addresses.
+            if host_bits < 128 {
+                // Split into chunks and XOR them together
+                let mut result = 0u128;
+                let mut remaining = full_addr;
+                while remaining != 0 {
+                    result ^= remaining & mask;
+                    remaining >>= host_bits;
+                }
+                result
+            } else {
+                // host_bits >= 128: use full address as-is
+                full_addr
+            }
+        }
+    };
+
+    // Combine base network + computed host value
+    let underlay_u128 = (base_u128 & !mask) | (host_value & mask);
+    let underlay_ipv6 = Ipv6Addr::from(underlay_u128.to_be_bytes());
+
+    // Validate bounds
+    if !underlay_admin_prefix.contains(&underlay_ipv6) {
+        return Err(anyhow::Error::msg(format!(
+            "Generated underlay IP {underlay_ipv6} falls outside configured \
+             prefix {underlay_admin_prefix} (external {external_ip})."
+        )));
+    }
+
+    Ok(IpAddr::V6(underlay_ipv6))
 }
 
 impl BackgroundTask for MulticastGroupReconciler {
@@ -214,7 +336,7 @@ impl BackgroundTask for MulticastGroupReconciler {
                 } else {
                     trace!(
                         opctx.log,
-                        "multicast RPW reconciliation pass completed - dataplane in sync"
+                        "multicast RPW reconciliation pass completed - dataplane consistent"
                     );
                 }
             } else {
@@ -319,80 +441,47 @@ impl MulticastGroupReconciler {
             "member_lifecycle_transitions" => status.members_processed,
             "orphaned_member_cleanup" => status.members_deleted,
             "total_dpd_operations" => status.groups_created + status.groups_deleted + status.members_processed,
-            "dataplane_consistency_check" => if status.errors.is_empty() { "PASS" } else { "FAIL" }
+            "error_count" => status.errors.len()
         );
 
         status
     }
 }
 
-/// Generate admin-scoped IPv6 multicast address from an external multicast
-/// address. Uses the IPv6 admin-local scope (ff04::/16) per RFC 7346:
-/// <https://www.rfc-editor.org/rfc/rfc7346>.
-pub(crate) fn map_external_to_underlay_ip(
-    external_ip: IpAddr,
-) -> Result<IpAddr, anyhow::Error> {
-    match external_ip {
-        IpAddr::V4(ipv4) => {
-            // Map IPv4 multicast to admin-scoped IPv6 multicast (ff04::/16)
-            // Use the IPv4 octets in the lower 32 bits
-            let octets = ipv4.octets();
-            let underlay_ipv6 = Ipv6Addr::new(
-                IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
-                0x0000,
-                0x0000,
-                0x0000,
-                0x0000,
-                0x0000,
-                u16::from(octets[0]) << 8 | u16::from(octets[1]),
-                u16::from(octets[2]) << 8 | u16::from(octets[3]),
-            );
-            Ok(IpAddr::V6(underlay_ipv6))
-        }
-        IpAddr::V6(ipv6) => {
-            // For IPv6 input, ensure it's in admin-scoped range
-            if ipv6.segments()[0] & 0xff00 == 0xff00 {
-                // Already a multicast address - convert to admin-scoped
-                let segments = ipv6.segments();
-                let underlay_ipv6 = Ipv6Addr::new(
-                    0xff04,
-                    segments[1],
-                    segments[2],
-                    segments[3],
-                    segments[4],
-                    segments[5],
-                    segments[6],
-                    segments[7],
-                );
-                Ok(IpAddr::V6(underlay_ipv6))
-            } else {
-                Err(anyhow::Error::msg(format!(
-                    "IPv6 address is not multicast: {ipv6}"
-                )))
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use omicron_common::address::IPV6_ADMIN_SCOPED_MULTICAST_PREFIX;
 
     #[test]
     fn test_map_ipv4_to_underlay_ipv6() {
-        // Test IPv4 multicast mapping to admin-scoped IPv6
+        // Test IPv4 multicast mapping to admin-scoped IPv6 using default
+        // prefix (ff04::/64). IPv4 fits in lower 32 bits.
         let ipv4 = Ipv4Addr::new(224, 1, 2, 3);
-        let result = map_external_to_underlay_ip(IpAddr::V4(ipv4)).unwrap();
+        let result = map_external_to_underlay_ip_impl(
+            DEFAULT_UNDERLAY_MULTICAST_NET,
+            IpAddr::V4(ipv4),
+        )
+        .unwrap();
 
         match result {
             IpAddr::V6(ipv6) => {
-                // Should be ff04::e001:203 (224=0xe0, 1=0x01, 2=0x02, 3=0x03)
+                // Should be ff04::e001:203
+                // (224=0xe0, 1=0x01, 2=0x02, 3=0x03)
                 assert_eq!(
                     ipv6.segments(),
                     [
-                        0xff04, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xe001,
-                        0x0203
+                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                        0x0000,
+                        0x0000,
+                        0x0000,
+                        0x0000,
+                        0x0000,
+                        0xe001,
+                        0x0203,
                     ]
                 );
             }
@@ -402,32 +491,52 @@ mod tests {
 
     #[test]
     fn test_map_ipv4_edge_cases() {
-        // Test minimum IPv4 multicast address
+        // Test minimum IPv4 multicast address using production default prefix
         let ipv4_min = Ipv4Addr::new(224, 0, 0, 1);
-        let result = map_external_to_underlay_ip(IpAddr::V4(ipv4_min)).unwrap();
+        let result = map_external_to_underlay_ip_impl(
+            DEFAULT_UNDERLAY_MULTICAST_NET,
+            IpAddr::V4(ipv4_min),
+        )
+        .unwrap();
         match result {
             IpAddr::V6(ipv6) => {
                 assert_eq!(
                     ipv6.segments(),
                     [
-                        0xff04, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xe000,
-                        0x0001
+                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                        0x0000,
+                        0x0000,
+                        0x0000,
+                        0x0000,
+                        0x0000,
+                        0xe000,
+                        0x0001,
                     ]
                 );
             }
             _ => panic!("Expected IPv6 result"),
         }
 
-        // Test maximum IPv4 multicast address
+        // Test maximum IPv4 multicast address using production default prefix
         let ipv4_max = Ipv4Addr::new(239, 255, 255, 255);
-        let result = map_external_to_underlay_ip(IpAddr::V4(ipv4_max)).unwrap();
+        let result = map_external_to_underlay_ip_impl(
+            DEFAULT_UNDERLAY_MULTICAST_NET,
+            IpAddr::V4(ipv4_max),
+        )
+        .unwrap();
         match result {
             IpAddr::V6(ipv6) => {
                 assert_eq!(
                     ipv6.segments(),
                     [
-                        0xff04, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0xefff,
-                        0xffff
+                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                        0x0000,
+                        0x0000,
+                        0x0000,
+                        0x0000,
+                        0x0000,
+                        0xefff,
+                        0xffff,
                     ]
                 );
             }
@@ -437,21 +546,33 @@ mod tests {
 
     #[test]
     fn test_map_ipv6_multicast_to_admin_scoped() {
-        // Test site-local multicast (ff05::/16) to admin-scoped (ff04::/16)
+        // Test algorithm with wider /16 prefix (not used in production).
+        // Tests site-local (ff05::/16) to admin-scoped (ff04::/16) with XOR folding.
+        // With /16, we XOR upper 112 bits with lower 112 bits.
         let ipv6_site_local = Ipv6Addr::new(
             0xff05, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678, 0x9abc,
         );
-        let result =
-            map_external_to_underlay_ip(IpAddr::V6(ipv6_site_local)).unwrap();
+        let prefix_16: Ipv6Net = "ff04::/16".parse().unwrap();
+        let result = map_external_to_underlay_ip_impl(
+            prefix_16,
+            IpAddr::V6(ipv6_site_local),
+        )
+        .unwrap();
 
         match result {
             IpAddr::V6(ipv6) => {
-                // Should preserve everything except first segment, which becomes ff04
+                // XOR result of 112-bit chunks
                 assert_eq!(
                     ipv6.segments(),
                     [
-                        0xff04, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678,
-                        0x9abc
+                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                        0x1234,
+                        0x5678,
+                        0x9abc,
+                        0xdef0,
+                        0x1234,
+                        0x5678,
+                        0x65b9, // XOR folded last segment
                     ]
                 );
             }
@@ -461,20 +582,33 @@ mod tests {
 
     #[test]
     fn test_map_ipv6_global_multicast_to_admin_scoped() {
-        // Test global multicast (ff0e::/16) to admin-scoped (ff04::/16)
+        // Test algorithm with wider /16 prefix (not used in production).
+        // Tests global (ff0e::/16) to admin-scoped (ff04::/16) with XOR folding.
+        // With /16, we XOR upper 112 bits with lower 112 bits.
         let ipv6_global = Ipv6Addr::new(
             0xff0e, 0xabcd, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678,
         );
-        let result =
-            map_external_to_underlay_ip(IpAddr::V6(ipv6_global)).unwrap();
+        let prefix_16: Ipv6Net = "ff04::/16".parse().unwrap();
+        let result = map_external_to_underlay_ip_impl(
+            prefix_16,
+            IpAddr::V6(ipv6_global),
+        )
+        .unwrap();
 
         match result {
             IpAddr::V6(ipv6) => {
+                // XOR result of 112-bit chunks
                 assert_eq!(
                     ipv6.segments(),
                     [
-                        0xff04, 0xabcd, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234,
-                        0x5678
+                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                        0xabcd,
+                        0x1234,
+                        0x5678,
+                        0x9abc,
+                        0xdef0,
+                        0x1234,
+                        0xa976, // XOR folded last segment
                     ]
                 );
             }
@@ -484,20 +618,38 @@ mod tests {
 
     #[test]
     fn test_map_ipv6_already_admin_scoped() {
-        // Test admin-scoped multicast (ff04::/16) - should preserve as-is
+        // Test algorithm with wider /16 prefix (not used in production).
+        // Admin-scoped multicast (ff04::/16) gets XOR folded like any other address.
+        // With /16, we XOR upper 112 bits with lower 112 bits.
         let ipv6_admin = Ipv6Addr::new(
-            0xff04, 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777,
+            IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+            0x1111,
+            0x2222,
+            0x3333,
+            0x4444,
+            0x5555,
+            0x6666,
+            0x7777,
         );
+        let prefix_16: Ipv6Net = "ff04::/16".parse().unwrap();
         let result =
-            map_external_to_underlay_ip(IpAddr::V6(ipv6_admin)).unwrap();
+            map_external_to_underlay_ip_impl(prefix_16, IpAddr::V6(ipv6_admin))
+                .unwrap();
 
         match result {
             IpAddr::V6(ipv6) => {
+                // XOR result of 112-bit chunks
                 assert_eq!(
                     ipv6.segments(),
                     [
-                        0xff04, 0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666,
-                        0x7777
+                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                        0x1111,
+                        0x2222,
+                        0x3333,
+                        0x4444,
+                        0x5555,
+                        0x6666,
+                        0x8873, // XOR folded last segment
                     ]
                 );
             }
@@ -506,26 +658,195 @@ mod tests {
     }
 
     #[test]
-    fn test_map_ipv6_non_multicast_fails() {
-        // Test unicast IPv6 address - should fail
-        let ipv6_unicast = Ipv6Addr::new(
-            0x2001, 0xdb8, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678,
-        );
-        let result = map_external_to_underlay_ip(IpAddr::V6(ipv6_unicast));
+    fn test_prefix_validation_ipv4_too_small() {
+        // Test that a prefix that's too small for IPv4 mapping is rejected
+        // ff04::/120 only allows for the last 8 bits to vary, but IPv4 needs 32 bits
+        let ipv4 = Ipv4Addr::new(224, 1, 2, 3);
+        let prefix: Ipv6Net = "ff04::/120".parse().unwrap();
+        let result = map_external_to_underlay_ip_impl(prefix, IpAddr::V4(ipv4));
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not multicast"));
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("has only 8 host bits")
+                && err_msg.contains("IPv4 requires at least 32 bits"),
+            "Expected IPv4 validation error, got: {err_msg}"
+        );
     }
 
     #[test]
-    fn test_map_ipv6_link_local_unicast_fails() {
-        // Test link-local unicast - should fail
-        let ipv6_link_local = Ipv6Addr::new(
-            0xfe80, 0x0000, 0x0000, 0x0000, 0x1234, 0x5678, 0x9abc, 0xdef0,
-        );
-        let result = map_external_to_underlay_ip(IpAddr::V6(ipv6_link_local));
+    fn test_prefix_preservation_hash_space_for_large_sets() {
+        // Smoke-test: For /64 (64 host bits), generating mappings for 100k
+        // unique IPv6 external addresses should produce 100k unique underlay
+        // addresses. With /64, we preserve segments 4-7, so vary those.
+        use std::collections::HashSet;
+        let prefix: Ipv6Net = "ff04::/64".parse().unwrap();
 
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not multicast"));
+        let mut set = HashSet::with_capacity(100_000);
+        for i in 0..100_000u32 {
+            // Construct a family of multicast IPv6 addresses (global scope ff0e)
+            // Vary segments 4-5 (which are preserved with /64) to ensure uniqueness
+            let ipv6 = Ipv6Addr::new(
+                0xff0e,
+                0,
+                0,
+                0,
+                (i >> 16) as u16,
+                (i & 0xffff) as u16,
+                0x3333,
+                0x4444,
+            );
+            let underlay =
+                map_external_to_underlay_ip_impl(prefix, IpAddr::V6(ipv6))
+                    .unwrap();
+            if let IpAddr::V6(u6) = underlay {
+                assert!(prefix.contains(&u6));
+                set.insert(u6);
+            } else {
+                panic!("expected IPv6 underlay");
+            }
+        }
+        assert_eq!(set.len(), 100_000);
+    }
+
+    #[test]
+    fn test_prefix_validation_success_larger_prefix() {
+        // Test that a larger prefix (e.g., /48) works correctly
+        let ipv4 = Ipv4Addr::new(224, 1, 2, 3);
+        let prefix: Ipv6Net = "ff04::/48".parse().unwrap();
+        let result = map_external_to_underlay_ip_impl(prefix, IpAddr::V4(ipv4));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_xor_folding_with_64bit_prefix() {
+        // Test XOR folding with /64 prefix: upper and lower 64-bit halves
+        // are XORed together to produce unique mapping
+        let ipv6 = Ipv6Addr::new(
+            0xff0e, 0x1234, 0x5678, 0x9abc, 0x7ef0, 0x1122, 0x3344, 0x5566,
+        );
+        let prefix: Ipv6Net = "ff04::/64".parse().unwrap();
+        let result =
+            map_external_to_underlay_ip_impl(prefix, IpAddr::V6(ipv6)).unwrap();
+
+        match result {
+            IpAddr::V6(underlay) => {
+                // Expected: XOR of upper 64 bits (ff0e:1234:5678:9abc) and
+                // lower 64 bits (7ef0:1122:3344:5566) = 81fe:0316:653c:cfda
+                let segments = underlay.segments();
+                assert_eq!(segments[0], IPV6_ADMIN_SCOPED_MULTICAST_PREFIX);
+                assert_eq!(segments[1], 0x0000);
+                assert_eq!(segments[2], 0x0000);
+                assert_eq!(segments[3], 0x0000);
+                assert_eq!(segments[4], 0x81fe);
+                assert_eq!(segments[5], 0x0316);
+                assert_eq!(segments[6], 0x653c);
+                assert_eq!(segments[7], 0xcfda);
+            }
+            _ => panic!("Expected IPv6 result"),
+        }
+    }
+
+    #[test]
+    fn test_bounded_preservation_prefix_48() {
+        // Test XOR folding with /48 prefix (not used in production):
+        // XORs upper 80 bits with lower 80 bits.
+        let ipv6 = Ipv6Addr::new(
+            0xff0e, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1122, 0x3344, 0x5566,
+        );
+        let prefix: Ipv6Net = "ff04:1000::/48".parse().unwrap();
+        let result =
+            map_external_to_underlay_ip_impl(prefix, IpAddr::V6(ipv6)).unwrap();
+
+        match result {
+            IpAddr::V6(underlay) => {
+                // XOR result of 80-bit chunks
+                assert_eq!(
+                    underlay.segments(),
+                    [
+                        IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                        0x1000,
+                        0x0000,
+                        0x9abc,
+                        0xdef0,
+                        0xee2c, // XOR folded
+                        0x2170, // XOR folded
+                        0x031e, // XOR folded
+                    ]
+                );
+            }
+            _ => panic!("Expected IPv6 result"),
+        }
+    }
+
+    #[test]
+    fn test_xor_folding_prevents_collisions() {
+        // Test that different external addresses with identical lower bits
+        // but different upper bits (scopes) map to DIFFERENT underlay addresses.
+        // XOR folding mixes upper and lower halves to avoid collisions.
+        let ipv6_site = Ipv6Addr::new(
+            0xff05, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1122, 0x3344, 0x5566,
+        );
+        let ipv6_global = Ipv6Addr::new(
+            0xff0e, 0xabcd, 0xef00, 0x0123, 0xdef0, 0x1122, 0x3344, 0x5566,
+        );
+
+        let prefix: Ipv6Net = "ff04::/64".parse().unwrap();
+
+        let result_site =
+            map_external_to_underlay_ip_impl(prefix, IpAddr::V6(ipv6_site))
+                .unwrap();
+        let result_global =
+            map_external_to_underlay_ip_impl(prefix, IpAddr::V6(ipv6_global))
+                .unwrap();
+
+        // Should map to DIFFERENT underlay addresses because XOR folding
+        // incorporates the different upper 64 bits (including scope)
+        assert_ne!(result_site, result_global);
+    }
+
+    #[test]
+    fn test_admin_scope_xor_folding() {
+        // Test that admin-scoped external addresses (ff04::) get XOR folded
+        // like any other multicast address, producing unique mappings
+        let external = Ipv6Addr::new(
+            IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+            0,
+            0,
+            0,
+            0x1234,
+            0x5678,
+            0x9abc,
+            0xdef0,
+        );
+
+        let prefix: Ipv6Net = "ff04::/64".parse().unwrap();
+        let underlay =
+            map_external_to_underlay_ip_impl(prefix, IpAddr::V6(external))
+                .unwrap();
+
+        // External and underlay will be different due to XOR folding
+        // (upper 64 bits XOR'd with lower 64 bits)
+        assert_ne!(IpAddr::V6(external), underlay);
+
+        // Verify XOR result: ff04:0:0:0 XOR 1234:5678:9abc:def0 = ed30:5678:9abc:def0
+        if let IpAddr::V6(u) = underlay {
+            assert_eq!(
+                u.segments(),
+                [
+                    IPV6_ADMIN_SCOPED_MULTICAST_PREFIX,
+                    0x0000,
+                    0x0000,
+                    0x0000,
+                    0xed30, // ff04 XOR 1234
+                    0x5678, // 0000 XOR 5678
+                    0x9abc, // 0000 XOR 9abc
+                    0xdef0, // 0000 XOR def0
+                ]
+            );
+        } else {
+            panic!("Expected IPv6 underlay");
+        }
     }
 }

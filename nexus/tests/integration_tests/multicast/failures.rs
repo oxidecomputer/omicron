@@ -105,7 +105,7 @@ async fn test_multicast_group_dpd_communication_failure_recovery(
 }
 
 #[nexus_test]
-async fn test_multicast_group_reconciler_state_consistency_validation(
+async fn test_multicast_reconciler_state_consistency_validation(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -162,7 +162,7 @@ async fn test_multicast_group_reconciler_state_consistency_validation(
     let attach_futures = instance_names.iter().zip(&group_names).map(
         |(instance_name, &group_name)| {
             multicast_group_attach(
-                client,
+                cptestctx,
                 project_name,
                 instance_name,
                 group_name,

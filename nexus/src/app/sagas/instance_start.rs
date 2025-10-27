@@ -97,6 +97,11 @@ declare_saga_actions! {
         - sis_ensure_registered_undo
     }
 
+    UPDATE_MULTICAST_SLED_ID -> "multicast_sled_id" {
+        + sis_update_multicast_sled_id
+        - sis_update_multicast_sled_id_undo
+    }
+
     // Only account for the instance's resource consumption when the saga is on
     // the brink of actually starting it. This allows prior steps' undo actions
     // to change the instance's generation number if warranted (e.g. by moving
@@ -142,6 +147,7 @@ impl NexusSaga for SagaInstanceStart {
         builder.append(dpd_ensure_action());
         builder.append(v2p_ensure_action());
         builder.append(ensure_registered_action());
+        builder.append(update_multicast_sled_id_action());
         builder.append(add_virtual_resources_action());
         builder.append(ensure_running_action());
         Ok(builder.build()?)
@@ -622,7 +628,7 @@ async fn sis_ensure_registered(
             .await
             .map_err(ActionError::action_failed)?;
 
-    let register_result = osagactx
+    osagactx
         .nexus()
         .instance_ensure_registered(
             &opctx,
@@ -636,67 +642,31 @@ async fn sis_ensure_registered(
             &vmm_record,
             InstanceRegisterReason::Start { vmm_id: propolis_id },
         )
-        .await;
+        .await
+        .map_err(|err| match err {
+            InstanceStateChangeError::SledAgent(inner) => {
+                info!(osagactx.log(),
+                      "start saga: sled agent failed to register instance";
+                      "instance_id" => %instance_id,
+                      "sled_id" =>  %sled_id,
+                      "error" => ?inner,
+                      "start_reason" => ?params.reason);
 
-    // Handle the result and update multicast members if successful
-    let vmm_record = match register_result {
-        Ok(vmm_record) => {
-            // Update multicast group members with the instance's sled_id now that it's registered
-            // Only do this if multicast is enabled - if disabled, no members exist to update
-            if osagactx.nexus().multicast_enabled() {
-                if let Err(e) = osagactx
-                    .datastore()
-                    .multicast_group_member_update_sled_id(
-                        &opctx,
-                        instance_id,
-                        Some(sled_id.into()),
-                    )
-                    .await
-                {
-                    // Log but don't fail the saga - the reconciler will fix this later
-                    info!(osagactx.log(),
-                          "start saga: failed to update multicast member sled_id, reconciler will fix";
-                          "instance_id" => %instance_id,
-                          "sled_id" => %sled_id,
-                          "error" => ?e);
-                } else {
-                    info!(osagactx.log(),
-                          "start saga: updated multicast member sled_id";
-                          "instance_id" => %instance_id,
-                          "sled_id" => %sled_id);
-                }
+                // Don't set the instance to Failed in this case. Instead, allow
+                // the saga to unwind and restore the instance to the Stopped
+                // state (matching what would happen if there were a failure
+                // prior to this point).
+                ActionError::action_failed(Error::from(inner))
             }
-            vmm_record
-        }
-        Err(err) => {
-            return Err(match err {
-                InstanceStateChangeError::SledAgent(inner) => {
-                    info!(osagactx.log(),
-                          "start saga: sled agent failed to register instance";
-                          "instance_id" => %instance_id,
-                          "sled_id" =>  %sled_id,
-                          "error" => ?inner,
-                          "start_reason" => ?params.reason);
-
-                    // Don't set the instance to Failed in this case. Instead, allow
-                    // the saga to unwind and restore the instance to the Stopped
-                    // state (matching what would happen if there were a failure
-                    // prior to this point).
-                    ActionError::action_failed(Error::from(inner))
-                }
-                InstanceStateChangeError::Other(inner) => {
-                    info!(osagactx.log(),
-                          "start saga: internal error registering instance";
-                          "instance_id" => %instance_id,
-                          "error" => ?inner,
-                          "start_reason" => ?params.reason);
-                    ActionError::action_failed(inner)
-                }
-            });
-        }
-    };
-
-    Ok(vmm_record)
+            InstanceStateChangeError::Other(inner) => {
+                info!(osagactx.log(),
+                      "start saga: internal error registering instance";
+                      "instance_id" => %instance_id,
+                      "error" => ?inner,
+                      "start_reason" => ?params.reason);
+                ActionError::action_failed(inner)
+            }
+        })
 }
 
 async fn sis_ensure_registered_undo(
@@ -808,33 +778,75 @@ async fn sis_ensure_registered_undo(
             }
         }
     } else {
-        // Only clear multicast member sled_id if multicast is enabled
-        // If disabled, no members exist to clear
-        if osagactx.nexus().multicast_enabled() {
-            datastore
-                .multicast_group_member_update_sled_id(
-                    &opctx,
-                    instance_id.into_untyped_uuid(),
-                    None,
-                )
-                .await
-                .map(|_| {
-                    info!(osagactx.log(),
-                          "start saga: cleared multicast member sled_id during undo";
-                          "instance_id" => %instance_id);
-                })
-                .map_err(|e| {
-                    // The reconciler will fix this later
-                    info!(osagactx.log(),
-                          "start saga: failed to clear multicast member sled_id during undo, reconciler will fix";
-                          "instance_id" => %instance_id,
-                          "error" => ?e);
-                })
-                .ok(); // Ignore the result
-        }
-
         Ok(())
     }
+}
+
+async fn sis_update_multicast_sled_id(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    // Only update multicast members if multicast is enabled
+    // If disabled, no members exist to update
+    if !osagactx.nexus().multicast_enabled() {
+        return Ok(());
+    }
+
+    let instance_id = params.db_instance.id();
+    let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
+
+    info!(osagactx.log(), "start saga: updating multicast member sled_id";
+          "instance_id" => %instance_id,
+          "sled_id" => %sled_id,
+          "start_reason" => ?params.reason);
+
+    osagactx
+        .datastore()
+        .multicast_group_member_update_sled_id(
+            &opctx,
+            InstanceUuid::from_untyped_uuid(instance_id),
+            Some(sled_id.into()),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sis_update_multicast_sled_id_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    // Only clear multicast members if multicast is enabled
+    // If disabled, no members exist to clear
+    if !osagactx.nexus().multicast_enabled() {
+        return Ok(());
+    }
+
+    let instance_id = InstanceUuid::from_untyped_uuid(params.db_instance.id());
+
+    info!(osagactx.log(), "start saga: clearing multicast member sled_id during undo";
+          "instance_id" => %instance_id,
+          "start_reason" => ?params.reason);
+
+    osagactx
+        .datastore()
+        .multicast_group_member_update_sled_id(&opctx, instance_id, None)
+        .await?;
+
+    Ok(())
 }
 
 async fn sis_ensure_running(

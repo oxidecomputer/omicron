@@ -131,7 +131,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     // Verify both stopped instances are in identical "Left" state
     for (i, instance) in [&instance1, &instance2].iter().enumerate() {
         wait_for_member_state(
-            client,
+            cptestctx,
             group_name,
             instance.identity.id,
             "Left", // Stopped instances should be Left
@@ -225,7 +225,7 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(member_uuid.instance_id, instance_uuid);
     // Instance is stopped (start: false), so reconciler will set member to "Left" state
-    wait_for_member_state(client, group_name, instance_uuid, "Left").await;
+    wait_for_member_state(cptestctx, group_name, instance_uuid, "Left").await;
 
     // Verify membership via UUID-based instance group list (no project parameter)
     let instance_groups_url =

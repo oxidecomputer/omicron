@@ -6,7 +6,7 @@
 
 //! Integration tests for multicast group APIs and basic membership operations.
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
@@ -30,7 +30,7 @@ use nexus_types::external_api::params::{
     IpPoolCreate, MulticastGroupCreate, MulticastGroupMemberAdd,
     MulticastGroupUpdate,
 };
-use nexus_types::external_api::shared::{IpRange, Ipv4Range};
+use nexus_types::external_api::shared::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_types::external_api::views::{
     IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
 };
@@ -87,7 +87,7 @@ async fn test_multicast_group_create_raw_omitted_optionals(
     .await
     .expect("Create with omitted optional fields should succeed")
     .parsed_body()
-    .expect("Failed to parse created MulticastGroup");
+    .expect("Should parse created MulticastGroup");
 
     assert_eq!(created.identity.name, group_name);
     assert!(created.multicast_ip.is_multicast());
@@ -136,7 +136,7 @@ async fn test_multicast_group_create_raw_asm_omitted_sources(
     .await
     .expect("ASM creation with omitted source_ips should succeed")
     .parsed_body()
-    .expect("Failed to parse created MulticastGroup");
+    .expect("Should parse created MulticastGroup");
 
     assert!(created.multicast_ip.is_multicast());
     assert!(created.source_ips.is_empty());
@@ -181,7 +181,7 @@ async fn test_multicast_group_create_raw_ssm_missing_sources(
     .await
     .expect("SSM creation without sources should fail")
     .parsed_body()
-    .expect("Failed to parse error response body");
+    .expect("Should parse error response body");
 
     assert!(
         error
@@ -564,6 +564,146 @@ async fn test_multicast_group_validation_errors(
         StatusCode::BAD_REQUEST,
     )
     .await;
+
+    // Test with IPv6 unicast (should be rejected)
+    let ipv6_unicast = IpAddr::V6(Ipv6Addr::new(
+        0x2001, 0xdb8, 0x1234, 0x5678, 0x9abc, 0xdef0, 0x1234, 0x5678,
+    ));
+    let params_ipv6_unicast = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "ipv6-unicast-group".parse().unwrap(),
+            description: "Group with IPv6 unicast IP".to_string(),
+        },
+        multicast_ip: Some(ipv6_unicast),
+        source_ips: None,
+        pool: None,
+        mvlan: None,
+    };
+
+    object_create_error(
+        client,
+        &group_url,
+        &params_ipv6_unicast,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    // Test with IPv6 interface-local multicast ff01:: (should be rejected)
+    let ipv6_interface_local =
+        IpAddr::V6(Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 1));
+    let params_ipv6_interface_local = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "ipv6-interface-local-group".parse().unwrap(),
+            description: "Group with IPv6 interface-local multicast IP"
+                .to_string(),
+        },
+        multicast_ip: Some(ipv6_interface_local),
+        source_ips: None,
+        pool: None,
+        mvlan: None,
+    };
+
+    object_create_error(
+        client,
+        &group_url,
+        &params_ipv6_interface_local,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    // Test with IPv6 link-local multicast ff02:: (should be rejected)
+    let ipv6_link_local_mcast =
+        IpAddr::V6(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 1));
+    let params_ipv6_link_local = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "ipv6-link-local-group".parse().unwrap(),
+            description: "Group with IPv6 link-local multicast IP".to_string(),
+        },
+        multicast_ip: Some(ipv6_link_local_mcast),
+        source_ips: None,
+        pool: None,
+        mvlan: None,
+    };
+
+    object_create_error(
+        client,
+        &group_url,
+        &params_ipv6_link_local,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+}
+
+/// Test that multicast IP pools reject invalid ranges at the pool level
+#[nexus_test]
+async fn test_multicast_ip_pool_range_validation(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create IPv4 multicast pool
+    let pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "test-v4-pool".parse().unwrap(),
+            description: "IPv4 multicast pool for validation tests".to_string(),
+        },
+        IpVersion::V4,
+    );
+    object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
+        .await;
+
+    let range_url = "/v1/system/ip-pools/test-v4-pool/ranges/add";
+
+    // IPv4 non-multicast range should be rejected
+    let ipv4_unicast_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 255))
+            .unwrap(),
+    );
+    object_create_error(
+        client,
+        range_url,
+        &ipv4_unicast_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    // IPv4 link-local multicast range should be rejected
+    let ipv4_link_local_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(224, 0, 0, 1), Ipv4Addr::new(224, 0, 0, 255))
+            .unwrap(),
+    );
+    object_create_error(
+        client,
+        range_url,
+        &ipv4_link_local_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    // Valid IPv4 multicast range should be accepted
+    let valid_ipv4_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(239, 0, 0, 1), Ipv4Addr::new(239, 0, 0, 255))
+            .unwrap(),
+    );
+    object_create::<_, IpPoolRange>(client, range_url, &valid_ipv4_range).await;
+
+    // TODO: Remove this test once IPv6 is enabled for multicast pools.
+    // IPv6 ranges should currently be rejected (not yet supported)
+    let ipv6_range = IpRange::V6(
+        Ipv6Range::new(
+            Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 1),
+            Ipv6Addr::new(0xff05, 0, 0, 0, 0, 0, 0, 255),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        range_url,
+        &ipv6_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
 }
 
 #[nexus_test]
@@ -634,8 +774,13 @@ async fn test_multicast_group_member_operations(
     // Wait for member to become joined
     // Member starts in "Joining" state and transitions to "Joined" via reconciler
     // Member only transitions to "Joined" AFTER successful DPD update
-    wait_for_member_state(&client, group_name, instance.identity.id, "Joined")
-        .await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        "Joined",
+    )
+    .await;
 
     // Test listing members (should have 1 now in Joined state)
     let members = list_multicast_group_members(&client, group_name).await;
@@ -654,7 +799,7 @@ async fn test_multicast_group_member_operations(
     let dpd_groups = dpd_client
         .multicast_groups_list(None, None)
         .await
-        .expect("Failed to list DPD groups");
+        .expect("Should list DPD groups");
 
     // Find the external IPv4 group (should exist but may not have members)
     let expect_msg =
@@ -708,7 +853,7 @@ async fn test_multicast_group_member_operations(
     let underlay_group = dpd_client
         .multicast_group_get_underlay(&underlay_ip)
         .await
-        .expect("Failed to get underlay group from DPD");
+        .expect("Should get underlay group from DPD");
 
     assert_eq!(
         underlay_group.members.len(),
@@ -730,7 +875,7 @@ async fn test_multicast_group_member_operations(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to remove member from multicast group");
+    .expect("Should remove member from multicast group");
 
     // Wait for member count to reach 0 after removal
     wait_for_member_count(&client, group_name, 0).await;
@@ -808,8 +953,15 @@ async fn test_instance_multicast_endpoints(
     )
     .await;
 
-    // Create an instance
+    // Create an instance (starts automatically with create_instance helper)
     let instance = create_instance(client, project_name, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Simulate and wait for instance to be fully running with sled_id assigned
+    let nexus = &cptestctx.server.server_context().nexus;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+    wait_for_instance_sled_assignment(cptestctx, &instance_id).await;
 
     // Test: List instance multicast groups (should be empty initially)
     let instance_groups_url = format!(
@@ -849,8 +1001,13 @@ async fn test_instance_multicast_endpoints(
     assert_eq!(member1.instance_id, instance.identity.id);
 
     // Wait for member to become joined
-    wait_for_member_state(&client, group1_name, instance.identity.id, "Joined")
-        .await;
+    wait_for_member_state(
+        cptestctx,
+        group1_name,
+        instance.identity.id,
+        "Joined",
+    )
+    .await;
 
     // Test: Verify membership shows up in both endpoints
     // Check group-centric view
@@ -888,8 +1045,13 @@ async fn test_instance_multicast_endpoints(
     assert_eq!(member2.instance_id, instance.identity.id);
 
     // Wait for member to become joined
-    wait_for_member_state(&client, group2_name, instance.identity.id, "Joined")
-        .await;
+    wait_for_member_state(
+        cptestctx,
+        group2_name,
+        instance.identity.id,
+        "Joined",
+    )
+    .await;
 
     // Verify instance now belongs to both groups (comprehensive list test)
     let instance_memberships: ResultsPage<MulticastGroupMember> =
@@ -983,7 +1145,7 @@ async fn test_instance_multicast_endpoints(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to remove member from group2");
+    .expect("Should remove member from group2");
 
     // Wait for reconciler to process the removal
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
@@ -1197,8 +1359,13 @@ async fn test_instance_deletion_removes_multicast_memberships(
     .await;
 
     // Wait for member to join
-    wait_for_member_state(&client, group_name, instance.identity.id, "Joined")
-        .await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        "Joined",
+    )
+    .await;
 
     // Verify member was added
     let members = list_multicast_group_members(&client, group_name).await;
@@ -1297,8 +1464,13 @@ async fn test_member_operations_via_rpw_reconciler(
         object_create(client, &member_add_url, &member_params).await;
 
     // Wait for member to become joined
-    wait_for_member_state(&client, group_name, instance.identity.id, "Joined")
-        .await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        "Joined",
+    )
+    .await;
 
     // Verify member was added and reached Joined state
     let members = list_multicast_group_members(&client, group_name).await;
@@ -1333,7 +1505,7 @@ async fn test_member_operations_via_rpw_reconciler(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to remove member from multicast group");
+    .expect("Should remove member from multicast group");
 
     // Verify member was removed (wait for member count to reach 0)
     wait_for_member_count(&client, group_name, 0).await;
@@ -1435,7 +1607,14 @@ async fn test_multicast_group_comprehensive_updates(
         object_put(client, &original_group_url, &name_update).await;
 
     // Wait for update saga to complete DPD configuration application
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+    // Name updates don't change DPD state, just verify saga completed without errors
+    wait_for_group_dpd_update(
+        cptestctx,
+        &created_group.multicast_ip,
+        dpd_predicates::expect_external_group(),
+        "name update saga completed",
+    )
+    .await;
 
     // Verify name update worked
     assert_eq!(name_updated_group.identity.name, updated_name);
@@ -1469,7 +1648,14 @@ async fn test_multicast_group_comprehensive_updates(
         object_put(client, &updated_group_url, &combined_update).await;
 
     // Wait for update saga to complete
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+    // Combined name+description updates don't change DPD state
+    wait_for_group_dpd_update(
+        cptestctx,
+        &created_group.multicast_ip,
+        dpd_predicates::expect_external_group(),
+        "combined name+description update saga completed",
+    )
+    .await;
 
     // Verify combined update worked
     assert_eq!(final_updated_group.identity.name, final_name);
@@ -1798,6 +1984,16 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
     };
     let updated_ssm: MulticastGroup =
         object_put(client, &mcast_group_url(ssm_group_name), &ssm_update).await;
+
+    // Wait for update saga to complete
+    wait_for_group_dpd_update(
+        cptestctx,
+        &updated_ssm.multicast_ip,
+        dpd_predicates::expect_external_group(),
+        "source_ips update saga completed",
+    )
+    .await;
+
     assert_eq!(updated_ssm.source_ips.len(), 2);
     let source_strings: std::collections::HashSet<String> =
         updated_ssm.source_ips.iter().map(|ip| ip.to_string()).collect();
@@ -1819,6 +2015,16 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         &ssm_source_reduction,
     )
     .await;
+
+    // Wait for source reduction saga to complete
+    wait_for_group_dpd_update(
+        cptestctx,
+        &reduced_ssm.multicast_ip,
+        dpd_predicates::expect_external_group(),
+        "source_ips reduction saga completed",
+    )
+    .await;
+
     assert_eq!(
         reduced_ssm.source_ips.len(),
         1,
@@ -1844,6 +2050,17 @@ async fn test_multicast_source_ips_update(cptestctx: &ControlPlaneTestContext) {
         &ssm_update_with_mvlan,
     )
     .await;
+
+    // Wait for combined source_ips+mvlan update saga to complete
+    // Must verify vlan_id was applied to DPD
+    wait_for_group_dpd_update(
+        cptestctx,
+        &ssm_with_mvlan.multicast_ip,
+        dpd_predicates::expect_vlan_id(2500),
+        "source_ips+mvlan update saga completed, vlan_id=2500",
+    )
+    .await;
+
     assert_eq!(ssm_with_mvlan.source_ips.len(), 2);
     assert_eq!(
         ssm_with_mvlan.mvlan,
@@ -2454,12 +2671,17 @@ async fn test_multicast_group_mvlan_with_member_operations(
     .await;
 
     // Attach instance to group with mvlan
-    multicast_group_attach(client, project_name, instance_name, group_name)
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
         .await;
 
     // Wait for member to reach Joined state
-    wait_for_member_state(client, group_name, instance.identity.id, "Joined")
-        .await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        "Joined",
+    )
+    .await;
 
     // Verify DPD shows vlan_id=2048
     let dpd_client = dpd_client(cptestctx);
@@ -2495,7 +2717,7 @@ async fn test_multicast_group_mvlan_with_member_operations(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to stop instance");
+    .expect("Should stop instance");
 
     let nexus = &cptestctx.server.server_context().nexus;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -2558,10 +2780,15 @@ async fn test_multicast_group_mvlan_reconciler_update(
     )
     .await;
 
-    multicast_group_attach(client, project_name, instance_name, group_name)
+    multicast_group_attach(cptestctx, project_name, instance_name, group_name)
         .await;
-    wait_for_member_state(client, group_name, instance.identity.id, "Joined")
-        .await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        "Joined",
+    )
+    .await;
 
     // Verify initial mvlan in DPD
     let dpd_client = dpd_client(cptestctx);
@@ -2604,30 +2831,14 @@ async fn test_multicast_group_mvlan_reconciler_update(
         "Group mvlan should be updated"
     );
 
-    // Wait for reconciler to process the mvlan change
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Verify reconciler updated DPD with new vlan_id
-    let updated_dpd_group = dpd_client
-        .multicast_group_get(&created_group.multicast_ip)
-        .await
-        .expect("Group should still exist in DPD");
-
-    match updated_dpd_group.into_inner() {
-        dpd_types::MulticastGroupResponse::External {
-            external_forwarding,
-            ..
-        } => {
-            assert_eq!(
-                external_forwarding.vlan_id,
-                Some(3500),
-                "Reconciler should have updated DPD vlan_id to 3500"
-            );
-        }
-        dpd_types::MulticastGroupResponse::Underlay { .. } => {
-            panic!("Expected external group");
-        }
-    }
+    // Wait for reconciler to process the mvlan change and verify DPD state
+    wait_for_group_dpd_update(
+        cptestctx,
+        &created_group.multicast_ip,
+        dpd_predicates::expect_vlan_id(3500),
+        "vlan_id = Some(3500)",
+    )
+    .await;
 
     // Member should still be Joined after mvlan update
     let members = list_multicast_group_members(client, group_name).await;
@@ -2648,7 +2859,7 @@ async fn test_multicast_group_mvlan_reconciler_update(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to stop instance");
+    .expect("Should stop instance");
 
     let nexus = &cptestctx.server.server_context().nexus;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);

@@ -60,7 +60,13 @@
 //! - ["Joined"](MulticastGroupMemberState::Joined): Member configuration applied
 //!   in the dataplane, ready to receive multicast traffic
 //! - ["Left"](MulticastGroupMemberState::Left): Member configuration removed from
-//!   the dataplane (e.g., instance stopped/migrated)
+//!   the dataplane (e.g., instance stopping/stopped, explicit detach, delete)
+//!
+//! Migration note: during instance migration, membership is reconfigured in
+//! place—the reconciler removes configuration from the old sled and applies it
+//! on the new sled without transitioning the member to "Left". In other words,
+//! migration is not considered leaving; the member generally remains "Joined"
+//! while its `sled_id` and dataplane configuration are updated.
 //! - If an instance is deleted, the member will be marked for removal with a
 //!   deleted timestamp, and the reconciler will remove it from the dataplane
 //!
@@ -185,13 +191,13 @@ pub struct ExternalMulticastGroup {
     /// The MVLAN value is sent to switches during group creation/updates and
     /// controls VLAN tagging for egress traffic only; it does not affect ingress
     /// multicast traffic received by the rack. Switch port selection for egress
-    /// traffic remains pending (see TODO at `nexus/src/app/multicast/dataplane.rs:113-115`).
+    /// traffic remains pending (see TODOs in `nexus/src/app/multicast/dataplane.rs`).
     ///
     /// Valid range when specified: 2-4094 (IEEE 802.1Q; Dendrite requires >= 2).
     ///
     /// Database Type: i16 (INT2) - this field uses `i16` (INT2) for storage
     /// efficiency, unlike other VLAN columns in the schema which use `SqlU16`
-    /// (forcing INT4). Direct `i16` is appropriate here since VLANs fits in
+    /// (forcing INT4). Direct `i16` is appropriate here since VLANs fit in
     /// INT2's range.
     pub mvlan: Option<i16>,
     /// Associated underlay group for NAT.
@@ -200,7 +206,15 @@ pub struct ExternalMulticastGroup {
     pub underlay_group_id: Option<Uuid>,
     /// Rack ID multicast group was created on.
     pub rack_id: Uuid,
-    /// Group tag for lifecycle management.
+    /// DPD-client tag used to couple external (overlay) and underlay entries
+    /// for this multicast group.
+    ///
+    /// System-generated from the group's unique name at creation
+    /// and updated on rename to maintain pairing consistency. Since group names
+    /// have a unique constraint (among non-deleted groups), tags are unique per
+    /// active group, ensuring tag-based DPD-client operations (like cleanup)
+    /// affect only the intended group. Not used for authorization; intended for
+    /// Dendrite management.
     pub tag: Option<String>,
     /// Current state of the multicast group (RPW pattern).
     /// See [MulticastGroupState] for possible values.
@@ -258,7 +272,7 @@ pub struct MulticastGroupMember {
     pub external_group_id: Uuid,
     /// Parent instance or service that receives multicast traffic.
     pub parent_id: Uuid,
-    /// Sled hosting the parent instance.
+    /// Sled hosting the parent.
     pub sled_id: Option<DbTypedUuid<SledKind>>,
     /// Current state of the multicast group member (RPW pattern).
     /// See [MulticastGroupMemberState] for possible values.
@@ -406,7 +420,8 @@ impl MulticastGroupMember {
 /// Database representation of an underlay multicast group.
 ///
 /// Underlay groups are system-generated admin-scoped IPv6 multicast addresses
-/// used as a NAT target for internal multicast traffic.
+/// used as a NAT target for internal multicast traffic. Underlay groups are
+/// VNI-agnostic; the VNI is an overlay identifier carried by [ExternalMulticastGroup].
 ///
 /// These are distinct from [ExternalMulticastGroup] which are external-facing
 /// addresses allocated from IP pools, specified by users or applications.
@@ -433,21 +448,18 @@ pub struct UnderlayMulticastGroup {
     pub time_deleted: Option<DateTime<Utc>>,
     /// Admin-scoped IPv6 multicast address (NAT target).
     pub multicast_ip: IpNetwork,
-    /// VNI for this multicast group.
-    pub vni: Vni,
-    /// Group tag for lifecycle management.
+    /// Dendrite tag used to couple external/underlay state for this group.
+    ///
+    /// Matches the tag on the paired [ExternalMulticastGroup] so Dendrite can treat
+    /// the overlay and underlay entries as a logical unit. Since tags are derived
+    /// from unique group names, each active group has a unique tag, ensuring
+    /// tag-based operations (like cleanup) affect only this group's configuration.
+    /// See [ExternalMulticastGroup::tag] for complete semantics.
     pub tag: Option<String>,
     /// Version when this group was added.
     pub version_added: Generation,
     /// Version when this group was removed.
     pub version_removed: Option<Generation>,
-}
-
-impl UnderlayMulticastGroup {
-    /// Get the VNI as a u32.
-    pub fn vni(&self) -> u32 {
-        self.vni.0.into()
-    }
 }
 
 /// Update data for a multicast group.

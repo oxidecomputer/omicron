@@ -63,6 +63,8 @@ pub(crate) struct MulticastGroupAllocationParams {
 
 impl DataStore {
     /// List multicast groups by state.
+    ///
+    /// Used by RPW reconciler.
     pub async fn multicast_groups_list_by_state(
         &self,
         opctx: &OpContext,
@@ -84,13 +86,13 @@ impl DataStore {
     pub async fn multicast_group_set_state(
         &self,
         opctx: &OpContext,
-        group_id: Uuid,
+        group_id: MulticastGroupUuid,
         new_state: MulticastGroupState,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::multicast_group::dsl;
 
         let rows_updated = diesel::update(dsl::multicast_group)
-            .filter(dsl::id.eq(group_id))
+            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .set((
                 dsl::state.eq(new_state),
@@ -103,7 +105,7 @@ impl DataStore {
         if rows_updated == 0 {
             return Err(external::Error::not_found_by_id(
                 ResourceType::MulticastGroup,
-                &group_id,
+                &group_id.into_untyped_uuid(),
             ));
         }
 
@@ -111,6 +113,9 @@ impl DataStore {
     }
 
     /// Allocate a new external multicast group.
+    ///
+    /// The external multicast IP is allocated from the specified pool or the
+    /// default multicast pool.
     pub async fn multicast_group_create(
         &self,
         opctx: &OpContext,
@@ -133,24 +138,22 @@ impl DataStore {
     }
 
     /// Fetch an external multicast group by ID.
+    ///
+    /// See [`Self::multicast_group_fetch_on_conn`] for the connection-reusing
+    /// variant.
     pub async fn multicast_group_fetch(
         &self,
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
     ) -> LookupResult<ExternalMulticastGroup> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.multicast_group_fetch_on_conn(
-            opctx,
-            &conn,
-            group_id.into_untyped_uuid(),
-        )
-        .await
+        self.multicast_group_fetch_on_conn(&conn, group_id.into_untyped_uuid())
+            .await
     }
 
     /// Fetch an external multicast group using provided connection.
     pub async fn multicast_group_fetch_on_conn(
         &self,
-        _opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<nexus_db_lookup::DbConnection>,
         group_id: Uuid,
     ) -> LookupResult<ExternalMulticastGroup> {
@@ -171,33 +174,6 @@ impl DataStore {
                     ),
                 )
             })
-    }
-
-    /// Check if an external multicast group is active.
-    pub(crate) async fn multicast_group_is_active(
-        &self,
-        conn: &async_bb8_diesel::Connection<nexus_db_lookup::DbConnection>,
-        group_id: Uuid,
-    ) -> LookupResult<bool> {
-        use nexus_db_schema::schema::multicast_group::dsl;
-
-        let state = dsl::multicast_group
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(group_id))
-            .select(dsl::state)
-            .first_async::<MulticastGroupState>(conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::MulticastGroup,
-                        LookupType::ById(group_id.into_untyped_uuid()),
-                    ),
-                )
-            })?;
-
-        Ok(state == MulticastGroupState::Active)
     }
 
     /// Lookup an external multicast group by IP address.
@@ -288,21 +264,26 @@ impl DataStore {
             })
     }
 
-    /// Mark a multicast group for soft deletion.
+    /// Mark a multicast group for deletion by transitioning to "DELETING" state.
     ///
-    /// Sets the `time_deleted` timestamp on the group, preventing it from
-    /// appearing in normal queries. The group remains in the database
-    /// until it's cleaned up by a background task.
+    /// Unlike members (which use `time_deleted` to distinguish temporary vs
+    /// permanent removal), groups use a simpler model:
+    /// - "DELETING" state = permanent removal in progress
+    /// - RPW reconciler handles cleanup then removes the row entirely
+    /// - `time_deleted` is only set as final step before row deletion
+    ///
+    /// The group remains visible in queries until the reconciler completes
+    /// cleanup and hard-deletes the row.
     pub async fn mark_multicast_group_for_removal(
         &self,
         opctx: &OpContext,
-        group_id: Uuid,
+        group_id: MulticastGroupUuid,
     ) -> DeleteResult {
         use nexus_db_schema::schema::multicast_group::dsl;
         let now = Utc::now();
 
         diesel::update(dsl::multicast_group)
-            .filter(dsl::id.eq(group_id))
+            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
             .filter(
                 dsl::state
                     .eq(MulticastGroupState::Active)
@@ -349,6 +330,8 @@ impl DataStore {
     ///
     /// The rack_id should come from the requesting nexus instance (the rack
     /// that received the API request).
+    ///
+    /// See [`Self::allocate_external_multicast_group_on_conn`] for the connection-reusing variant.
     pub(crate) async fn allocate_external_multicast_group(
         &self,
         opctx: &OpContext,
@@ -415,7 +398,8 @@ impl DataStore {
                 source_ips: source_ip_networks,
                 mvlan: params.mvlan.map(|vlan_id| u16::from(vlan_id) as i16),
                 vni,
-                // Set tag to group name for lifecycle management
+                // Set DPD tag to the group name to couple overlay/underlay entries
+                // for this multicast group (kept in sync on rename)
                 tag: Some(params.identity.name.to_string()),
             },
         );
@@ -463,18 +447,28 @@ impl DataStore {
         })
     }
 
-    /// Deallocate an external multicast group address.
+    /// Deallocate an external multicast group address for IP pool cleanup.
+    ///
+    /// This marks the group's IP address as deallocated by setting `time_deleted`,
+    /// releasing it back to the pool. This is NOT the user-initiated deletion path.
+    ///
+    /// User-initiated deletion uses `mark_multicast_group_for_removal` which
+    /// transitions to "Deleting" state for RPW cleanup before row removal.
     ///
     /// Returns `Ok(true)` if the group was deallocated, `Ok(false)` if it was
-    /// already deleted, `Err(_)` for any other condition including non-existent
-    /// record.
+    /// already deleted (i.e., `time_deleted` was already set), `Err(_)` for any
+    /// other condition including non-existent record.
     pub async fn deallocate_external_multicast_group(
         &self,
         opctx: &OpContext,
-        group_id: Uuid,
+        group_id: MulticastGroupUuid,
     ) -> Result<bool, external::Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.deallocate_external_multicast_group_on_conn(&conn, group_id).await
+        self.deallocate_external_multicast_group_on_conn(
+            &conn,
+            group_id.into_untyped_uuid(),
+        )
+        .await
     }
 
     /// Transaction-safe variant of deallocate_external_multicast_group.
@@ -516,7 +510,6 @@ impl DataStore {
         opctx: &OpContext,
         external_group: MulticastGroup,
         multicast_ip: IpNetwork,
-        vni: Vni,
     ) -> CreateResult<UnderlayMulticastGroup> {
         use nexus_db_schema::schema::multicast_group::dsl as external_dsl;
         use nexus_db_schema::schema::underlay_multicast_group::dsl as underlay_dsl;
@@ -533,7 +526,6 @@ impl DataStore {
             underlay_dsl::time_created.eq(Utc::now()),
             underlay_dsl::time_modified.eq(Utc::now()),
             underlay_dsl::multicast_ip.eq(multicast_ip),
-            underlay_dsl::vni.eq(vni),
             underlay_dsl::tag.eq(tag.clone()),
         ))
         .returning(UnderlayMulticastGroup::as_returning())
@@ -545,8 +537,7 @@ impl DataStore {
                     opctx.log,
                     "Created new underlay multicast group";
                     "group_id" => %created_group.id,
-                    "multicast_ip" => %multicast_ip,
-                    "vni" => u32::from(vni.0)
+                    "multicast_ip" => %multicast_ip
                 );
                 created_group
             }
@@ -558,7 +549,6 @@ impl DataStore {
                         opctx.log,
                         "Concurrent underlay multicast group creation detected, fetching existing";
                         "multicast_ip" => %multicast_ip,
-                        "vni" => u32::from(vni.0)
                     );
 
                     underlay_dsl::underlay_multicast_group
@@ -578,7 +568,6 @@ impl DataStore {
                         "Failed to create underlay multicast group";
                         "error" => ?e,
                         "multicast_ip" => %multicast_ip,
-                        "vni" => u32::from(vni.0),
                         "tag" => ?tag
                     );
                     return Err(public_error_from_diesel(
@@ -612,29 +601,16 @@ impl DataStore {
         opctx: &OpContext,
         group_id: Uuid,
     ) -> LookupResult<UnderlayMulticastGroup> {
-        use nexus_db_schema::schema::underlay_multicast_group::dsl;
-
-        dsl::underlay_multicast_group
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(group_id))
-            .select(UnderlayMulticastGroup::as_select())
-            .first_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::MulticastGroup,
-                        LookupType::ById(group_id.into_untyped_uuid()),
-                    ),
-                )
-            })
+        self.underlay_multicast_group_fetch_on_conn(
+            &*self.pool_connection_authorized(opctx).await?,
+            group_id,
+        )
+        .await
     }
 
     /// Fetch underlay multicast group using provided connection.
     pub async fn underlay_multicast_group_fetch_on_conn(
         &self,
-        _opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         group_id: Uuid,
     ) -> LookupResult<UnderlayMulticastGroup> {
@@ -703,9 +679,10 @@ mod tests {
         MulticastGroupMemberState,
     };
     use crate::db::pub_test_utils::helpers::{
-        SledUpdateBuilder, create_project,
+        SledUpdateBuilder, create_instance_with_vmm, create_project,
+        create_stopped_instance_record,
     };
-    use crate::db::pub_test_utils::{TestDatabase, helpers, multicast};
+    use crate::db::pub_test_utils::{TestDatabase, multicast};
 
     async fn create_test_sled(datastore: &DataStore) -> SledUuid {
         let sled_id = SledUuid::new_v4();
@@ -956,7 +933,7 @@ mod tests {
         datastore
             .multicast_group_set_state(
                 &opctx,
-                group_default.id(),
+                MulticastGroupUuid::from_untyped_uuid(group_default.id()),
                 MulticastGroupState::Active,
             )
             .await
@@ -1090,14 +1067,12 @@ mod tests {
                 &opctx,
                 external_group.clone(),
                 "ff04::1".parse().unwrap(),
-                external_group.vni,
             )
             .await
             .expect("Should create underlay group");
 
         // Verify underlay group properties
         assert!(underlay_group.multicast_ip.ip().is_ipv6());
-        assert!(underlay_group.vni() > 0);
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -1185,7 +1160,7 @@ mod tests {
 
         // Create test sled and instances
         let sled_id = create_test_sled(&datastore).await;
-        let instance_record_1 = helpers::create_stopped_instance_record(
+        let instance_record_1 = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -1193,7 +1168,7 @@ mod tests {
         )
         .await;
         let parent_id_1 = instance_record_1.as_untyped_uuid();
-        let instance_record_2 = helpers::create_stopped_instance_record(
+        let instance_record_2 = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -1201,7 +1176,7 @@ mod tests {
         )
         .await;
         let parent_id_2 = instance_record_2.as_untyped_uuid();
-        let instance_record_3 = helpers::create_stopped_instance_record(
+        let instance_record_3 = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -1330,7 +1305,7 @@ mod tests {
         datastore
             .multicast_group_set_state(
                 &opctx,
-                group.id(),
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
                 MulticastGroupState::Active,
             )
             .await
@@ -1412,8 +1387,8 @@ mod tests {
         datastore
             .multicast_group_member_detach_by_group_and_instance(
                 &opctx,
-                group.id(),
-                *parent_id_1,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(*parent_id_1),
             )
             .await
             .expect("Should remove first member");
@@ -1461,8 +1436,8 @@ mod tests {
         datastore
             .multicast_group_member_detach_by_group_and_instance(
                 &opctx,
-                group.id(),
-                *parent_id_1,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(*parent_id_1),
             )
             .await
             .expect("Should remove first member again");
@@ -1470,8 +1445,8 @@ mod tests {
         datastore
             .multicast_group_member_detach_by_group_and_instance(
                 &opctx,
-                group.id(),
-                *parent_id_2,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(*parent_id_2),
             )
             .await
             .expect("Should remove second member");
@@ -1575,9 +1550,9 @@ mod tests {
 
         // Create test project, sled and instance for duplicate testing
         let (authz_project, _project) =
-            helpers::create_project(&opctx, &datastore, "dup-test-proj").await;
+            create_project(&opctx, &datastore, "dup-test-proj").await;
         let sled_id = create_test_sled(&datastore).await;
-        let instance_record = helpers::create_stopped_instance_record(
+        let instance_record = create_stopped_instance_record(
             &opctx,
             &datastore,
             &authz_project,
@@ -1651,7 +1626,7 @@ mod tests {
         datastore
             .multicast_group_set_state(
                 &opctx,
-                group.id(),
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
                 MulticastGroupState::Active,
             )
             .await
@@ -1787,10 +1762,9 @@ mod tests {
 
         // Create test project and instance (datastore-only)
         let (authz_project, _project) =
-            helpers::create_project(&opctx, &datastore, "state-test-proj")
-                .await;
+            create_project(&opctx, &datastore, "state-test-proj").await;
         let sled_id = create_test_sled(&datastore).await;
-        let (instance, _vmm) = helpers::create_instance_with_vmm(
+        let (instance, _vmm) = create_instance_with_vmm(
             &opctx,
             &datastore,
             &authz_project,
@@ -1804,7 +1778,7 @@ mod tests {
         datastore
             .multicast_group_set_state(
                 &opctx,
-                group.id(),
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
                 MulticastGroupState::Active,
             )
             .await
@@ -1827,8 +1801,8 @@ mod tests {
         datastore
             .multicast_group_member_set_state(
                 &opctx,
-                group.id(),
-                test_instance_id,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(test_instance_id),
                 MulticastGroupMemberState::Joined,
             )
             .await
@@ -1857,16 +1831,20 @@ mod tests {
         datastore
             .multicast_group_member_set_state(
                 &opctx,
-                group.id(),
-                test_instance_id,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(test_instance_id),
                 MulticastGroupMemberState::Left,
             )
             .await
             .expect("Should transition to 'Left' state");
 
-        // Verify member is now in "Left" state (use _all_states to see Left members)
+        // Verify member is now in "Left" state
         let all_members = datastore
-            .multicast_group_members_list_all(&opctx, group.id(), pagparams)
+            .multicast_group_members_list_by_id(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                pagparams,
+            )
             .await
             .expect("Should list all members");
 
@@ -1898,16 +1876,20 @@ mod tests {
         datastore
             .multicast_group_member_set_state(
                 &opctx,
-                group.id(),
-                test_instance_id,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(test_instance_id),
                 MulticastGroupMemberState::Left,
             )
             .await
-            .expect("Should transition to Deleted");
+            .expect("Should transition to Left");
 
-        // Member should still exist in database but marked as "Deleted"
+        // Member should still exist in database and be in "Left" state
         let members = datastore
-            .multicast_group_members_list_all(&opctx, group.id(), pagparams)
+            .multicast_group_members_list_by_id(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                pagparams,
+            )
             .await
             .expect("Should list members");
 
@@ -1997,7 +1979,10 @@ mod tests {
 
         // Delete the group completely (time_deleted set)
         let deleted = datastore
-            .deallocate_external_multicast_group(&opctx, group1.id())
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group1.id()),
+            )
             .await
             .expect("Should deallocate group");
         assert_eq!(deleted, true, "Should successfully deallocate the group");
@@ -2139,7 +2124,10 @@ mod tests {
 
         // Delete the first group to free up the IP
         let deleted = datastore
-            .deallocate_external_multicast_group(&opctx, group1.id())
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group1.id()),
+            )
             .await
             .expect("Should deallocate first group");
         assert_eq!(deleted, true, "Should successfully deallocate the group");
@@ -2261,7 +2249,10 @@ mod tests {
 
         // Deallocate existing group - should return true
         let result1 = datastore
-            .deallocate_external_multicast_group(&opctx, group.id())
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
             .await
             .expect("Deallocation should succeed");
         assert_eq!(
@@ -2271,7 +2262,10 @@ mod tests {
 
         // Deallocate the same group again - should return false (already deleted)
         let result2 = datastore
-            .deallocate_external_multicast_group(&opctx, group.id())
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
             .await
             .expect("Second deallocation should succeed but return false");
         assert_eq!(
@@ -2282,7 +2276,10 @@ mod tests {
         // Try to deallocate non-existent group - should return error
         let fake_id = Uuid::new_v4();
         let result3 = datastore
-            .deallocate_external_multicast_group(&opctx, fake_id)
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(fake_id),
+            )
             .await;
         assert!(
             result3.is_err(),
@@ -2649,7 +2646,7 @@ mod tests {
         datastore
             .multicast_group_set_state(
                 &opctx,
-                group.id(),
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
                 MulticastGroupState::Active,
             )
             .await
@@ -2669,7 +2666,7 @@ mod tests {
         datastore
             .multicast_group_set_state(
                 &opctx,
-                group.id(),
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
                 MulticastGroupState::Deleting,
             )
             .await
@@ -2690,7 +2687,7 @@ mod tests {
         let result = datastore
             .multicast_group_set_state(
                 &opctx,
-                fake_id,
+                MulticastGroupUuid::from_untyped_uuid(fake_id),
                 MulticastGroupState::Active,
             )
             .await;
@@ -2784,7 +2781,10 @@ mod tests {
         // Test that soft-deleted groups are not returned
         // Soft-delete group1 (sets time_deleted)
         datastore
-            .deallocate_external_multicast_group(&opctx, group1.id())
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(group1.id()),
+            )
             .await
             .expect("Should soft-delete group");
 
@@ -2951,7 +2951,10 @@ mod tests {
         // Test updating deleted group - should fail
         // First soft-delete the group (sets time_deleted)
         datastore
-            .deallocate_external_multicast_group(&opctx, final_group.id())
+            .deallocate_external_multicast_group(
+                &opctx,
+                MulticastGroupUuid::from_untyped_uuid(final_group.id()),
+            )
             .await
             .expect("Should soft-delete group");
 

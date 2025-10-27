@@ -3149,12 +3149,13 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
 
             // Multicast groups
 
-            // Multicast groups list allows authenticated users to list (ReadOnly)
-            // so they can discover groups to join their instances to
+            // Multicast groups are fleet-scoped and allow any authenticated user
+            // (including unprivileged) to create, read, modify, and delete groups
+            // to enable cross-project and cross-silo multicast communication.
             VerifyEndpoint {
                 url: &MULTICAST_GROUPS_URL,
                 visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                unprivileged_access: UnprivilegedAccess::Full,
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Post(
@@ -3165,7 +3166,7 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
             VerifyEndpoint {
                 url: &DEMO_MULTICAST_GROUP_URL,
                 visibility: Visibility::Public,
-                unprivileged_access: UnprivilegedAccess::ReadOnly,
+                unprivileged_access: UnprivilegedAccess::Full,
                 allowed_methods: vec![
                     AllowedMethod::Get,
                     AllowedMethod::Put(

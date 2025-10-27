@@ -25,6 +25,7 @@ use nexus_db_lookup::LookupDataStore;
 use nexus_db_model::{MulticastGroup, UnderlayMulticastGroup};
 use nexus_db_queries::authn;
 use nexus_types::identity::Resource;
+use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
@@ -125,17 +126,13 @@ async fn mgde_fetch_group_data(
     // (sequential fetches since we're using the same connection)
     let external_group = osagactx
         .datastore()
-        .multicast_group_fetch_on_conn(&opctx, &conn, params.external_group_id)
+        .multicast_group_fetch_on_conn(&conn, params.external_group_id)
         .await
         .map_err(ActionError::action_failed)?;
 
     let underlay_group = osagactx
         .datastore()
-        .underlay_multicast_group_fetch_on_conn(
-            &opctx,
-            &conn,
-            params.underlay_group_id,
-        )
+        .underlay_multicast_group_fetch_on_conn(&conn, params.underlay_group_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -165,7 +162,7 @@ async fn mgde_fetch_group_data(
         "external_ip" => %external_group.multicast_ip,
         "underlay_group_id" => %underlay_group.id,
         "underlay_ip" => %underlay_group.multicast_ip,
-        "vni" => %u32::from(underlay_group.vni.0)
+        "vni" => %u32::from(external_group.vni.0)
     );
 
     Ok((external_group, underlay_group))
@@ -293,7 +290,7 @@ async fn mgde_update_group_state(
         .datastore()
         .multicast_group_set_state(
             &opctx,
-            params.external_group_id,
+            MulticastGroupUuid::from_untyped_uuid(params.external_group_id),
             nexus_db_model::MulticastGroupState::Active,
         )
         .await
@@ -505,7 +502,6 @@ mod test {
                 &opctx,
                 external_group.clone(),
                 "ff04::1:2:3:4".parse().unwrap(),
-                external_group.vni,
             )
             .await
             .expect("Failed to create underlay group");
@@ -514,7 +510,7 @@ mod test {
         datastore
             .multicast_group_set_state(
                 &opctx,
-                group.identity.id,
+                MulticastGroupUuid::from_untyped_uuid(group.identity.id),
                 nexus_db_model::MulticastGroupState::Active,
             )
             .await

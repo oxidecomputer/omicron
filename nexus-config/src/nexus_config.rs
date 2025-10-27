@@ -10,7 +10,9 @@ use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use ipnet::Ipv6Net;
 use nexus_types::deployment::ReconfiguratorConfig;
+use omicron_common::address::IPV6_ADMIN_SCOPED_MULTICAST_PREFIX;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use omicron_common::address::RACK_PREFIX;
@@ -26,6 +28,7 @@ use serde_with::serde_as;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -441,8 +444,8 @@ pub struct BackgroundTaskConfig {
     pub webhook_deliverator: WebhookDeliveratorConfig,
     /// configuration for SP ereport ingester task
     pub sp_ereport_ingester: SpEreportIngesterConfig,
-    /// configuration for multicast group reconciler task
-    pub multicast_group_reconciler: MulticastGroupReconcilerConfig,
+    /// configuration for multicast reconciler (group+members) task
+    pub multicast_reconciler: MulticastGroupReconcilerConfig,
 }
 
 #[serde_as]
@@ -887,7 +890,16 @@ impl Default for MulticastGroupReconcilerConfig {
     }
 }
 
-/// TODO: remove this when multicast is implemented end-to-end.
+/// Fixed underlay admin-scoped IPv6 multicast network (ff04::/64) used for
+/// internal multicast group allocation and external→underlay mapping.
+/// This /64 subnet within the admin-scoped space provides 2^64 host addresses
+/// (ample for collision resistance) and is not configurable.
+pub const DEFAULT_UNDERLAY_MULTICAST_NET: Ipv6Net = Ipv6Net::new_assert(
+    Ipv6Addr::new(IPV6_ADMIN_SCOPED_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    64,
+);
+
+/// Configuration for multicast options.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MulticastConfig {
     /// Whether multicast functionality is enabled or not.
@@ -1073,10 +1085,7 @@ mod test {
             //     "unexpected eof encountered at line 1 column 6"
             // );
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
@@ -1090,10 +1099,7 @@ mod test {
             assert_eq!(error.span(), Some(0..0));
             assert_eq!(error.message(), "missing field `deployment`");
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
@@ -1204,7 +1210,7 @@ mod test {
             webhook_deliverator.first_retry_backoff_secs = 45
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
-            multicast_group_reconciler.period_secs = 60
+            multicast_reconciler.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1449,10 +1455,9 @@ mod test {
                             period_secs: Duration::from_secs(47),
                             disable: false,
                         },
-                        multicast_group_reconciler:
-                            MulticastGroupReconcilerConfig {
-                                period_secs: Duration::from_secs(60),
-                            },
+                        multicast_reconciler: MulticastGroupReconcilerConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1552,7 +1557,7 @@ mod test {
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
-            multicast_group_reconciler.period_secs = 60
+            multicast_reconciler.period_secs = 60
 
             [default_region_allocation_strategy]
             type = "random"
@@ -1620,10 +1625,7 @@ mod test {
                 error
             );
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
@@ -1675,10 +1677,7 @@ mod test {
                 r#"invalid "max_vpc_ipv4_subnet_prefix": "IPv4 subnet prefix must"#,
             ));
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 

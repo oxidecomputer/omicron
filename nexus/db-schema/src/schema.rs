@@ -2795,7 +2795,6 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         multicast_ip -> Inet,
-        vni -> Int4,
         tag -> Nullable<Text>,
         version_added -> Int8,
         version_removed -> Nullable<Int8>,

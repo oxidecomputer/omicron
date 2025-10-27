@@ -255,7 +255,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator: Activator::new(),
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
-            task_multicast_group_reconciler: Activator::new(),
+            task_multicast_reconciler: Activator::new(),
 
             // Handles to activate background tasks that do not get used by Nexus
             // at-large.  These background tasks are implementation details as far as
@@ -340,7 +340,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator,
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
-            task_multicast_group_reconciler,
+            task_multicast_reconciler,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1048,9 +1048,9 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
-            name: "multicast_group_reconciler",
-            description: "reconciles multicast group state with dendrite switch configuration",
-            period: config.multicast_group_reconciler.period_secs,
+            name: "multicast_reconciler",
+            description: "reconciles multicast group and member state with dendrite switch configuration",
+            period: config.multicast_reconciler.period_secs,
             task_impl: Box::new(MulticastGroupReconciler::new(
                 datastore.clone(),
                 resolver.clone(),
@@ -1059,7 +1059,7 @@ impl BackgroundTasksInitializer {
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
-            activator: task_multicast_group_reconciler,
+            activator: task_multicast_reconciler,
         });
 
         driver.register(TaskDefinition {

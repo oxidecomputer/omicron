@@ -24,6 +24,7 @@ use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::{
     AffinityGroupUuid, AntiAffinityGroupUuid, GenericUuid, InstanceUuid,
+    MulticastGroupUuid,
 };
 use ref_cast::RefCast;
 use serde::Deserialize;
@@ -1035,8 +1036,8 @@ async fn sic_join_instance_multicast_group(
     if let Err(e) = datastore
         .multicast_group_member_attach_to_instance(
             &opctx,
-            db_group.id(),
-            instance_id.into_untyped_uuid(),
+            MulticastGroupUuid::from_untyped_uuid(db_group.id()),
+            instance_id,
         )
         .await
     {
@@ -1105,7 +1106,10 @@ async fn sic_join_instance_multicast_group_undo(
 
     // Delete the record outright.
     datastore
-        .multicast_group_members_delete_by_group(&opctx, db_group.id())
+        .multicast_group_members_delete_by_group(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(db_group.id()),
+        )
         .await?;
 
     Ok(())

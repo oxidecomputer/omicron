@@ -242,12 +242,10 @@ enum InstanceRequest {
     RefreshExternalIps {
         tx: oneshot::Sender<Result<(), ManagerError>>,
     },
-    #[allow(dead_code)]
     JoinMulticastGroup {
         membership: InstanceMulticastMembership,
         tx: oneshot::Sender<Result<(), ManagerError>>,
     },
-    #[allow(dead_code)]
     LeaveMulticastGroup {
         membership: InstanceMulticastMembership,
         tx: oneshot::Sender<Result<(), ManagerError>>,
@@ -1819,7 +1817,6 @@ impl Instance {
             .or_else(InstanceRequest::fail_try_send)
     }
 
-    #[allow(dead_code)]
     pub fn join_multicast_group(
         &self,
         tx: oneshot::Sender<Result<(), ManagerError>>,
@@ -1833,7 +1830,6 @@ impl Instance {
             .or_else(InstanceRequest::fail_try_send)
     }
 
-    #[allow(dead_code)]
     pub fn leave_multicast_group(
         &self,
         tx: oneshot::Sender<Result<(), ManagerError>>,
@@ -2400,11 +2396,20 @@ impl InstanceRunner {
             })
             .collect();
 
+        // Validate multicast configuration with OPTE
         self.port_manager.multicast_groups_ensure(
             primary_nic.id,
             primary_nic.kind,
             &multicast_cfg,
         )?;
+
+        // TODO: Configure underlay multicast group addresses on the zone's vNIC.
+        // This should add the multicast group addresses to the zone's network
+        // interface so it can receive underlay multicast traffic (physical
+        // network layer). Rack-wide dataplane forwarding is handled by the
+        // RPW reconciler + DPD.
+        // See also: port_manager.rs multicast_groups_ensure() TODO about
+        // configuring OPTE port-level multicast group membership.
 
         Ok(())
     }

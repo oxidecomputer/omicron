@@ -29,15 +29,21 @@
 //!   - RPW responds to sled migrations
 //!
 //! - **Left**: Member not receiving traffic (temporary or permanent)
-//!   - Instance stopped, failed, or migrating
+//!   - Instance stopping/stopped, failed, or explicitly detached
 //!   - time_deleted=NULL: temporary (can rejoin)
 //!   - time_deleted=SET: permanent deletion pending
+//!
+//! Migration note: migration is not treated as leaving. The reconciler removes
+//! dataplane membership from the old sled and applies it on the new sled while
+//! keeping the member in "Joined" (reconfigures in place).
 //!
 //! ## Operations Handled
 //!
 //! - **State transitions**: "Joining" → "Joined" → "Left" with reactivation
-//! - **Dataplane updates**: Applying and removing configuration via DPD client(s) on switches
-//! - **Sled migration**: Detecting moves and updating dataplane configuration accordingly
+//! - **Dataplane updates**: Applying and removing configuration via DPD
+//!   client(s) on switches
+//! - **Sled migration**: Detecting moves and updating dataplane configuration
+//!   accordingly (no transition to "Left")
 //! - **Cleanup**: Removing orphaned switch state for deleted members
 //! - **Extensible processing**: Support for different member types as we evolve
 //!
@@ -89,6 +95,7 @@
 //! | 4 | None | Valid | "Active" | Transition | "Joining" |
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
@@ -101,6 +108,7 @@ use nexus_db_model::{
     MulticastGroupState,
 };
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::multicast::ops::member_reconcile::ReconcileAction;
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{DataPageParams, InstanceState};
 use omicron_uuid_kinds::{
@@ -109,6 +117,10 @@ use omicron_uuid_kinds::{
 
 use super::{MulticastGroupReconciler, MulticastSwitchPort, StateTransition};
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
+
+/// Pre-fetched instance state data for batch processing.
+/// Maps instance_id -> (is_valid_for_multicast, current_sled_id).
+type InstanceStateMap = HashMap<Uuid, (bool, Option<SledUuid>)>;
 
 /// Trait for processing different types of multicast group members.
 trait MemberStateProcessor {
@@ -119,6 +131,7 @@ trait MemberStateProcessor {
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error>;
 
@@ -129,6 +142,7 @@ trait MemberStateProcessor {
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error>;
 
@@ -139,6 +153,7 @@ trait MemberStateProcessor {
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error>;
 }
@@ -153,10 +168,17 @@ impl MemberStateProcessor for InstanceMemberProcessor {
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
         reconciler
-            .handle_instance_joining(opctx, group, member, dataplane_client)
+            .handle_instance_joining(
+                opctx,
+                group,
+                member,
+                instance_states,
+                dataplane_client,
+            )
             .await
     }
 
@@ -166,10 +188,17 @@ impl MemberStateProcessor for InstanceMemberProcessor {
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
         reconciler
-            .handle_instance_joined(opctx, group, member, dataplane_client)
+            .handle_instance_joined(
+                opctx,
+                group,
+                member,
+                instance_states,
+                dataplane_client,
+            )
             .await
     }
 
@@ -179,10 +208,17 @@ impl MemberStateProcessor for InstanceMemberProcessor {
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
         reconciler
-            .handle_instance_left(opctx, group, member, dataplane_client)
+            .handle_instance_left(
+                opctx,
+                group,
+                member,
+                instance_states,
+                dataplane_client,
+            )
             .await
     }
 }
@@ -249,18 +285,26 @@ impl MulticastGroupReconciler {
         // Get members in various states that need processing
         let members = self.get_group_members(opctx, group.id()).await?;
 
+        // Batch-fetch instance states for all members to avoid N+1 queries
+        let instance_states =
+            Arc::new(self.batch_fetch_instance_states(opctx, &members).await?);
+
         // Process members concurrently with configurable parallelism
         let results = stream::iter(members)
-            .map(|member| async move {
-                let result = self
-                    .process_member_state(
-                        opctx,
-                        group,
-                        &member,
-                        dataplane_client,
-                    )
-                    .await;
-                (member, result)
+            .map(|member| {
+                let instance_states = Arc::clone(&instance_states);
+                async move {
+                    let result = self
+                        .process_member_state(
+                            opctx,
+                            group,
+                            &member,
+                            &instance_states,
+                            dataplane_client,
+                        )
+                        .await;
+                    (member, result)
+                }
             })
             .buffer_unordered(self.member_concurrency_limit) // Configurable concurrency
             .collect::<Vec<_>>()
@@ -314,6 +358,7 @@ impl MulticastGroupReconciler {
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
         // For now, all members are instance-based, but this is where we'd
@@ -328,6 +373,7 @@ impl MulticastGroupReconciler {
                         opctx,
                         group,
                         member,
+                        instance_states,
                         dataplane_client,
                     )
                     .await
@@ -339,126 +385,192 @@ impl MulticastGroupReconciler {
                         opctx,
                         group,
                         member,
+                        instance_states,
                         dataplane_client,
                     )
                     .await
             }
             MulticastGroupMemberState::Left => {
                 processor
-                    .process_left(self, opctx, group, member, dataplane_client)
+                    .process_left(
+                        self,
+                        opctx,
+                        group,
+                        member,
+                        instance_states,
+                        dataplane_client,
+                    )
                     .await
             }
         }
     }
 
     /// Instance-specific handler for members in "Joining" state.
+    ///
     /// Handles sled_id updates and validates instance state before proceeding.
+    ///
+    /// # Goal
+    ///
+    /// This task operates in an environment where multiple Nexus instances
+    /// may be processing the same member concurrently. The design follows
+    /// optimistic concurrency patterns with eventual consistency guarantees.
+    ///
+    /// ## Scenarios to Handle
+    ///
+    /// 1. **Multiple Nexus instances processing same member**: Each Nexus reads
+    ///    the member state, checks instance validity, and attempts updates. The
+    ///    reconciler uses compare-and-swap (CAS) operations for state transitions
+    ///    to ensure only one Nexus succeeds when race conditions occur.
+    ///
+    /// 2. **Instance state evolving during processing**: Between reading instance
+    ///    state and updating the member record, the instance may have migrated,
+    ///    stopped, or changed state. The reconciler detects this via CAS failures
+    ///    and returns `NoChange`, allowing the next reconciliation cycle to
+    ///    process the updated state.
+    ///
+    /// 3. **Sled migration during reconciliation**: If an instance migrates while
+    ///    a Nexus is processing its member, the conditional sled_id update will
+    ///    fail. The Nexus returns `NoChange` and the next reconciliation cycle
+    ///    will process the new sled_id.
+    ///
+    /// ## CAS Operations
+    ///
+    /// - **sled_id update**: `multicast_group_member_update_sled_id_if_current`
+    ///   checks that sled_id matches the expected value before updating
+    /// - **State transitions**: `multicast_group_member_to_left_if_current`
+    ///   and `multicast_group_member_set_state_if_current` ensure state changes
+    ///   only proceed if the current state matches expectations
+    ///
+    /// ## Eventual Consistency
+    ///
+    /// The reconciler ensures eventual consistency through repeated reconciliation
+    /// cycles. If a CAS operation fails due to concurrent modification, the
+    /// function returns `NoChange` rather than failing. The next reconciliation
+    /// cycle will re-read the updated state and process it correctly.
     async fn handle_instance_joining(
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
-        // First, ensure we have current instance state and sled_id
-        let (instance_valid, current_sled_id) =
-            self.get_instance_state_and_sled(opctx, member.parent_id).await;
+        let (instance_valid, current_sled_id) = instance_states
+            .get(&member.parent_id)
+            .copied()
+            .unwrap_or((false, None));
 
-        // Update member's sled_id if it changed
-        if let Some(sled_id) = current_sled_id {
-            if member.sled_id != Some(sled_id.into()) {
-                debug!(
-                    opctx.log,
-                    "updating member sled_id";
-                    "member" => ?member,
-                    "new_sled_id" => %sled_id
-                );
-                self.datastore
-                    .multicast_group_member_update_sled_id(
-                        opctx,
-                        member.parent_id,
-                        Some(sled_id.into()),
-                    )
-                    .await
-                    .context("failed to update member sled_id")?;
-            }
-        }
+        let current_sled_id_db = current_sled_id.map(|id| id.into());
 
-        if group.state == MulticastGroupState::Active {
-            // Group is active - can process member state changes
-            if !instance_valid {
-                // Instance is invalid - transition to "Left"
-                debug!(
-                    opctx.log,
-                    "multicast member lifecycle transition: Joining → Left (instance invalid)";
-                    "member_id" => %member.id,
-                    "instance_id" => %member.parent_id,
-                    "group_id" => %group.id(),
-                    "group_name" => group.name().as_str(),
-                    "current_sled_id" => ?member.sled_id,
-                    "reason" => "instance_not_valid_for_multicast_traffic",
-                    "instance_states_valid" => "[Creating, Starting, Running, Rebooting, Migrating, Repairing]"
-                );
-                self.datastore
-                    .multicast_group_member_set_state(
-                        opctx,
-                        group.id(),
-                        member.parent_id,
-                        MulticastGroupMemberState::Left,
-                    )
-                    .await
-                    .context(
-                        "failed to transition member from Joining to Left",
-                    )?;
+        let reconcile_result = self
+            .datastore
+            .multicast_group_member_reconcile_joining(
+                opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(member.parent_id),
+                instance_valid,
+                current_sled_id_db,
+            )
+            .await
+            .context("failed to reconcile member in 'Joining' state")?;
 
-                // Also clear sled_id when transitioning to "Left"
-                if member.sled_id.is_some() {
-                    self.datastore
-                        .multicast_group_member_update_sled_id(
-                            opctx,
-                            member.parent_id,
-                            None,
-                        )
-                        .await
-                        .context("failed to clear member sled_id")?;
-                }
-
+        match reconcile_result.action {
+            ReconcileAction::TransitionedToLeft => {
                 info!(
                     opctx.log,
-                    "multicast member excluded from forwarding (Left state)";
+                    "multicast member lifecycle transition: 'Joining' → 'Left' (instance invalid)";
                     "member_id" => %member.id,
                     "instance_id" => %member.parent_id,
                     "group_id" => %group.id(),
                     "group_name" => group.name().as_str(),
                     "group_multicast_ip" => %group.multicast_ip,
                     "forwarding_status" => "EXCLUDED",
-                    "dpd_cleanup" => "not_required_for_Joining_to_Left_transition"
+                    "reason" => "instance_not_valid_for_multicast_traffic"
                 );
                 Ok(StateTransition::StateChanged)
-            } else {
-                // Instance is valid and group is active - proceed with join
-                self.complete_instance_member_join(
+            }
+
+            ReconcileAction::UpdatedSledId { old, new } => {
+                debug!(
+                    opctx.log,
+                    "updated member sled_id, checking if ready to join";
+                    "member_id" => %member.id,
+                    "old_sled_id" => ?old,
+                    "new_sled_id" => ?new,
+                    "group_state" => ?group.state,
+                    "instance_valid" => instance_valid
+                );
+
+                self.try_complete_join_if_ready(
                     opctx,
                     group,
                     member,
+                    instance_valid,
                     dataplane_client,
                 )
-                .await?;
-                Ok(StateTransition::StateChanged)
+                .await
             }
+
+            ReconcileAction::NotFound | ReconcileAction::NoChange => {
+                if member.state == MulticastGroupMemberState::Joined {
+                    debug!(
+                        opctx.log,
+                        "member already in 'Joined' state, no action needed";
+                        "member_id" => %member.id,
+                        "group_id" => %group.id(),
+                        "group_name" => group.name().as_str()
+                    );
+                    return Ok(StateTransition::NoChange);
+                }
+
+                self.try_complete_join_if_ready(
+                    opctx,
+                    group,
+                    member,
+                    instance_valid,
+                    dataplane_client,
+                )
+                .await
+            }
+        }
+    }
+
+    fn is_ready_to_join(
+        &self,
+        group: &MulticastGroup,
+        instance_valid: bool,
+    ) -> bool {
+        group.state == MulticastGroupState::Active && instance_valid
+    }
+
+    async fn try_complete_join_if_ready(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+        instance_valid: bool,
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<StateTransition, anyhow::Error> {
+        if self.is_ready_to_join(group, instance_valid) {
+            self.complete_instance_member_join(
+                opctx,
+                group,
+                member,
+                dataplane_client,
+            )
+            .await?;
+            Ok(StateTransition::StateChanged)
         } else {
-            // Group is still "Creating" - keep members in "Joining" state
-            // regardless of instance validity
             debug!(
                 opctx.log,
-                "member staying in Joining state - group still Creating";
+                "member not ready to join - waiting for next cycle";
                 "member_id" => %member.id,
                 "group_id" => %group.id(),
                 "group_name" => group.name().as_str(),
                 "instance_valid" => instance_valid,
                 "group_state" => ?group.state
             );
-            Ok(StateTransition::NoChange) // No state change - wait for group to become "Active"
+            Ok(StateTransition::NoChange)
         }
     }
 
@@ -468,27 +580,17 @@ impl MulticastGroupReconciler {
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
-        // Check instance validity and get current sled_id
-        let (instance_valid, current_sled_id) =
-            self.get_instance_state_and_sled(opctx, member.parent_id).await;
+        // Get pre-fetched instance state and sled_id
+        let (instance_valid, current_sled_id) = instance_states
+            .get(&member.parent_id)
+            .copied()
+            .unwrap_or((false, None));
 
         if !instance_valid {
             // Instance became invalid - remove from dataplane and transition to "Left"
-            debug!(
-                opctx.log,
-                "multicast member lifecycle transition: Joined → Left (instance state change)";
-                "member_id" => %member.id,
-                "instance_id" => %member.parent_id,
-                "group_id" => %group.id(),
-                "group_name" => group.name().as_str(),
-                "group_multicast_ip" => %group.multicast_ip,
-                "previous_sled_id" => ?member.sled_id,
-                "reason" => "instance_no_longer_valid_for_multicast_traffic",
-                "dpd_cleanup_required" => true
-            );
-
             // Remove from dataplane first
             if let Err(e) = self
                 .remove_member_from_dataplane(opctx, member, dataplane_client)
@@ -503,39 +605,41 @@ impl MulticastGroupReconciler {
                 return Err(e);
             }
 
-            // Update database state
-            self.datastore
-                .multicast_group_member_set_state(
+            // Update database state (atomically set Left and clear sled_id)
+            let updated = self
+                .datastore
+                .multicast_group_member_to_left_if_current(
                     opctx,
-                    group.id(),
-                    member.parent_id,
-                    MulticastGroupMemberState::Left,
+                    MulticastGroupUuid::from_untyped_uuid(group.id()),
+                    InstanceUuid::from_untyped_uuid(member.parent_id),
+                    MulticastGroupMemberState::Joined,
                 )
                 .await
                 .context(
-                    "failed to transition member from 'Joined' to 'Left'",
+                    "failed to conditionally transition member from 'Joined' to 'Left'",
                 )?;
 
-            // Clear sled_id since instance is no longer valid
-            self.datastore
-                .multicast_group_member_update_sled_id(
-                    opctx,
-                    member.parent_id,
-                    None,
-                )
-                .await
-                .context("failed to clear member sled_id")?;
+            if !updated {
+                debug!(
+                    opctx.log,
+                    "skipping Joined→Left transition due to concurrent update";
+                    "member_id" => %member.id,
+                    "instance_id" => %member.parent_id,
+                    "group_id" => %group.id()
+                );
+                return Ok(StateTransition::NoChange);
+            }
 
             info!(
                 opctx.log,
-                "multicast member removed from switch forwarding tables";
+                "multicast member lifecycle transition: 'Joined' → 'Left' (instance invalid)";
                 "member_id" => %member.id,
                 "instance_id" => %member.parent_id,
                 "group_id" => %group.id(),
                 "group_multicast_ip" => %group.multicast_ip,
                 "forwarding_status" => "REMOVED",
                 "dpd_operation" => "remove_member_from_underlay_group",
-                "switch_cleanup" => "COMPLETED"
+                "reason" => "instance_no_longer_valid_for_multicast_traffic"
             );
             Ok(StateTransition::StateChanged)
         } else if let Some(sled_id) = current_sled_id {
@@ -570,15 +674,29 @@ impl MulticastGroupReconciler {
                     return Err(e);
                 }
 
-                // Update sled_id in database
-                self.datastore
-                    .multicast_group_member_update_sled_id(
+                // Update sled_id in database using CAS to avoid clobbering concurrent changes
+                let updated = self
+                    .datastore
+                    .multicast_group_member_update_sled_id_if_current(
                         opctx,
-                        member.parent_id,
+                        InstanceUuid::from_untyped_uuid(member.parent_id),
+                        member.sled_id,
                         Some(sled_id.into()),
                     )
                     .await
-                    .context("failed to update member sled_id for migration")?;
+                    .context("failed to conditionally update member sled_id for migration")?;
+
+                if !updated {
+                    debug!(
+                        opctx.log,
+                        "skipping sled_id update after migration due to concurrent change";
+                        "member_id" => %member.id,
+                        "group_id" => %group.id(),
+                        "old_sled_id" => ?member.sled_id,
+                        "new_sled_id" => %sled_id
+                    );
+                    return Ok(StateTransition::NoChange);
+                }
 
                 // Re-apply configuration on new sled
                 self.complete_instance_member_join(
@@ -608,7 +726,7 @@ impl MulticastGroupReconciler {
             // Instance is valid but has no sled_id (shouldn't happen in Joined state)
             warn!(
                 opctx.log,
-                "joined member has no sled_id - transitioning to Left";
+                "joined member has no sled_id - transitioning to 'Left'";
                 "member_id" => %member.id,
                 "parent_id" => %member.parent_id
             );
@@ -627,16 +745,18 @@ impl MulticastGroupReconciler {
                 return Err(e);
             }
 
-            self.datastore
-                .multicast_group_member_set_state(
+            let _ = self
+                .datastore
+                .multicast_group_member_set_state_if_current(
                     opctx,
-                    group.id(),
-                    member.parent_id,
+                    MulticastGroupUuid::from_untyped_uuid(group.id()),
+                    InstanceUuid::from_untyped_uuid(member.parent_id),
+                    MulticastGroupMemberState::Joined,
                     MulticastGroupMemberState::Left,
                 )
                 .await
                 .context(
-                    "failed to transition member with no sled_id to Left",
+                    "failed to conditionally transition member with no sled_id to Left",
                 )?;
 
             Ok(StateTransition::StateChanged)
@@ -649,6 +769,7 @@ impl MulticastGroupReconciler {
         opctx: &OpContext,
         group: &MulticastGroup,
         member: &MulticastGroupMember,
+        instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
         // Check if this member is marked for deletion (time_deleted set)
@@ -658,34 +779,59 @@ impl MulticastGroupReconciler {
                 .await?;
             Ok(StateTransition::NeedsCleanup)
         } else {
-            // Check if instance became valid and group is active - if so, transition back to "Joining"
-            let instance_valid = self
-                .is_valid_instance_for_multicast(opctx, member.parent_id)
-                .await;
+            // Get pre-fetched instance state and sled_id
+            let (instance_valid, current_sled_id) = instance_states
+                .get(&member.parent_id)
+                .copied()
+                .unwrap_or((false, None));
 
             if instance_valid && group.state == MulticastGroupState::Active {
                 debug!(
                     opctx.log,
-                    "transitioning member from Left to Joining - instance became valid and group is active";
+                    "transitioning member from 'Left' to 'Joining' - instance became valid and group is active";
                     "member_id" => %member.id,
                     "parent_id" => %member.parent_id,
                     "group_id" => %group.id(),
                     "group_name" => group.name().as_str()
                 );
-                self.datastore
-                    .multicast_group_member_set_state(
-                        opctx,
-                        group.id(),
-                        member.parent_id,
-                        MulticastGroupMemberState::Joining,
-                    )
-                    .await
-                    .context(
-                        "failed to transition member from Left to Joining",
-                    )?;
+                let updated = if let Some(sled_id) = current_sled_id {
+                    self.datastore
+                        .multicast_group_member_left_to_joining_if_current(
+                            opctx,
+                            MulticastGroupUuid::from_untyped_uuid(group.id()),
+                            InstanceUuid::from_untyped_uuid(member.parent_id),
+                            sled_id.into(),
+                        )
+                        .await
+                        .context(
+                            "failed to conditionally transition member from Left to Joining (with sled_id)",
+                        )?
+                } else {
+                    self.datastore
+                        .multicast_group_member_set_state_if_current(
+                            opctx,
+                            MulticastGroupUuid::from_untyped_uuid(group.id()),
+                            InstanceUuid::from_untyped_uuid(member.parent_id),
+                            MulticastGroupMemberState::Left,
+                            MulticastGroupMemberState::Joining,
+                        )
+                        .await
+                        .context(
+                            "failed to conditionally transition member from Left to Joining",
+                        )?
+                };
+                if !updated {
+                    debug!(
+                        opctx.log,
+                        "skipping Left→Joining transition due to concurrent update";
+                        "member_id" => %member.id,
+                        "group_id" => %group.id()
+                    );
+                    return Ok(StateTransition::NoChange);
+                }
                 info!(
                     opctx.log,
-                    "member transitioned to Joining state";
+                    "member transitioned to 'Joining' state";
                     "member_id" => %member.id,
                     "group_id" => %group.id(),
                     "group_name" => group.name().as_str()
@@ -698,20 +844,43 @@ impl MulticastGroupReconciler {
         }
     }
 
-    /// Get instance state and current sled_id for multicast processing.
-    /// Returns (is_valid_for_multicast, current_sled_id).
-    async fn get_instance_state_and_sled(
+    /// Batch-fetch instance states for multiple members to avoid N+1 queries.
+    /// Returns a map of instance_id -> (is_valid_for_multicast, current_sled_id).
+    ///
+    /// 1. Batch-fetching all instance records in one query via the datastore
+    /// 2. Batch-fetching all VMM records in one query via the datastore
+    /// 3. Building the result map from the fetched data
+    async fn batch_fetch_instance_states(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
-    ) -> (bool, Option<SledUuid>) {
-        let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);
+        members: &[MulticastGroupMember],
+    ) -> Result<InstanceStateMap, anyhow::Error> {
+        let mut state_map = HashMap::new();
 
-        // We need to look up both instance and VMM to get sled_id
-        match self.datastore.instance_get_state(opctx, &instance_uuid).await {
-            Ok(Some(instance_state)) => {
+        if members.is_empty() {
+            return Ok(state_map);
+        }
+
+        // Extract unique instance IDs
+        let instance_ids: Vec<InstanceUuid> = members
+            .iter()
+            .map(|m| InstanceUuid::from_untyped_uuid(m.parent_id))
+            .collect();
+
+        // Use datastore method to batch-fetch instance and VMM data
+        let instance_vmm_data = self
+            .datastore
+            .instance_and_vmm_batch_fetch(opctx, &instance_ids)
+            .await
+            .context("failed to batch-fetch instance and VMM data")?;
+
+        // Build the state map from the fetched data
+        for member in members {
+            if let Some((instance, vmm_opt)) =
+                instance_vmm_data.get(&member.parent_id)
+            {
                 let is_valid = matches!(
-                    instance_state.nexus_state.state(),
+                    instance.runtime_state.nexus_state.state(),
                     InstanceState::Creating
                         | InstanceState::Starting
                         | InstanceState::Running
@@ -720,57 +889,25 @@ impl MulticastGroupReconciler {
                         | InstanceState::Repairing
                 );
 
-                // Get sled_id from VMM if instance has one
-                let sled_id =
-                    if let Some(propolis_id) = instance_state.propolis_id {
-                        match self
-                            .datastore
-                            .vmm_fetch(
-                                opctx,
-                                &PropolisUuid::from_untyped_uuid(propolis_id),
-                            )
-                            .await
-                        {
-                            Ok(vmm) => Some(SledUuid::from_untyped_uuid(
-                                vmm.sled_id.into_untyped_uuid(),
-                            )),
-                            Err(_) => None,
-                        }
-                    } else {
-                        None
-                    };
+                let sled_id = vmm_opt.as_ref().map(|vmm| {
+                    SledUuid::from_untyped_uuid(vmm.sled_id.into_untyped_uuid())
+                });
 
-                (is_valid, sled_id)
+                state_map.insert(member.parent_id, (is_valid, sled_id));
+            } else {
+                // Instance not found - mark as invalid
+                state_map.insert(member.parent_id, (false, None));
             }
-            Ok(None) | Err(_) => (false, None), // Instance not found or error occurred
         }
-    }
 
-    /// Check if a given UUID is an instance ID in a valid state for multicast processing.
-    /// Valid states are: Creating (initial state) and Vmm (has VMM/running).
-    async fn is_valid_instance_for_multicast(
-        &self,
-        opctx: &OpContext,
-        id: Uuid,
-    ) -> bool {
-        let instance_id = InstanceUuid::from_untyped_uuid(id);
-        match self.datastore.instance_get_state(opctx, &instance_id).await {
-            Ok(Some(instance_state)) => {
-                match instance_state.nexus_state.state() {
-                    InstanceState::Creating
-                    | InstanceState::Starting
-                    | InstanceState::Running => true,
-                    InstanceState::Stopping
-                    | InstanceState::Stopped
-                    | InstanceState::Failed
-                    | InstanceState::Destroyed => false,
-                    InstanceState::Rebooting
-                    | InstanceState::Migrating
-                    | InstanceState::Repairing => true,
-                }
-            }
-            Ok(None) | Err(_) => false, // Instance not found or error occurred
-        }
+        debug!(
+            opctx.log,
+            "batch-fetched instance states for multicast reconciliation";
+            "member_count" => members.len(),
+            "instances_found" => instance_vmm_data.len()
+        );
+
+        Ok(state_map)
     }
 
     /// Complete a member join operation ("Joining" -> "Joined") for an instance.
@@ -842,7 +979,9 @@ impl MulticastGroupReconciler {
                             self.datastore
                                 .multicast_group_member_update_sled_id(
                                     opctx,
-                                    member.parent_id,
+                                    InstanceUuid::from_untyped_uuid(
+                                        member.parent_id,
+                                    ),
                                     Some(current_sled_id.into()),
                                 )
                                 .await
@@ -888,16 +1027,28 @@ impl MulticastGroupReconciler {
         )
         .await?;
 
-        // Transition to "Joined" state
-        self.datastore
-            .multicast_group_member_set_state(
+        // Transition to "Joined" state (only if still in Joining)
+        let updated = self
+            .datastore
+            .multicast_group_member_set_state_if_current(
                 opctx,
-                group.id(),
-                member.parent_id,
-                nexus_db_model::MulticastGroupMemberState::Joined,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(member.parent_id),
+                MulticastGroupMemberState::Joining,
+                MulticastGroupMemberState::Joined,
             )
             .await
-            .context("failed to transition member to Joined state")?;
+            .context(
+                "failed to conditionally transition member to 'Joined' state",
+            )?;
+        if !updated {
+            debug!(
+                opctx.log,
+                "skipping Joining→Joined transition due to concurrent update";
+                "member_id" => %member.id,
+                "group_id" => %group.id()
+            );
+        }
 
         info!(
             opctx.log,
@@ -910,7 +1061,7 @@ impl MulticastGroupReconciler {
         Ok(())
     }
 
-    /// Apply member dataplane configuration (via DPD).
+    /// Apply member dataplane configuration (via DPD-client).
     async fn add_member_to_dataplane(
         &self,
         opctx: &OpContext,
@@ -1212,7 +1363,7 @@ impl MulticastGroupReconciler {
         self.datastore
             .multicast_group_members_list_by_id(
                 opctx,
-                group_id,
+                MulticastGroupUuid::from_untyped_uuid(group_id),
                 &DataPageParams::max_page(),
             )
             .await
@@ -1411,7 +1562,7 @@ impl MulticastGroupReconciler {
             .collect()
     }
 
-    /// Find the appropriate instance switch orts for a given sled.
+    /// Find the appropriate instance switch ports for a given sled.
     /// This combines general switch logic with instance-specific filtering.
     fn find_instance_switch_ports_for_sled<'a>(
         &self,

@@ -2520,8 +2520,8 @@ impl Vni {
 
     /// VNI default if no VPC is provided for a multicast group.
     ///
-    /// This is a low-numbered VNI, to avoid colliding with user VNIs.
-    /// However, it is not in the Oxide-reserved yet.
+    /// This is a low-numbered VNI to avoid colliding with user VNIs.
+    /// However, it is not in the Oxide-reserved range yet.
     pub const DEFAULT_MULTICAST_VNI: Self = Self(77);
 
     /// Oxide reserves a slice of initial VNIs for its own use.

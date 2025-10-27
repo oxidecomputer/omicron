@@ -192,7 +192,7 @@ webhook_deliverator.first_retry_backoff_secs = 10
 webhook_deliverator.second_retry_backoff_secs = 20
 read_only_region_replacement_start.period_secs = 999999
 sp_ereport_ingester.period_secs = 30
-multicast_group_reconciler.period_secs = 60
+multicast_reconciler.period_secs = 60
 
 [multicast]
 # Enable multicast functionality for tests (disabled by default in production)

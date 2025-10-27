@@ -204,7 +204,6 @@ impl NextExternalMulticastGroup {
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");
-
         // Filter for multicast address ranges (224.0.0.0/4 for IPv4,
         // ff00::/8 for IPv6)
         out.push_sql(" AND (");

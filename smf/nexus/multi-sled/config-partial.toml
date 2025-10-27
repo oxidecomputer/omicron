@@ -98,7 +98,7 @@ sp_ereport_ingester.period_secs = 30
 # has not merged yet, and trying to ingest them will just result in Nexus
 # logging a bunch of errors.
 sp_ereport_ingester.disable = true
-multicast_group_reconciler.period_secs = 60
+multicast_reconciler.period_secs = 60
 
 [default_region_allocation_strategy]
 # by default, allocate across 3 distinct sleds

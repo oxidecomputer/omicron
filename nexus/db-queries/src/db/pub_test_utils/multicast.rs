@@ -17,7 +17,7 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::shared::{IpRange, Ipv4Range};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{IdentityMetadataCreateParams, LookupType};
-use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid, SledUuid};
 
 use crate::authz;
 use crate::context::OpContext;
@@ -212,7 +212,7 @@ pub async fn create_test_group_with_state(
         datastore
             .multicast_group_set_state(
                 opctx,
-                group.id(),
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
                 MulticastGroupState::Active,
             )
             .await

@@ -135,7 +135,7 @@ async fn test_multicast_with_external_ip_basic(
     .await;
 
     // Wait for multicast member to reach "Joined" state
-    wait_for_member_state(client, group_name, instance_id, "Joined").await;
+    wait_for_member_state(cptestctx, group_name, instance_id, "Joined").await;
 
     // Verify member count
     let members = list_multicast_group_members(client, group_name).await;
@@ -519,7 +519,7 @@ async fn test_multicast_with_external_ip_at_creation(
     .await;
 
     // Verify both features work together - wait for member to reach Joined state
-    wait_for_member_state(client, group_name, instance_id, "Joined").await;
+    wait_for_member_state(cptestctx, group_name, instance_id, "Joined").await;
 
     let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have multicast member");
@@ -640,7 +640,7 @@ async fn test_multicast_with_floating_ip_basic(
     .await;
 
     // Wait for multicast member to reach "Joined" state
-    wait_for_member_state(client, group_name, instance_id, "Joined").await;
+    wait_for_member_state(cptestctx, group_name, instance_id, "Joined").await;
 
     // Verify member count
     let members = list_multicast_group_members(client, group_name).await;

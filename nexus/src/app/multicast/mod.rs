@@ -20,7 +20,8 @@
 //!
 //! ### Authorization Rules
 //!
-//! - **Creating/modifying/deleting groups**: Requires Fleet::Admin role (fleet admins only)
+//! - **Creating/modifying/deleting groups**: Any authenticated user in the fleet (silo users)
+//!   can create, modify, and delete multicast groups
 //! - **Reading/listing groups**: Any authenticated user in the fleet can read and list groups
 //!   (enables discovery of available groups for joining instances)
 //! - **Listing group members**: Only requires Read permission on the group (fleet-scoped),
@@ -39,24 +40,18 @@ use std::sync::Arc;
 
 use ref_cast::RefCast;
 
+use nexus_config::DEFAULT_UNDERLAY_MULTICAST_NET;
 use nexus_db_lookup::{LookupPath, lookup};
 use nexus_db_model::Name;
-use nexus_db_queries::authn::saga::Serialized;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::{authz, db};
 use nexus_types::external_api::{params, views};
-use nexus_types::identity::Resource;
 use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, NameOrId, UpdateResult, http_pagination::PaginatedBy,
 };
-use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
-
-use crate::app::sagas::multicast_group_dpd_update::{
-    Params, SagaMulticastGroupDpdUpdate,
-};
 
 pub(crate) mod dataplane;
 
@@ -90,12 +85,14 @@ impl super::Nexus {
         opctx: &OpContext,
         params: &params::MulticastGroupCreate,
     ) -> CreateResult<db::model::ExternalMulticastGroup> {
-        // Authorization: creating multicast groups requires Fleet admin
+        // Authorization FIRST: check before validating parameters
+        // This ensures 403 Forbidden is returned before 400 Bad Request
         opctx
             .authorize(authz::Action::CreateChild, &authz::MULTICAST_GROUP_LIST)
             .await?;
 
-        // If an explicit multicast IP is provided, validate ASM/SSM semantics:
+        // If an explicit multicast IP is provided, validate ASM/SSM semantics
+        // and ensure it does not collide with the fixed underlay prefix.
         // - ASM IPs must not specify sources
         // - SSM IPs must specify at least one source
         if let Some(mcast_ip) = params.multicast_ip {
@@ -103,6 +100,23 @@ impl super::Nexus {
             let sources: &[IpAddr] =
                 params.source_ips.as_deref().unwrap_or(&empty);
             validate_ssm_configuration(mcast_ip, sources)?;
+
+            // Block external IPv6 multicast addresses that fall within the
+            // fixed underlay admin-local prefix (reserved for underlay).
+            if let IpAddr::V6(ipv6) = mcast_ip {
+                // Convert fixed underlay prefix to ipnet and compare
+                let fixed_underlay: ipnet::Ipv6Net =
+                    DEFAULT_UNDERLAY_MULTICAST_NET
+                        .to_string()
+                        .parse()
+                        .expect("valid fixed underlay admin prefix");
+                if fixed_underlay.contains(&ipv6) {
+                    return Err(Error::invalid_request(&format!(
+                        "IPv6 address {ipv6} is within the reserved underlay multicast prefix {}",
+                        fixed_underlay
+                    )));
+                }
+            }
         }
 
         let authz_pool = match &params.pool {
@@ -134,7 +148,7 @@ impl super::Nexus {
             .await?;
 
         // Activate reconciler to process the new group ("Creating" → "Active")
-        self.background_tasks.task_multicast_group_reconciler.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
         Ok(group)
     }
 
@@ -205,19 +219,12 @@ impl super::Nexus {
             )));
         }
 
-        let underlay_group_id =
-            current_group.underlay_group_id.ok_or_else(|| {
-                Error::internal_error(
-                    "active multicast group missing `underlay_group_id`",
-                )
-            })?;
-
-        // Store old name for saga rollback
-        let old_name = current_group.name().clone();
-        // store the old sources
-        let old_sources = current_group.source_ips.clone();
-        // store the old mvlan to detect changes
-        let old_mvlan = current_group.mvlan;
+        // Ensure the group has an associated underlay group (required for updates)
+        current_group.underlay_group_id.ok_or_else(|| {
+            Error::internal_error(
+                "active multicast group missing `underlay_group_id`",
+            )
+        })?;
 
         // Validate the new source configuration if provided
         if let Some(ref new_source_ips) = params.source_ips {
@@ -227,7 +234,7 @@ impl super::Nexus {
             )?;
         }
 
-        // Update the database first
+        // Update the database
         let result = self
             .db_datastore
             .multicast_group_update(
@@ -237,46 +244,9 @@ impl super::Nexus {
             )
             .await?;
 
-        // If name, sources, or mvlan changed, execute DPD update saga to keep
-        // dataplane configuration in sync with the database (including tag updates)
-        if Self::needs_dataplane_update(
-            old_name.as_str(),
-            &params.identity.name,
-            &params.source_ips,
-            old_mvlan,
-            &params.mvlan,
-        ) {
-            let new_name = params
-                .identity
-                .name
-                .as_ref()
-                .map(|n| n.as_str())
-                .unwrap_or(old_name.as_str());
-
-            let saga_params = Params {
-                serialized_authn: Serialized::for_opctx(opctx),
-                external_group_id: current_group.id(),
-                underlay_group_id,
-                old_name: old_name.to_string(),
-                new_name: new_name.to_string(),
-                old_sources,
-                new_sources: params
-                    .source_ips
-                    .as_ref()
-                    .map(|ips| ips.iter().map(|ip| (*ip).into()).collect())
-                    .unwrap_or_else(|| {
-                        // If no source change requested, use current sources from DB
-                        // This is important for SSM groups which require sources
-                        current_group.source_ips.clone()
-                    }),
-            };
-
-            self.sagas.saga_execute::<SagaMulticastGroupDpdUpdate>(saga_params)
-                .await
-                .map_err(|e| Error::internal_error(&format!(
-                    "failed to update multicast group DPD configuration: {}", e
-                )))?;
-        }
+        // Activate RPW to apply changes to DPD (eventually consistent)
+        // The reconciler will detect drift and launch the UPDATE saga
+        self.background_tasks.task_multicast_reconciler.activate();
 
         Ok(result)
     }
@@ -290,14 +260,17 @@ impl super::Nexus {
         let (.., group_id) =
             group_lookup.lookup_for(authz::Action::Delete).await?;
 
-        // Prefer soft-delete + RPW cleanup to ensure DPD configuration is
-        // removed before final deletion.
+        // Mark for deletion via RPW: sets state="Deleting" (not soft-delete).
+        // RPW cleanup ensures DPD configuration is removed before final deletion.
         self.db_datastore
-            .mark_multicast_group_for_removal(opctx, group_id.id())
+            .mark_multicast_group_for_removal(
+                opctx,
+                MulticastGroupUuid::from_untyped_uuid(group_id.id()),
+            )
             .await?;
 
-        // Activate reconciler to process the deletion (RPW pattern)
-        self.background_tasks.task_multicast_group_reconciler.activate();
+        // Activate reconciler to process the "Deleting" state
+        self.background_tasks.task_multicast_reconciler.activate();
 
         Ok(())
     }
@@ -326,7 +299,7 @@ impl super::Nexus {
             .await?;
 
         // Activate reconciler to process the new member ("Joining" → "Joined")
-        self.background_tasks.task_multicast_group_reconciler.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
         Ok(member)
     }
 
@@ -367,7 +340,7 @@ impl super::Nexus {
             .await?;
 
         // Activate reconciler to process the member removal
-        self.background_tasks.task_multicast_group_reconciler.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
         Ok(())
     }
 
@@ -423,7 +396,7 @@ impl super::Nexus {
             .db_datastore
             .multicast_group_members_list_by_instance(
                 opctx,
-                authz_instance.id(),
+                InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 false,
             )
             .await?;
@@ -431,25 +404,6 @@ impl super::Nexus {
             .into_iter()
             .map(views::MulticastGroupMember::try_from)
             .collect::<Result<Vec<_>, _>>()
-    }
-
-    fn needs_dataplane_update(
-        old_name: &str,
-        new_name: &Option<external::Name>,
-        new_sources: &Option<Vec<IpAddr>>,
-        old_mvlan: Option<i16>,
-        new_mvlan: &Option<external::Nullable<VlanID>>,
-    ) -> bool {
-        let name_changed =
-            new_name.as_ref().map_or(false, |n| n.as_str() != old_name);
-        let sources_changed = new_sources.is_some();
-        // Check if mvlan changed: new_mvlan.is_some() means the field was provided in the update
-        // If provided, extract the inner value and compare with old_mvlan
-        let mvlan_changed = new_mvlan.as_ref().map_or(false, |nullable| {
-            let new_mvlan = nullable.0.map(|vlan| u16::from(vlan) as i16);
-            new_mvlan != old_mvlan
-        });
-        name_changed || sources_changed || mvlan_changed
     }
 }
 

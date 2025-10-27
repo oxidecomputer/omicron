@@ -2,17 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Saga for updating multicast group identity information in the dataplane
-//! (via DPD).
+//! Saga for updating multicast group state in the dataplane (via DPD).
 //!
-//! This saga handles atomic updates of both external and underlay multicast
-//! groups when identity information (name) or source IPs change.
+//! This saga handles atomic updates of both external and underlay
+//! multicast groups in DPD. It reads the current state from the database
+//! and applies it to all switches.
 //!
-//! The saga is triggered when multicast_group_update() is called and ensures
-//! that either both groups are successfully updated on all switches, or any
-//! partial changes are rolled back.
+//! The saga is idempotent and can be called multiple times safely. If the
+//! group state hasn't changed, the DPD update is effectively a no-op.
 
-use ipnetwork::IpNetwork;
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use slog::{debug, info};
 use steno::{ActionError, DagBuilder, Node};
@@ -41,14 +40,6 @@ pub(crate) struct Params {
     pub external_group_id: Uuid,
     /// Underlay multicast group to update
     pub underlay_group_id: Uuid,
-    /// Old group name (for rollback)
-    pub old_name: String,
-    /// New group name (for DPD tag updates)
-    pub new_name: String,
-    /// Old sources (for rollback)
-    pub old_sources: Vec<IpNetwork>,
-    /// New sources (for update)
-    pub new_sources: Vec<IpNetwork>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -112,13 +103,9 @@ async fn mgu_fetch_group_data(
 
     debug!(
         osagactx.log(),
-        "fetching multicast group data for identity update";
+        "fetching multicast group data for DPD update";
         "external_group_id" => %params.external_group_id,
-        "underlay_group_id" => %params.underlay_group_id,
-        "old_name" => %params.old_name,
-        "new_name" => %params.new_name,
-        "old_sources" => ?params.old_sources,
-        "new_sources" => ?params.new_sources
+        "underlay_group_id" => %params.underlay_group_id
     );
 
     // Fetch external multicast group
@@ -140,12 +127,13 @@ async fn mgu_fetch_group_data(
 
     debug!(
         osagactx.log(),
-        "successfully fetched multicast group data for update";
+        "successfully fetched multicast group data for DPD update";
         "external_group_id" => %external_group.id(),
         "external_group_name" => external_group.name().as_str(),
         "external_ip" => %external_group.multicast_ip,
         "underlay_group_id" => %underlay_group.id,
-        "underlay_ip" => %underlay_group.multicast_ip
+        "underlay_ip" => %underlay_group.multicast_ip,
+        "sources" => ?external_group.source_ips
     );
 
     Ok((external_group, underlay_group))
@@ -175,13 +163,13 @@ async fn mgu_update_dataplane(
 
     debug!(
         osagactx.log(),
-        "updating multicast group identity via DPD across switches";
+        "updating multicast group in DPD across switches (idempotent)";
         "switch_count" => %dataplane.switch_count(),
         "external_group_id" => %external_group.id(),
         "external_group_name" => external_group.name().as_str(),
         "external_ip" => %external_group.multicast_ip,
         "underlay_ip" => %underlay_group.multicast_ip,
-        "params" => ?params,
+        "sources" => ?external_group.source_ips,
     );
 
     let (underlay_response, external_response) = dataplane
@@ -190,8 +178,8 @@ async fn mgu_update_dataplane(
             GroupUpdateParams {
                 external_group: &external_group,
                 underlay_group: &underlay_group,
-                new_name: &params.new_name,
-                new_sources: &params.new_sources,
+                new_name: external_group.name().as_str(),
+                new_sources: &external_group.source_ips,
             },
         )
         .await
@@ -199,11 +187,10 @@ async fn mgu_update_dataplane(
 
     info!(
         osagactx.log(),
-        "successfully updated multicast groups via DPD across switches";
+        "successfully updated multicast groups in DPD across switches";
         "external_group_id" => %external_group.id(),
         "underlay_group_id" => %underlay_group.id,
-        "old_name" => %params.old_name,
-        "new_name" => %params.new_name
+        "group_name" => external_group.name().as_str()
     );
 
     Ok(DataplaneUpdateResponse {
@@ -212,19 +199,18 @@ async fn mgu_update_dataplane(
     })
 }
 
+/// Rollback multicast group updates by removing groups from DPD.
 async fn mgu_rollback_dataplane(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    let (external_group, underlay_group) = sagactx
+
+    let (external_group, _underlay_group) = sagactx
         .lookup::<(MulticastGroup, UnderlayMulticastGroup)>("group_data")?;
 
-    // Use MulticastDataplaneClient for consistent cleanup
+    let multicast_tag = external_group.name().to_string();
+
     let dataplane = MulticastDataplaneClient::new(
         osagactx.nexus().datastore().clone(),
         osagactx.nexus().resolver().clone(),
@@ -233,33 +219,24 @@ async fn mgu_rollback_dataplane(
     .await
     .map_err(ActionError::action_failed)?;
 
-    info!(
+    debug!(
         osagactx.log(),
-        "rolling back multicast group updates";
+        "rolling back multicast additions";
         "external_group_id" => %params.external_group_id,
         "underlay_group_id" => %params.underlay_group_id,
+        "tag" => %multicast_tag,
         "external_group_name" => external_group.name().as_str(),
-        "reverting_to_old_name" => %params.old_name,
     );
 
     dataplane
-        .update_groups(
-            &opctx,
-            GroupUpdateParams {
-                external_group: &external_group,
-                underlay_group: &underlay_group,
-                new_name: &params.old_name,
-                new_sources: &params.old_sources,
-            },
-        )
+        .remove_groups(&multicast_tag)
         .await
-        .map_err(ActionError::action_failed)?;
+        .context("failed to cleanup multicast groups during saga rollback")?;
 
-    info!(
+    debug!(
         osagactx.log(),
-        "successfully completed atomic rollback of multicast group updates";
-        "switches_reverted" => %dataplane.switch_count(),
-        "reverted_to_tag" => %params.old_name
+        "completed rollback of multicast configuration";
+        "tag" => %multicast_tag
     );
 
     Ok(())
@@ -281,10 +258,6 @@ mod test {
             serialized_authn: Serialized::for_opctx(opctx),
             external_group_id: Uuid::new_v4(),
             underlay_group_id: Uuid::new_v4(),
-            old_name: "old-group-name".to_string(),
-            new_name: "new-group-name".to_string(),
-            old_sources: vec![],
-            new_sources: vec![],
         }
     }
 

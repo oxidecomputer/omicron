@@ -1234,7 +1234,7 @@ async fn siu_commit_instance_updates(
                     .datastore()
                     .multicast_group_member_update_sled_id(
                         &opctx,
-                        instance_id,
+                        InstanceUuid::from_untyped_uuid(instance_id),
                         Some((*new_sled_id).into()),
                     )
                     .await

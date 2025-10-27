@@ -9,6 +9,16 @@
 //!
 //! - External groups: External-facing, allocated from IP pools
 //! - Underlay groups: System-generated admin-scoped IPv6 multicast groups
+//!
+//! ## Typed UUID Usage
+//!
+//! Public datastore functions in this module use typed UUIDs for type safety:
+//!
+//! - **Public functions** use `MulticastGroupUuid` and `InstanceUuid` for:
+//!   - Type safety at API boundaries
+//!   - Clear documentation of expected ID types
+//!   - Preventing UUID type confusion
 
 pub mod groups;
 pub mod members;
+pub mod ops;

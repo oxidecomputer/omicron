@@ -11,9 +11,10 @@ use crate::app::sagas::declare_saga_actions;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
-use slog::info;
+use slog::{debug, info};
 use steno::ActionError;
 
 // instance delete saga: input parameters
@@ -160,7 +161,10 @@ async fn sid_leave_multicast_groups(
 
     // Mark all multicast group memberships for this instance as deleted
     datastore
-        .multicast_group_members_mark_for_removal(&opctx, instance_id)
+        .multicast_group_members_mark_for_removal(
+            &opctx,
+            InstanceUuid::from_untyped_uuid(instance_id),
+        )
         .await
         .map_err(ActionError::action_failed)?;
 

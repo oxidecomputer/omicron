@@ -472,16 +472,21 @@ impl AuthorizedResource for IpPoolList {
 }
 
 /// Synthetic, fleet-scoped resource representing the `/v1/multicast-groups`
-/// collection. This is not a persisted entity; it exists only to authorize
-/// collection-level actions on multicast groups.
+/// collection.
 ///
-/// Authorization derives from the parent Fleet (via the `parent_fleet`
-/// relation). Fleet Admins may create groups; Fleet Viewers may list them.
-/// Additionally, policy permits any authenticated actor in the same
-/// silo/fleet to list multicast groups (see `omicron.polar`) so instances can
-/// discover and attach to groups without requiring `Fleet::Viewer`.
+/// **Authorization Model:**
+/// - Multicast groups are fleet-wide resources (similar to IP pools).
+/// - Any authenticated user within a silo in the fleet can create, list, read,
+///   and modify groups. This includes project collaborators, silo collaborators,
+///   and silo admins.
+/// - Cross-silo multicast communication is enabled by fleet-wide access.
 ///
-/// Akin to [IpPoolList]'s approach.
+/// The fleet-level collection endpoint (`/v1/multicast-groups`) allows:
+/// - Any authenticated user within the fleet's silos to create and list groups.
+/// - Instances from different projects and silos can join the same multicast groups.
+///
+/// See `omicron.polar` for the detailed policy rules that grant fleet-wide
+/// access to authenticated silo users for multicast group operations.
 #[derive(Clone, Copy, Debug)]
 pub struct MulticastGroupList;
 
@@ -1217,15 +1222,19 @@ authz_resource! {
 // communication.
 //
 // Authorization rules:
-// - Creating/modifying/deleting groups: requires Fleet::Admin role
-// - Listing groups: Any authenticated user in the same fleet
-// - Viewing individual groups: Any authenticated user in the same fleet
+// - Creating/modifying groups: Any authenticated user within a silo in the fleet.
+//   This includes project collaborators, silo collaborators, and silo admins.
+// - Listing groups: Any authenticated user within a silo in the fleet
+// - Viewing individual groups: Any authenticated user within a silo in the fleet
 // - Attaching instances to groups: only requires Instance::Modify permission
-//   (silo users can attach their own instances to any fleet-scoped group)
+//   (users can attach their own instances to any fleet-scoped group)
 //
-// See omicron.polar for the special `has_permission` rules that grant list/read
-// access to all authenticated users in the fleet, enabling cross-project and
-// cross-silo multicast without requiring Fleet::Viewer role.
+// Fleet::Admin role can also perform all operations via the parent Fleet relation.
+//
+// See omicron.polar for the special `has_permission` rules that grant create/modify/
+// list/read access to authenticated silo users (including project collaborators),
+// enabling cross-project and cross-silo multicast communication without requiring
+// Fleet::Admin or Fleet::Viewer roles.
 //
 // Member management: `MulticastGroup` member attachments/detachments (instances
 // joining/leaving groups) use the existing `MulticastGroup` and `Instance`

@@ -18,7 +18,7 @@
 //!
 //! ## Operations Handled
 //! - **"Creating" state**: Initiate DPD "ensure" to apply configuration
-//! - **"Active" state**: Verification and drift correction
+//! - **"Active" state**: Detect DPD drift and launch UPDATE saga when DB state differs
 //! - **"Deleting" state**: Switch cleanup and database removal
 //! - **Extensible processing**: Support for different group types
 //!
@@ -31,7 +31,7 @@
 //! ```text
 //! "Creating"                  → "Active" → "Deleting" → "Deleted" (removed from DB)
 //!     ↓                            ↓           ↓
-//!   (saga=external+underlay)    (verify)    (cleanup)
+//!   (saga=external+underlay)  (check+sync)  (cleanup)
 //! ```
 //!
 //! ## State Transition Permutations
@@ -46,20 +46,20 @@
 //! ### ACTIVE State Transitions
 //! | Condition | DPD State | Action | Next State |
 //! |-----------|-----------|---------|------------|
-//! | 1 | Updated correctly | No action | "Active" (NoChange) |
-//! | 2 | Missing/incorrect | Ensure dataplane reflects intended config (DPD) | "Active" (NoChange) |
+//! | 1 | Matches DB | No action | "Active" (NoChange) |
+//! | 2 | Differs from DB | Launch UPDATE saga to fix drift | "Active" (StateChanged) |
+//! | 3 | Missing/error | Launch UPDATE saga to fix drift | "Active" (StateChanged) |
 //!
 //! ### DELETING State Transitions
-//! | Condition | DPD Cleanup | DB Cleanup | Action | Next State |
-//! |-----------|------------|-----------|---------|------------|
-//! | 1 | Success | Success | Remove from DB | Deleted (removed) |
+//! | Condition | DPD cleanup (external+underlay) | DB cleanup (row) | Action | Next State |
+//! |-----------|-------------------------------|-------------------|--------|------------|
+//! | 1 | Success | Success | Delete DB row | "Deleted" (no row) |
 //! | 2 | Failed | N/A | Log error, retry next pass | "Deleting" (NoChange) |
 //! | 3 | Success | Failed | Log error, retry next pass | "Deleting" (NoChange) |
 //!
-//! ### DELETED State Transitions
-//! | Condition | Action | Next State |
-//! |-----------|---------|------------|
-//! | 1 | Remove corresponding DPD configuration | Removed from DB |
+//! Note: "Deleted" is a terminal outcome (the group row no longer exists). All
+//! DPD cleanup happens while in "Deleting"; there are no transitions for
+//! "Deleted" because the reconciler no longer sees the group.
 //!
 //! ## Triggering Events
 //! - **"Creating"**: User API creates group → DB inserts with "Creating" state
@@ -75,7 +75,7 @@
 
 use anyhow::Context;
 use futures::stream::{self, StreamExt};
-use slog::{debug, info, trace, warn};
+use slog::{debug, error, trace, warn};
 
 use nexus_db_model::{MulticastGroup, MulticastGroupState};
 use nexus_db_queries::context::OpContext;
@@ -83,12 +83,52 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
-use super::{
-    MulticastGroupReconciler, StateTransition, map_external_to_underlay_ip,
-};
+use super::{MulticastGroupReconciler, StateTransition};
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
 use crate::app::saga::create_saga_dag;
 use crate::app::sagas;
+
+/// Check if DPD tag matches database name.
+fn dpd_state_matches_name(
+    dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
+    db_group: &MulticastGroup,
+) -> bool {
+    dpd_group.tag.as_ref().map_or(false, |tag| tag == db_group.name().as_str())
+}
+
+/// Check if DPD sources match database sources.
+fn dpd_state_matches_sources(
+    dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
+    db_group: &MulticastGroup,
+) -> bool {
+    let db_sources: Vec<_> =
+        db_group.source_ips.iter().map(|ip| ip.ip()).collect();
+    let dpd_sources = dpd_group.sources.clone().unwrap_or_default();
+
+    // Extract exact IPs from DPD sources (filter out subnets)
+    let mut dpd_ips: Vec<_> = dpd_sources
+        .into_iter()
+        .filter_map(|src| match src {
+            dpd_client::types::IpSrc::Exact(ip) => Some(ip),
+            dpd_client::types::IpSrc::Subnet(_) => None,
+        })
+        .collect();
+
+    let mut db_sources_sorted = db_sources;
+    dpd_ips.sort();
+    db_sources_sorted.sort();
+
+    dpd_ips == db_sources_sorted
+}
+
+/// Check if DPD vlan_id matches database mvlan.
+fn dpd_state_matches_mvlan(
+    dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
+    db_group: &MulticastGroup,
+) -> bool {
+    let db_mvlan = db_group.mvlan.map(|v| v as u16);
+    dpd_group.external_forwarding.vlan_id == db_mvlan
+}
 
 /// Trait for processing different types of multicast groups
 trait GroupStateProcessor {
@@ -109,7 +149,7 @@ trait GroupStateProcessor {
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error>;
 
-    /// Process a group in "Active" state (verification).
+    /// Process a group in "Active" state (check DPD sync status).
     async fn process_active(
         &self,
         reconciler: &MulticastGroupReconciler,
@@ -146,7 +186,7 @@ impl GroupStateProcessor for ExternalGroupProcessor {
             .await
     }
 
-    /// Handle groups in "Active" state (verification).
+    /// Handle groups in "Active" state (check DPD sync status).
     async fn process_active(
         &self,
         reconciler: &MulticastGroupReconciler,
@@ -161,69 +201,98 @@ impl GroupStateProcessor for ExternalGroupProcessor {
 }
 
 impl MulticastGroupReconciler {
-    /// Process multicast groups that are in "Creating" state.
-    pub async fn reconcile_creating_groups(
+    /// Generic group reconciliation logic for any state.
+    ///
+    /// This consolidates the common pattern of:
+    /// 1. List groups by state
+    /// 2. Process concurrently
+    /// 3. Collect and log results
+    async fn reconcile_groups_by_state(
         &self,
         opctx: &OpContext,
+        state: MulticastGroupState,
+        dataplane_client: Option<&MulticastDataplaneClient>,
     ) -> Result<usize, String> {
-        trace!(opctx.log, "searching for creating multicast groups");
+        trace!(opctx.log, "searching for multicast groups"; "state" => %state);
 
         let groups = self
             .datastore
             .multicast_groups_list_by_state(
                 opctx,
-                MulticastGroupState::Creating,
+                state,
                 &DataPageParams::max_page(),
             )
             .await
             .map_err(|e| {
                 error!(
                     opctx.log,
-                    "failed to list creating multicast groups";
-                    "error" => %e
+                    "failed to list multicast groups";
+                    "error" => %e,
+                    "state" => %state
                 );
-                "failed to list creating multicast groups".to_string()
+                format!("failed to list {state} multicast groups")
             })?;
 
-        trace!(opctx.log, "found creating multicast groups"; "count" => groups.len());
+        trace!(opctx.log, "found multicast groups"; "count" => groups.len(), "state" => %state);
 
         // Process groups concurrently with configurable parallelism
         let results = stream::iter(groups)
             .map(|group| async move {
-                let result =
-                    self.process_group_state(opctx, &group, None).await;
+                let result = self
+                    .process_group_state(opctx, &group, dataplane_client)
+                    .await;
                 (group, result)
             })
             .buffer_unordered(self.group_concurrency_limit)
             .collect::<Vec<_>>()
             .await;
 
+        // Handle results with state-appropriate logging and counting
         let mut processed = 0;
+        let total_results = results.len();
         for (group, result) in results {
             match result {
-                Ok(transition) => match transition {
-                    StateTransition::StateChanged
-                    | StateTransition::NoChange => {
+                Ok(transition) => {
+                    // Count successful transitions based on state expectations
+                    let should_count = match state {
+                        // Creating: count StateChanged and NoChange
+                        MulticastGroupState::Creating => matches!(
+                            transition,
+                            StateTransition::StateChanged
+                                | StateTransition::NoChange
+                        ),
+                        // Deleting: count StateChanged and NeedsCleanup
+                        MulticastGroupState::Deleting => matches!(
+                            transition,
+                            StateTransition::StateChanged
+                                | StateTransition::NeedsCleanup
+                        ),
+                        // Active: count StateChanged and NoChange
+                        MulticastGroupState::Active => matches!(
+                            transition,
+                            StateTransition::StateChanged
+                                | StateTransition::NoChange
+                        ),
+                        MulticastGroupState::Deleted => true,
+                    };
+
+                    if should_count {
                         processed += 1;
-                        debug!(
-                            opctx.log,
-                            "processed creating multicast group";
-                            "group" => ?group,
-                            "transition" => ?transition
-                        );
                     }
-                    StateTransition::NeedsCleanup => {
-                        debug!(
-                            opctx.log,
-                            "creating group marked for cleanup";
-                            "group" => ?group
-                        );
-                    }
-                },
+
+                    debug!(
+                        opctx.log,
+                        "processed multicast group";
+                        "state" => %state,
+                        "group" => ?group,
+                        "transition" => ?transition
+                    );
+                }
                 Err(e) => {
                     warn!(
                         opctx.log,
-                        "failed to process creating multicast group";
+                        "failed to process multicast group";
+                        "state" => %state,
                         "group" => ?group,
                         "error" => %e
                     );
@@ -231,7 +300,30 @@ impl MulticastGroupReconciler {
             }
         }
 
+        if total_results > 0 {
+            debug!(
+                opctx.log,
+                "group reconciliation completed";
+                "state" => %state,
+                "processed" => processed,
+                "total" => total_results
+            );
+        }
+
         Ok(processed)
+    }
+
+    /// Process multicast groups that are in "Creating" state.
+    pub async fn reconcile_creating_groups(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<usize, String> {
+        self.reconcile_groups_by_state(
+            opctx,
+            MulticastGroupState::Creating,
+            None,
+        )
+        .await
     }
 
     /// Process multicast groups that are in "Deleting" state.
@@ -240,152 +332,26 @@ impl MulticastGroupReconciler {
         opctx: &OpContext,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<usize, String> {
-        let groups = self
-            .datastore
-            .multicast_groups_list_by_state(
-                opctx,
-                MulticastGroupState::Deleting,
-                &DataPageParams::max_page(),
-            )
-            .await
-            .map_err(|e| {
-                error!(
-                    opctx.log,
-                    "failed to list deleting multicast groups";
-                    "error" => %e
-                );
-                "failed to list deleting multicast groups".to_string()
-            })?;
-
-        // Process groups concurrently with configurable parallelism
-        let results = stream::iter(groups)
-            .map(|group| async move {
-                let result = self
-                    .process_group_state(opctx, &group, Some(dataplane_client))
-                    .await;
-                (group, result)
-            })
-            .buffer_unordered(self.group_concurrency_limit)
-            .collect::<Vec<_>>()
-            .await;
-
-        let mut processed = 0;
-        for (group, result) in results {
-            match result {
-                Ok(transition) => match transition {
-                    StateTransition::StateChanged
-                    | StateTransition::NeedsCleanup => {
-                        processed += 1;
-                        debug!(
-                            opctx.log,
-                            "processed deleting multicast group";
-                            "group" => ?group,
-                            "transition" => ?transition
-                        );
-                    }
-                    StateTransition::NoChange => {
-                        debug!(
-                            opctx.log,
-                            "deleting group no change needed";
-                            "group" => ?group
-                        );
-                    }
-                },
-                Err(e) => {
-                    warn!(
-                        opctx.log,
-                        "failed to process deleting multicast group";
-                        "group" => ?group,
-                        "error" => %e
-                    );
-                }
-            }
-        }
-
-        Ok(processed)
+        self.reconcile_groups_by_state(
+            opctx,
+            MulticastGroupState::Deleting,
+            Some(dataplane_client),
+        )
+        .await
     }
 
-    /// Verify that active multicast groups are still properly configured.
+    /// Reconcile active multicast groups with DPD (drift detection and correction).
     pub async fn reconcile_active_groups(
         &self,
         opctx: &OpContext,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<usize, String> {
-        trace!(opctx.log, "searching for active multicast groups");
-
-        let groups = self
-            .datastore
-            .multicast_groups_list_by_state(
-                opctx,
-                MulticastGroupState::Active,
-                &DataPageParams::max_page(),
-            )
-            .await
-            .map_err(|e| {
-                error!(
-                    opctx.log,
-                    "failed to list active multicast groups";
-                    "error" => %e
-                );
-                "failed to list active multicast groups".to_string()
-            })?;
-
-        trace!(opctx.log, "found active multicast groups"; "count" => groups.len());
-
-        // Process groups concurrently with configurable parallelism
-        let results = stream::iter(groups)
-            .map(|group| async move {
-                let result = self
-                    .process_group_state(opctx, &group, Some(dataplane_client))
-                    .await;
-                (group, result)
-            })
-            .buffer_unordered(self.group_concurrency_limit)
-            .collect::<Vec<_>>()
-            .await;
-
-        let mut verified = 0;
-        let total_results = results.len();
-        for (group, result) in results {
-            match result {
-                Ok(transition) => match transition {
-                    StateTransition::StateChanged
-                    | StateTransition::NoChange => {
-                        verified += 1;
-                        debug!(
-                            opctx.log,
-                            "processed active multicast group";
-                            "group" => ?group,
-                            "transition" => ?transition
-                        );
-                    }
-                    StateTransition::NeedsCleanup => {
-                        debug!(
-                            opctx.log,
-                            "active group marked for cleanup";
-                            "group" => ?group
-                        );
-                    }
-                },
-                Err(e) => {
-                    warn!(
-                        opctx.log,
-                        "active group verification/reconciliation failed";
-                        "group" => ?group,
-                        "error" => %e
-                    );
-                }
-            }
-        }
-
-        debug!(
-            opctx.log,
-            "active group reconciliation completed";
-            "verified" => verified,
-            "total" => total_results
-        );
-
-        Ok(verified)
+        self.reconcile_groups_by_state(
+            opctx,
+            MulticastGroupState::Active,
+            Some(dataplane_client),
+        )
+        .await
     }
 
     /// Main dispatch function for processing group state changes.
@@ -464,7 +430,7 @@ impl MulticastGroupReconciler {
     ) -> Result<StateTransition, anyhow::Error> {
         debug!(
             opctx.log,
-            "processing external multicast group transition: Creating → Active";
+            "processing external multicast group transition: 'Creating' → 'Active'";
             "group_id" => %group.id(),
             "group_name" => group.name().as_str(),
             "multicast_ip" => %group.multicast_ip,
@@ -491,7 +457,7 @@ impl MulticastGroupReconciler {
     ) -> Result<StateTransition, anyhow::Error> {
         debug!(
             opctx.log,
-            "processing external multicast group transition: Deleting → Deleted (switch cleanup)";
+            "processing external multicast group transition: 'Deleting' → 'Deleted' (switch cleanup)";
             "group_id" => %group.id(),
             "group_name" => group.name().as_str(),
             "multicast_ip" => %group.multicast_ip,
@@ -505,25 +471,111 @@ impl MulticastGroupReconciler {
         Ok(StateTransition::StateChanged)
     }
 
-    /// External group handler for groups in "Active" state (verification).
+    /// External group handler for groups in "Active" state.
+    ///
+    /// Checks if the group's DPD state matches the database state. If not,
+    /// launches the UPDATE saga to sync. This handles updates triggered by
+    /// the UPDATE API endpoint and self-corrects any DPD drift.
     async fn handle_active_external_group(
         &self,
         opctx: &OpContext,
         group: &MulticastGroup,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
-        debug!(
-            opctx.log,
-            "verifying active external multicast group dataplane consistency";
-            "group_id" => %group.id(),
-            "multicast_ip" => %group.multicast_ip,
-            "multicast_scope" => if group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
-            "underlay_group_id" => ?group.underlay_group_id,
-            "verification_type" => "switch_forwarding_table_sync"
-        );
+        let underlay_group_id = group.underlay_group_id.ok_or_else(|| {
+            anyhow::Error::msg(
+                "active multicast group missing underlay_group_id",
+            )
+        })?;
 
-        self.verify_groups_inner(opctx, group, dataplane_client).await?;
-        Ok(StateTransition::NoChange)
+        // Check if DPD state matches DB state (read-before-write for drift detection)
+        let needs_update = match dataplane_client
+            .fetch_external_group_for_drift_check(
+                opctx,
+                group.multicast_ip.ip(),
+            )
+            .await
+        {
+            Ok(Some(dpd_group)) => {
+                let name_matches = dpd_state_matches_name(&dpd_group, group);
+                let sources_match =
+                    dpd_state_matches_sources(&dpd_group, group);
+                let mvlan_matches = dpd_state_matches_mvlan(&dpd_group, group);
+
+                let needs_update =
+                    !name_matches || !sources_match || !mvlan_matches;
+
+                if needs_update {
+                    debug!(
+                        opctx.log,
+                        "detected DPD state mismatch for active group";
+                        "group_id" => %group.id(),
+                        "name_matches" => name_matches,
+                        "sources_match" => sources_match,
+                        "mvlan_matches" => mvlan_matches
+                    );
+                }
+
+                needs_update
+            }
+            Ok(None) => {
+                // Group not found in DPD - need to create
+                debug!(
+                    opctx.log,
+                    "active group not found in DPD, will update";
+                    "group_id" => %group.id()
+                );
+                true
+            }
+            Err(e) => {
+                // Error fetching from DPD - log and retry
+                warn!(
+                    opctx.log,
+                    "error fetching active group from DPD, will retry update";
+                    "group_id" => %group.id(),
+                    "error" => %e
+                );
+                true
+            }
+        };
+
+        if needs_update {
+            debug!(
+                opctx.log,
+                "updating active multicast group in DPD";
+                "group_id" => %group.id(),
+                "multicast_ip" => %group.multicast_ip
+            );
+
+            let saga_params = sagas::multicast_group_dpd_update::Params {
+                serialized_authn:
+                    nexus_db_queries::authn::saga::Serialized::for_opctx(opctx),
+                external_group_id: group.id(),
+                underlay_group_id,
+            };
+
+            let dag = create_saga_dag::<
+                sagas::multicast_group_dpd_update::SagaMulticastGroupDpdUpdate,
+            >(saga_params)
+            .context("failed to create multicast group update saga")?;
+
+            let saga_id = self
+                .sagas
+                .saga_start(dag)
+                .await
+                .context("failed to start multicast group update saga")?;
+
+            debug!(
+                opctx.log,
+                "DPD update saga initiated for active group";
+                "external_group_id" => %group.id(),
+                "saga_id" => %saga_id,
+            );
+
+            Ok(StateTransition::StateChanged)
+        } else {
+            Ok(StateTransition::NoChange)
+        }
     }
 
     /// Process a single multicast group in "Creating" state.
@@ -565,13 +617,11 @@ impl MulticastGroupReconciler {
                 );
 
                 // Generate underlay multicast IP using IPv6 admin-local scope (RFC 7346)
-                let underlay_ip =
-                    map_external_to_underlay_ip(group.multicast_ip.ip())
-                        .context(
-                            "failed to map customer multicast IP to underlay",
-                        )?;
-
-                let vni = group.vni;
+                let underlay_ip = self
+                    .map_external_to_underlay_ip(group.multicast_ip.ip())
+                    .context(
+                        "failed to map customer multicast IP to underlay",
+                    )?;
 
                 let new_underlay = self
                     .datastore
@@ -579,7 +629,6 @@ impl MulticastGroupReconciler {
                         opctx,
                         group.clone(),
                         underlay_ip.into(),
-                        vni,
                     )
                     .await
                     .context("failed to create underlay multicast group")?;
@@ -603,7 +652,7 @@ impl MulticastGroupReconciler {
             "external_multicast_ip" => %group.multicast_ip,
             "underlay_group_id" => %underlay_group.id,
             "underlay_multicast_ip" => %underlay_group.multicast_ip,
-            "vni" => ?underlay_group.vni,
+            "vni" => ?group.vni,
             "saga_type" => "multicast_group_dpd_ensure",
             "dpd_operation" => "create_external_and_underlay_groups"
         );
@@ -675,120 +724,6 @@ impl MulticastGroupReconciler {
             )
             .await
             .context("failed to complete external group deletion")?;
-
-        Ok(())
-    }
-
-    /// Verify and reconcile a group on all dataplane switches.
-    async fn verify_groups_inner(
-        &self,
-        opctx: &OpContext,
-        group: &MulticastGroup,
-        dataplane_client: &MulticastDataplaneClient,
-    ) -> Result<(), anyhow::Error> {
-        let tag = Self::generate_multicast_tag(group);
-
-        // Use dataplane client from reconciliation pass to query switch state
-        let switch_groups = dataplane_client
-            .get_groups(&tag)
-            .await
-            .context("failed to get groups from switches")?;
-
-        // Check if group exists on all switches
-        let expected_switches = switch_groups.len();
-        let mut switches_with_group = 0;
-        let mut needs_reconciliation = false;
-
-        for (location, groups) in &switch_groups {
-            let has_groups = !groups.is_empty();
-            if has_groups {
-                switches_with_group += 1;
-                debug!(
-                    opctx.log,
-                    "found multicast groups on switch";
-                    "switch" => %location,
-                    "tag" => %tag,
-                    "count" => groups.len()
-                );
-            } else {
-                debug!(
-                    opctx.log,
-                    "missing multicast groups on switch";
-                    "switch" => %location,
-                    "tag" => %tag
-                );
-                needs_reconciliation = true;
-            }
-        }
-
-        // If group is missing from some switches, re-add it
-        if needs_reconciliation {
-            info!(
-                opctx.log,
-                "multicast group missing from switches - re-adding";
-                "group" => ?group,
-                "tag" => %tag,
-                "switches_with_group" => switches_with_group,
-                "total_switches" => expected_switches
-            );
-
-            // Get the external and underlay groups for recreation
-            let external_group = self
-                .datastore
-                .multicast_group_fetch(
-                    opctx,
-                    MulticastGroupUuid::from_untyped_uuid(group.id()),
-                )
-                .await
-                .context("failed to get external group for verification")?;
-
-            let underlay_group_id = group
-                .underlay_group_id
-                .context("no underlay group for external group")?;
-
-            let underlay_group = self
-                .datastore
-                .underlay_multicast_group_fetch(opctx, underlay_group_id)
-                .await
-                .context("failed to get underlay group for verification")?;
-
-            // Re-create the groups on all switches
-            match dataplane_client
-                .create_groups(opctx, &external_group, &underlay_group)
-                .await
-            {
-                Ok(_) => {
-                    info!(
-                        opctx.log,
-                        "successfully re-added multicast groups to switches";
-                        "group" => ?group,
-                        "tag" => %tag
-                    );
-                }
-                Err(
-                    omicron_common::api::external::Error::ObjectAlreadyExists {
-                        ..
-                    },
-                ) => {
-                    debug!(
-                        opctx.log,
-                        "multicast groups already exist on some switches - this is expected";
-                        "group" => ?group,
-                        "tag" => %tag
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        opctx.log,
-                        "failed to re-add multicast groups to switches";
-                        "group" => ?group,
-                        "tag" => %tag,
-                        "error" => %e
-                    );
-                    // Don't fail verification - just log the error and continue
-                }
-            }
-        }
 
         Ok(())
     }

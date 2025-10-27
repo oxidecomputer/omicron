@@ -15,19 +15,19 @@ use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_instance, create_project, object_create,
-    object_delete, object_get, object_put,
+    object_delete, object_get,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, InstanceUpdate,
-    MulticastGroupCreate, MulticastGroupMemberAdd,
+    InstanceCreate, InstanceNetworkInterfaceAttachment, MulticastGroupCreate,
+    MulticastGroupMemberAdd,
 };
 use nexus_types::external_api::views::{MulticastGroup, MulticastGroupMember};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 
 use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, Instance, InstanceCpuCount,
-    InstanceState, NameOrId, Nullable,
+    InstanceState, NameOrId,
 };
 use omicron_common::vlan::VlanID;
 use omicron_nexus::TestInterfaces;
@@ -129,7 +129,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
 
     // Verify create-time attachment worked
     wait_for_member_state(
-        client,
+        cptestctx,
         "group-lifecycle-1",
         instances[0].identity.id,
         "Left", // Instance is stopped, so should be Left
@@ -139,7 +139,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     // Live attach/detach operations
     // Attach instance-live-1 to group-lifecycle-2
     multicast_group_attach(
-        client,
+        cptestctx,
         PROJECT_NAME,
         "instance-live-1",
         "group-lifecycle-2",
@@ -148,7 +148,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
 
     // Attach instance-live-2 to group-lifecycle-2 (test multiple instances per group)
     multicast_group_attach(
-        client,
+        cptestctx,
         PROJECT_NAME,
         "instance-live-2",
         "group-lifecycle-2",
@@ -158,7 +158,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     // Verify both instances are attached to group-lifecycle-2
     for i in 0..2 {
         wait_for_member_state(
-            client,
+            cptestctx,
             "group-lifecycle-2",
             instances[i + 1].identity.id,
             "Left", // Stopped instances
@@ -169,7 +169,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     // Multi-group attachment (instance to multiple groups)
     // Attach instance-multi-groups to multiple groups
     multicast_group_attach(
-        client,
+        cptestctx,
         PROJECT_NAME,
         "instance-multi-groups",
         "group-lifecycle-3",
@@ -177,7 +177,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     multicast_group_attach(
-        client,
+        cptestctx,
         PROJECT_NAME,
         "instance-multi-groups",
         "group-lifecycle-4",
@@ -187,7 +187,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
     // Verify multi-group membership
     for group_name in ["group-lifecycle-3", "group-lifecycle-4"] {
         wait_for_member_state(
-            client,
+            cptestctx,
             group_name,
             instances[3].identity.id,
             "Left", // Stopped instance
@@ -225,7 +225,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
             None,
         )
         .await
-        .expect("Failed to list multicast group members")
+        .expect("Should list multicast group members")
         .all_items;
 
     // Should only have instance-live-2 as member now
@@ -335,7 +335,7 @@ async fn test_multicast_group_attach_conflicts(
             None,
         )
         .await
-        .expect("Failed to list multicast group members")
+        .expect("Should list multicast group members")
         .all_items;
 
     assert_eq!(
@@ -415,8 +415,13 @@ async fn test_multicast_group_attach_limits(
 
     // Wait for members to reach "Left" state for each group (instance is stopped, so reconciler transitions "Joining"→"Left")
     for group_name in &multicast_group_names {
-        wait_for_member_state(client, group_name, instance.identity.id, "Left")
-            .await;
+        wait_for_member_state(
+            cptestctx,
+            group_name,
+            instance.identity.id,
+            "Left",
+        )
+        .await;
     }
 
     // Verify instance is member of multiple groups
@@ -429,7 +434,7 @@ async fn test_multicast_group_attach_limits(
              None,
          )
          .await
-         .expect("Failed to list multicast group members")
+         .expect("Should list multicast group members")
          .all_items;
 
         assert_eq!(
@@ -491,7 +496,7 @@ async fn test_multicast_group_instance_state_transitions(
 
     // Wait for member to reach "Left" state (reconciler transitions "Joining"→"Left" for stopped instance)
     wait_for_member_state(
-        client,
+        cptestctx,
         "state-test-group",
         stopped_instance.identity.id,
         "Left",
@@ -620,7 +625,7 @@ async fn test_multicast_group_persistence_through_stop_start(
 
     // Wait for member to be joined (reconciler will be triggered by instance start)
     wait_for_member_state(
-        client,
+        cptestctx,
         "persist-test-group",
         instance.identity.id,
         "Joined",
@@ -634,7 +639,7 @@ async fn test_multicast_group_persistence_through_stop_start(
             MulticastGroupMember,
         >(client, &members_url, "", None)
         .await
-        .expect("Failed to list group members before stop")
+        .expect("Should list group members before stop")
         .all_items;
 
     assert_eq!(
@@ -661,7 +666,7 @@ async fn test_multicast_group_persistence_through_stop_start(
     .authn_as(nexus_test_utils::http_testing::AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to stop instance");
+    .expect("Should stop instance");
 
     // Simulate the transition and wait for stopped state
     let nexus = &cptestctx.server.server_context().nexus;
@@ -686,7 +691,7 @@ async fn test_multicast_group_persistence_through_stop_start(
             MulticastGroupMember,
         >(client, &members_url, "", None)
         .await
-        .expect("Failed to list group members while stopped")
+        .expect("Should list group members while stopped")
         .all_items;
 
     assert_eq!(
@@ -713,12 +718,11 @@ async fn test_multicast_group_persistence_through_stop_start(
     .authn_as(nexus_test_utils::http_testing::AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to start instance");
+    .expect("Should start instance");
 
     // Simulate the instance transitioning back to "Running" state
     let nexus = &cptestctx.server.server_context().nexus;
     instance_simulate(nexus, &instance_id).await;
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Wait for instance to be running again
     instance_wait_for_state(
@@ -728,16 +732,13 @@ async fn test_multicast_group_persistence_through_stop_start(
     )
     .await;
 
-    // Wait for reconciler to process the instance restart
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
     // Verify multicast group membership still exists after restart
     let members_after_restart =
         nexus_test_utils::http_testing::NexusRequest::iter_collection_authn::<
             MulticastGroupMember,
         >(client, &members_url, "", None)
         .await
-        .expect("Failed to list group members after restart")
+        .expect("Should list group members after restart")
         .all_items;
 
     assert_eq!(
@@ -749,78 +750,22 @@ async fn test_multicast_group_persistence_through_stop_start(
 
     // Wait for member to be joined again after restart
     wait_for_member_state(
-        client,
+        cptestctx,
         "persist-test-group",
         instance.identity.id,
         "Joined",
     )
     .await;
 
-    // Clean up: Remove instance from multicast group before deletion
-    let instance_update_url = format!(
-        "/v1/instances/{}?project={}",
-        "persist-test-instance", PROJECT_NAME
-    );
-
-    let update_params = InstanceUpdate {
-        ncpus: InstanceCpuCount::try_from(1).unwrap(),
-        memory: ByteCount::from_gibibytes_u32(1),
-        boot_disk: Nullable(None),
-        auto_restart_policy: Nullable(None),
-        cpu_platform: Nullable(None),
-        multicast_groups: Some(vec![]), // Remove from all multicast groups
-    };
-
-    object_put::<_, Instance>(client, &instance_update_url, &update_params)
-        .await;
-
-    // Stop the instance before deletion (some systems require this)
-    let instance_stop_url = format!(
-        "/v1/instances/{}/stop?project={}",
-        "persist-test-instance", PROJECT_NAME
-    );
-    nexus_test_utils::http_testing::NexusRequest::new(
-        nexus_test_utils::http_testing::RequestBuilder::new(
-            client,
-            http::Method::POST,
-            &instance_stop_url,
-        )
-        .body(None as Option<&serde_json::Value>)
-        .expect_status(Some(http::StatusCode::ACCEPTED)),
-    )
-    .authn_as(nexus_test_utils::http_testing::AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("Failed to stop instance before deletion");
-
-    // Simulate the stop transition
-    let nexus = &cptestctx.server.server_context().nexus;
-    let info = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("Running instance should be on a sled");
-    info.sled_client.vmm_finish_transition(info.propolis_id).await;
-
-    // Wait for instance to be stopped
-    instance_wait_for_state(
+    // Clean up - use cleanup helper which handles stop/delete
+    cleanup_instances(
+        cptestctx,
         client,
-        instance_id,
-        omicron_common::api::external::InstanceState::Stopped,
+        PROJECT_NAME,
+        &["persist-test-instance"],
     )
     .await;
-
-    // Clean up
-    object_delete(
-        client,
-        &format!(
-            "/v1/instances/{}?project={}",
-            "persist-test-instance", PROJECT_NAME
-        ),
-    )
-    .await;
-
-    object_delete(client, &mcast_group_url("persist-test-group")).await;
+    cleanup_multicast_groups(client, &["persist-test-group"]).await;
 }
 
 /// Verify concurrent multicast operations maintain correct member states.
@@ -876,7 +821,7 @@ async fn test_multicast_concurrent_operations(
 
     // Attach all instances to the multicast group in parallel (this is the optimization)
     multicast_group_attach_bulk(
-        client,
+        cptestctx,
         PROJECT_NAME,
         &instance_names,
         "concurrent-test-group",
@@ -886,7 +831,7 @@ async fn test_multicast_concurrent_operations(
     // Verify all members reached correct state despite concurrent operations
     for instance in instances.iter() {
         wait_for_member_state(
-            client,
+            cptestctx,
             "concurrent-test-group",
             instance.identity.id,
             "Joined", // create_instance() starts instances, so they should be Joined
@@ -921,7 +866,7 @@ async fn test_multicast_concurrent_operations(
 
     // Re-attach one instance while detaching another (overlapping operations)
     let reattach_future = multicast_group_attach(
-        client,
+        cptestctx,
         PROJECT_NAME,
         "concurrent-instance-1",
         "concurrent-test-group",
@@ -945,7 +890,7 @@ async fn test_multicast_concurrent_operations(
     // This tests handling of operations that arrive while reconciler is processing
     let rapid_ops_future = async {
         multicast_group_attach(
-            client,
+            cptestctx,
             PROJECT_NAME,
             "concurrent-instance-3",
             "concurrent-test-group",
@@ -973,7 +918,7 @@ async fn test_multicast_concurrent_operations(
     // Wait for all remaining members to reach "Joined" state
     for member in &post_rapid_members {
         wait_for_member_state(
-            client,
+            cptestctx,
             "concurrent-test-group",
             member.instance_id,
             "Joined",
@@ -1073,7 +1018,7 @@ async fn test_multicast_member_cleanup_instance_never_started(
     .await;
 
     // Wait specifically for member to reach "Left" state since instance was created stopped
-    wait_for_member_state(client, group_name, instance.identity.id, "Left")
+    wait_for_member_state(cptestctx, group_name, instance.identity.id, "Left")
         .await;
 
     // Verify member count
@@ -1175,8 +1120,13 @@ async fn test_multicast_group_membership_during_migration(
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
     // Wait for instance to reach "Joined" state (member creation is processed by reconciler)
-    wait_for_member_state(client, group_name, instance.identity.id, "Joined")
-        .await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        "Joined",
+    )
+    .await;
 
     let pre_migration_members =
         list_multicast_group_members(client, group_name).await;
@@ -1235,7 +1185,7 @@ async fn test_multicast_group_membership_during_migration(
     .authn_as(nexus_test_utils::http_testing::AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to initiate instance migration");
+    .expect("Should initiate instance migration");
 
     // Get propolis IDs for source and target - follow the pattern from existing tests
     let info = nexus
@@ -1258,9 +1208,25 @@ async fn test_multicast_group_membership_during_migration(
         sa.vmm_finish_transition(propolis_id).await;
     }
 
-    // Complete migration on source sled
+    // Complete migration on source sled and wait for instance to enter "Migrating"
     vmm_simulate_on_sled(cptestctx, nexus, source_sled_id, src_propolis_id)
         .await;
+
+    // Instance should transition to "Migrating"; membership should remain "Joined"
+    instance_wait_for_state(client, instance_id, InstanceState::Migrating)
+        .await;
+    let migrating_members =
+        list_multicast_group_members(client, group_name).await;
+    assert_eq!(
+        migrating_members.len(),
+        1,
+        "Membership should remain during migration"
+    );
+    assert_eq!(migrating_members[0].instance_id, instance.identity.id);
+    assert_eq!(
+        migrating_members[0].state, "Joined",
+        "Member should stay Joined while migrating"
+    );
 
     // Complete migration on target sled
     vmm_simulate_on_sled(cptestctx, nexus, target_sled_id, dst_propolis_id)
@@ -1299,8 +1265,13 @@ async fn test_multicast_group_membership_during_migration(
 
     // Wait for member to reach "Joined" state on target sled
     // The RPW reconciler should transition the member back to "Joined" after re-applying DPD configuration
-    wait_for_member_state(client, group_name, instance.identity.id, "Joined")
-        .await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        "Joined",
+    )
+    .await;
 
     let final_member_state = &post_migration_members[0];
     assert_eq!(
@@ -1345,7 +1316,7 @@ async fn test_multicast_group_membership_during_migration(
     .authn_as(nexus_test_utils::http_testing::AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to stop instance");
+    .expect("Should stop instance");
 
     // Simulate stop and wait for stopped state
     let final_info = nexus
@@ -1440,7 +1411,7 @@ async fn test_multicast_group_concurrent_member_migrations(
     // Wait for all members to reach "Joined" state
     for instance in &instances {
         wait_for_member_state(
-            client,
+            cptestctx,
             group_name,
             instance.identity.id,
             "Joined",
@@ -1583,7 +1554,7 @@ async fn test_multicast_group_concurrent_member_migrations(
     // Verify both members reach "Joined" state on their new sleds
     for instance in &instances {
         wait_for_member_state(
-            client,
+            cptestctx,
             group_name,
             instance.identity.id,
             "Joined",

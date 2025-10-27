@@ -54,6 +54,7 @@ use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::MulticastGroupUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use propolis_client::support::InstanceSerialConsoleHelper;
@@ -386,7 +387,11 @@ impl super::Nexus {
         // Get current multicast group memberships (active-only)
         let current_memberships = self
             .datastore()
-            .multicast_group_members_list_by_instance(opctx, instance_id, false)
+            .multicast_group_members_list_by_instance(
+                opctx,
+                InstanceUuid::from_untyped_uuid(instance_id),
+                false,
+            )
             .await?;
         let current_group_ids: HashSet<_> =
             current_memberships.iter().map(|m| m.external_group_id).collect();
@@ -438,8 +443,8 @@ impl super::Nexus {
             self.datastore()
                 .multicast_group_member_detach_by_group_and_instance(
                     opctx,
-                    group_id,
-                    instance_id,
+                    MulticastGroupUuid::from_untyped_uuid(group_id),
+                    InstanceUuid::from_untyped_uuid(instance_id),
                 )
                 .await?;
         }
@@ -455,8 +460,8 @@ impl super::Nexus {
             self.datastore()
                 .multicast_group_member_attach_to_instance(
                     opctx,
-                    group_id,
-                    instance_id,
+                    MulticastGroupUuid::from_untyped_uuid(group_id),
+                    InstanceUuid::from_untyped_uuid(instance_id),
                 )
                 .await?;
         }
@@ -537,7 +542,7 @@ impl super::Nexus {
 
         // Activate multicast reconciler after successful reconfiguration if multicast groups were modified
         if multicast_groups.is_some() {
-            self.background_tasks.task_multicast_group_reconciler.activate();
+            self.background_tasks.task_multicast_reconciler.activate();
         }
 
         Ok(instance_result)
@@ -696,7 +701,7 @@ impl super::Nexus {
 
         // Activate background tasks after successful instance creation
         self.background_tasks.task_vpc_route_manager.activate();
-        self.background_tasks.task_multicast_group_reconciler.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
 
         // TODO: This operation should return the instance as it was created.
         // Refetching the instance state here won't return that version of the
@@ -771,7 +776,7 @@ impl super::Nexus {
 
         // Activate background tasks after successful saga completion
         self.background_tasks.task_vpc_route_manager.activate();
-        self.background_tasks.task_multicast_group_reconciler.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
         Ok(())
     }
 
@@ -826,7 +831,7 @@ impl super::Nexus {
 
         // Activate background tasks after successful saga completion
         self.background_tasks.task_vpc_route_manager.activate();
-        self.background_tasks.task_multicast_group_reconciler.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
 
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
@@ -922,10 +927,10 @@ impl super::Nexus {
                     )
                     .await?;
 
-                // Activate multicast reconciler after successful instance start
-                self.background_tasks
-                    .task_multicast_group_reconciler
-                    .activate();
+                // Activate multicast reconciler after successful instance start.
+                // The reconciler handles both group and member state, including
+                // Joining→Joined transitions now that sled_id is set.
+                self.background_tasks.task_multicast_reconciler.activate();
 
                 self.db_datastore
                     .instance_fetch_with_vmm(opctx, &authz_instance)
@@ -963,13 +968,13 @@ impl super::Nexus {
             self.db_datastore
                 .multicast_group_members_detach_by_instance(
                     opctx,
-                    authz_instance.id(),
+                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 )
                 .await?;
         }
 
         // Activate multicast reconciler to handle switch-level changes
-        self.background_tasks.task_multicast_group_reconciler.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
 
         if let Err(e) = self
             .instance_request_state(
@@ -1445,42 +1450,46 @@ impl super::Nexus {
             project_id: authz_project.id(),
         };
 
-        let multicast_members = self
-            .db_datastore
-            .multicast_group_members_list_for_instance(
-                opctx,
-                authz_instance.id(),
-            )
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!(
-                    "failed to list multicast group members for instance: {e}"
-                ))
-            })?;
-
         let mut multicast_groups = Vec::new();
-        for member in multicast_members {
-            // Get the group details for this membership
-            if let Ok(group) = self
+
+        if self.multicast_enabled() {
+            let multicast_members = self
                 .db_datastore
-                .multicast_group_fetch(
+                .multicast_group_members_list_by_instance(
                     opctx,
-                    omicron_uuid_kinds::MulticastGroupUuid::from_untyped_uuid(
-                        member.external_group_id,
-                    ),
+                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    false, // include_removed
                 )
                 .await
-            {
-                multicast_groups.push(
-                    sled_agent_client::types::InstanceMulticastMembership {
-                        group_ip: group.multicast_ip.ip(),
-                        sources: group
-                            .source_ips
-                            .into_iter()
-                            .map(|src_ip| src_ip.ip())
-                            .collect(),
-                    },
-                );
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to list multicast group members for instance: {e}"
+                    ))
+                })?;
+
+            for member in multicast_members {
+                // Get the group details for this membership
+                if let Ok(group) = self
+                    .db_datastore
+                    .multicast_group_fetch(
+                        opctx,
+                        omicron_uuid_kinds::MulticastGroupUuid::from_untyped_uuid(
+                            member.external_group_id,
+                        ),
+                    )
+                    .await
+                {
+                    multicast_groups.push(
+                        sled_agent_client::types::InstanceMulticastMembership {
+                            group_ip: group.multicast_ip.ip(),
+                            sources: group
+                                .source_ips
+                                .into_iter()
+                                .map(|src_ip| src_ip.ip())
+                                .collect(),
+                        },
+                    );
+                }
             }
         }
 
@@ -2289,6 +2298,8 @@ impl super::Nexus {
         let sagas = self.sagas.clone();
         let task_instance_updater =
             self.background_tasks.task_instance_updater.clone();
+        let task_multicast_reconciler =
+            self.background_tasks.task_multicast_reconciler.clone();
         let log = log.clone();
         async move {
             debug!(
@@ -2329,6 +2340,9 @@ impl super::Nexus {
                 // instance, kick the instance-updater background task
                 // to try and start it again in a timely manner.
                 task_instance_updater.activate();
+            } else {
+                // Activate multicast reconciler after successful saga completion
+                task_multicast_reconciler.activate();
             }
         }
     }

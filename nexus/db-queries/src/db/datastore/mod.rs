@@ -79,7 +79,7 @@ mod ip_pool;
 mod lldp;
 mod lookup_interface;
 mod migration;
-mod multicast;
+pub mod multicast;
 mod nat_entry;
 mod network_interface;
 mod oximeter;

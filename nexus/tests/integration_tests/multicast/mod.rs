@@ -4,11 +4,14 @@
 
 //! Multicast integration tests.
 
+use std::future::Future;
 use std::net::IpAddr;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use dropshot::test_util::ClientTestContext;
 use http::{Method, StatusCode};
+use slog::{debug, info, warn};
 
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
@@ -77,45 +80,6 @@ pub(crate) fn mcast_group_member_add_url(
     match instance {
         NameOrId::Name(_) => format!("{base_url}?project={project_name}"),
         NameOrId::Id(_) => base_url,
-    }
-}
-
-/// Utility functions for running multiple async operations in parallel.
-pub(crate) mod ops {
-    use std::future::Future;
-
-    /// Execute a collection of independent async operations in parallel
-    pub(crate) async fn join_all<T>(
-        ops: impl IntoIterator<Item = impl Future<Output = T>>,
-    ) -> Vec<T> {
-        futures::future::join_all(ops).await
-    }
-
-    /// Execute 2 independent async operations in parallel
-    pub(crate) async fn join2<T1, T2>(
-        op1: impl Future<Output = T1>,
-        op2: impl Future<Output = T2>,
-    ) -> (T1, T2) {
-        tokio::join!(op1, op2)
-    }
-
-    /// Execute 3 independent async operations in parallel
-    pub(crate) async fn join3<T1, T2, T3>(
-        op1: impl Future<Output = T1>,
-        op2: impl Future<Output = T2>,
-        op3: impl Future<Output = T3>,
-    ) -> (T1, T2, T3) {
-        tokio::join!(op1, op2, op3)
-    }
-
-    /// Execute 4 independent async operations in parallel
-    pub(crate) async fn join4<T1, T2, T3, T4>(
-        op1: impl Future<Output = T1>,
-        op2: impl Future<Output = T2>,
-        op3: impl Future<Output = T3>,
-        op4: impl Future<Output = T4>,
-    ) -> (T1, T2, T3, T4) {
-        tokio::join!(op1, op2, op3, op4)
     }
 }
 
@@ -194,9 +158,241 @@ pub(crate) async fn wait_for_multicast_reconciler(
 ) -> nexus_lockstep_client::types::BackgroundTask {
     nexus_test_utils::background::wait_background_task(
         lockstep_client,
-        "multicast_group_reconciler",
+        "multicast_reconciler",
     )
     .await
+}
+
+/// Wait for a condition to be true, activating the reconciler periodically.
+///
+/// This is like `wait_for_condition` but activates the multicast reconciler
+/// periodically (not on every poll) to drive state changes. We activate the
+/// reconciler every 500ms instead of every 80ms poll to reduce overhead while
+/// still ensuring the reconciler processes changes promptly.
+///
+/// Useful for tests that need to wait for reconciler-driven state changes
+/// (e.g., member state transitions).
+pub(crate) async fn wait_for_condition_with_reconciler<F, Fut, T, E>(
+    lockstep_client: &ClientTestContext,
+    condition: F,
+    poll_interval: &Duration,
+    timeout: &Duration,
+) -> Result<T, poll::Error<E>>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<T, CondCheckError<E>>>,
+{
+    // Activate reconciler less frequently than we check the condition
+    // This reduces overhead while still driving state changes forward
+    const RECONCILER_ACTIVATION_INTERVAL: Duration = Duration::from_millis(500);
+
+    let last_reconciler_activation = Arc::new(Mutex::new(Instant::now()));
+
+    // Activate once at the start to kick things off
+    wait_for_multicast_reconciler(lockstep_client).await;
+
+    wait_for_condition(
+        || async {
+            // Only activate reconciler if enough time has passed
+            let now = Instant::now();
+            let should_activate = {
+                let last = last_reconciler_activation.lock().unwrap();
+                now.duration_since(*last) >= RECONCILER_ACTIVATION_INTERVAL
+            };
+
+            if should_activate {
+                wait_for_multicast_reconciler(lockstep_client).await;
+                *last_reconciler_activation.lock().unwrap() = now;
+            }
+
+            condition().await
+        },
+        poll_interval,
+        timeout,
+    )
+    .await
+}
+
+/// Ensure DPD (switch infrastructure) is ready and responsive.
+///
+/// This ensures that switch zones are up and DPD APIs are responding before
+/// running tests that depend on dataplane operations. Helps prevent flaky tests
+/// where the reconciler tries to contact DPD before switch zones are up.
+///
+/// Best practice: Call this at the beginning of every multicast test,
+/// right after getting the test context. It's fast when DPD is already up
+/// (immediate return on success).
+///
+/// Uses a simple ping by listing groups - any successful response means DPD is ready.
+pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
+    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
+    let log = &cptestctx.logctx.log;
+
+    info!(log, "waiting for DPD/switch infrastructure to be ready");
+
+    match wait_for_condition(
+        || async {
+            // Try to list multicast groups - any successful response means DPD is ready
+            // limit=None, page_token=None - we don't care about the results, just that DPD responds
+            match dpd_client.multicast_groups_list(None, None).await {
+                Ok(_) => {
+                    debug!(log, "DPD is responsive");
+                    Ok(())
+                }
+                Err(e) => {
+                    debug!(
+                        log,
+                        "DPD not ready yet";
+                        "error" => %e
+                    );
+                    Err(CondCheckError::<String>::NotYet)
+                }
+            }
+        },
+        &Duration::from_millis(200), // Check every 200ms
+        &Duration::from_secs(30),    // Wait up to 30 seconds for switches
+    )
+    .await
+    {
+        Ok(_) => {
+            info!(log, "DPD/switch infrastructure is ready");
+        }
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "DPD/switch infrastructure did not become ready within {elapsed:?}"
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!("Failed waiting for DPD to be ready: {err}");
+        }
+    }
+}
+
+/// Wait for DPD multicast group state to match a condition.
+///
+/// Generic helper that polls DPD state and calls the provided predicate
+/// to determine if the expected state has been reached. This is useful when
+/// the reconciler runs sagas asynchronously and tests need to wait for DPD
+/// to reflect the changes.
+///
+/// # Usage Examples
+///
+/// Check for a specific vlan_id:
+/// ```rust,ignore
+/// wait_for_dpd_state(
+///     cptestctx,
+///     &multicast_ip,
+///     |response| match response {
+///         MulticastGroupResponse::External { external_forwarding, .. } => {
+///             if external_forwarding.vlan_id == Some(3500) {
+///                 Ok(())
+///             } else {
+///                 Err(CondCheckError::NotYet)
+///             }
+///         }
+///         _ => Err(CondCheckError::Failed("Expected external group".to_string()))
+///     },
+///     "vlan_id = Some(3500)",
+/// ).await;
+/// ```
+///
+/// Check for source IP changes:
+/// ```rust,ignore
+/// wait_for_dpd_state(
+///     cptestctx,
+///     &multicast_ip,
+///     |response| match response {
+///         MulticastGroupResponse::External { sources, .. } => {
+///             if sources.contains(&expected_source) {
+///                 Ok(())
+///             } else {
+///                 Err(CondCheckError::NotYet)
+///             }
+///         }
+///         _ => Err(CondCheckError::Failed("Expected external group".to_string()))
+///     },
+///     "sources contains expected IP",
+/// ).await;
+/// ```
+pub(crate) async fn wait_for_dpd_state<F>(
+    cptestctx: &ControlPlaneTestContext,
+    multicast_ip: &IpAddr,
+    predicate: F,
+    description: &str,
+) where
+    F: Fn(
+        &dpd_client::types::MulticastGroupResponse,
+    ) -> Result<(), CondCheckError<String>>,
+{
+    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
+
+    match wait_for_condition(
+        || async {
+            match dpd_client.multicast_group_get(multicast_ip).await {
+                Ok(response) => predicate(&response.into_inner()),
+                Err(e) => Err(CondCheckError::Failed(format!(
+                    "DPD query failed: {e}"
+                ))),
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(_) => {}
+        Err(poll::Error::TimedOut(elapsed)) => panic!(
+            "DPD state for {multicast_ip} did not reach expected condition '{description}' within {elapsed:?}"
+        ),
+        Err(poll::Error::PermanentError(err)) => {
+            panic!("Failed waiting for DPD state '{description}': {err}")
+        }
+    }
+}
+
+/// Wait for a multicast group DPD update to complete.
+///
+/// This is a composite helper that combines activating the reconciler
+/// and waiting for DPD state to match a condition. Use this instead of
+/// calling `wait_for_multicast_reconciler()` + `wait_for_dpd_state()`
+/// separately.
+///
+/// # Usage Examples
+///
+/// After a metadata-only update (name/description):
+/// ```rust,ignore
+/// wait_for_group_dpd_update(
+///     cptestctx,
+///     &multicast_ip,
+///     dpd_predicates::expect_external_group(),
+///     "name update saga completed",
+/// ).await;
+/// ```
+///
+/// After an mvlan update:
+/// ```rust,ignore
+/// wait_for_group_dpd_update(
+///     cptestctx,
+///     &multicast_ip,
+///     dpd_predicates::expect_vlan_id(3500),
+///     "vlan_id updated to 3500",
+/// ).await;
+/// ```
+pub(crate) async fn wait_for_group_dpd_update<F>(
+    cptestctx: &ControlPlaneTestContext,
+    multicast_ip: &IpAddr,
+    predicate: F,
+    description: &str,
+) where
+    F: Fn(
+        &dpd_client::types::MulticastGroupResponse,
+    ) -> Result<(), CondCheckError<String>>,
+{
+    // Activate reconciler to ensure saga is launched
+    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
+
+    // Wait for DPD to reflect the changes (saga completion)
+    wait_for_dpd_state(cptestctx, multicast_ip, predicate, description).await;
 }
 
 /// Get a single multicast group by name.
@@ -279,61 +475,81 @@ pub(crate) async fn wait_for_group_active(
 }
 
 /// Wait for a specific member to reach the expected state
-/// (e.g., "Joined", "Joining", "Leaving", "Left").
+/// (e.g., "Joined", "Joining", "Left").
+///
+/// For "Joined" state, this function uses `wait_for_condition_with_reconciler`
+/// to ensure the reconciler processes member state transitions.
 pub(crate) async fn wait_for_member_state(
-    client: &ClientTestContext,
+    cptestctx: &ControlPlaneTestContext,
     group_name: &str,
     instance_id: uuid::Uuid,
     expected_state: &str,
 ) -> MulticastGroupMember {
-    match wait_for_condition(
-        || async {
-            let members =
-                list_multicast_group_members(client, group_name).await;
+    let client = &cptestctx.external_client;
+    let lockstep_client = &cptestctx.lockstep_client;
 
-            // If we're looking for "Joined" state, we need to ensure the member exists first
-            // and then wait for the reconciler to process it
-            if expected_state == "Joined" {
-                if let Some(member) = members.iter().find(|m| m.instance_id == instance_id) {
-                    match member.state.as_str() {
-                        "Joined" => Ok(member.clone()),
-                        "Joining" => {
-                            // Member exists and is in transition - wait a bit more
-                            Err(CondCheckError::NotYet)
-                        }
-                        "Left" => {
-                            // Member in Left state, reconciler needs to process instance start - wait more
-                            Err(CondCheckError::NotYet)
-                        }
-                        other_state => {
-                            Err(CondCheckError::Failed(format!(
-                                "Member {} in group {} has unexpected state '{}', expected 'Left', 'Joining' or 'Joined'",
-                                instance_id, group_name, other_state
-                            )))
-                        }
+    let check_member = || async {
+        let members = list_multicast_group_members(client, group_name).await;
+
+        // If we're looking for "Joined" state, we need to ensure the member exists first
+        // and then wait for the reconciler to process it
+        if expected_state == "Joined" {
+            if let Some(member) =
+                members.iter().find(|m| m.instance_id == instance_id)
+            {
+                match member.state.as_str() {
+                    "Joined" => Ok(member.clone()),
+                    "Joining" => {
+                        // Member exists and is in transition - wait a bit more
+                        Err(CondCheckError::NotYet)
                     }
+                    "Left" => {
+                        // Member in Left state, reconciler needs to process instance start - wait more
+                        Err(CondCheckError::NotYet)
+                    }
+                    other_state => Err(CondCheckError::Failed(format!(
+                        "Member {instance_id} in group {group_name} has unexpected state '{other_state}', expected 'Left', 'Joining' or 'Joined'"
+                    ))),
+                }
+            } else {
+                // Member doesn't exist yet - wait for it to be created
+                Err(CondCheckError::NotYet)
+            }
+        } else {
+            // For other states, just look for exact match
+            if let Some(member) =
+                members.iter().find(|m| m.instance_id == instance_id)
+            {
+                if member.state == expected_state {
+                    Ok(member.clone())
                 } else {
-                    // Member doesn't exist yet - wait for it to be created
                     Err(CondCheckError::NotYet)
                 }
             } else {
-                // For other states, just look for exact match
-                if let Some(member) = members.iter().find(|m| m.instance_id == instance_id) {
-                    if member.state == expected_state {
-                        Ok(member.clone())
-                    } else {
-                        Err(CondCheckError::NotYet)
-                    }
-                } else {
-                    Err(CondCheckError::NotYet)
-                }
+                Err(CondCheckError::NotYet)
             }
-        },
-        &POLL_INTERVAL,
-        &MULTICAST_OPERATION_TIMEOUT,
-    )
-    .await
-    {
+        }
+    };
+
+    // Use reconciler-activating wait for "Joined" state
+    let result = if expected_state == "Joined" {
+        wait_for_condition_with_reconciler(
+            lockstep_client,
+            check_member,
+            &POLL_INTERVAL,
+            &MULTICAST_OPERATION_TIMEOUT,
+        )
+        .await
+    } else {
+        wait_for_condition(
+            check_member,
+            &POLL_INTERVAL,
+            &MULTICAST_OPERATION_TIMEOUT,
+        )
+        .await
+    };
+
+    match result {
         Ok(member) => member,
         Err(poll::Error::TimedOut(elapsed)) => {
             panic!(
@@ -343,6 +559,100 @@ pub(crate) async fn wait_for_member_state(
         Err(poll::Error::PermanentError(err)) => {
             panic!(
                 "failed waiting for member {instance_id} in group {group_name} to reach state '{expected_state}': {err:?}",
+            );
+        }
+    }
+}
+
+/// Wait for an instance to have a sled_id assigned.
+///
+/// This is a stricter check than `instance_wait_for_vmm_registration` - it ensures
+/// that not only does the VMM exist and is not in "Creating" state, but also that
+/// the VMM has been assigned to a specific sled. This is critical for multicast
+/// member join operations which need the sled_id to program switch ports.
+pub(crate) async fn wait_for_instance_sled_assignment(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: &InstanceUuid,
+) {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let log = &cptestctx.logctx.log;
+    let opctx = nexus_db_queries::context::OpContext::for_tests(
+        log.clone(),
+        datastore.clone(),
+    );
+
+    info!(
+        log,
+        "waiting for instance to have sled_id assigned";
+        "instance_id" => %instance_id,
+    );
+
+    match wait_for_condition(
+        || async {
+            // Use the same batch fetch method the reconciler uses
+            let instance_vmm_data = datastore
+                .instance_and_vmm_batch_fetch(&opctx, &[*instance_id])
+                .await
+                .map_err(|e| {
+                    CondCheckError::Failed(format!(
+                        "Failed to fetch instance data: {e}"
+                    ))
+                })?;
+
+            let instance_uuid = instance_id.into_untyped_uuid();
+            if let Some((instance, vmm_opt)) =
+                instance_vmm_data.get(&instance_uuid)
+            {
+                if let Some(vmm) = vmm_opt {
+                    debug!(
+                        log,
+                        "instance VMM found, checking sled assignment";
+                        "instance_id" => %instance_id,
+                        "vmm_id" => %vmm.id,
+                        "vmm_state" => ?vmm.runtime.state,
+                        "sled_id" => %vmm.sled_id
+                    );
+
+                    // VMM exists and has a sled_id - we're good
+                    Ok(())
+                } else {
+                    debug!(
+                        log,
+                        "instance exists but has no VMM yet";
+                        "instance_id" => %instance_id,
+                        "instance_state" => ?instance.runtime_state.nexus_state.state()
+                    );
+                    Err(CondCheckError::<String>::NotYet)
+                }
+            } else {
+                warn!(
+                    log,
+                    "instance not found in batch fetch";
+                    "instance_id" => %instance_id
+                );
+                Err(CondCheckError::<String>::NotYet)
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(_) => {
+            info!(
+                log,
+                "instance has sled_id assigned";
+                "instance_id" => %instance_id
+            );
+        }
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "instance {instance_id} did not get sled_id assigned within {elapsed:?}"
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!(
+                "failed waiting for instance {instance_id} sled assignment: {err}"
             );
         }
     }
@@ -431,6 +741,12 @@ pub(crate) async fn instance_for_multicast_groups(
     start: bool,
     multicast_group_names: &[&str],
 ) -> Instance {
+    // Ensure DPD is ready before creating instances with multicast groups
+    // This prevents the reconciler from failing when it tries to add members
+    if !multicast_group_names.is_empty() {
+        ensure_dpd_ready(cptestctx).await;
+    }
+
     let client = &cptestctx.external_client;
     let multicast_groups: Vec<NameOrId> = multicast_group_names
         .iter()
@@ -446,8 +762,7 @@ pub(crate) async fn instance_for_multicast_groups(
             identity: IdentityMetadataCreateParams {
                 name: instance_name.parse().unwrap(),
                 description: format!(
-                    "Instance for multicast group testing: {}",
-                    instance_name
+                    "Instance for multicast group testing: {instance_name}"
                 ),
             },
             ncpus: InstanceCpuCount::try_from(1).unwrap(),
@@ -523,11 +838,12 @@ pub(crate) async fn create_instances_with_multicast_groups(
 
 /// Attach an instance to a multicast group.
 pub(crate) async fn multicast_group_attach(
-    client: &ClientTestContext,
+    cptestctx: &ControlPlaneTestContext,
     project_name: &str,
     instance_name: &str,
     group_name: &str,
 ) {
+    let client = &cptestctx.external_client;
     let url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
@@ -540,7 +856,7 @@ pub(crate) async fn multicast_group_attach(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to attach instance to multicast group");
+    .expect("Should attach instance to multicast group");
 }
 
 /// Create multiple multicast groups from the same pool.
@@ -630,16 +946,15 @@ pub(crate) async fn cleanup_instances(
             InstanceState::Starting => {
                 instances_to_wait_then_stop.push(*name);
                 eprintln!(
-                    "Instance {} in Starting state - will wait for Running then stop",
-                    name
+                    "Instance {name} in Starting state - will wait for Running then stop",
                 );
             }
             InstanceState::Stopped => {
-                eprintln!("Instance {} already stopped", name)
+                eprintln!("Instance {name} already stopped")
             }
             _ => eprintln!(
-                "Instance {} in state {:?} - will attempt to delete as-is",
-                name, instance.runtime.run_state
+                "Instance {name} in state {:?} - will attempt to delete as-is",
+                instance.runtime.run_state
             ),
         }
     }
@@ -674,7 +989,7 @@ pub(crate) async fn cleanup_instances(
             )
             .await;
 
-            eprintln!("Instance {} reached Running state", name);
+            eprintln!("Instance {name} reached Running state");
         }
 
         instances_to_stop.extend(&instances_to_wait_then_stop);
@@ -791,14 +1106,24 @@ pub(crate) async fn stop_instances(
 }
 
 /// Attach multiple instances to a multicast group in parallel.
+///
+/// Ensures DPD is ready once before attaching all instances, avoiding redundant checks.
 pub(crate) async fn multicast_group_attach_bulk(
-    client: &ClientTestContext,
+    cptestctx: &ControlPlaneTestContext,
     project_name: &str,
     instance_names: &[&str],
     group_name: &str,
 ) {
+    // Check DPD readiness once for all attachments
+    ensure_dpd_ready(cptestctx).await;
+
     let attach_futures = instance_names.iter().map(|instance_name| {
-        multicast_group_attach(client, project_name, instance_name, group_name)
+        multicast_group_attach(
+            cptestctx,
+            project_name,
+            instance_name,
+            group_name,
+        )
     });
     ops::join_all(attach_futures).await;
 }
@@ -835,5 +1160,95 @@ pub(crate) async fn multicast_group_detach(
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
-    .expect("Failed to detach instance from multicast group");
+    .expect("Should detach instance from multicast group");
+}
+
+/// Utility functions for running multiple async operations in parallel.
+pub(crate) mod ops {
+    use std::future::Future;
+
+    /// Execute a collection of independent async operations in parallel
+    pub(crate) async fn join_all<T>(
+        ops: impl IntoIterator<Item = impl Future<Output = T>>,
+    ) -> Vec<T> {
+        futures::future::join_all(ops).await
+    }
+
+    /// Execute 2 independent async operations in parallel
+    pub(crate) async fn join2<T1, T2>(
+        op1: impl Future<Output = T1>,
+        op2: impl Future<Output = T2>,
+    ) -> (T1, T2) {
+        tokio::join!(op1, op2)
+    }
+
+    /// Execute 3 independent async operations in parallel
+    pub(crate) async fn join3<T1, T2, T3>(
+        op1: impl Future<Output = T1>,
+        op2: impl Future<Output = T2>,
+        op3: impl Future<Output = T3>,
+    ) -> (T1, T2, T3) {
+        tokio::join!(op1, op2, op3)
+    }
+
+    /// Execute 4 independent async operations in parallel
+    pub(crate) async fn join4<T1, T2, T3, T4>(
+        op1: impl Future<Output = T1>,
+        op2: impl Future<Output = T2>,
+        op3: impl Future<Output = T3>,
+        op4: impl Future<Output = T4>,
+    ) -> (T1, T2, T3, T4) {
+        tokio::join!(op1, op2, op3, op4)
+    }
+}
+
+/// Common DPD state predicates for use with `wait_for_dpd_state()`.
+///
+/// These predicates provide pre-built conditions for common DPD state checks.
+pub(crate) mod dpd_predicates {
+    use super::*;
+
+    /// Predicate that checks if a group exists in DPD as an external group.
+    ///
+    /// Used for metadata-only updates (name, description) where DPD state
+    /// doesn't change but we need to verify the saga completed without errors.
+    pub fn expect_external_group() -> impl Fn(
+        &dpd_client::types::MulticastGroupResponse,
+    )
+        -> Result<(), CondCheckError<String>> {
+        |response| match response {
+            dpd_client::types::MulticastGroupResponse::External { .. } => {
+                Ok(())
+            }
+            dpd_client::types::MulticastGroupResponse::Underlay { .. } => Err(
+                CondCheckError::Failed("Expected external group".to_string()),
+            ),
+        }
+    }
+
+    /// Predicate that checks if a group has a specific vlan_id in DPD.
+    ///
+    /// Used for mvlan updates where we need to verify the vlan_id was
+    /// applied to the dataplane.
+    pub fn expect_vlan_id(
+        vlan: u16,
+    ) -> impl Fn(
+        &dpd_client::types::MulticastGroupResponse,
+    ) -> Result<(), CondCheckError<String>> {
+        move |response| match response {
+            dpd_client::types::MulticastGroupResponse::External {
+                external_forwarding,
+                ..
+            } => {
+                if external_forwarding.vlan_id == Some(vlan) {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::NotYet)
+                }
+            }
+            dpd_client::types::MulticastGroupResponse::Underlay { .. } => Err(
+                CondCheckError::Failed("Expected external group".to_string()),
+            ),
+        }
+    }
 }

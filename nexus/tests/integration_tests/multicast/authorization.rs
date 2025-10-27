@@ -4,11 +4,22 @@
 
 //! Authorization tests for fleet-scoped multicast groups.
 //!
-//! Multicast groups are fleet-scoped resources (parent = "Fleet"), similar to
-//! IP pools. This means:
-//! - Only fleet admins can create/modify/delete multicast groups
-//! - Silo users can attach their instances to any multicast group
-//! - No project-level or silo-level isolation for groups themselves
+//! Multicast groups are fleet-scoped resources with explicit permissions granted
+//! to any authenticated user in the fleet (defined in nexus/auth/src/authz/omicron.polar).
+//!
+//! **Authorization model (intentionally deviates from standard Oxide IAM):**
+//! - **Read/List**: Any authenticated user can read and list multicast groups in their fleet
+//!   (no Fleet::Viewer role required)
+//! - **Create**: Any authenticated user can create multicast groups in their fleet
+//!   (no Fleet::Admin role required)
+//! - **Modify/Delete**: Any authenticated user can modify and delete multicast groups in their fleet
+//!   (no Fleet::Admin role required)
+//! - **Member operations**: Users can add/remove instances they own (requires instance permissions)
+//!
+//! This enables cross-project and cross-silo multicast communication. Users
+//! with ONLY project-level roles (e.g., Project::Collaborator) and NO
+//! silo-level roles can still access multicast groups, because the only
+//! requirement is being an authenticated user in a silo within the fleet.
 
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -23,24 +34,25 @@ use nexus_test_utils::resource_helpers::{
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
     InstanceCreate, InstanceNetworkInterfaceAttachment, MulticastGroupCreate,
-    MulticastGroupMemberAdd, ProjectCreate,
+    MulticastGroupMemberAdd, MulticastGroupUpdate, ProjectCreate,
 };
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::shared::{ProjectRole, SiloRole};
 use nexus_types::external_api::views::{
     MulticastGroup, MulticastGroupMember, Silo,
 };
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
-    InstanceCpuCount, NameOrId,
+    ByteCount, Hostname, IdentityMetadataCreateParams,
+    IdentityMetadataUpdateParams, Instance, InstanceCpuCount, NameOrId,
 };
 use omicron_common::vlan::VlanID;
 
 use super::*;
 
-/// Test that only fleet admins (privileged users) can create multicast groups.
-/// Regular silo users should get 403 Forbidden.
+/// Test that silo users can create and modify multicast groups in their fleet.
+/// This verifies the authorization model where any authenticated silo user
+/// can manage multicast groups.
 #[nexus_test]
-async fn test_only_fleet_admins_can_create_multicast_groups(
+async fn test_silo_users_can_create_and_modify_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -73,7 +85,7 @@ async fn test_only_fleet_admins_can_create_multicast_groups(
     )
     .await;
 
-    // Try to create multicast group as the silo user - should FAIL with 403
+    // Create multicast group as the silo user - should SUCCEED
     let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 101));
     let group_url = "/v1/multicast-groups";
     let group_params = MulticastGroupCreate {
@@ -87,21 +99,68 @@ async fn test_only_fleet_admins_can_create_multicast_groups(
         mvlan: None,
     };
 
-    // Try to create multicast group as silo user - should get 403 Forbidden
-    NexusRequest::new(
+    // Silo user can create multicast group
+    let group: MulticastGroup = NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &group_url)
             .body(Some(&group_params))
-            .expect_status(Some(StatusCode::FORBIDDEN)),
+            .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::SiloUser(user.id))
     .execute()
     .await
-    .expect("Expected 403 Forbidden for silo user creating multicast group");
+    .unwrap()
+    .parsed_body()
+    .unwrap();
 
-    // Now create multicast group as fleet admin - should SUCCEED
-    let group: MulticastGroup = NexusRequest::new(
+    assert_eq!(group.identity.name.as_str(), "user-group");
+    assert_eq!(group.multicast_ip, multicast_ip);
+
+    // Wait for group to become active before updating
+    wait_for_group_active(client, "user-group").await;
+
+    // Silo user can also modify the multicast group they created
+    let update_url = mcast_group_url(&group.identity.name.to_string());
+    let update_params = MulticastGroupUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(group.identity.name.clone()),
+            description: Some("Updated description by silo user".to_string()),
+        },
+        source_ips: None,
+        mvlan: None,
+    };
+
+    let updated_group: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &update_url)
+            .body(Some(&update_params))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::SiloUser(user.id))
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(
+        updated_group.identity.description,
+        "Updated description by silo user"
+    );
+
+    // Fleet admin can also create multicast groups
+    let admin_params = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "admin-group".parse().unwrap(),
+            description: "Group created by fleet admin".to_string(),
+        },
+        multicast_ip: Some(IpAddr::V4(Ipv4Addr::new(224, 0, 1, 102))),
+        source_ips: None,
+        pool: Some(NameOrId::Name("mcast-pool".parse().unwrap())),
+        mvlan: None,
+    };
+
+    let admin_group: MulticastGroup = NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &group_url)
-            .body(Some(&group_params))
+            .body(Some(&admin_params))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -111,11 +170,11 @@ async fn test_only_fleet_admins_can_create_multicast_groups(
     .parsed_body()
     .unwrap();
 
-    assert_eq!(group.identity.name.as_str(), "user-group");
+    assert_eq!(admin_group.identity.name.as_str(), "admin-group");
 }
 
 /// Test that silo users can attach their own instances to fleet-scoped
-/// multicast groups, even though they can't create the groups themselves.
+/// multicast groups (including groups created by other users or fleet admins).
 #[nexus_test]
 async fn test_silo_users_can_attach_instances_to_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
@@ -800,4 +859,236 @@ async fn test_unprivileged_users_can_list_group_members(
         1,
         "Member should still exist after failed unauthorized operations"
     );
+}
+
+/// Test that authenticated silo users with ONLY project-level roles (no
+/// silo-level roles) can still access multicast groups fleet-wide. This verifies
+/// that being an authenticated SiloUser is sufficient - multicast group access
+/// does not depend on having any specific silo-level or project-level roles.
+#[nexus_test]
+async fn test_project_only_users_can_access_multicast_groups(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    // create_default_ip_pool already links "default" pool to the DEFAULT_SILO
+    create_default_ip_pool(&client).await;
+
+    // Create multicast pool (fleet-scoped, no per-silo linking needed)
+    create_multicast_ip_pool(&client, "mcast-pool").await;
+
+    // Get the DEFAULT silo (same silo as the privileged test user)
+    // This ensures that when we create a project using AuthnMode::PrivilegedUser,
+    // it will be created in the same silo as our project_user
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.identity().name);
+    let silo: Silo = object_get(client, &silo_url).await;
+
+    // Create a user with NO silo-level roles (only project-level roles)
+    let project_user = create_local_user(
+        client,
+        &silo,
+        &"project-only-user".parse().unwrap(),
+        UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // Create a project using AuthnMode::PrivilegedUser, which creates it in DEFAULT_SILO
+    // (the same silo where we created project_user above)
+    let project = create_project(client, "project-only").await;
+
+    // Grant ONLY project-level role (Project::Collaborator), NO silo roles
+    // Users with project-level roles can work within that project even without
+    // silo-level roles, as long as they reference the project by ID
+    let project_url = format!("/v1/projects/{}", project.identity.name);
+    grant_iam(
+        client,
+        &project_url,
+        ProjectRole::Collaborator,
+        project_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Fleet admin creates a multicast group
+    let multicast_ip = IpAddr::V4(Ipv4Addr::new(224, 0, 1, 250));
+    let group_url = "/v1/multicast-groups";
+    let group_params = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "project-user-test".parse().unwrap(),
+            description: "Group for testing project-only user access"
+                .to_string(),
+        },
+        multicast_ip: Some(multicast_ip),
+        source_ips: None,
+        pool: Some(NameOrId::Name("mcast-pool".parse().unwrap())),
+        mvlan: None,
+    };
+    let group: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &group_url)
+            .body(Some(&group_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // Project-only user CAN LIST multicast groups (no silo roles needed)
+    let list_response: dropshot::ResultsPage<MulticastGroup> =
+        NexusRequest::object_get(client, "/v1/multicast-groups")
+            .authn_as(AuthnMode::SiloUser(project_user.id))
+            .execute()
+            .await
+            .expect("Project-only user should be able to list multicast groups")
+            .parsed_body()
+            .unwrap();
+
+    let list_groups = list_response.items;
+
+    assert!(
+        list_groups.iter().any(|g| g.identity.id == group.identity.id),
+        "Project-only user should see multicast groups in list"
+    );
+
+    // Project-only user CAN READ individual multicast group
+    let get_group_url = mcast_group_url(&group.identity.name.to_string());
+    let read_group: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::GET, &get_group_url)
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::SiloUser(project_user.id))
+    .execute()
+    .await
+    .expect("Project-only user should be able to read multicast group")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(read_group.identity.id, group.identity.id);
+
+    // Project-only user CAN CREATE a multicast group
+    let user_group_params = MulticastGroupCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "created-by-project-user".parse().unwrap(),
+            description: "Group created by project-only user".to_string(),
+        },
+        multicast_ip: Some(IpAddr::V4(Ipv4Addr::new(224, 0, 1, 251))),
+        source_ips: None,
+        pool: Some(NameOrId::Name("mcast-pool".parse().unwrap())),
+        mvlan: None,
+    };
+
+    let user_created_group: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &group_url)
+            .body(Some(&user_group_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::SiloUser(project_user.id))
+    .execute()
+    .await
+    .expect("Project-only user should be able to create multicast group")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(
+        user_created_group.identity.name.as_str(),
+        "created-by-project-user"
+    );
+
+    // Wait for group to become active before modifying
+    wait_for_group_active(client, "created-by-project-user").await;
+
+    // Project-only user CAN MODIFY multicast groups (including ones they created)
+    let update_url =
+        mcast_group_url(&user_created_group.identity.name.to_string());
+    let update_params = MulticastGroupUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(user_created_group.identity.name.clone()),
+            description: Some("Updated by project-only user".to_string()),
+        },
+        source_ips: None,
+        mvlan: None,
+    };
+
+    let updated_group: MulticastGroup = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::PUT, &update_url)
+            .body(Some(&update_params))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::SiloUser(project_user.id))
+    .execute()
+    .await
+    .expect("Project-only user should be able to modify multicast group")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(
+        updated_group.identity.description,
+        "Updated by project-only user"
+    );
+
+    // Project-only user CAN CREATE an instance in the project (Project::Collaborator)
+    // Must use project ID (not name) since user has no silo-level roles
+    let instance_name = "project-user-instance";
+    let instances_url =
+        format!("/v1/instances?project={}", project.identity.id);
+    let instance_params = InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: "Instance created by project-only user".to_string(),
+        },
+        ncpus: InstanceCpuCount::try_from(1).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: false,
+        auto_restart_policy: Default::default(),
+        anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
+    };
+    let instance: Instance = NexusRequest::objects_post(
+        client,
+        &instances_url,
+        &instance_params,
+    )
+    .authn_as(AuthnMode::SiloUser(project_user.id))
+    .execute()
+    .await
+    .expect(
+        "Project-only user should be able to create an instance in the project",
+    )
+    .parsed_body()
+    .expect("Should parse created instance");
+
+    // Project-only user CAN ATTACH the instance they own to a fleet-scoped group
+    let member_add_url = format!(
+        "{}?project={}",
+        mcast_group_members_url(&group.identity.name.to_string()),
+        project.identity.name
+    );
+    let member_params = MulticastGroupMemberAdd {
+        instance: NameOrId::Name(instance_name.parse().unwrap()),
+    };
+    let member: MulticastGroupMember = NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &member_add_url)
+            .body(Some(&member_params))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::SiloUser(project_user.id))
+    .execute()
+    .await
+    .expect("Project-only user should be able to attach their instance to the group")
+    .parsed_body()
+    .unwrap();
+
+    // Verify the member was created successfully
+    assert_eq!(member.instance_id, instance.identity.id);
+    assert_eq!(member.multicast_group_id, group.identity.id);
 }

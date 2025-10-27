@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use futures::{TryStreamExt, future::try_join_all};
+use futures::future::try_join_all;
 use ipnetwork::IpNetwork;
 use oxnet::MulticastMac;
 use slog::{Logger, debug, error, info};
@@ -150,7 +150,7 @@ impl MulticastDataplaneClient {
         Ok(Self { _datastore: datastore, dpd_clients, log })
     }
 
-    async fn ensure_underlay_created_on(
+    async fn dpd_ensure_underlay_created(
         &self,
         client: &dpd_client::Client,
         ip: AdminScopedIpv6,
@@ -172,7 +172,7 @@ impl MulticastDataplaneClient {
                     "underlay exists; fetching";
                     "underlay_ip" => %ip,
                     "switch" => %switch,
-                    "dpd_operation" => "ensure_underlay_created_on"
+                    "dpd_operation" => "dpd_ensure_underlay_created"
                 );
                 Ok(client
                     .multicast_group_get_underlay(&ip)
@@ -184,7 +184,7 @@ impl MulticastDataplaneClient {
                             "underlay_ip" => %ip,
                             "switch" => %switch,
                             "error" => %e,
-                            "dpd_operation" => "ensure_underlay_created_on"
+                            "dpd_operation" => "dpd_ensure_underlay_created"
                         );
                         Error::internal_error("underlay fetch failed")
                     })?
@@ -197,14 +197,14 @@ impl MulticastDataplaneClient {
                     "underlay_ip" => %ip,
                     "switch" => %switch,
                     "error" => %e,
-                    "dpd_operation" => "ensure_underlay_created_on"
+                    "dpd_operation" => "dpd_ensure_underlay_created"
                 );
                 Err(Error::internal_error("underlay create failed"))
             }
         }
     }
 
-    async fn ensure_external_created_on(
+    async fn dpd_ensure_external_created(
         &self,
         client: &dpd_client::Client,
         create: &MulticastGroupCreateExternalEntry,
@@ -220,7 +220,7 @@ impl MulticastDataplaneClient {
                     "external exists; fetching";
                     "external_ip" => %create.group_ip,
                     "switch" => %switch,
-                    "dpd_operation" => "ensure_external_created_on"
+                    "dpd_operation" => "dpd_ensure_external_created"
                 );
                 let response = client
                     .multicast_group_get(&create.group_ip)
@@ -232,7 +232,7 @@ impl MulticastDataplaneClient {
                             "external_ip" => %create.group_ip,
                             "switch" => %switch,
                             "error" => %e,
-                            "dpd_operation" => "ensure_external_created_on"
+                            "dpd_operation" => "dpd_ensure_external_created"
                         );
                         Error::internal_error("external fetch failed")
                     })?;
@@ -245,14 +245,14 @@ impl MulticastDataplaneClient {
                     "external_ip" => %create.group_ip,
                     "switch" => %switch,
                     "error" => %e,
-                    "dpd_operation" => "ensure_external_created_on"
+                    "dpd_operation" => "dpd_ensure_external_created"
                 );
                 Err(Error::internal_error("external create failed"))
             }
         }
     }
 
-    async fn update_external_or_create_on(
+    async fn dpd_update_external_or_create(
         &self,
         client: &dpd_client::Client,
         group_ip: IpAddr,
@@ -281,7 +281,7 @@ impl MulticastDataplaneClient {
                                     "external_ip" => %group_ip,
                                     "switch" => %switch,
                                     "error" => %e,
-                                    "dpd_operation" => "update_external_or_create_on"
+                                    "dpd_operation" => "dpd_update_external_or_create"
                                 );
                                 Error::internal_error(
                                     "external fetch after conflict failed",
@@ -296,7 +296,7 @@ impl MulticastDataplaneClient {
                             "external_ip" => %group_ip,
                             "switch" => %switch,
                             "error" => %e,
-                            "dpd_operation" => "update_external_or_create_on"
+                            "dpd_operation" => "dpd_update_external_or_create"
                         );
                         Err(Error::internal_error("external ensure failed"))
                     }
@@ -309,7 +309,7 @@ impl MulticastDataplaneClient {
                     "external_ip" => %group_ip,
                     "switch" => %switch,
                     "error" => %e,
-                    "dpd_operation" => "update_external_or_create_on"
+                    "dpd_operation" => "dpd_update_external_or_create"
                 );
                 Err(Error::internal_error("external update failed"))
             }
@@ -338,7 +338,7 @@ impl MulticastDataplaneClient {
             "external_multicast_ip" => %external_group.multicast_ip,
             "underlay_group_id" => %underlay_group.id,
             "underlay_multicast_ip" => %underlay_group.multicast_ip,
-            "vni" => ?underlay_group.vni,
+            "vni" => ?external_group.vni,
             "target_switches" => self.switch_count(),
             "multicast_scope" => if external_group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
             "source_mode" => if external_group.source_ips.is_empty() { "ASM" } else { "SSM" },
@@ -371,7 +371,7 @@ impl MulticastDataplaneClient {
         let nat_target = NatTarget {
             internal_ip: underlay_ipv6,
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
-            vni: Vni::from(u32::from(underlay_group.vni.0)),
+            vni: Vni::from(u32::from(external_group.vni.0)),
         };
 
         let sources_dpd = external_group
@@ -382,8 +382,6 @@ impl MulticastDataplaneClient {
 
         let external_group_ip = external_group.multicast_ip.ip();
 
-        // DPD now supports sources=[] for ASM, so always pass sources
-
         let create_operations =
             dpd_clients.into_iter().map(|(switch_location, client)| {
                 let tag = tag.clone();
@@ -393,7 +391,7 @@ impl MulticastDataplaneClient {
                 async move {
                     // Ensure underlay is present idempotently
                     let underlay_response = self
-                        .ensure_underlay_created_on(
+                        .dpd_ensure_underlay_created(
                             client,
                             underlay_ip_admin,
                             &tag,
@@ -412,7 +410,7 @@ impl MulticastDataplaneClient {
                     };
 
                     let external_response = self
-                        .ensure_external_created_on(
+                        .dpd_ensure_external_created(
                             client,
                             &external_entry,
                             switch_location,
@@ -516,7 +514,7 @@ impl MulticastDataplaneClient {
         let nat_target = NatTarget {
             internal_ip: underlay_ipv6,
             inner_mac: MacAddr { a: underlay_ipv6.derive_multicast_mac() },
-            vni: Vni::from(u32::from(params.underlay_group.vni.0)),
+            vni: Vni::from(u32::from(params.external_group.vni.0)),
         };
 
         let new_name_str = params.new_name.to_string();
@@ -549,7 +547,7 @@ impl MulticastDataplaneClient {
                         {
                             // Create missing underlay group with new tag and empty members
                             let created = self
-                                .ensure_underlay_created_on(
+                                .dpd_ensure_underlay_created(
                                     client,
                                     underlay_ip_admin.clone(),
                                     &new_name,
@@ -614,7 +612,7 @@ impl MulticastDataplaneClient {
                     };
 
                     let external_response = self
-                        .update_external_or_create_on(
+                        .dpd_update_external_or_create(
                             client,
                             external_group_ip,
                             &update_entry,
@@ -832,78 +830,68 @@ impl MulticastDataplaneClient {
         .await
     }
 
-    /// Get multicast groups by tag from all switches.
-    pub(crate) async fn get_groups(
+    /// Fetch external multicast group DPD state for RPW drift detection.
+    ///
+    /// **RPW use only**: This queries a single switch to check if the group's
+    /// DPD configuration matches the database state. Used by the reconciler's
+    /// read-before-write pattern to decide whether to launch an UPDATE saga.
+    ///
+    /// **Single-switch query**: Queries only the first available switch for
+    /// efficiency. If drift is detected on any switch, the UPDATE saga will
+    /// fix all switches atomically. Worst case: one reconciler cycle of
+    /// detection latency if only some switches have drift.
+    ///
+    /// **Not for sagas**: Sagas should use `create_groups`/`update_groups`
+    /// which operate on all switches with `try_join_all`.
+    pub(crate) async fn fetch_external_group_for_drift_check(
         &self,
-        tag: &str,
-    ) -> MulticastDataplaneResult<
-        HashMap<SwitchLocation, Vec<MulticastGroupResponse>>,
-    > {
+        _opctx: &OpContext,
+        group_ip: IpAddr,
+    ) -> MulticastDataplaneResult<Option<MulticastGroupExternalResponse>> {
+        let (switch_location, client) =
+            self.dpd_clients.iter().next().ok_or_else(|| {
+                Error::internal_error("no DPD clients available")
+            })?;
+
         debug!(
             self.log,
-            "getting multicast groups by tag";
-            "tag" => tag
+            "fetching external group state from DPD for drift detection";
+            "group_ip" => %group_ip,
+            "switch" => %switch_location,
+            "query_scope" => "single_switch",
+            "dpd_operation" => "fetch_external_group_for_drift_check"
         );
 
-        let dpd_clients = &self.dpd_clients;
-        let mut switch_groups = HashMap::new();
-
-        // Query all switches in parallel for multicast groups
-        let get_groups_ops = dpd_clients.iter().map(|(location, client)| {
-            let tag = tag.to_string();
-            let log = self.log.clone();
-            async move {
-                match client
-                    .multicast_groups_list_by_tag_stream(&tag, None)
-                    .try_collect::<Vec<MulticastGroupResponse>>()
-                    .await
-                {
-                    Ok(groups_vec) => {
-                        debug!(
-                            log,
-                            "retrieved multicast groups from switch";
-                            "switch" => %location,
-                            "tag" => %tag,
-                            "count" => groups_vec.len()
-                        );
-                        Ok((*location, groups_vec))
-                    }
-                    Err(DpdError::ErrorResponse(resp))
-                        if resp.status() == reqwest::StatusCode::NOT_FOUND =>
-                    {
-                        // Tag not found on this switch - return empty list
-                        debug!(
-                            log,
-                            "no multicast groups found with tag on switch";
-                            "switch" => %location,
-                            "tag" => %tag
-                        );
-                        Ok((*location, Vec::new()))
-                    }
-                    Err(e) => {
-                        error!(
-                            log,
-                            "failed to list multicast groups by tag";
-                            "switch" => %location,
-                            "tag" => %tag,
-                            "error" => %e,
-                            "dpd_operation" => "get_groups"
-                        );
-                        Err(Error::internal_error(
-                            "failed to list multicast groups by tag",
-                        ))
-                    }
-                }
+        match client.multicast_group_get(&group_ip).await {
+            Ok(response) => {
+                Ok(Some(response.into_inner().into_external_response()?))
             }
-        });
-
-        // Wait for all queries to complete and collect results
-        let results = try_join_all(get_groups_ops).await?;
-        for (location, groups_vec) in results {
-            switch_groups.insert(location, groups_vec);
+            Err(DpdError::ErrorResponse(resp))
+                if resp.status() == reqwest::StatusCode::NOT_FOUND =>
+            {
+                debug!(
+                    self.log,
+                    "external group not found in DPD (expected for new groups)";
+                    "group_ip" => %group_ip,
+                    "switch" => %switch_location,
+                    "dpd_operation" => "fetch_external_group_for_drift_check"
+                );
+                Ok(None)
+            }
+            Err(e) => {
+                error!(
+                    self.log,
+                    "external group fetch failed";
+                    "group_ip" => %group_ip,
+                    "switch" => %switch_location,
+                    "error" => %e,
+                    "dpd_operation" => "fetch_external_group_for_drift_check"
+                );
+                Err(Error::internal_error(&format!(
+                    "failed to fetch external group from DPD: {e}"
+                )))
+            }
         }
-
-        Ok(switch_groups)
     }
 
     pub(crate) async fn remove_groups(

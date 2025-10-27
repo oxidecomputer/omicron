@@ -1244,7 +1244,7 @@ pub struct InstanceCreate {
     /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
     /// characters with padding). Maximum 32 KiB unencoded data.
     // While serde happily accepts #[serde(with = "<mod>")] as a shorthand for
-    // specifing `serialize_with` and `deserialize_with`, schemars requires the
+    // specifying `serialize_with` and `deserialize_with`, schemars requires the
     // argument to `with` to be a type rather than merely a path prefix (i.e. a
     // mod or type). It's admittedly a bit tricky for schemars to address;
     // unlike `serialize` or `deserialize`, `JsonSchema` requires several
@@ -2966,6 +2966,11 @@ pub fn validate_multicast_ip(ip: IpAddr) -> Result<(), String> {
     }
 }
 
+// IPv4 link-local multicast range reserved for local network control.
+const RESERVED_IPV4_MULTICAST_LINK_LOCAL: Ipv4Addr =
+    Ipv4Addr::new(224, 0, 0, 0);
+const RESERVED_IPV4_MULTICAST_LINK_LOCAL_PREFIX: u8 = 24;
+
 /// Validates IPv4 multicast addresses.
 fn validate_ipv4_multicast(addr: Ipv4Addr) -> Result<(), String> {
     // Verify this is actually a multicast address
@@ -2973,27 +2978,16 @@ fn validate_ipv4_multicast(addr: Ipv4Addr) -> Result<(), String> {
         return Err(format!("{} is not a multicast address", addr));
     }
 
-    // Define reserved IPv4 multicast subnets using oxnet
-    //
-    // TODO: Eventually move to `is_reserved` possibly?...
-    // https://github.com/rust-lang/rust/issues/27709
-    let reserved_subnets = [
-        // Local network control block (link-local)
-        Ipv4Net::new(Ipv4Addr::new(224, 0, 0, 0), 24).unwrap(),
-        // GLOP addressing
-        Ipv4Net::new(Ipv4Addr::new(233, 0, 0, 0), 8).unwrap(),
-        // Administrative scoped addresses
-        Ipv4Net::new(Ipv4Addr::new(239, 0, 0, 0), 8).unwrap(),
-    ];
-
-    // Check reserved subnets
-    for subnet in &reserved_subnets {
-        if subnet.contains(addr) {
-            return Err(format!(
-                "{} is in the reserved multicast subnet {}",
-                addr, subnet,
-            ));
-        }
+    // Block link-local multicast (224.0.0.0/24) as it's reserved for local network control
+    let link_local = Ipv4Net::new(
+        RESERVED_IPV4_MULTICAST_LINK_LOCAL,
+        RESERVED_IPV4_MULTICAST_LINK_LOCAL_PREFIX,
+    )
+    .unwrap();
+    if link_local.contains(addr) {
+        return Err(format!(
+            "{addr} is in the link-local multicast range (224.0.0.0/24)"
+        ));
     }
 
     Ok(())
@@ -3002,23 +2996,14 @@ fn validate_ipv4_multicast(addr: Ipv4Addr) -> Result<(), String> {
 /// Validates IPv6 multicast addresses.
 fn validate_ipv6_multicast(addr: Ipv6Addr) -> Result<(), String> {
     if !addr.is_multicast() {
-        return Err(format!("{} is not a multicast address", addr));
-    }
-
-    // Check for admin-scoped multicast addresses (reserved for underlay use)
-    let addr_net = Ipv6Net::new(addr, 128).unwrap();
-    if addr_net.is_admin_scoped_multicast() {
-        return Err(format!(
-            "{} is admin-scoped (ff04::/16, ff05::/16, ff08::/16) and reserved for Oxide underlay use",
-            addr
-        ));
+        return Err(format!("{addr} is not a multicast address"));
     }
 
     // Define reserved IPv6 multicast subnets using oxnet
     let reserved_subnets = [
-        // Interface-local scope
+        // Interface-local scope (ff01::/16)
         Ipv6Net::new(Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0), 16).unwrap(),
-        // Link-local scope
+        // Link-local scope (ff02::/16)
         Ipv6Net::new(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0), 16).unwrap(),
     ];
 
@@ -3031,6 +3016,10 @@ fn validate_ipv6_multicast(addr: Ipv6Addr) -> Result<(), String> {
             ));
         }
     }
+
+    // Note: Admin-local scope (ff04::/16) is allowed for on-premises deployments.
+    // Collision avoidance with underlay addresses is handled by the mapping
+    // function which sets a collision-avoidance bit in the underlay space.
 
     Ok(())
 }
@@ -3109,6 +3098,14 @@ mod tests {
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(231, 5, 6, 7)))
                 .is_ok()
         );
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(233, 1, 1, 1)))
+                .is_ok()
+        ); // GLOP addressing - allowed
+        assert!(
+            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(239, 1, 1, 1)))
+                .is_ok()
+        ); // Admin-scoped - allowed
 
         // Invalid IPv4 multicast addresses - reserved ranges
         assert!(
@@ -3119,14 +3116,6 @@ mod tests {
             validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 255)))
                 .is_err()
         ); // Link-local control
-        assert!(
-            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(233, 1, 1, 1)))
-                .is_err()
-        ); // GLOP addressing
-        assert!(
-            validate_multicast_ip(IpAddr::V4(Ipv4Addr::new(239, 1, 1, 1)))
-                .is_err()
-        ); // Admin-scoped
 
         // Non-multicast addresses
         assert!(
@@ -3154,6 +3143,18 @@ mod tests {
             )))
             .is_ok()
         ); // Site-local scope
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff05, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_ok()
+        ); // Site-local admin scope - allowed
+        assert!(
+            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
+                0xff08, 0, 0, 0, 0, 0, 0, 1
+            )))
+            .is_ok()
+        ); // Org-local admin scope - allowed
 
         // Invalid IPv6 multicast addresses - reserved ranges
         assert!(
@@ -3169,25 +3170,15 @@ mod tests {
             .is_err()
         ); // Link-local
 
-        // Admin-scoped (reserved for Oxide underlay use)
+        // Admin-local (ff04::/16) is allowed for on-premises deployments.
+        // Collision avoidance is handled by the mapping function which sets
+        // a collision-avoidance bit to separate external and underlay spaces.
         assert!(
             validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
                 0xff04, 0, 0, 0, 0, 0, 0, 1
             )))
-            .is_err()
-        ); // Admin-scoped
-        assert!(
-            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
-                0xff05, 0, 0, 0, 0, 0, 0, 1
-            )))
-            .is_err()
-        ); // Admin-scoped
-        assert!(
-            validate_multicast_ip(IpAddr::V6(Ipv6Addr::new(
-                0xff08, 0, 0, 0, 0, 0, 0, 1
-            )))
-            .is_err()
-        ); // Admin-scoped
+            .is_ok()
+        );
 
         // Non-multicast addresses
         assert!(

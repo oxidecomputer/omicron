@@ -6819,7 +6819,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     /* VNI for multicast group (derived or random) */
     vni INT4 NOT NULL,
 
-    /* IP allocation from pools (following external_ip pattern) */
+    /* IP allocation from pools */
     ip_pool_id UUID NOT NULL,
     ip_pool_range_id UUID NOT NULL,
     multicast_ip INET NOT NULL,
@@ -6832,14 +6832,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     /* Internal rack traffic uses VNI-based underlay forwarding */
     mvlan INT2,
 
-    /* Associated underlay group for NAT  */
+    /* Associated underlay group for NAT */
     /* We fill this as part of the RPW */
     underlay_group_id UUID,
 
     /* Rack ID where the group was created */
     rack_id UUID NOT NULL,
 
-    /* Group tag for lifecycle management */
+    /* DPD tag to couple external/underlay state for this group */
     tag STRING(63),
 
     /* Current state of the multicast group (for RPW) */
@@ -6897,23 +6897,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
     /* Admin-scoped IPv6 multicast address (NAT target) */
     multicast_ip INET NOT NULL,
 
-    vni INT4 NOT NULL,
-
-    /* Group tag for lifecycle management */
+    /* DPD tag to couple external/underlay state for this group */
     tag STRING(63),
 
-    /* DPD sync versioning */
+    /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8,
 
     /* Constraints */
-    -- Underlay groups: admin-scoped IPv6 only (ff04, ff05, ff08)
+    -- Underlay groups: admin-local scoped IPv6 only (ff04::/16)
     CONSTRAINT underlay_ipv6_admin_scoped CHECK (
-        family(multicast_ip) = 6 AND (
-            multicast_ip << 'ff04::/16' OR
-            multicast_ip << 'ff05::/16' OR
-            multicast_ip << 'ff08::/16'
-        )
+        family(multicast_ip) = 6 AND multicast_ip << 'ff04::/16'
     )
 );
 
@@ -6939,7 +6933,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
     /* RPW state for reliable operations */
     state omicron.public.multicast_group_member_state NOT NULL,
 
-    /* Dendrite sync versioning */
+    /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
     version_removed INT8
 );
@@ -7014,7 +7008,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS underlay_multicast_group_version_added ON omic
     version_added
 ) STORING (
     multicast_ip,
-    vni,
     time_created,
     time_deleted
 );
@@ -7025,7 +7018,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS underlay_multicast_group_version_removed ON om
     version_removed
 ) STORING (
     multicast_ip,
-    vni,
     time_created,
     time_deleted
 );
@@ -7034,12 +7026,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS underlay_multicast_group_version_removed ON om
 -- Supports: SELECT ... WHERE multicast_ip = ? AND time_deleted IS NULL
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_underlay_multicast_by_ip ON omicron.public.underlay_multicast_group (
     multicast_ip
-) WHERE time_deleted IS NULL;
-
--- VPC VNI association for NAT forwarding
--- Supports: SELECT ... WHERE vni = ? AND time_deleted IS NULL
-CREATE INDEX IF NOT EXISTS lookup_underlay_multicast_by_vpc_vni ON omicron.public.underlay_multicast_group (
-    vni
 ) WHERE time_deleted IS NULL;
 
 -- Lifecycle management via group tags
