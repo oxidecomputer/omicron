@@ -12017,7 +12017,7 @@ dependencies = [
 [[package]]
 name = "scim2-rs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs#5fcdf1c96ba9860088af680a8f9901c34f9d182d"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=c78005db837a71f94c3b8efac9a64cfbdb2d527f#c78005db837a71f94c3b8efac9a64cfbdb2d527f"
 dependencies = [
  "anyhow",
  "chrono",
@@ -12036,7 +12036,7 @@ dependencies = [
 [[package]]
 name = "scim2-test-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs#5fcdf1c96ba9860088af680a8f9901c34f9d182d"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=c78005db837a71f94c3b8efac9a64cfbdb2d527f#c78005db837a71f94c3b8efac9a64cfbdb2d527f"
 dependencies = [
  "anyhow",
  "clap",

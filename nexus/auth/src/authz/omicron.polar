@@ -281,8 +281,11 @@ resource SshKey {
 	relations = { silo_user: SiloUser };
 
 	"read" if "read" on "silo_user";
-	"modify" if "modify" on "silo_user";
 }
+# We want to allow the user to modify the ssh key but disallow a SCIM IdP token
+# from doing the same.
+has_permission(actor: AuthenticatedActor, "modify", ssh_key: SshKey)
+	if actor.is_user and has_permission(actor, "modify", ssh_key.silo_user);
 has_relation(user: SiloUser, "silo_user", ssh_key: SshKey)
 	if ssh_key.silo_user = user;
 
@@ -629,6 +632,52 @@ has_relation(silo: Silo, "parent_silo", collection: SiloUserList)
 	if collection.silo = silo;
 has_relation(fleet: Fleet, "parent_fleet", collection: SiloUserList)
 	if collection.silo.fleet = fleet;
+
+# Grant SCIM IdP actors the permissions they need on users.
+has_permission(actor: AuthenticatedActor, "read", silo_user: SiloUser)
+    if actor.is_scim_idp and silo_user.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "create_child", silo_user_list: SiloUserList)
+	if actor.is_scim_idp and silo_user_list.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "modify", silo_user: SiloUser)
+	if actor.is_scim_idp and silo_user.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "list_children", silo_user_list: SiloUserList)
+    if actor.is_scim_idp and silo_user_list.silo in actor.silo;
+
+# Describes the policy for creating and managing Silo groups (mostly intended
+# for API-managed groups)
+resource SiloGroupList {
+	permissions = [ "list_children", "create_child" ];
+
+	relations = { parent_silo: Silo, parent_fleet: Fleet };
+
+	# Everyone who can read the Silo (which includes all the groups in the
+	# Silo) can see the groups in it.
+	"list_children" if "read" on "parent_silo";
+
+	# Fleet and Silo administrators can manage the Silo's groups.  This is
+	# one of the only areas of Silo configuration that Fleet Administrators
+	# have permissions on.  This is also one of the few cases (so far) where
+	# we need to look two levels up the hierarchy to see if somebody has the
+	# right permission.  For most other things, permissions cascade down the
+	# hierarchy so we only need to look at the parent.
+	"create_child" if "admin" on "parent_silo";
+	"list_children" if "admin" on "parent_fleet";
+	"create_child" if "admin" on "parent_fleet";
+}
+has_relation(silo: Silo, "parent_silo", collection: SiloGroupList)
+	if collection.silo = silo;
+has_relation(fleet: Fleet, "parent_fleet", collection: SiloGroupList)
+	if collection.silo.fleet = fleet;
+
+# Grant SCIM IdP actors the permissions they need on groups.
+has_permission(actor: AuthenticatedActor, "read", silo_group: SiloGroup)
+    if actor.is_scim_idp and silo_group.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "create_child", silo_group_list: SiloGroupList)
+	if actor.is_scim_idp and silo_group_list.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "modify", silo_group: SiloGroup)
+	if actor.is_scim_idp and silo_group.silo in actor.silo;
+has_permission(actor: AuthenticatedActor, "list_children", silo_group_list: SiloGroupList)
+    if actor.is_scim_idp and silo_group_list.silo in actor.silo;
 
 # These rules grants the external authenticator role the permissions it needs to
 # read silo users and modify their sessions.  This is necessary for login to

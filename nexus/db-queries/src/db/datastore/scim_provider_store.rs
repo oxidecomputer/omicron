@@ -22,6 +22,8 @@ use diesel::prelude::*;
 use iddqd::IdOrdMap;
 use nexus_auth::authz::ApiResource;
 use nexus_auth::authz::ApiResourceWithRoles;
+use nexus_auth::authz::SiloGroupList;
+use nexus_auth::authz::SiloUserList;
 use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatabaseString;
@@ -50,7 +52,7 @@ use scim2_rs::UserGroup;
 use scim2_rs::UserGroupType;
 
 pub struct CrdbScimProviderStore<'a> {
-    silo_id: Uuid,
+    authz_silo: authz::Silo,
     datastore: Arc<DataStore>,
     opctx: &'a OpContext,
 }
@@ -63,13 +65,27 @@ define_sql_function!(
     ) -> diesel::sql_types::Text
 );
 
+fn external_error_to_provider_error(
+    error: omicron_common::api::external::Error,
+) -> ProviderStoreError {
+    match error {
+        omicron_common::api::external::Error::Unauthenticated { .. } => {
+            ProviderStoreError::Scim(scim2_rs::Error::unauthorized())
+        }
+        omicron_common::api::external::Error::Forbidden => {
+            ProviderStoreError::Scim(scim2_rs::Error::forbidden())
+        }
+        err => ProviderStoreError::StoreError(err.into()),
+    }
+}
+
 impl<'a> CrdbScimProviderStore<'a> {
     pub fn new(
-        silo_id: Uuid,
+        authz_silo: authz::Silo,
         datastore: Arc<DataStore>,
         opctx: &'a OpContext,
     ) -> Self {
-        CrdbScimProviderStore { silo_id, datastore, opctx }
+        CrdbScimProviderStore { authz_silo, datastore, opctx }
     }
 
     /// Nuke sessions, tokens, etc, for deactivated users
@@ -116,7 +132,7 @@ impl<'a> CrdbScimProviderStore<'a> {
             .inner_join(
                 group_dsl::silo_group.on(dsl::silo_group_id.eq(group_dsl::id)),
             )
-            .filter(group_dsl::silo_id.eq(self.silo_id))
+            .filter(group_dsl::silo_id.eq(self.authz_silo.id()))
             .filter(
                 group_dsl::user_provision_type
                     .eq(model::UserProvisionType::Scim),
@@ -195,7 +211,7 @@ impl<'a> CrdbScimProviderStore<'a> {
             use nexus_db_schema::schema::silo_user::dsl;
 
             dsl::silo_user
-                .filter(dsl::silo_id.eq(self.silo_id))
+                .filter(dsl::silo_id.eq(self.authz_silo.id()))
                 .filter(
                     dsl::user_provision_type.eq(model::UserProvisionType::Scim),
                 )
@@ -235,7 +251,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // userName that already exists, reject it
 
         let maybe_other_user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(lower(dsl::user_name).eq(lower(user_request.name.clone())))
             .filter(dsl::time_deleted.is_null())
@@ -255,7 +271,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let new_user = SiloUserScim::new(
-            self.silo_id,
+            self.authz_silo.id(),
             SiloUserUuid::new_v4(),
             user_request.name,
             user_request.active,
@@ -281,7 +297,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_user::dsl;
 
         let mut query = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::time_deleted.is_null())
             .into_boxed();
@@ -342,7 +358,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_user::dsl;
 
         let maybe_user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -363,7 +379,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // userName to one that already exists, reject it
 
         let maybe_other_user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(lower(dsl::user_name).eq(lower(name.clone())))
             .filter(dsl::id.ne(to_db_typed_uuid(user_id)))
@@ -389,7 +405,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let updated = diesel::update(dsl::silo_user)
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -409,7 +425,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -441,7 +457,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_user::dsl;
 
         let maybe_user = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -455,7 +471,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let updated = diesel::update(dsl::silo_user)
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(user_id)))
             .filter(dsl::time_deleted.is_null())
@@ -490,7 +506,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_group::dsl;
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -559,7 +575,7 @@ impl<'a> CrdbScimProviderStore<'a> {
                     use nexus_db_schema::schema::silo_user::dsl;
 
                     let maybe_user: Option<Uuid> = dsl::silo_user
-                        .filter(dsl::silo_id.eq(self.silo_id))
+                        .filter(dsl::silo_id.eq(self.authz_silo.id()))
                         .filter(
                             dsl::user_provision_type
                                 .eq(model::UserProvisionType::Scim),
@@ -598,7 +614,7 @@ impl<'a> CrdbScimProviderStore<'a> {
                 use nexus_db_schema::schema::silo_user::dsl;
 
                 dsl::silo_user
-                    .filter(dsl::silo_id.eq(self.silo_id))
+                    .filter(dsl::silo_id.eq(self.authz_silo.id()))
                     .filter(
                         dsl::user_provision_type
                             .eq(model::UserProvisionType::Scim),
@@ -615,7 +631,7 @@ impl<'a> CrdbScimProviderStore<'a> {
                 use nexus_db_schema::schema::silo_group::dsl;
 
                 dsl::silo_group
-                    .filter(dsl::silo_id.eq(self.silo_id))
+                    .filter(dsl::silo_id.eq(self.authz_silo.id()))
                     .filter(
                         dsl::user_provision_type
                             .eq(model::UserProvisionType::Scim),
@@ -685,7 +701,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // but our / Nexus groups have to be unique due to the lookup by Name.
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(lower(dsl::display_name).eq(lower(display_name.clone())))
             .filter(dsl::time_deleted.is_null())
@@ -707,7 +723,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         let group_id = SiloGroupUuid::new_v4();
 
         let new_group = SiloGroupScim::new(
-            self.silo_id,
+            self.authz_silo.id(),
             group_id,
             display_name.clone(),
             external_id,
@@ -768,7 +784,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         {
             use nexus_db_schema::schema::silo::dsl;
             let silo = dsl::silo
-                .filter(dsl::id.eq(self.silo_id))
+                .filter(dsl::id.eq(self.authz_silo.id()))
                 .select(model::Silo::as_select())
                 .first_async(conn)
                 .await?;
@@ -779,8 +795,8 @@ impl<'a> CrdbScimProviderStore<'a> {
 
                     let authz_silo = authz::Silo::new(
                         authz::FLEET,
-                        self.silo_id,
-                        LookupType::ById(self.silo_id),
+                        self.authz_silo.id(),
+                        LookupType::ById(self.authz_silo.id()),
                     );
 
                     use nexus_db_schema::schema::role_assignment::dsl;
@@ -813,7 +829,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_group::dsl;
 
         let mut query = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::time_deleted.is_null())
             .into_boxed();
@@ -878,7 +894,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_group::dsl;
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -900,7 +916,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // the displayName to one that already exists, reject it.
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(lower(dsl::display_name).eq(lower(display_name.clone())))
             .filter(dsl::id.ne(to_db_typed_uuid(group_id)))
@@ -923,7 +939,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // Stash the group for later
 
         let existing_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -940,7 +956,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         // Overwrite all fields based on CreateGroupRequest.
 
         let updated = diesel::update(dsl::silo_group)
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -959,7 +975,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -1035,15 +1051,15 @@ impl<'a> CrdbScimProviderStore<'a> {
         {
             use nexus_db_schema::schema::silo::dsl;
             let silo = dsl::silo
-                .filter(dsl::id.eq(self.silo_id))
+                .filter(dsl::id.eq(self.authz_silo.id()))
                 .select(model::Silo::as_select())
                 .first_async(conn)
                 .await?;
 
             let authz_silo = authz::Silo::new(
                 authz::FLEET,
-                self.silo_id,
-                LookupType::ById(self.silo_id),
+                self.authz_silo.id(),
+                LookupType::ById(self.authz_silo.id()),
             );
 
             if let Some(admin_group_name) = silo.admin_group_name {
@@ -1123,7 +1139,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         use nexus_db_schema::schema::silo_group::dsl;
 
         let maybe_group = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -1137,7 +1153,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         let updated = diesel::update(dsl::silo_group)
-            .filter(dsl::silo_id.eq(self.silo_id))
+            .filter(dsl::silo_id.eq(self.authz_silo.id()))
             .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
             .filter(dsl::id.eq(to_db_typed_uuid(group_id)))
             .filter(dsl::time_deleted.is_null())
@@ -1219,6 +1235,13 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             }
         };
 
+        self.opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &SiloUserList::new(self.authz_silo.clone()),
+            )
+            .await
+            .map_err(external_error_to_provider_error)?;
         let conn =
             self.datastore.pool_connection_unauthorized().await.map_err(
                 |err| {
@@ -1256,14 +1279,22 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
         &self,
         user_request: CreateUserRequest,
     ) -> Result<StoredParts<User>, ProviderStoreError> {
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        let authz_silo_user_list =
+            authz::SiloUserList::new(self.authz_silo.clone());
+        self.opctx
+            .authorize(authz::Action::CreateChild, &authz_silo_user_list)
+            .await
+            .map_err(external_error_to_provider_error)?;
+
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1294,14 +1325,22 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
         &self,
         filter: Option<FilterOp>,
     ) -> Result<Vec<StoredParts<User>>, ProviderStoreError> {
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        self.opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &SiloUserList::new(self.authz_silo.clone()),
+            )
+            .await
+            .map_err(external_error_to_provider_error)?;
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1340,14 +1379,25 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             }
         };
 
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        let authz_silo_user = authz::SiloUser::new(
+            self.authz_silo.clone(),
+            user_id,
+            LookupType::by_id(user_id),
+        );
+        self.opctx
+            .authorize(authz::Action::Modify, &authz_silo_user)
+            .await
+            .map_err(external_error_to_provider_error)?;
+
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1388,14 +1438,24 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             }
         };
 
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        let authz_silo_user = authz::SiloUser::new(
+            self.authz_silo.clone(),
+            user_id,
+            LookupType::by_id(user_id),
+        );
+        self.opctx
+            .authorize(authz::Action::Delete, &authz_silo_user)
+            .await
+            .map_err(external_error_to_provider_error)?;
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1438,14 +1498,22 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             }
         };
 
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        self.opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &SiloGroupList::new(self.authz_silo.clone()),
+            )
+            .await
+            .map_err(external_error_to_provider_error)?;
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1475,14 +1543,21 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
         &self,
         group_request: CreateGroupRequest,
     ) -> Result<StoredParts<Group>, ProviderStoreError> {
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        let authz_silo_group_list =
+            authz::SiloGroupList::new(self.authz_silo.clone());
+        self.opctx
+            .authorize(authz::Action::CreateChild, &authz_silo_group_list)
+            .await
+            .map_err(external_error_to_provider_error)?;
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1513,14 +1588,22 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
         &self,
         filter: Option<FilterOp>,
     ) -> Result<Vec<StoredParts<Group>>, ProviderStoreError> {
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        self.opctx
+            .authorize(
+                authz::Action::ListChildren,
+                &SiloGroupList::new(self.authz_silo.clone()),
+            )
+            .await
+            .map_err(external_error_to_provider_error)?;
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1559,14 +1642,25 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             }
         };
 
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        let authz_silo_group = authz::SiloGroup::new(
+            self.authz_silo.clone(),
+            group_id,
+            LookupType::by_id(group_id),
+        );
+        self.opctx
+            .authorize(authz::Action::Modify, &authz_silo_group)
+            .await
+            .map_err(external_error_to_provider_error)?;
+
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1611,6 +1705,16 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
                 )));
             }
         };
+
+        let authz_silo_group = authz::SiloGroup::new(
+            self.authz_silo.clone(),
+            group_id,
+            LookupType::by_id(group_id),
+        );
+        self.opctx
+            .authorize(authz::Action::Delete, &authz_silo_group)
+            .await
+            .map_err(external_error_to_provider_error)?;
 
         let conn =
             self.datastore.pool_connection_unauthorized().await.map_err(

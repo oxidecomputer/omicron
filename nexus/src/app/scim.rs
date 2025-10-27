@@ -12,6 +12,7 @@ use dropshot::Body;
 use dropshot::HttpError;
 use http::Response;
 use http::StatusCode;
+use nexus_auth::authz;
 use nexus_db_lookup::lookup;
 use nexus_db_queries::authn::{Actor, Reason};
 use nexus_db_queries::context::OpContext;
@@ -22,6 +23,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -144,17 +146,26 @@ impl super::Nexus {
         opctx: &'a OpContext,
     ) -> LookupResult<scim2_rs::Provider<CrdbScimProviderStore<'a>>> {
         match opctx.authn.actor() {
-            Some(Actor::Scim { silo_id }) => Ok(scim2_rs::Provider::new(
-                self.log.new(slog::o!(
-                    "component" => "scim2_rs::Provider",
-                    "silo" => silo_id.to_string(),
-                )),
-                CrdbScimProviderStore::new(
+            Some(Actor::Scim { silo_id }) => {
+                // Get the silo
+                let silo = authz::Silo::new(
+                    authz::FLEET,
                     *silo_id,
-                    self.datastore().clone(),
-                    opctx,
-                ),
-            )),
+                    LookupType::ById(*silo_id),
+                );
+
+                Ok(scim2_rs::Provider::new(
+                    self.log.new(slog::o!(
+                        "component" => "scim2_rs::Provider",
+                        "silo" => silo_id.to_string(),
+                    )),
+                    CrdbScimProviderStore::new(
+                        silo,
+                        self.datastore().clone(),
+                        opctx,
+                    ),
+                ))
+            }
 
             _ => Err(Error::Unauthenticated {
                 internal_message: "not an Actor::Scim".to_string(),
