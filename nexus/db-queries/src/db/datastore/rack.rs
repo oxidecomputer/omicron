@@ -1765,12 +1765,10 @@ mod test {
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
-        let service_ip_pool =
-            IpRange::try_from((nexus_ip_start, nexus_ip_end))
-                .expect("Cannot create IP Range");
-        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
-            service_ip_pool
-        );
+        let service_ip_pool = IpRange::try_from((nexus_ip_start, nexus_ip_end))
+            .expect("Cannot create IP Range");
+        let external_ip_policy =
+            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
 
         let mut system = SystemDescription::new();
         system
@@ -2060,12 +2058,10 @@ mod test {
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 1);
         let nexus_ip_end =
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 10);
-        let service_ip_pool =
-            IpRange::try_from((nexus_ip_start, nexus_ip_end))
-                .expect("Cannot create IP Range");
-        let external_ip_policy = ExternalIpPolicy::single_pool_no_external_dns(
-            service_ip_pool
-        );
+        let service_ip_pool = IpRange::try_from((nexus_ip_start, nexus_ip_end))
+            .expect("Cannot create IP Range");
+        let external_ip_policy =
+            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
 
         let mut system = SystemDescription::new();
         system
