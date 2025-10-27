@@ -797,7 +797,7 @@ impl BundleCollection {
         let mut tasks =
             ParallelTaskSet::new_with_parallelism(MAX_CONCURRENT_STEPS);
 
-        'run: loop {
+        loop {
             // Process all the currently-planned steps
             while let Some((step_name, step)) = steps.pop() {
                 let previous_result = tasks.spawn({
@@ -821,8 +821,9 @@ impl BundleCollection {
                 };
             }
 
-            // If we've run out of tasks to spawn, join any of the existing steps.
-            while let Some(previous_result) = tasks.join_next().await {
+            // If we've run out of tasks to spawn, join any of the previously
+            // spawned tasks, if any exist.
+            if let Some(previous_result) = tasks.join_next().await {
                 if let Ok(output) = previous_result {
                     output.process(&mut report, &mut steps);
                 };
@@ -830,7 +831,7 @@ impl BundleCollection {
                 // As soon as any task completes, see if we can spawn more work
                 // immediately. This ensures that the ParallelTaskSet is
                 // saturated as much as it can be.
-                continue 'run;
+                continue;
             }
 
             // Executing steps may create additional steps, as follow-up work.
