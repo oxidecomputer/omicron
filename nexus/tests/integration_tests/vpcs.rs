@@ -6,15 +6,20 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
 use http::method::Method;
+use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
-    create_project, create_vpc, create_vpc_with_error, objects_list_page_authz,
+    create_local_user, create_project, create_vpc, create_vpc_with_error,
+    grant_iam, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::{params, views::Vpc};
+use nexus_types::external_api::params;
+use nexus_types::external_api::shared::ProjectRole;
+use nexus_types::external_api::views::{Silo, Vpc};
+use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 
@@ -243,4 +248,134 @@ async fn vpc_put(
 fn vpcs_eq(vpc1: &Vpc, vpc2: &Vpc) {
     identity_eq(&vpc1.identity, &vpc2.identity);
     assert_eq!(vpc1.project_id, vpc2.project_id);
+}
+
+#[nexus_test]
+async fn test_vpc_collaborator_no_networking_role(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a project
+    let project_name = "test-project";
+    create_project(&client, &project_name).await;
+    let project_url = format!("/v1/projects/{}", project_name);
+    let vpcs_url = format!("/v1/vpcs?project={}", project_name);
+
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    let silo: Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Grant the Project Collaborator role to a local user
+    grant_iam(
+        client,
+        &project_url,
+        ProjectRole::Collaborator,
+        USER_TEST_UNPRIVILEGED.id(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Create a local user and give them the CollaboratorNoNetworking role
+    let no_networking_user = create_local_user(
+        client,
+        &silo,
+        &"no-networking-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    grant_iam(
+        client,
+        &project_url,
+        ProjectRole::CollaboratorNoNetworking,
+        no_networking_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Test 1: Verify the PrivilegedUser can create a VPC
+    let vpc_name = "test-vpc";
+    let _vpc_priv: Vpc = NexusRequest::objects_post(
+        client,
+        &vpcs_url,
+        &params::VpcCreate {
+            identity: IdentityMetadataCreateParams {
+                name: vpc_name.parse().unwrap(),
+                description: "test vpc".to_string(),
+            },
+            ipv6_prefix: None,
+            dns_name: "test".parse().unwrap(),
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("privileged user should be able to create VPC")
+    .parsed_body()
+    .unwrap();
+
+    // Test 2: Unprivileged user with Collaborator role CAN create a VPC
+    let vpc_name2 = "test-vpc-2";
+    let vpc: Vpc = NexusRequest::objects_post(
+        client,
+        &vpcs_url,
+        &params::VpcCreate {
+            identity: IdentityMetadataCreateParams {
+                name: vpc_name2.parse().unwrap(),
+                description: "test vpc 2".to_string(),
+            },
+            ipv6_prefix: None,
+            dns_name: "test2".parse().unwrap(),
+        },
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect(
+        "unprivileged user with Collaborator role should be able to create VPC",
+    )
+    .parsed_body()
+    .unwrap();
+    assert_eq!(vpc.identity.name, vpc_name2);
+
+    // Test 3: User with CollaboratorNoNetworking role CAN read/list VPCs (viewer inheritance)
+    let vpcs_list: Vec<Vpc> = NexusRequest::object_get(client, &vpcs_url)
+        .authn_as(AuthnMode::SiloUser(no_networking_user.id))
+        .execute()
+        .await
+        .expect("CollaboratorNoNetworking should be able to list VPCs")
+        .parsed_body::<dropshot::ResultsPage<Vpc>>()
+        .unwrap()
+        .items;
+    assert!(
+        vpcs_list.len() >= 2,
+        "Should see default VPC and the created VPCs"
+    );
+
+    // Test 4: User with CollaboratorNoNetworking role CANNOT create a VPC
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &vpcs_url)
+            .body(Some(&params::VpcCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "forbidden-vpc".parse().unwrap(),
+                    description: "should not be created".to_string(),
+                },
+                ipv6_prefix: None,
+                dns_name: "forbidden".parse().unwrap(),
+            }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(no_networking_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "Forbidden");
 }
