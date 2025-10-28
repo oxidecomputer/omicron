@@ -225,7 +225,7 @@ impl EstablishedConn {
                             config,
                         },
                     }) {
-                        warn!(
+                        error!(
                             self.log,
                             "Failed to send received NetworkConfig with
                              generation {generation} to main task"
