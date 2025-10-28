@@ -3023,7 +3023,9 @@ pub(crate) mod test {
                 Err(err) => {
                     let err = InlineErrorChain::new(&err).to_string();
                     assert!(
-                        err.contains("error allocating internal DNS"),
+                        err.contains(
+                            "no reserved subnets available for internal DNS"
+                        ),
                         "unexpected error: {err}"
                     );
                 }
