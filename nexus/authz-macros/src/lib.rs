@@ -263,13 +263,14 @@ enum PolarSnippet {
     InSilo,
 
     /// Generate it as a resource nested within a Project (either directly or
-    /// indirectly)
-    InProject,
+    /// indirectly). Grants modify/create permissions to `limited-collaborator`
+    /// and above.
+    InProjectLimited,
 
-    /// Generate it as a networking resource nested within a Project.
-    /// Like InProject, but requires the full `collaborator` role
-    /// (not `limited-collaborator`) to modify or create these resources.
-    InProjectNetworking,
+    /// Generate it as a resource nested within a Project.
+    /// Requires the full `collaborator` role (not `limited-collaborator`)
+    /// to modify or create these resources.
+    InProjectFull,
 }
 
 /// Implementation of [`authz_resource!`]
@@ -325,8 +326,8 @@ fn do_authz_resource(
     let polar_snippet = match (input.polar_snippet, input.parent.as_str()) {
         (PolarSnippet::Custom, _) => String::new(),
 
-        // The FleetChild case is similar to the InProject case, but we require
-        // a different role (and, of course, the parent is the Fleet)
+        // The FleetChild case is similar to the InProject* cases, but we require
+        // a different role (admin) and the parent is the Fleet instead of Project
         (PolarSnippet::FleetChild, _) => format!(
             r#"
                 resource {} {{
@@ -376,7 +377,7 @@ fn do_authz_resource(
 
         // If this resource is directly inside a Project, we only need to define
         // permissions that are contingent on having roles on that Project.
-        (PolarSnippet::InProject, "Project") => format!(
+        (PolarSnippet::InProjectLimited, "Project") => format!(
             r#"
                 resource {} {{
                     permissions = [
@@ -404,7 +405,7 @@ fn do_authz_resource(
         // relationship to the containing Project.  Permissions are still
         // contingent on having roles on the Project, but to get to the Project,
         // we have to go through the parent resource.
-        (PolarSnippet::InProject, _) => format!(
+        (PolarSnippet::InProjectLimited, _) => format!(
             r#"
                 resource {} {{
                     permissions = [
@@ -439,9 +440,9 @@ fn do_authz_resource(
             parent_as_snake,
         ),
 
-        // InProjectNetworking: Like InProject, but modifying these things
+        // InProjectFull: Like InProjectLimited, but modifying these things
         // requires "collaborator".
-        (PolarSnippet::InProjectNetworking, "Project") => format!(
+        (PolarSnippet::InProjectFull, "Project") => format!(
             r#"
                 resource {} {{
                     permissions = [
@@ -463,7 +464,7 @@ fn do_authz_resource(
             "#,
             resource_name, resource_name,
         ),
-        (PolarSnippet::InProjectNetworking, _) => format!(
+        (PolarSnippet::InProjectFull, _) => format!(
             r#"
                 resource {} {{
                     permissions = [
@@ -644,7 +645,7 @@ mod tests {
             // this code is never compiled, just printed out.
             input_key = SomeCompositeId,
             roles_allowed = false,
-            polar_snippet = InProject,
+            polar_snippet = InProjectLimited,
         })
         .unwrap();
         assert_contents("outputs/instance.txt", &pretty_format(output));

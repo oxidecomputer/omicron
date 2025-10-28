@@ -1135,7 +1135,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1143,7 +1143,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1151,7 +1151,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1159,7 +1159,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1167,7 +1167,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1175,7 +1175,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1183,7 +1183,7 @@ authz_resource! {
     parent = "Instance",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1191,7 +1191,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1199,7 +1199,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1207,7 +1207,7 @@ authz_resource! {
     parent = "VpcRouter",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1215,7 +1215,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1223,7 +1223,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1231,7 +1231,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1239,7 +1239,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProjectNetworking,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1247,7 +1247,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 // Customer network integration resources nested below "Fleet"
