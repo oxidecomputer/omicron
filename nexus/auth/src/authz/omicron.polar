@@ -69,7 +69,8 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 # - organization.collaborator (can manage Projects)
 # - organization.viewer   (can read most resources within the Organization)
 # - project.admin         (complete control over a Project)
-# - project.collaborator  (can manage all resources within the Project)
+# - project.collaborator  (can manage all resources within the Project, including networking)
+# - project.limited-collaborator (can manage compute resources, but not networking resources)
 # - project.viewer        (can read most resources within the Project)
 #
 # Outside the Silo/Organization/Project hierarchy, we (currently) treat most
