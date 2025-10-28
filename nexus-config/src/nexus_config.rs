@@ -1433,6 +1433,9 @@ mod test {
                             period_secs: Duration::from_secs(47),
                             disable: false,
                         },
+                        fm: FmTasksConfig {
+                            sitrep_load_period_secs: Duration::from_secs(48),
+                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {

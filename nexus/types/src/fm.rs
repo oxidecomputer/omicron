@@ -15,6 +15,16 @@ pub struct Sitrep {
     // TODO(eliza): draw the rest of the sitrep
 }
 
+impl Sitrep {
+    pub fn id(&self) -> SitrepUuid {
+        self.metadata.id
+    }
+
+    pub fn parent_id(&self) -> Option<SitrepUuid> {
+        self.metadata.parent_sitrep_id
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct SitrepVersion {
     pub id: SitrepUuid,

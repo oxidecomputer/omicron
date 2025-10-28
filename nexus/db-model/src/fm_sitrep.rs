@@ -42,6 +42,27 @@ impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
     }
 }
 
+impl From<nexus_types::fm::SitrepMetadata> for SitrepMetadata {
+    fn from(db_meta: nexus_types::fm::SitrepMetadata) -> Self {
+        let nexus_types::fm::SitrepMetadata {
+            id,
+            parent_sitrep_id,
+            inv_collection_id,
+            creator_id,
+            comment,
+            time_created,
+        } = db_meta;
+        Self {
+            id: id.into(),
+            parent_sitrep_id: parent_sitrep_id.map(Into::into),
+            inv_collection_id: inv_collection_id.into(),
+            creator_id: creator_id.into(),
+            comment,
+            time_created,
+        }
+    }
+}
+
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = fm_sitrep_history)]
 pub struct SitrepVersion {
