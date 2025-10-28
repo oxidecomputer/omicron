@@ -656,8 +656,11 @@ async fn test_multicast_ip_pool_range_validation(
 
     // IPv4 non-multicast range should be rejected
     let ipv4_unicast_range = IpRange::V4(
-        Ipv4Range::new(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 255))
-            .unwrap(),
+        Ipv4Range::new(
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 255),
+        )
+        .unwrap(),
     );
     object_create_error(
         client,
@@ -669,8 +672,11 @@ async fn test_multicast_ip_pool_range_validation(
 
     // IPv4 link-local multicast range should be rejected
     let ipv4_link_local_range = IpRange::V4(
-        Ipv4Range::new(Ipv4Addr::new(224, 0, 0, 1), Ipv4Addr::new(224, 0, 0, 255))
-            .unwrap(),
+        Ipv4Range::new(
+            Ipv4Addr::new(224, 0, 0, 1),
+            Ipv4Addr::new(224, 0, 0, 255),
+        )
+        .unwrap(),
     );
     object_create_error(
         client,
@@ -682,8 +688,11 @@ async fn test_multicast_ip_pool_range_validation(
 
     // Valid IPv4 multicast range should be accepted
     let valid_ipv4_range = IpRange::V4(
-        Ipv4Range::new(Ipv4Addr::new(239, 0, 0, 1), Ipv4Addr::new(239, 0, 0, 255))
-            .unwrap(),
+        Ipv4Range::new(
+            Ipv4Addr::new(239, 0, 0, 1),
+            Ipv4Addr::new(239, 0, 0, 255),
+        )
+        .unwrap(),
     );
     object_create::<_, IpPoolRange>(client, range_url, &valid_ipv4_range).await;
 

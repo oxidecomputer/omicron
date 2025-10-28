@@ -85,7 +85,10 @@ pub const IPV6_ADMIN_SCOPED_MULTICAST_PREFIX: u16 = 0xff04;
 /// See RFC 4291 Section 2.7 (multicast scope field):
 /// <https://www.rfc-editor.org/rfc/rfc4291#section-2.7>
 pub const IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET: oxnet::Ipv6Net =
-    oxnet::Ipv6Net::new_unchecked(Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0), 16);
+    oxnet::Ipv6Net::new_unchecked(
+        Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0),
+        16,
+    );
 
 /// IPv6 link-local multicast subnet (ff02::/16).
 /// These addresses are not routable beyond the local link and should not be
@@ -93,7 +96,10 @@ pub const IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET: oxnet::Ipv6Net =
 /// See RFC 4291 Section 2.7 (multicast scope field):
 /// <https://www.rfc-editor.org/rfc/rfc4291#section-2.7>
 pub const IPV6_LINK_LOCAL_MULTICAST_SUBNET: oxnet::Ipv6Net =
-    oxnet::Ipv6Net::new_unchecked(Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0), 16);
+    oxnet::Ipv6Net::new_unchecked(
+        Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0),
+        16,
+    );
 
 /// maximum possible value for a tcp or udp port
 pub const MAX_PORT: u16 = u16::MAX;
