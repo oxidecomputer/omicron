@@ -266,9 +266,9 @@ enum PolarSnippet {
     /// indirectly)
     InProject,
 
-    /// Generate it as a networking resource nested within a Project
-    /// (like InProject, but without default permission rules - all rules
-    /// defined in omicron.polar for networking restrictions)
+    /// Generate it as a networking resource nested within a Project.
+    /// Like InProject, but requires the full `collaborator` role
+    /// (not `collaborator-no-networking`) to modify or create these resources.
     InProjectNetworking,
 }
 
