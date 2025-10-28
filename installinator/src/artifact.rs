@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use anyhow::{Context, Result};
 use clap::Args;
@@ -155,7 +155,27 @@ impl ArtifactClient {
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
-        let client = installinator_client::Client::new(&endpoint, log.clone());
+        // Set a connect timeout of 15 seconds (the progenitor default), and a
+        // total timeout of 5 minutes. The progenitor default for the total
+        // timeout is 15 seconds, which can easily be exceeded for large
+        // downloads. (Don't set the total timeout to be too long, though,
+        // because we're fetching ~2GiB artifacts over a LAN which really should
+        // take less than 5 minutes.)
+        //
+        // Do not set a read timeout here -- instead, read timeouts are handled
+        // by the fetch loop. (Why is the read timeout handled by the fetch
+        // loop? So that it can also apply to the mock peer backend, and logic
+        // shared across both.)
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(5 * 60))
+            .build()
+            .expect("installinator artifact client created");
+        let client = installinator_client::Client::new_with_client(
+            &endpoint,
+            client,
+            log.clone(),
+        );
         Self { log, client }
     }
 

@@ -227,6 +227,7 @@ impl FetchArtifactBackend {
             InstallinatorProgressMetadata::Download { peer: peer.address() };
 
         loop {
+            // This is the read timeout.
             match tokio::time::timeout(self.timeout, receiver.recv()).await {
                 Ok(Some(Ok(bytes))) => {
                     slog::debug!(
