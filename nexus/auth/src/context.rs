@@ -136,6 +136,7 @@ impl OpContext {
                 authn::Actor::SiloUser { silo_user_id, silo_id } => {
                     log.new(o!(
                         "authenticated" => true,
+                        "type" => "silo_user",
                         "silo_user_id" => silo_user_id.to_string(),
                         "silo_id" => silo_id.to_string(),
                     ))
@@ -143,7 +144,14 @@ impl OpContext {
 
                 authn::Actor::UserBuiltin { user_builtin_id } => log.new(o!(
                     "authenticated" => true,
+                    "type" => "user_builtin",
                     "user_builtin_id" => user_builtin_id.to_string(),
+                )),
+
+                authn::Actor::Scim { silo_id } => log.new(o!(
+                    "authenticated" => true,
+                    "type" => "scim",
+                    "silo_id" => silo_id.to_string(),
                 )),
             }
         } else {

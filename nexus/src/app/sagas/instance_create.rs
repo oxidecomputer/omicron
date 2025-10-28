@@ -11,7 +11,9 @@ use crate::app::{
 };
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
-use nexus_db_model::{ExternalIp, NetworkInterfaceKind};
+use nexus_db_model::{
+    ExternalIp, IpConfig, Ipv4Assignment, Ipv4Config, NetworkInterfaceKind,
+};
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
@@ -33,6 +35,7 @@ use slog::{info, warn};
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
+use std::net::IpAddr;
 use steno::ActionError;
 use steno::Node;
 use steno::{DagBuilder, SagaName};
@@ -637,13 +640,41 @@ async fn create_custom_network_interface(
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
+
+    // TODO-completeness: Support IPv6 addressing in the public API, see
+    // https://github.com/oxidecomputer/omicron/issues/9248.
+    let ipv4_assignment = match interface_params.ip {
+        Some(IpAddr::V4(ip)) => Ipv4Assignment::Explicit(ip),
+        Some(IpAddr::V6(_)) => {
+            return Err(ActionError::action_failed(Error::invalid_request(
+                "IPv6 addressing is not yet suported for network interfaces",
+            )));
+        }
+        None => Ipv4Assignment::Auto,
+    };
+    let transit_ips = interface_params
+        .transit_ips
+        .iter()
+        .map(|ipnet| {
+            let oxnet::IpNet::V4(net) = ipnet else {
+                return Err(ActionError::action_failed(
+                    Error::invalid_request(
+                        "IPv6 transit IPs are not yet supported \
+                    for network interfaces",
+                    ),
+                ));
+            };
+            Ok(*net)
+        })
+        .collect::<Result<_, _>>()?;
+    let ip_config =
+        IpConfig::V4(Ipv4Config { ip: ipv4_assignment, transit_ips });
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         db_subnet.clone(),
         interface_params.identity.clone(),
-        interface_params.ip,
-        interface_params.transit_ips.iter().map(|ip| (*ip).into()).collect(),
+        ip_config,
     )
     .map_err(ActionError::action_failed)?;
     datastore
@@ -733,13 +764,40 @@ async fn create_default_primary_network_interface(
         .await
         .map_err(ActionError::action_failed)?;
 
+    // TODO-completeness: Support IPv6 addressing in the public API, see
+    // https://github.com/oxidecomputer/omicron/issues/9248.
+    let ipv4_assignment = match interface_params.ip {
+        Some(IpAddr::V4(ip)) => Ipv4Assignment::Explicit(ip),
+        Some(IpAddr::V6(_)) => {
+            return Err(ActionError::action_failed(Error::invalid_request(
+                "IPv6 addressing is not yet suported for network interfaces",
+            )));
+        }
+        None => Ipv4Assignment::Auto,
+    };
+    let transit_ips = interface_params
+        .transit_ips
+        .iter()
+        .map(|ipnet| {
+            let oxnet::IpNet::V4(net) = ipnet else {
+                return Err(ActionError::action_failed(
+                    Error::invalid_request(
+                        "IPv6 transit IPs are not yet supported \
+                    for network interfaces",
+                    ),
+                ));
+            };
+            Ok(*net)
+        })
+        .collect::<Result<_, _>>()?;
+    let ip_config =
+        IpConfig::V4(Ipv4Config { ip: ipv4_assignment, transit_ips });
     let interface = db::model::IncompleteNetworkInterface::new_instance(
         interface_id,
         instance_id,
         db_subnet.clone(),
         interface_params.identity.clone(),
-        interface_params.ip,
-        interface_params.transit_ips.iter().map(|ip| (*ip).into()).collect(),
+        ip_config,
     )
     .map_err(ActionError::action_failed)?;
     datastore

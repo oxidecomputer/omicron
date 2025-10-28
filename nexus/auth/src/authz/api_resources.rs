@@ -1081,6 +1081,58 @@ impl AuthorizedResource for AlertClassList {
     }
 }
 
+/// Synthetic resource describing the list of SCIM client bearer tokens
+/// associated with a Silo
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ScimClientBearerTokenList(Silo);
+
+impl ScimClientBearerTokenList {
+    pub fn new(silo: Silo) -> ScimClientBearerTokenList {
+        ScimClientBearerTokenList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for ScimClientBearerTokenList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &ScimClientBearerTokenList| {
+                list.0.clone()
+            })
+    }
+}
+
+impl AuthorizedResource for ScimClientBearerTokenList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Main resource hierarchy: Projects and their resources
 
 authz_resource! {
@@ -1525,6 +1577,14 @@ authz_resource! {
     name = "WebhookSecret",
     parent = "AlertReceiver",
     primary_key = { uuid_kind = WebhookSecretKind },
+    roles_allowed = false,
+    polar_snippet = Custom,
+}
+
+authz_resource! {
+    name = "ScimClientBearerToken",
+    parent = "Silo",
+    primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = Custom,
 }

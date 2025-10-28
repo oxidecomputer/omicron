@@ -1767,6 +1767,10 @@ pub enum AuditLogEntryActor {
         silo_id: Uuid,
     },
 
+    Scim {
+        silo_id: Uuid,
+    },
+
     Unauthenticated,
 }
 

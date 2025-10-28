@@ -303,6 +303,16 @@ async fn make_silo(
         let create_project_users = first_branch && i == 0;
         make_project(builder, &silo, &project_name, create_project_users).await;
     }
+
+    let scim_client_bearer_token_id =
+        "7885144e-9c75-47f7-a97d-7dfc58e1186c".parse().unwrap();
+
+    builder.new_resource(authz::ScimClientBearerToken::new(
+        silo.clone(),
+        scim_client_bearer_token_id,
+        LookupType::by_id(scim_client_bearer_token_id),
+    ));
+    builder.new_resource(authz::ScimClientBearerTokenList::new(silo.clone()));
 }
 
 /// Helper for `make_resources()` that constructs a small Project hierarchy

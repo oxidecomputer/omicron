@@ -262,9 +262,11 @@ impl<'a> LookupPath<'a> {
                 SiloUser::PrimaryKey(Root { lookup_root: self }, *silo_user_id),
             ),
 
-            authn::Actor::UserBuiltin { .. } => Err(
-                Error::non_resourcetype_not_found("could not find silo user"),
-            ),
+            authn::Actor::UserBuiltin { .. } | authn::Actor::Scim { .. } => {
+                Err(Error::non_resourcetype_not_found(
+                    "could not find silo user",
+                ))
+            }
         }
     }
 
@@ -527,6 +529,18 @@ impl<'a> LookupPath<'a> {
         'a: 'b,
     {
         Alert::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`ScimClientBearerToken`], identified by its
+    /// UUID.
+    pub fn scim_client_bearer_token_id<'b>(
+        self,
+        id: Uuid,
+    ) -> ScimClientBearerToken<'b>
+    where
+        'a: 'b,
+    {
+        ScimClientBearerToken::PrimaryKey(Root { lookup_root: self }, id)
     }
 }
 
@@ -932,6 +946,15 @@ lookup_resource! {
     primary_key_columns = [
         { column_name = "id", uuid_kind = AlertKind }
     ]
+}
+
+lookup_resource! {
+    name = "ScimClientBearerToken",
+    ancestors = ["Silo"],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    visible_outside_silo = true
 }
 
 // Helpers for unifying the interfaces around images
