@@ -155,6 +155,7 @@ impl ArtifactClient {
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
+
         // Set a connect timeout of 15 seconds (the progenitor default), and a
         // total timeout of 5 minutes. The progenitor default for the total
         // timeout is 15 seconds, which can easily be exceeded for large
@@ -176,6 +177,7 @@ impl ArtifactClient {
             client,
             log.clone(),
         );
+
         Self { log, client }
     }
 
