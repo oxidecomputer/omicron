@@ -2482,7 +2482,7 @@ pub(crate) mod test {
     use nexus_types::inventory::CockroachStatus;
     use nexus_types::inventory::InternalDnsGenerationStatus;
     use nexus_types::inventory::TimeSync;
-    use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv4Range;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::TufArtifactMeta;
@@ -2509,6 +2509,7 @@ pub(crate) mod test {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::net::IpAddr;
+    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactKind;
@@ -3273,7 +3274,7 @@ pub(crate) mod test {
         // Change the policy: add some external DNS IPs.
         let external_dns_ips =
             ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
-                addr.parse::<IpAddr>()
+                addr.parse::<Ipv4Addr>()
                     .expect("can't parse external DNS IP address")
             });
         let input = {
@@ -3282,17 +3283,14 @@ pub(crate) mod test {
                 builder.policy_mut().external_ips.clone().into_builder();
             // Add a "service IP pool" covering our external DNS IP range.
             ip_policy
-                .push_service_ip_pool(
-                    IpRange::try_from((
-                        external_dns_ips[0],
-                        external_dns_ips[2],
-                    ))
-                    .unwrap(),
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(external_dns_ips[0], external_dns_ips[2])
+                        .unwrap(),
                 )
                 .unwrap();
             // Set these IPs as "for external DNS".
             for ip in external_dns_ips {
-                ip_policy.add_external_dns_ip(ip).unwrap();
+                ip_policy.add_external_dns_ip(ip.into()).unwrap();
             }
             builder.policy_mut().external_ips = ip_policy.build();
             builder.build()

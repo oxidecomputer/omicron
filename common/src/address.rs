@@ -524,17 +524,6 @@ impl IpRange {
             IpRange::V6(_) => IpVersion::V6,
         }
     }
-
-    /// Returns `true` if `self` has any IPs in common with `other`; false
-    /// otherwise.
-    pub fn overlaps(&self, other: &IpRange) -> bool {
-        match (self, other) {
-            (IpRange::V4(r0), IpRange::V4(r1)) => r0.overlaps(r1),
-            (IpRange::V6(r0), IpRange::V6(r1)) => r0.overlaps(r1),
-            (IpRange::V4(_), IpRange::V6(_))
-            | (IpRange::V6(_), IpRange::V4(_)) => false,
-        }
-    }
 }
 
 impl From<IpAddr> for IpRange {

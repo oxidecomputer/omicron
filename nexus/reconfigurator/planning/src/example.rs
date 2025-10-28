@@ -36,7 +36,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
-use omicron_common::address::IpRange;
+use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -507,11 +507,11 @@ impl ExampleSystemBuilder {
             let mut builder =
                 system.external_ip_policy().clone().into_builder();
             builder
-                .push_service_ip_pool(
-                    IpRange::try_from((
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(
                         "198.51.100.1".parse::<Ipv4Addr>().unwrap(),
                         "198.51.100.30".parse::<Ipv4Addr>().unwrap(),
-                    ))
+                    )
                     .unwrap(),
                 )
                 .unwrap();

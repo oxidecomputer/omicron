@@ -25,6 +25,8 @@ use daft::Diffable;
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::address::IpRange;
+use omicron_common::address::Ipv4Range;
+use omicron_common::address::Ipv6Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
@@ -1045,17 +1047,26 @@ pub struct Policy {
 }
 
 /// Subset of [`Policy`] specific to external IP addresses.
+///
+/// Today, this type encompasses three logical parts of a policy:
+///
+/// * A single IPv4 service IP pool, made up of 0 or more ranges.
+/// * A single IPv6 service IP pool, made up of 0 or more ranges.
+/// * A set of external DNS IP addresses, each of which must be present in one
+///   of the two service IP pools.
+///
+/// This is slightly more general than what deployed racks actually have: they
+/// all only populate the IPv4 service pool and external DNS IP addresses. But
+/// `#[nexus_test]` uses all of the above, and this a step in the direction
+/// we're moving where we will have more than one service IP pool (see
+/// <https://github.com/oxidecomputer/omicron/issues/8945>).
 // NOTE: The fields of the struct are private and we manually implement
 // `Deserialize` to maintain invariants (e.g., that every `external_dns_ip` is
-// contained in one of the `service_ip_pool_ranges`).
+// contained in one of the service pool ranges).
 #[derive(Debug, Clone, Serialize)]
 pub struct ExternalIpPolicy {
-    /// ranges specified by the IP pool for externally-visible control plane
-    /// services (e.g., external DNS, Nexus, boundary NTP)
-    service_ip_pool_ranges: Vec<IpRange>,
-
-    /// specific IP addresses contained in `service_ip_pool_ranges` that are
-    /// earmarked for external DNS
+    service_pool_ipv4_ranges: Vec<Ipv4Range>,
+    service_pool_ipv6_ranges: Vec<Ipv6Range>,
     external_dns_ips: BTreeSet<IpAddr>,
 }
 
@@ -1075,18 +1086,29 @@ impl<'de> Deserialize<'de> for ExternalIpPolicy {
         #[derive(Deserialize)]
         #[serde(remote = "ExternalIpPolicy")]
         struct ExternalIpPolicyShadow {
-            service_ip_pool_ranges: Vec<IpRange>,
+            service_pool_ipv4_ranges: Vec<Ipv4Range>,
+            service_pool_ipv6_ranges: Vec<Ipv6Range>,
             external_dns_ips: BTreeSet<IpAddr>,
         }
 
         // Deserialize without validation...
-        let ExternalIpPolicy { service_ip_pool_ranges, external_dns_ips } =
-            ExternalIpPolicyShadow::deserialize(deserializer)?;
+        let ExternalIpPolicy {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        } = ExternalIpPolicyShadow::deserialize(deserializer)?;
 
         // ...then validate by going through the builder.
         let mut builder = ExternalIpPolicy::builder();
-        for pool in service_ip_pool_ranges {
-            builder.push_service_ip_pool(pool).map_err(D::Error::custom)?;
+        for r in service_pool_ipv4_ranges {
+            builder
+                .push_service_pool_ipv4_range(r)
+                .map_err(D::Error::custom)?;
+        }
+        for r in service_pool_ipv6_ranges {
+            builder
+                .push_service_pool_ipv6_range(r)
+                .map_err(D::Error::custom)?;
         }
         for ip in external_dns_ips {
             builder.add_external_dns_ip(ip).map_err(D::Error::custom)?;
@@ -1099,19 +1121,25 @@ impl<'de> Deserialize<'de> for ExternalIpPolicy {
 impl ExternalIpPolicy {
     pub fn empty() -> Self {
         Self {
-            service_ip_pool_ranges: Vec::new(),
+            service_pool_ipv4_ranges: Vec::new(),
+            service_pool_ipv6_ranges: Vec::new(),
             external_dns_ips: BTreeSet::new(),
         }
     }
 
-    /// Construct an `ExternalIpPolicy` containing a single service IP pool and
-    /// no external DNS IPs.
+    /// Construct an `ExternalIpPolicy` containing a single service IP pool
+    /// range and no external DNS IPs.
     ///
     /// This is used primarily by tests. A single pool with no external DNS IPs
     /// can be constructed infallibly.
     pub fn single_pool_no_external_dns(range: IpRange) -> Self {
+        let (service_pool_ipv4_ranges, service_pool_ipv6_ranges) = match range {
+            IpRange::V4(r) => (vec![r], vec![]),
+            IpRange::V6(r) => (vec![], vec![r]),
+        };
         Self {
-            service_ip_pool_ranges: vec![range],
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
             external_dns_ips: BTreeSet::new(),
         }
     }
@@ -1124,19 +1152,36 @@ impl ExternalIpPolicy {
     /// Construct an [`ExternalIpPolicyBuilder`] that contains all of this
     /// policy's IP pools and external DNS IPs.
     pub fn into_builder(self) -> ExternalIpPolicyBuilder {
-        let Self { service_ip_pool_ranges, external_dns_ips } = self;
-        ExternalIpPolicyBuilder { service_ip_pool_ranges, external_dns_ips }
+        let Self {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        } = self;
+        ExternalIpPolicyBuilder {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        }
     }
 
     /// Consume this `ExternalIpPolicy`, returning an iterator over all IPs that
     /// should be used for services other than external DNS (i.e., Nexus and
     /// boundary NTP).
     pub fn into_non_external_dns_ips(self) -> impl Iterator<Item = IpAddr> {
-        let Self { service_ip_pool_ranges, external_dns_ips } = self;
-        service_ip_pool_ranges
+        let Self {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        } = self;
+
+        let v4_ips = service_pool_ipv4_ranges
             .into_iter()
-            .flat_map(|r| r.iter())
-            .filter(move |ip| !external_dns_ips.contains(ip))
+            .flat_map(|r| r.iter().map(IpAddr::V4));
+        let v6_ips = service_pool_ipv6_ranges
+            .into_iter()
+            .flat_map(|r| r.iter().map(IpAddr::V6));
+
+        v4_ips.chain(v6_ips).filter(move |ip| !external_dns_ips.contains(ip))
     }
 
     /// The set of external IP addresses on which we should run external DNS
@@ -1148,7 +1193,8 @@ impl ExternalIpPolicy {
 
 #[derive(Debug, Clone, Default)]
 pub struct ExternalIpPolicyBuilder {
-    service_ip_pool_ranges: Vec<IpRange>,
+    service_pool_ipv4_ranges: Vec<Ipv4Range>,
+    service_pool_ipv6_ranges: Vec<Ipv6Range>,
     external_dns_ips: BTreeSet<IpAddr>,
 }
 
@@ -1158,30 +1204,65 @@ impl ExternalIpPolicyBuilder {
         Self::default()
     }
 
-    /// Add an external IP pool for services.
+    /// Add a range to either the IPv4 or the IPv6 service pool, depending on
+    /// the variant of `new_range`.
     ///
     /// # Errors
     ///
-    /// Fails if `pool_range` overlaps an existing pool within this builder.
-    // TODO-correctness Eventually this may be broken up into different pools
-    // for different kinds of services. For now, we group all services into a
-    // single set of pools and then separately carve out external DNS from
-    // within those pools.
-    pub fn push_service_ip_pool(
+    /// Fails if `new_range` overlaps an existing range within this builder.
+    pub fn push_service_pool_range(
         &mut self,
-        new_pool: IpRange,
+        new_range: IpRange,
     ) -> Result<(), ExternalIpPolicyError> {
-        // Linear scan should be good enough: we don't expect many pools, and
-        // the check we do for each pool is cheap.
-        for &existing_pool in &self.service_ip_pool_ranges {
-            if existing_pool.overlaps(&new_pool) {
-                return Err(ExternalIpPolicyError::OverlappingPools {
-                    new_pool,
-                    existing_pool,
+        match new_range {
+            IpRange::V4(r) => self.push_service_pool_ipv4_range(r),
+            IpRange::V6(r) => self.push_service_pool_ipv6_range(r),
+        }
+    }
+
+    /// Add a range to the IPv4 service pool.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `new_range` overlaps an existing range within this builder.
+    pub fn push_service_pool_ipv4_range(
+        &mut self,
+        new_range: Ipv4Range,
+    ) -> Result<(), ExternalIpPolicyError> {
+        // Linear scan should be good enough: we don't expect many ranges, and
+        // the check we do for each range is cheap.
+        for &existing_range in &self.service_pool_ipv4_ranges {
+            if existing_range.overlaps(&new_range) {
+                return Err(ExternalIpPolicyError::OverlappingRanges {
+                    new_range: new_range.into(),
+                    existing_range: new_range.into(),
                 });
             }
         }
-        self.service_ip_pool_ranges.push(new_pool);
+        self.service_pool_ipv4_ranges.push(new_range);
+        Ok(())
+    }
+
+    /// Add a range to the IPv6 service pool.
+    ///
+    /// # Errors
+    ///
+    /// Fails if `new_range` overlaps an existing range within this builder.
+    pub fn push_service_pool_ipv6_range(
+        &mut self,
+        new_range: Ipv6Range,
+    ) -> Result<(), ExternalIpPolicyError> {
+        // Linear scan should be good enough: we don't expect many ranges, and
+        // the check we do for each range is cheap.
+        for &existing_range in &self.service_pool_ipv6_ranges {
+            if existing_range.overlaps(&new_range) {
+                return Err(ExternalIpPolicyError::OverlappingRanges {
+                    new_range: new_range.into(),
+                    existing_range: new_range.into(),
+                });
+            }
+        }
+        self.service_pool_ipv6_ranges.push(new_range);
         Ok(())
     }
 
@@ -1191,15 +1272,23 @@ impl ExternalIpPolicyBuilder {
     ///
     /// Fails if the requested IP is _not_ covered by an existing service IP
     /// pool range.
-    // TODO-correctness See the note above on `push_service_ip_pool()`; the fact
-    // that external DNS IPs are not special or distinct from the general
-    // service IP pools is a little confusing, and it would be nice to clean
-    // that up eventually.
+    // TODO-correctness The fact that external DNS IPs are not special or
+    // distinct from the general service IP pools is a little confusing, and it
+    // would be nice to clean that up eventually. We may need to do that as a
+    // part of the work to move to multiple service pools.
     pub fn add_external_dns_ip(
         &mut self,
         ip: IpAddr,
     ) -> Result<(), ExternalIpPolicyError> {
-        if self.service_ip_pool_ranges.iter().any(|pool| pool.contains(ip)) {
+        let contained_in_pool = match ip {
+            IpAddr::V4(ip) => {
+                self.service_pool_ipv4_ranges.iter().any(|r| r.contains(ip))
+            }
+            IpAddr::V6(ip) => {
+                self.service_pool_ipv6_ranges.iter().any(|r| r.contains(ip))
+            }
+        };
+        if contained_in_pool {
             self.external_dns_ips.insert(ip);
             Ok(())
         } else {
@@ -1208,22 +1297,30 @@ impl ExternalIpPolicyBuilder {
     }
 
     pub fn build(self) -> ExternalIpPolicy {
-        let Self { service_ip_pool_ranges, external_dns_ips } = self;
-        ExternalIpPolicy { service_ip_pool_ranges, external_dns_ips }
+        let Self {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        } = self;
+        ExternalIpPolicy {
+            service_pool_ipv4_ranges,
+            service_pool_ipv6_ranges,
+            external_dns_ips,
+        }
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExternalIpPolicyError {
     #[error(
-        "external IP policy cannot have overlapping pools: \
-         [{}, {}] overlaps [{}, {}]",
-        new_pool.first_address(),
-        new_pool.last_address(),
-        existing_pool.first_address(),
-        existing_pool.last_address(),
+        "external IP policy cannot have overlapping IP ranges: \
+         new range [{}, {}] overlaps existing range [{}, {}]",
+        new_range.first_address(),
+        new_range.last_address(),
+        existing_range.first_address(),
+        existing_range.last_address(),
     )]
-    OverlappingPools { new_pool: IpRange, existing_pool: IpRange },
+    OverlappingRanges { new_range: IpRange, existing_range: IpRange },
     #[error("external DNS IP {0} is not a member of any service IP pool")]
     ExternalDnsOutsideServiceIpPools(IpAddr),
 }

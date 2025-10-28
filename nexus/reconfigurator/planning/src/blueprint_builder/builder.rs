@@ -3531,7 +3531,7 @@ pub mod test {
                 builder.policy_mut().external_ips = {
                     let mut ip_policy = ExternalIpPolicy::builder();
                     for r in used_ip_ranges {
-                        ip_policy.push_service_ip_pool(r).unwrap();
+                        ip_policy.push_service_pool_range(r).unwrap();
                     }
                     ip_policy.build()
                 };

@@ -54,7 +54,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SpType;
-use omicron_common::address::IpRange;
+use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
@@ -187,11 +187,11 @@ impl SystemDescription {
         let external_ip_policy = {
             let mut builder = ExternalIpPolicy::builder();
             builder
-                .push_service_ip_pool(
-                    IpRange::try_from((
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(
                         "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
                         "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
-                    ))
+                    )
                     .unwrap(),
                 )
                 .unwrap();

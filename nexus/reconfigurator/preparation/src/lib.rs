@@ -277,7 +277,7 @@ impl PlanningInputFromDb<'_> {
                     InlineErrorChain::new(&e),
                 ))
             })?;
-            builder.push_service_ip_pool(range).map_err(|e| {
+            builder.push_service_pool_range(range).map_err(|e| {
                 Error::internal_error(&format!(
                     "cannot construct external IP policy: {}",
                     InlineErrorChain::new(&e),

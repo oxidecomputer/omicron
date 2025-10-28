@@ -663,6 +663,7 @@ pub mod test {
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
     use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv4Range;
     use omicron_common::api::external::Vni;
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -754,7 +755,7 @@ pub mod test {
         let policy = {
             let mut builder = ExternalIpPolicy::builder();
             for r in ip_pool_ranges {
-                builder.push_service_ip_pool(r).unwrap();
+                builder.push_service_pool_range(r).unwrap();
             }
             builder.build()
         };
@@ -860,16 +861,16 @@ pub mod test {
     fn external_dns_ips_are_partitioned_separately() {
         // Construct a service IP range with 3 IPs. The first two are for
         // external DNS, and the third is for other services.
-        let service_ip_pool = IpRange::try_from((
-            "192.0.2.1".parse::<IpAddr>().unwrap(),
-            "192.0.2.3".parse::<IpAddr>().unwrap(),
-        ))
+        let service_ip_pool = Ipv4Range::new(
+            "192.0.2.1".parse::<Ipv4Addr>().unwrap(),
+            "192.0.2.3".parse::<Ipv4Addr>().unwrap(),
+        )
         .unwrap();
         assert_eq!(service_ip_pool.len(), 3);
 
         let external_ip_policy = {
             let mut builder = ExternalIpPolicy::builder();
-            builder.push_service_ip_pool(service_ip_pool).unwrap();
+            builder.push_service_pool_ipv4_range(service_ip_pool).unwrap();
             builder.add_external_dns_ip("192.0.2.1".parse().unwrap()).unwrap();
             builder.add_external_dns_ip("192.0.2.2".parse().unwrap()).unwrap();
             builder.build()
@@ -889,7 +890,11 @@ pub mod test {
                         dns_address: OmicronZoneExternalFloatingAddr {
                             id: ExternalIpUuid::new_v4(),
                             addr: SocketAddr::new(
-                                service_ip_pool.iter().nth(index).unwrap(),
+                                service_ip_pool
+                                    .iter()
+                                    .nth(index)
+                                    .unwrap()
+                                    .into(),
                                 0,
                             ),
                         },
