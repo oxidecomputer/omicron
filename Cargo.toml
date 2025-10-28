@@ -660,7 +660,7 @@ rand_distr = "0.5.1"
 rand_seeder = "0.4.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
-raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "0a8dbd2311263f6a59ea58089e33c8331436ff3a" }
+raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
