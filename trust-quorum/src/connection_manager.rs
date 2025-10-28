@@ -446,19 +446,16 @@ impl ConnMgr {
             );
 
             // Inform the main task that accepted connection is established
-            if let Err(e) = main_tx
-                .send(ConnToMainMsg {
-                    task_id: task::id(),
-                    msg: ConnToMainMsgInner::Accepted {
-                        addr,
-                        peer_id: baseboard_id,
-                    },
-                })
-                .await
-            {
-                // The system is shutting down
+            if let Err(_) = main_tx.try_send(ConnToMainMsg {
+                task_id: task::id(),
+                msg: ConnToMainMsgInner::Accepted {
+                    addr,
+                    peer_id: baseboard_id,
+                },
+            }) {
+                // The system is shutting down or we've overloaded the main channel
                 // Just bail from this task
-                warn!(log, "Failed to send 'accepted' msg to main task: {e:?}");
+                warn!(log, "Failed to send 'accepted' msg to main task");
             } else {
                 conn.run().await;
             }
@@ -663,22 +660,16 @@ impl ConnMgr {
             );
             // Inform the main task that the client connection is
             // established.
-            if let Err(e) = main_tx
-                .send(ConnToMainMsg {
-                    task_id: task::id(),
-                    msg: ConnToMainMsgInner::Connected {
-                        addr,
-                        peer_id: baseboard_id,
-                    },
-                })
-                .await
-            {
-                // The system is shutting down
+            if let Err(_) = main_tx.try_send(ConnToMainMsg {
+                task_id: task::id(),
+                msg: ConnToMainMsgInner::Connected {
+                    addr,
+                    peer_id: baseboard_id,
+                },
+            }) {
+                // The system is shutting down or we've overloaded the main channel
                 // Just bail from this task
-                error!(
-                    log,
-                    "Failed to send 'connected' msg to main task: {e:?}"
-                );
+                error!(log, "Failed to send 'connected' msg to main task");
             } else {
                 conn.run().await;
             }

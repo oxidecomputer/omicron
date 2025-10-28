@@ -155,17 +155,13 @@ impl EstablishedConn {
     }
 
     async fn close(&mut self) {
-        if let Err(e) = self
-            .main_tx
-            .send(ConnToMainMsg {
-                task_id: self.task_id,
-                msg: ConnToMainMsgInner::Disconnected {
-                    peer_id: self.peer_id.clone(),
-                },
-            })
-            .await
-        {
-            warn!(self.log, "Failed to send to main task: {e:?}");
+        if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
+            task_id: self.task_id,
+            msg: ConnToMainMsgInner::Disconnected {
+                peer_id: self.peer_id.clone(),
+            },
+        }) {
+            warn!(self.log, "Failed to send to main task");
         }
         let _ = self.writer.shutdown().await;
     }
@@ -202,21 +198,18 @@ impl EstablishedConn {
             debug!(self.log, "Received {msg:?}");
             match msg {
                 WireMsg::Tq(msg) => {
-                    if let Err(e) = self
-                        .main_tx
-                        .send(ConnToMainMsg {
-                            task_id: self.task_id,
-                            msg: ConnToMainMsgInner::Received {
-                                from: self.peer_id.clone(),
-                                msg,
-                            },
-                        })
-                        .await
-                    {
-                        warn!(
+                    if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
+                        task_id: self.task_id,
+                        msg: ConnToMainMsgInner::Received {
+                            from: self.peer_id.clone(),
+                            msg,
+                        },
+                    }) {
+                        error!(
                             self.log,
-                            "Failed to send received fsm msg to main task: {e:?}"
+                            "Failed to send received fsm msg to main task"
                         );
+                        panic!("Connection to main task channel full");
                     }
                 }
                 WireMsg::Ping => {
@@ -225,22 +218,19 @@ impl EstablishedConn {
                 }
                 WireMsg::NetworkConfig(config) => {
                     let generation = config.generation;
-                    if let Err(e) = self
-                        .main_tx
-                        .send(ConnToMainMsg {
-                            task_id: self.task_id,
-                            msg: ConnToMainMsgInner::ReceivedNetworkConfig {
-                                from: self.peer_id.clone(),
-                                config,
-                            },
-                        })
-                        .await
-                    {
+                    if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
+                        task_id: self.task_id,
+                        msg: ConnToMainMsgInner::ReceivedNetworkConfig {
+                            from: self.peer_id.clone(),
+                            config,
+                        },
+                    }) {
                         warn!(
                             self.log,
                             "Failed to send received NetworkConfig with
-                             generation {generation} to main task: {e:?}"
+                             generation {generation} to main task"
                         );
+                        panic!("Connection to main task channnel full");
                     }
                 }
             }

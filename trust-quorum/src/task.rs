@@ -18,6 +18,18 @@ use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use trust_quorum_protocol::{BaseboardId, Node, NodeCtx};
 
+/// We only expect a handful of messages at a time.
+const API_CHANNEL_BOUND: usize = 32;
+
+/// We size this bound large enough that it should never be hit. Up to 31
+/// `EstablishedConn` tasks can send messages to the main task simultaneously when
+/// messages are received.
+///
+/// We use `try_send.unwrap()` when sending to the main task to prevent deadlock
+/// and inform us via panic that something has gone seriously wrong. This is
+/// similar to using an unbounded channel but will not use all possible memory.
+const CONN_TO_MAIN_CHANNEL_BOUND: usize = 1024;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub baseboard_id: BaseboardId,
@@ -130,13 +142,11 @@ impl NodeTask {
             "component" => "trust-quorum",
             "baseboard_id" => config.baseboard_id.to_string()
         ));
-        // We only expect one outstanding request at a time for `Init_` or
-        // `LoadRackSecret` requests, We can have one of those requests in
-        // flight while allowing `PeerAddresses` updates. We also allow status
-        // requests in parallel. Just leave some room.
-        let (tx, rx) = mpsc::channel(10);
 
-        let (conn_mgr_tx, conn_mgr_rx) = mpsc::channel(100);
+        let (tx, rx) = mpsc::channel(API_CHANNEL_BOUND);
+
+        let (conn_mgr_tx, conn_mgr_rx) =
+            mpsc::channel(CONN_TO_MAIN_CHANNEL_BOUND);
 
         let baseboard_id = config.baseboard_id.clone();
 
