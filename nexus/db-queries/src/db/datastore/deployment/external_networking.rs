@@ -52,9 +52,9 @@ impl DataStore {
         // during rack setup by examining the current target blueprint and
         // looking at the IPs of all of its external DNS zones. We _must_
         // include expunged zones as well as in-service zones: during an update,
-        // we'll create a blueprint that expunges an external DNS zones, waits
+        // we'll create a blueprint that expunges an external DNS zone, waits
         // for it to go away, then wants to reassign that zone's external IP to
-        // a new external DNS zones. But because we are scanning expunged zones,
+        // a new external DNS zone. But because we are scanning expunged zones,
         // we also have to allow for duplicates - this isn't an error and is
         // expected if we've performed more than one update, at least until we
         // start pruning old expunged zones out of the blueprint (tracked by
