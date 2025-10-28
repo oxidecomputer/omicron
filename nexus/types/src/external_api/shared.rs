@@ -175,7 +175,7 @@ pub enum SiloRole {
 pub enum ProjectRole {
     Admin,
     Collaborator,
-    CollaboratorNoNetworking,
+    LimitedCollaborator,
     Viewer,
 }
 

@@ -509,8 +509,8 @@ impl DatabaseString for ProjectRole {
         match self {
             ProjectRole::Admin => "admin",
             ProjectRole::Collaborator => "collaborator",
-            ProjectRole::CollaboratorNoNetworking => {
-                "collaborator-no-networking"
+            ProjectRole::LimitedCollaborator => {
+                "limited-collaborator"
             }
             ProjectRole::Viewer => "viewer",
         }
@@ -524,8 +524,8 @@ impl DatabaseString for ProjectRole {
         match s {
             "admin" => Ok(ProjectRole::Admin),
             "collaborator" => Ok(ProjectRole::Collaborator),
-            "collaborator-no-networking" => {
-                Ok(ProjectRole::CollaboratorNoNetworking)
+            "limited-collaborator" => {
+                Ok(ProjectRole::LimitedCollaborator)
             }
             "viewer" => Ok(ProjectRole::Viewer),
             _ => {

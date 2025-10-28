@@ -184,17 +184,17 @@ resource Project {
 	    "read",
 	    "create_child",
 	];
-	roles = [ "admin", "collaborator", "collaborator-no-networking", "viewer" ];
+	roles = [ "admin", "collaborator", "limited-collaborator", "viewer" ];
 
 	# Roles implied by other roles on this resource
-	"viewer" if "collaborator-no-networking";
-	"collaborator-no-networking" if "collaborator";
+	"viewer" if "limited-collaborator";
+	"limited-collaborator" if "collaborator";
 	"collaborator" if "admin";
 
 	# Permissions granted directly by roles on this resource
 	"list_children" if "viewer";
 	"read" if "viewer";
-	"create_child" if "collaborator-no-networking";
+	"create_child" if "limited-collaborator";
 	"modify" if "admin";
 
 	# Roles implied by roles on this resource's parent (Silo)

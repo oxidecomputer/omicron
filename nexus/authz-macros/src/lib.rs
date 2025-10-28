@@ -268,7 +268,7 @@ enum PolarSnippet {
 
     /// Generate it as a networking resource nested within a Project.
     /// Like InProject, but requires the full `collaborator` role
-    /// (not `collaborator-no-networking`) to modify or create these resources.
+    /// (not `limited-collaborator`) to modify or create these resources.
     InProjectNetworking,
 }
 
@@ -389,8 +389,8 @@ fn do_authz_resource(
                     relations = {{ containing_project: Project }};
                     "list_children" if "viewer" on "containing_project";
                     "read" if "viewer" on "containing_project";
-                    "modify" if "collaborator-no-networking" on "containing_project";
-                    "create_child" if "collaborator-no-networking" on "containing_project";
+                    "modify" if "limited-collaborator" on "containing_project";
+                    "create_child" if "limited-collaborator" on "containing_project";
                 }}
 
                 has_relation(parent: Project, "containing_project", child: {})
@@ -420,8 +420,8 @@ fn do_authz_resource(
                     }};
                     "list_children" if "viewer" on "containing_project";
                     "read" if "viewer" on "containing_project";
-                    "modify" if "collaborator-no-networking" on "containing_project";
-                    "create_child" if "collaborator-no-networking" on "containing_project";
+                    "modify" if "limited-collaborator" on "containing_project";
+                    "create_child" if "limited-collaborator" on "containing_project";
                 }}
 
                 has_relation(project: Project, "containing_project", child: {})

@@ -251,7 +251,7 @@ fn vpcs_eq(vpc1: &Vpc, vpc2: &Vpc) {
 }
 
 #[nexus_test]
-async fn test_vpc_collaborator_no_networking_role(
+async fn test_vpc_limited_collaborator_role(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -281,11 +281,11 @@ async fn test_vpc_collaborator_no_networking_role(
     )
     .await;
 
-    // Create a local user and give them the CollaboratorNoNetworking role
-    let no_networking_user = create_local_user(
+    // Create a local user and give them the LimitedCollaborator role
+    let limited_user = create_local_user(
         client,
         &silo,
-        &"no-networking-user".parse().unwrap(),
+        &"limited-user".parse().unwrap(),
         test_params::UserPassword::LoginDisallowed,
     )
     .await;
@@ -293,8 +293,8 @@ async fn test_vpc_collaborator_no_networking_role(
     grant_iam(
         client,
         &project_url,
-        ProjectRole::CollaboratorNoNetworking,
-        no_networking_user.id,
+        ProjectRole::LimitedCollaborator,
+        limited_user.id,
         AuthnMode::PrivilegedUser,
     )
     .await;
@@ -344,12 +344,12 @@ async fn test_vpc_collaborator_no_networking_role(
     .unwrap();
     assert_eq!(vpc.identity.name, vpc_name2);
 
-    // Test 3: User with CollaboratorNoNetworking role CAN read/list VPCs (viewer inheritance)
+    // Test 3: User with LimitedCollaborator role CAN read/list VPCs (viewer inheritance)
     let vpcs_list: Vec<Vpc> = NexusRequest::object_get(client, &vpcs_url)
-        .authn_as(AuthnMode::SiloUser(no_networking_user.id))
+        .authn_as(AuthnMode::SiloUser(limited_user.id))
         .execute()
         .await
-        .expect("CollaboratorNoNetworking should be able to list VPCs")
+        .expect("LimitedCollaborator should be able to list VPCs")
         .parsed_body::<dropshot::ResultsPage<Vpc>>()
         .unwrap()
         .items;
@@ -358,7 +358,7 @@ async fn test_vpc_collaborator_no_networking_role(
         "Should see default VPC and the created VPCs"
     );
 
-    // Test 4: User with CollaboratorNoNetworking role CANNOT create a VPC
+    // Test 4: User with LimitedCollaborator role CANNOT create a VPC
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &vpcs_url)
             .body(Some(&params::VpcCreate {
@@ -371,7 +371,7 @@ async fn test_vpc_collaborator_no_networking_role(
             }))
             .expect_status(Some(StatusCode::FORBIDDEN)),
     )
-    .authn_as(AuthnMode::SiloUser(no_networking_user.id))
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
     .expect("request should complete")
