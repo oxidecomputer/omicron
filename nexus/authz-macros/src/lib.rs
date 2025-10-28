@@ -472,7 +472,6 @@ fn do_authz_resource(
                         "modify",
                         "read",
                         "create_child",
-                        "delete",
                     ];
 
                     relations = {{
