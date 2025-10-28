@@ -131,6 +131,7 @@ resource: authz::MulticastGroupList
   silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
   silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
 
 resource: authz::QuiesceState
 
@@ -460,6 +461,7 @@ resource: MulticastGroup "silo1-proj1-multicast-group1"
   silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
 
 resource: AffinityGroup "silo1-proj1-affinity-group1"
 
@@ -684,6 +686,7 @@ resource: MulticastGroup "silo1-proj2-multicast-group1"
   silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
 
 resource: AffinityGroup "silo1-proj2-affinity-group1"
 
@@ -1148,6 +1151,7 @@ resource: MulticastGroup "silo2-proj1-multicast-group1"
   silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
   unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
 
 resource: AffinityGroup "silo2-proj1-affinity-group1"
 
