@@ -14838,6 +14838,7 @@ dependencies = [
  "serde_with",
  "sha3",
  "sled-agent-types",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "sprockets-tls",

@@ -8,15 +8,29 @@
 use crate::connection_manager::{
     ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner,
 };
+use omicron_uuid_kinds::RackUuid;
+use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, error, info, o};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
-use trust_quorum_protocol::{BaseboardId, Node, NodeCtx};
+use tokio::time::sleep;
+use trust_quorum_protocol::{
+    Alarm, BaseboardId, CommitError, Configuration, Epoch, ExpungedMetadata,
+    LoadRackSecretError, LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCallerCtx,
+    NodeCommonCtx, NodeCtx, PersistentState, PrepareAndCommitError,
+    ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
+};
+
+#[cfg(not(test))]
+const LOAD_RACK_SECRET_RETRY_TIMEOUT: Duration = Duration::from_millis(500);
+#[cfg(test)]
+const LOAD_RACK_SECRET_RETRY_TIMEOUT: Duration = Duration::from_millis(5);
 
 /// We only expect a handful of messages at a time.
 const API_CHANNEL_BOUND: usize = 32;
@@ -39,6 +53,45 @@ pub struct Config {
     pub sprockets: SprocketsConfig,
 }
 
+/// Status of the node coordinating the `Prepare` phase of a reconfiguration or
+/// LRTQ upgrade.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoordinatorStatus {
+    config: Configuration,
+    acked_prepares: BTreeSet<BaseboardId>,
+}
+
+// Details about a given node's status
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeStatus {
+    connected_peers: BTreeSet<BaseboardId>,
+    alarms: BTreeSet<Alarm>,
+    persistent_state: NodePersistentStateSummary,
+}
+
+/// A summary of a node's persistent state, leaving out things like key shares
+/// and hashes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodePersistentStateSummary {
+    has_lrtq_share: bool,
+    configs: BTreeSet<Epoch>,
+    shares: BTreeSet<Epoch>,
+    commits: BTreeSet<Epoch>,
+    expunged: Option<ExpungedMetadata>,
+}
+
+impl From<&PersistentState> for NodePersistentStateSummary {
+    fn from(value: &PersistentState) -> Self {
+        Self {
+            has_lrtq_share: value.lrtq.is_some(),
+            configs: value.configs.iter().map(|c| c.epoch).collect(),
+            shares: value.shares.keys().cloned().collect(),
+            commits: value.commits.clone(),
+            expunged: value.expunged.clone(),
+        }
+    }
+}
+
 /// A request sent to the `NodeTask` from the `NodeTaskHandle`
 pub enum NodeApiRequest {
     /// Inform the `Node` of currently known IP addresses on the bootstrap network
@@ -46,8 +99,50 @@ pub enum NodeApiRequest {
     /// These are generated from DDM prefixes learned by the bootstrap agent.
     BootstrapAddresses(BTreeSet<SocketAddrV6>),
 
+    /// Remove any secrets cached in memory at this node
+    ClearSecrets,
+
     /// Retrieve connectivity status via the `ConnMgr`
     ConnMgrStatus { responder: oneshot::Sender<ConnMgrStatus> },
+
+    /// Return the status of this node if it is a coordinator
+    CoordinatorStatus { responder: oneshot::Sender<Option<CoordinatorStatus>> },
+
+    /// Load a rack secret for the given epoch
+    LoadRackSecret {
+        epoch: Epoch,
+        responder: oneshot::Sender<
+            Result<Option<ReconstructedRackSecret>, LoadRackSecretError>,
+        >,
+    },
+
+    /// Coordinate an upgrade from LRTQ at this node
+    LrtqUpgrade {
+        msg: LrtqUpgradeMsg,
+        responder: oneshot::Sender<Result<(), LrtqUpgradeError>>,
+    },
+
+    /// Get the overall status of the node
+    NodeStatus { responder: oneshot::Sender<NodeStatus> },
+
+    /// `PrepareAndCommit` a configuration at this node
+    PrepareAndCommit {
+        config: Configuration,
+        responder: oneshot::Sender<Result<bool, PrepareAndCommitError>>,
+    },
+
+    /// `Commit` a configuration at this node
+    Commit {
+        rack_id: RackUuid,
+        epoch: Epoch,
+        responder: oneshot::Sender<Result<bool, CommitError>>,
+    },
+
+    /// Coordinate a reconfiguration at this node
+    Reconfigure {
+        msg: ReconfigureMsg,
+        responder: oneshot::Sender<Result<(), ReconfigurationError>>,
+    },
 
     /// Shutdown the node's tokio tasks
     Shutdown,
@@ -56,10 +151,20 @@ pub enum NodeApiRequest {
 /// An error response from a `NodeApiRequest`
 #[derive(Error, Debug, PartialEq)]
 pub enum NodeApiError {
-    #[error("Failed to send request to node task")]
+    #[error("failed to send request to node task")]
     Send,
-    #[error("Failed to receive response from node task")]
+    #[error("failed to receive response from node task")]
     Recv,
+    #[error("failed to reconfigure trust quorum")]
+    Reconfigure(#[from] ReconfigurationError),
+    #[error("failed to load rack secret")]
+    LoadRackSecret(#[from] LoadRackSecretError),
+    #[error("failed to upgrade from LRTQ")]
+    LrtqUpgrade(#[from] LrtqUpgradeError),
+    #[error("failed to prepare and commit")]
+    PrepareAndCommit(#[from] PrepareAndCommitError),
+    #[error("failed to commit")]
+    Commit(#[from] CommitError),
 }
 
 impl<T> From<SendError<T>> for NodeApiError {
@@ -82,7 +187,7 @@ pub struct NodeTaskHandle {
 }
 
 impl NodeTaskHandle {
-    /// Return the actual port being listened on
+    /// Return the actual ip and port being listened on
     ///
     /// This is useful when the port passed in was `0`.
     pub fn listen_addr(&self) -> SocketAddrV6 {
@@ -91,6 +196,114 @@ impl NodeTaskHandle {
 
     pub fn baseboard_id(&self) -> &BaseboardId {
         &self.baseboard_id
+    }
+
+    /// Initiate a trust quorum reconfiguration at this node
+    pub async fn reconfigure(
+        &self,
+        msg: ReconfigureMsg,
+    ) -> Result<(), NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::Reconfigure { msg, responder: tx })
+            .await?;
+        rx.await??;
+        Ok(())
+    }
+
+    /// Initiate an LRTQ upgrade at this node
+    pub async fn upgrade_from_lrtq(
+        &self,
+        msg: LrtqUpgradeMsg,
+    ) -> Result<(), NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::LrtqUpgrade { msg, responder: tx })
+            .await?;
+        rx.await??;
+        Ok(())
+    }
+
+    /// Return the status of this node if it is coordinating the `Prepare` phase
+    /// of a reconfiguration or LRTQ upgrade. Return `Ok(None)` or an error
+    /// otherwise.
+    pub async fn coordinator_status(
+        &self,
+    ) -> Result<Option<CoordinatorStatus>, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::CoordinatorStatus { responder: tx })
+            .await?;
+        let res = rx.await?;
+        Ok(res)
+    }
+
+    /// Load the rack secret for the given epoch
+    ///
+    /// This can block for an indefinite period of time before returning
+    /// and depends on availability of the trust quorum.
+    pub async fn load_rack_secret(
+        &self,
+        epoch: Epoch,
+    ) -> Result<ReconstructedRackSecret, NodeApiError> {
+        loop {
+            let (tx, rx) = oneshot::channel();
+            self.tx
+                .send(NodeApiRequest::LoadRackSecret { epoch, responder: tx })
+                .await?;
+            if let Some(rack_secret) = rx.await?? {
+                return Ok(rack_secret);
+            };
+
+            // The task returns immediately with `None` if the secret is still
+            // being loaded. We must therefore retry.
+            sleep(LOAD_RACK_SECRET_RETRY_TIMEOUT).await;
+        }
+    }
+
+    /// Return `Ok(true)` if the configuration has committed, `Ok(false)` if
+    /// it hasn't committed yet, or an error otherwise.
+    ///
+    /// Nexus will retry this operation and so we should only try once here.
+    /// This is in contrast to operations like `load_rack_secret` that are
+    /// called directly from sled agent.
+    pub async fn prepare_and_commit(
+        &self,
+        config: Configuration,
+    ) -> Result<bool, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::PrepareAndCommit { config, responder: tx })
+            .await?;
+        let res = rx.await??;
+        Ok(res)
+    }
+
+    /// Return `Ok(true)` if the configuration has committed, `Ok(false)` if
+    /// it hasn't committed yet, or an error otherwise.
+    ///
+    /// Nexus will retry this operation and so we should only try once here.
+    /// This is in contrast to operations like `load_rack_secret` that are
+    /// called directly from sled agent.
+    pub async fn commit(
+        &self,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> Result<bool, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::Commit { rack_id, epoch, responder: tx })
+            .await?;
+        let res = rx.await??;
+        Ok(res)
+    }
+
+    /// Clear all secrets loaded in memory at this node
+    ///
+    /// Rack secrets are cached after loading and must be manually cleared.
+    pub async fn clear_secrets(&self) -> Result<(), NodeApiError> {
+        self.tx.send(NodeApiRequest::ClearSecrets).await?;
+        Ok(())
     }
 
     /// Inform the node of currently known IP addresses on the bootstrap network
@@ -111,6 +324,13 @@ impl NodeTaskHandle {
         Ok(res)
     }
 
+    pub async fn status(&self) -> Result<NodeStatus, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx.send(NodeApiRequest::NodeStatus { responder: tx }).await?;
+        let res = rx.await?;
+        Ok(res)
+    }
+
     pub async fn shutdown(&self) -> Result<(), NodeApiError> {
         self.tx.send(NodeApiRequest::Shutdown).await?;
         Ok(())
@@ -122,9 +342,7 @@ pub struct NodeTask {
     log: Logger,
     #[expect(unused)]
     config: Config,
-    #[expect(unused)]
     node: Node,
-    #[expect(unused)]
     ctx: NodeCtx,
     conn_mgr: ConnMgr,
     conn_mgr_rx: mpsc::Receiver<ConnToMainMsg>,
@@ -196,7 +414,10 @@ impl NodeTask {
                 Some(msg) = self.conn_mgr_rx.recv() => {
                     self.on_conn_msg(msg).await
                 }
+            }
 
+            for envelope in self.ctx.drain_envelopes() {
+                self.conn_mgr.send(envelope).await;
             }
         }
     }
@@ -207,19 +428,22 @@ impl NodeTask {
         match msg.msg {
             ConnToMainMsgInner::Accepted { addr, peer_id } => {
                 self.conn_mgr
-                    .server_handshake_completed(task_id, addr, peer_id)
+                    .server_handshake_completed(task_id, addr, peer_id.clone())
                     .await;
+                self.node.on_connect(&mut self.ctx, peer_id);
             }
             ConnToMainMsgInner::Connected { addr, peer_id } => {
                 self.conn_mgr
-                    .client_handshake_completed(task_id, addr, peer_id)
+                    .client_handshake_completed(task_id, addr, peer_id.clone())
                     .await;
+                self.node.on_connect(&mut self.ctx, peer_id);
             }
             ConnToMainMsgInner::Disconnected { peer_id } => {
-                self.conn_mgr.on_disconnected(task_id, peer_id).await;
+                self.conn_mgr.on_disconnected(task_id, peer_id.clone()).await;
+                self.node.on_disconnect(&mut self.ctx, peer_id);
             }
-            ConnToMainMsgInner::Received { from: _, msg: _ } => {
-                todo!();
+            ConnToMainMsgInner::Received { from, msg } => {
+                self.node.handle(&mut self.ctx, from, msg);
             }
             ConnToMainMsgInner::ReceivedNetworkConfig {
                 from: _,
@@ -230,17 +454,76 @@ impl NodeTask {
         }
     }
 
+    // TODO: Process `ctx`: save persistent state
     async fn on_api_request(&mut self, request: NodeApiRequest) {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {
                 info!(self.log, "Updated Peer Addresses: {addrs:?}");
                 // TODO: real corpus
                 let corpus = vec![];
-                self.conn_mgr.update_bootstrap_connections(addrs, corpus).await;
+                let disconnected = self
+                    .conn_mgr
+                    .update_bootstrap_connections(addrs, corpus)
+                    .await;
+                for peer_id in disconnected {
+                    self.node.on_disconnect(&mut self.ctx, peer_id);
+                }
+            }
+            NodeApiRequest::ClearSecrets => {
+                self.node.clear_secrets();
+            }
+            NodeApiRequest::Commit { rack_id, epoch, responder } => {
+                let res = self
+                    .node
+                    .commit_configuration(&mut self.ctx, rack_id, epoch)
+                    .map(|_| {
+                        self.ctx.persistent_state().commits.contains(&epoch)
+                    });
+                let _ = responder.send(res);
             }
             NodeApiRequest::ConnMgrStatus { responder } => {
                 debug!(self.log, "Received Request for ConnMgrStatus");
                 let _ = responder.send(self.conn_mgr.status());
+            }
+            NodeApiRequest::CoordinatorStatus { responder } => {
+                let status = self.node.get_coordinator_state().map(|cs| {
+                    CoordinatorStatus {
+                        config: cs.config().clone(),
+                        acked_prepares: cs.op().acked_prepares(),
+                    }
+                });
+                let _ = responder.send(status);
+            }
+            NodeApiRequest::LoadRackSecret { epoch, responder } => {
+                let res = self.node.load_rack_secret(&mut self.ctx, epoch);
+                let _ = responder.send(res);
+            }
+            NodeApiRequest::LrtqUpgrade { msg, responder } => {
+                let res =
+                    self.node.coordinate_upgrade_from_lrtq(&mut self.ctx, msg);
+                let _ = responder.send(res);
+            }
+            NodeApiRequest::NodeStatus { responder } => {
+                let _ = responder.send(NodeStatus {
+                    connected_peers: self.ctx.connected().clone(),
+                    alarms: self.ctx.alarms().clone(),
+                    persistent_state: self.ctx.persistent_state().into(),
+                });
+            }
+            NodeApiRequest::PrepareAndCommit { config, responder } => {
+                let epoch = config.epoch;
+                let res = self
+                    .node
+                    .prepare_and_commit(&mut self.ctx, config)
+                    .map(|_| {
+                        self.ctx.persistent_state().commits.contains(&epoch)
+                    });
+                let _ = responder.send(res);
+            }
+            NodeApiRequest::Reconfigure { msg, responder } => {
+                let res =
+                    self.node.coordinate_reconfiguration(&mut self.ctx, msg);
+                let _ = responder.send(res);
             }
             NodeApiRequest::Shutdown => {
                 info!(self.log, "Shutting down Node tokio tasks");
@@ -257,15 +540,20 @@ mod tests {
         ConnState, RECONNECT_TIME, platform_id_to_baseboard_id,
     };
     use camino::Utf8PathBuf;
-    use dropshot::test_util::log_prefix_for_test;
+    use dropshot::test_util::{LogContext, log_prefix_for_test};
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::GenericUuid;
+    use secrecy::ExposeSecretMut;
+    use sled_hardware_types::Baseboard;
     use sprockets_tls::keys::ResolveSetting;
     use sprockets_tls_test_utils::{
         alias_prefix, cert_path, certlist_path, private_key_path, root_prefix,
         sprockets_auth_prefix,
     };
     use std::time::Duration;
+    use tokio::task::JoinHandle;
+    use trust_quorum_protocol::NodeHandlerCtx;
 
     fn pki_doc_to_node_configs(dir: Utf8PathBuf, n: usize) -> Vec<Config> {
         (1..=n)
@@ -304,17 +592,7 @@ mod tests {
             .collect()
     }
 
-    /// Test that all nodes can connect to each other when given each the full
-    /// set of "bootstrap addresses".
-    #[tokio::test]
-    async fn full_mesh_connectivity() {
-        let logctx = test_setup_log("full_mesh_connectivity");
-        let (mut dir, s) = log_prefix_for_test("full_mesh_connectivity");
-        dir.push(&s);
-        std::fs::create_dir(&dir).unwrap();
-        println!("Writing keys and certs to {dir}");
-        let num_nodes = 4;
-
+    fn write_keys_and_measurements(dir: Utf8PathBuf, num_nodes: usize) {
         let file_behavior =
             sprockets_tls_test_utils::OutputFileExistsBehavior::Overwrite;
 
@@ -339,22 +617,144 @@ mod tests {
         // Write out the log document to the filesystem
         let out = attest_mock::log::mock(attest_log_doc).unwrap();
         std::fs::write(dir.join("log.bin"), &out).unwrap();
+    }
 
-        let configs = pki_doc_to_node_configs(dir.clone(), num_nodes);
+    struct TestSetup {
+        pub logctx: LogContext,
+        pub dir: Utf8PathBuf,
+        pub configs: Vec<Config>,
+        pub node_handles: Vec<NodeTaskHandle>,
+        pub join_handles: Vec<JoinHandle<()>>,
+        pub listen_addrs: Vec<SocketAddrV6>,
+    }
 
-        let mut node_handles = vec![];
-        let mut join_handles = vec![];
-        for config in configs.clone() {
-            let (mut task, handle) = NodeTask::new(config, &logctx.log).await;
-            node_handles.push(handle);
-            join_handles.push(tokio::spawn(async move { task.run().await }));
+    impl TestSetup {
+        pub async fn spawn_nodes(
+            name: &'static str,
+            num_nodes: usize,
+        ) -> TestSetup {
+            let logctx = test_setup_log(name);
+            let (mut dir, s) = log_prefix_for_test(name);
+            dir.push(&s);
+            std::fs::create_dir(&dir).unwrap();
+            println!("Writing keys and certs to {dir}");
+            write_keys_and_measurements(dir.clone(), num_nodes);
+            let configs = pki_doc_to_node_configs(dir.clone(), num_nodes);
+
+            let mut node_handles = vec![];
+            let mut join_handles = vec![];
+            for config in configs.clone() {
+                let (mut task, handle) =
+                    NodeTask::new(config, &logctx.log).await;
+                node_handles.push(handle);
+                join_handles
+                    .push(tokio::spawn(async move { task.run().await }));
+            }
+
+            let listen_addrs: Vec<_> =
+                node_handles.iter().map(|h| h.listen_addr()).collect();
+            TestSetup {
+                logctx,
+                dir,
+                configs,
+                node_handles,
+                join_handles,
+                listen_addrs,
+            }
         }
 
-        let listen_addrs: BTreeSet<_> =
-            node_handles.iter().map(|h| h.listen_addr()).collect();
+        pub async fn spawn_nodes_with_lrtq_shares(
+            name: &'static str,
+            num_nodes: usize,
+        ) -> (TestSetup, RackUuid) {
+            let logctx = test_setup_log(name);
+            let (mut dir, s) = log_prefix_for_test(name);
+            dir.push(&s);
+            std::fs::create_dir(&dir).unwrap();
+            println!("Writing keys and certs to {dir}");
+            write_keys_and_measurements(dir.clone(), num_nodes);
+            let configs = pki_doc_to_node_configs(dir.clone(), num_nodes);
 
-        for h in &node_handles {
-            h.load_peer_addresses(listen_addrs.clone()).await.unwrap();
+            let rack_id = RackUuid::new_v4();
+
+            // Translate `BaseboardId`s to `Baseboard`s for LRTQ membership
+            let baseboards: BTreeSet<_> = configs
+                .iter()
+                .map(|c| {
+                    Baseboard::new_pc(
+                        c.baseboard_id.serial_number.clone(),
+                        c.baseboard_id.part_number.clone(),
+                    )
+                })
+                .collect();
+
+            // Create the LRTQ key share packages and take only the common data,
+            // which is what we use for trust quorum upgrade.
+            let share_pkgs: Vec<_> = bootstore::schemes::v0::create_pkgs(
+                rack_id.into_untyped_uuid(),
+                baseboards.clone(),
+            )
+            .unwrap()
+            .expose_secret_mut()
+            .iter()
+            .map(|pkg| pkg.common.clone())
+            .collect();
+
+            let mut node_handles = vec![];
+            let mut join_handles = vec![];
+            for (config, share_pkg) in
+                configs.clone().into_iter().zip(share_pkgs)
+            {
+                let (mut task, handle) =
+                    NodeTask::new(config, &logctx.log).await;
+                task.ctx.update_persistent_state(|ps| {
+                    ps.lrtq = Some(share_pkg);
+                    // We are modifying the persistent state, but not in a way
+                    // we want the test to recognize.
+                    false
+                });
+                node_handles.push(handle);
+                join_handles
+                    .push(tokio::spawn(async move { task.run().await }));
+            }
+
+            let listen_addrs: Vec<_> =
+                node_handles.iter().map(|h| h.listen_addr()).collect();
+            (
+                TestSetup {
+                    logctx,
+                    dir,
+                    configs,
+                    node_handles,
+                    join_handles,
+                    listen_addrs,
+                },
+                rack_id,
+            )
+        }
+
+        pub fn members(&self) -> impl Iterator<Item = &BaseboardId> {
+            self.configs.iter().map(|c| &c.baseboard_id)
+        }
+
+        pub fn cleanup_successful(self) {
+            self.logctx.cleanup_successful();
+            std::fs::remove_dir_all(self.dir).unwrap();
+        }
+    }
+
+    /// Test that all nodes can connect to each other when given each the full
+    /// set of "bootstrap addresses".
+    #[tokio::test]
+    async fn full_mesh_connectivity() {
+        let num_nodes = 4;
+        let mut setup =
+            TestSetup::spawn_nodes("full_mesh_connectivity", num_nodes).await;
+
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
         }
 
         let poll_interval = Duration::from_millis(1);
@@ -364,7 +764,7 @@ mod tests {
         wait_for_condition(
             async || {
                 let mut count = 0;
-                for h in &node_handles {
+                for h in &setup.node_handles {
                     let status = h.conn_mgr_status().await.unwrap();
                     if status
                         .connections
@@ -395,9 +795,9 @@ mod tests {
         // reconnecting. This should cause the task id counter to start
         // incrementing at all nodes and for their to be one fewer established
         // connection.
-        let h = node_handles.pop().unwrap();
+        let h = setup.node_handles.pop().unwrap();
         h.shutdown().await.unwrap();
-        join_handles.pop().unwrap();
+        setup.join_handles.pop().unwrap();
         let stopped_addr = h.listen_addr;
 
         // Speed up reconnection in the test
@@ -407,7 +807,7 @@ mod tests {
         wait_for_condition(
             async || {
                 let mut valid = 0;
-                for h in &node_handles {
+                for h in &setup.node_handles {
                     let status = h.conn_mgr_status().await.unwrap();
                     let established_count = status
                         .connections
@@ -443,16 +843,19 @@ mod tests {
         .unwrap();
 
         // Now let's bring back up the old node and ensure full connectivity again
-        let (mut task, handle) =
-            NodeTask::new(configs.last().unwrap().clone(), &logctx.log).await;
-        node_handles.push(handle.clone());
-        join_handles.push(tokio::spawn(async move { task.run().await }));
+        let (mut task, handle) = NodeTask::new(
+            setup.configs.last().unwrap().clone(),
+            &setup.logctx.log,
+        )
+        .await;
+        setup.node_handles.push(handle.clone());
+        setup.join_handles.push(tokio::spawn(async move { task.run().await }));
 
         // The port likely changed, so we must refresh everyone's set of addresses
         let listen_addrs: BTreeSet<_> =
-            node_handles.iter().map(|h| h.listen_addr()).collect();
+            setup.node_handles.iter().map(|h| h.listen_addr()).collect();
 
-        for h in &node_handles {
+        for h in &setup.node_handles {
             h.load_peer_addresses(listen_addrs.clone()).await.unwrap();
         }
 
@@ -460,7 +863,7 @@ mod tests {
         wait_for_condition(
             async || {
                 let mut count = 0;
-                for h in &node_handles {
+                for h in &setup.node_handles {
                     let status = h.conn_mgr_status().await.unwrap();
                     if status
                         .connections
@@ -483,7 +886,553 @@ mod tests {
         .await
         .unwrap();
 
-        logctx.cleanup_successful();
-        std::fs::remove_dir_all(dir).unwrap();
+        setup.cleanup_successful();
+    }
+
+    /// Commit an initial configuration at all nodes
+    #[tokio::test]
+    pub async fn tq_initial_config() {
+        let num_nodes = 4;
+        let setup =
+            TestSetup::spawn_nodes("tq_initial_config", num_nodes).await;
+        let rack_id = RackUuid::new_v4();
+
+        // Trigger an initial configuration by using the first node as a
+        // coordinator. We're pretending to be the sled-agent with instruction from
+        // Nexus here.
+        let initial_config = ReconfigureMsg {
+            rack_id,
+            epoch: Epoch(1),
+            last_committed_epoch: None,
+            members: setup.members().cloned().collect(),
+            threshold: trust_quorum_protocol::Threshold(3),
+        };
+
+        // Tell nodes how to reach each other
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+
+        let coordinator = setup.node_handles.first().unwrap();
+        coordinator.reconfigure(initial_config).await.unwrap();
+
+        let poll_interval = Duration::from_millis(10);
+        let poll_max = Duration::from_secs(10);
+
+        // Wait for the coordinator to see `PrepareAck`s from all nodes
+        wait_for_condition(
+            async || {
+                let Ok(Some(s)) = coordinator.coordinator_status().await else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                if s.acked_prepares.len() == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Commit at each node
+        //
+        // Nexus retries this idempotent command until each node acks. So we
+        // simulate that here.
+        wait_for_condition(
+            async || {
+                let mut acked = 0;
+                for h in &setup.node_handles {
+                    if h.commit(rack_id, Epoch(1)).await.unwrap() {
+                        acked += 1;
+                    }
+                }
+                if acked == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Now load the rack secret at all nodes
+        let mut secret = None;
+        for h in &setup.node_handles {
+            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
+            if secret.is_none() {
+                secret = Some(rs.clone());
+            }
+            assert_eq!(&rs, secret.as_ref().unwrap());
+        }
+
+        setup.cleanup_successful();
+    }
+
+    /// Eventually Commit an initial configuration at all nodes
+    ///
+    /// We leave one node out of the bootstrap network info, trigger a commit
+    /// at the first 3 nodes. Then we go and issue a `PrepareAndCommit` to the last
+    /// node and ensure it commits.
+    #[tokio::test]
+    pub async fn tq_initial_config_prepare_and_commit() {
+        let num_nodes = 4;
+        let setup = TestSetup::spawn_nodes(
+            "tq_initial_config_prepare_and_commit",
+            num_nodes,
+        )
+        .await;
+        let rack_id = RackUuid::new_v4();
+
+        // Trigger an initial configuration by using the first node as a
+        // coordinator. We're pretending to be the sled-agent with instruction from
+        // Nexus here.
+        let initial_config = ReconfigureMsg {
+            rack_id,
+            epoch: Epoch(1),
+            last_committed_epoch: None,
+            members: setup.members().cloned().collect(),
+            threshold: trust_quorum_protocol::Threshold(3),
+        };
+
+        // Tell all but the last node how to reach each other
+        for h in &setup.node_handles[0..num_nodes - 1] {
+            h.load_peer_addresses(
+                setup
+                    .listen_addrs
+                    .iter()
+                    .take(num_nodes - 1)
+                    .cloned()
+                    .collect(),
+            )
+            .await
+            .unwrap();
+        }
+
+        let coordinator = setup.node_handles.first().unwrap();
+        coordinator.reconfigure(initial_config).await.unwrap();
+
+        let poll_interval = Duration::from_millis(10);
+        let poll_max = Duration::from_secs(10);
+
+        // Wait for the coordinator to see `PrepareAck`s from all but the last
+        // node
+        wait_for_condition(
+            async || {
+                let Ok(Some(s)) = coordinator.coordinator_status().await else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                if s.acked_prepares.len() == num_nodes - 1 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Save the configuration as if we were nexus
+        let config =
+            coordinator.coordinator_status().await.unwrap().unwrap().config;
+
+        // Commit at each node
+        //
+        // Nexus retries this idempotent command until each node acks. So we
+        // simulate that here.
+        wait_for_condition(
+            async || {
+                let mut acked = 0;
+                for h in &setup.node_handles[0..num_nodes - 1] {
+                    if h.commit(rack_id, Epoch(1)).await.unwrap() {
+                        acked += 1;
+                    }
+                }
+                if acked == num_nodes - 1 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Now ensure that the last node still hasn't prepared or committed for
+        // epoch 1, and isn't connected to any other node.
+        let status = setup.node_handles.last().unwrap().status().await.unwrap();
+        assert!(status.connected_peers.is_empty());
+        assert!(status.persistent_state.configs.is_empty());
+        assert!(status.persistent_state.shares.is_empty());
+        assert!(status.persistent_state.commits.is_empty());
+
+        // Update connectivity at all nodes
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+
+        // Now issue a `PrepareAndCommit` to the last node and wait for it to
+        // commit
+        wait_for_condition(
+            async || {
+                let h = &setup.node_handles.last().unwrap();
+                if h.prepare_and_commit(config.clone()).await.unwrap() {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // The last node should now have all the info we expect
+        let status = setup.node_handles.last().unwrap().status().await.unwrap();
+        assert_eq!(status.connected_peers.len(), num_nodes - 1);
+        assert!(status.persistent_state.configs.contains(&Epoch(1)));
+        assert!(status.persistent_state.shares.contains(&Epoch(1)));
+        assert!(status.persistent_state.commits.contains(&Epoch(1)));
+
+        // Now load the rack secret at all nodes
+        let mut secret = None;
+        for h in &setup.node_handles {
+            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
+            if secret.is_none() {
+                secret = Some(rs.clone());
+            }
+            assert_eq!(&rs, secret.as_ref().unwrap());
+        }
+
+        setup.cleanup_successful();
+    }
+
+    /// Perform an initial config, followed by a reconfiguration. Leave one
+    /// node out of the reconfiguration, then connect it and attempt to load
+    /// the configuration for the prior epoch. This should result in commit
+    /// advancing to the latest epoch.
+    #[tokio::test]
+    pub async fn tq_reconfig_with_commit_advance() {
+        let num_nodes = 4;
+        let setup = TestSetup::spawn_nodes(
+            "tq_recofnig_with_commit_advance",
+            num_nodes,
+        )
+        .await;
+        let rack_id = RackUuid::new_v4();
+
+        // Trigger an initial configuration by using the first node as a
+        // coordinator. We're pretending to be the sled-agent with instruction from
+        // Nexus here.
+        let initial_config = ReconfigureMsg {
+            rack_id,
+            epoch: Epoch(1),
+            last_committed_epoch: None,
+            members: setup.members().cloned().collect(),
+            threshold: trust_quorum_protocol::Threshold(3),
+        };
+
+        // Tell all but the last node how to reach each other
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+
+        let coordinator = setup.node_handles.first().unwrap();
+        coordinator.reconfigure(initial_config.clone()).await.unwrap();
+
+        let poll_interval = Duration::from_millis(10);
+        let poll_max = Duration::from_secs(10);
+
+        // Wait for the coordinator to see `PrepareAck`s from all nodes
+        wait_for_condition(
+            async || {
+                let Ok(Some(s)) = coordinator.coordinator_status().await else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                if s.acked_prepares.len() == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Commit at each node
+        //
+        // Nexus retries this idempotent command until each node acks. So we
+        // simulate that here.
+        wait_for_condition(
+            async || {
+                let mut acked = 0;
+                for h in &setup.node_handles {
+                    if h.commit(rack_id, Epoch(1)).await.unwrap() {
+                        acked += 1;
+                    }
+                }
+                if acked == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Now load the rack secret at all nodes
+        let mut secret = None;
+        for h in &setup.node_handles {
+            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
+            if secret.is_none() {
+                secret = Some(rs.clone());
+            }
+            assert_eq!(&rs, secret.as_ref().unwrap());
+        }
+
+        // Tell all but the last node how to reach each other
+        // This should disconnect the last node from everybody
+        for h in &setup.node_handles[0..num_nodes - 1] {
+            h.load_peer_addresses(
+                setup.listen_addrs.iter().take(3).cloned().collect(),
+            )
+            .await
+            .unwrap();
+        }
+        setup
+            .node_handles
+            .last()
+            .unwrap()
+            .load_peer_addresses(BTreeSet::new())
+            .await
+            .unwrap();
+
+        // Wait for peers to disconnect
+        wait_for_condition(
+            async || {
+                let mut acked = 0;
+                for h in &setup.node_handles[0..num_nodes - 1] {
+                    let status = h.status().await.unwrap();
+                    if status.connected_peers.len() == num_nodes - 2 {
+                        acked += 1;
+                    }
+                }
+                let status =
+                    setup.node_handles.last().unwrap().status().await.unwrap();
+                if status.connected_peers.is_empty() {
+                    acked += 1;
+                }
+
+                if acked == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Just stick to the same set of nodes for simplicity
+        let mut new_config = initial_config;
+        new_config.epoch = Epoch(2);
+        new_config.last_committed_epoch = Some(Epoch(1));
+
+        // Pick a different coordinator for the hell of it
+        let coordinator = setup.node_handles.get(1).unwrap();
+        coordinator.reconfigure(new_config).await.unwrap();
+
+        // Wait for the coordinator to see `PrepareAck`s from all but the last
+        // node
+        wait_for_condition(
+            async || {
+                let Ok(Some(s)) = coordinator.coordinator_status().await else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                if s.acked_prepares.len() == num_nodes - 1 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Commit at each node
+        //
+        // Nexus retries this idempotent command until each node acks. So we
+        // simulate that here.
+        wait_for_condition(
+            async || {
+                let mut acked = 0;
+                for h in &setup.node_handles[0..num_nodes - 1] {
+                    if h.commit(rack_id, Epoch(2)).await.unwrap() {
+                        acked += 1;
+                    }
+                }
+                if acked == num_nodes - 1 {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Now ensure that the last node still hasn't prepared or committed for epoch 2,
+        // and isn't connected to any other node.
+        let status = setup.node_handles.last().unwrap().status().await.unwrap();
+        assert!(status.connected_peers.is_empty());
+        assert!(status.persistent_state.configs.contains(&Epoch(1)));
+        assert!(status.persistent_state.shares.contains(&Epoch(1)));
+        assert!(status.persistent_state.commits.contains(&Epoch(1)));
+        assert!(!status.persistent_state.configs.contains(&Epoch(2)));
+        assert!(!status.persistent_state.shares.contains(&Epoch(2)));
+        assert!(!status.persistent_state.commits.contains(&Epoch(2)));
+
+        // Now reconnect the last node.
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+
+        // Clear the rack secrets at the last node to force a request for shares.
+        let last_node = setup.node_handles.last().unwrap();
+        last_node.clear_secrets().await.unwrap();
+
+        // Load the secret at epoch 1. This should trigger a `CommitAdvance`
+        // response from nodes that committed at epoch 2.
+        let res =
+            setup.node_handles.last().unwrap().load_rack_secret(Epoch(1)).await;
+
+        println!("res = {res:#?}");
+
+        let rs = last_node.load_rack_secret(Epoch(2)).await.unwrap();
+
+        // Ensure the rack secret is the same as at another node
+        let expected = setup
+            .node_handles
+            .first()
+            .unwrap()
+            .load_rack_secret(Epoch(2))
+            .await
+            .unwrap();
+        assert_eq!(rs, expected);
+
+        setup.cleanup_successful();
+    }
+
+    #[tokio::test]
+    pub async fn tq_upgrade_from_lrtq() {
+        let num_nodes = 4;
+        let (setup, rack_id) = TestSetup::spawn_nodes_with_lrtq_shares(
+            "tq_upgrade_from_lrtq",
+            num_nodes,
+        )
+        .await;
+
+        let msg = LrtqUpgradeMsg {
+            rack_id,
+            epoch: Epoch(2),
+            members: setup.members().cloned().collect(),
+            threshold: trust_quorum_protocol::Threshold(3),
+        };
+
+        // Tell nodes how to reach each other
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+
+        let coordinator = setup.node_handles.first().unwrap();
+        coordinator.upgrade_from_lrtq(msg).await.unwrap();
+
+        let poll_interval = Duration::from_millis(10);
+        let poll_max = Duration::from_secs(10);
+
+        // Wait for the coordinator to see `PrepareAck`s from all nodes
+        wait_for_condition(
+            async || {
+                let Ok(Some(s)) = coordinator.coordinator_status().await else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                if s.acked_prepares.len() == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Commit at each node
+        //
+        // Nexus retries this idempotent command until each node acks. So we
+        // simulate that here.
+        wait_for_condition(
+            async || {
+                let mut acked = 0;
+                for h in &setup.node_handles {
+                    if h.commit(rack_id, Epoch(2)).await.unwrap() {
+                        acked += 1;
+                    }
+                }
+                if acked == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Now load the rack secret at all nodes
+        let mut secret = None;
+        for h in &setup.node_handles {
+            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
+            if secret.is_none() {
+                secret = Some(rs.clone());
+            }
+            assert_eq!(&rs, secret.as_ref().unwrap());
+        }
+
+        setup.cleanup_successful();
     }
 }

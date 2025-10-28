@@ -5,7 +5,7 @@
 //! A mechanism for maintaining a full mesh of trust quorum node connections
 
 use crate::established_conn::EstablishedConn;
-use trust_quorum_protocol::{BaseboardId, PeerMsg};
+use trust_quorum_protocol::{BaseboardId, Envelope, PeerMsg};
 
 // TODO: Move to this crate
 // https://github.com/oxidecomputer/omicron/issues/9311
@@ -50,7 +50,6 @@ pub enum AcceptError {
 /// Messages sent from the main task to the connection managing tasks
 #[derive(Debug)]
 pub enum MainToConnMsg {
-    #[expect(unused)]
     Msg(WireMsg),
 }
 
@@ -103,7 +102,6 @@ pub enum ConnToMainMsgInner {
         addr: SocketAddrV6,
         peer_id: BaseboardId,
     },
-    #[expect(unused)]
     Received {
         from: BaseboardId,
         msg: PeerMsg,
@@ -120,7 +118,6 @@ pub enum ConnToMainMsgInner {
 
 pub struct TaskHandle {
     pub abort_handle: AbortHandle,
-    #[expect(unused)]
     pub tx: mpsc::Sender<MainToConnMsg>,
     pub conn_type: ConnectionType,
 }
@@ -136,6 +133,10 @@ impl TaskHandle {
 
     pub fn abort(&self) {
         self.abort_handle.abort()
+    }
+
+    pub async fn send(&self, msg: PeerMsg) {
+        let _ = self.tx.send(MainToConnMsg::Msg(WireMsg::Tq(msg))).await;
     }
 }
 
@@ -177,6 +178,10 @@ impl EstablishedTaskHandle {
 
     pub fn abort(&self) {
         self.task_handle.abort();
+    }
+
+    pub async fn send(&self, msg: PeerMsg) {
+        let _ = self.task_handle.send(msg).await;
     }
 }
 
@@ -373,6 +378,14 @@ impl ConnMgr {
 
     pub fn listen_addr(&self) -> SocketAddrV6 {
         self.listen_addr
+    }
+
+    pub async fn send(&self, envelope: Envelope) {
+        let Envelope { to, msg, .. } = envelope;
+        info!(self.log, "Sending {msg:?}"; "peer_id" => %to);
+        if let Some(handle) = self.established.get1(&to) {
+            handle.send(msg).await;
+        }
     }
 
     /// Perform any polling related operations that the connection
@@ -576,13 +589,15 @@ impl ConnMgr {
     /// easiest way to achieve this is to only connect to peers with addresses
     /// that sort less than our own and tear down any connections that no longer
     /// exist in `addrs`.
+    ///
+    /// Return the `BaseboardId` of all peers that have been disconnected.
     pub async fn update_bootstrap_connections(
         &mut self,
         addrs: BTreeSet<SocketAddrV6>,
         corpus: Vec<Utf8PathBuf>,
-    ) {
+    ) -> BTreeSet<BaseboardId> {
         if self.bootstrap_addrs == addrs {
-            return;
+            return BTreeSet::new();
         }
 
         // We don't try to compare addresses from accepted nodes. If DDMD
@@ -610,9 +625,13 @@ impl ConnMgr {
             self.connect_client(corpus.clone(), addr).await;
         }
 
+        let mut disconnected_peers = BTreeSet::new();
         for addr in to_disconnect {
-            self.disconnect_client(addr).await;
+            if let Some(peer_id) = self.disconnect_client(addr).await {
+                disconnected_peers.insert(peer_id);
+            }
         }
+        disconnected_peers
     }
 
     /// Spawn a task to estalbish a sprockets connection for the given address
@@ -691,7 +710,13 @@ impl ConnMgr {
     ///
     /// We don't tear down server connections this way as we don't know their
     /// listen port, just the ephemeral port.
-    async fn disconnect_client(&mut self, addr: SocketAddrV6) {
+    ///
+    /// Return the `BaseboardId` of the peer if an established connection is
+    // torn down.
+    async fn disconnect_client(
+        &mut self,
+        addr: SocketAddrV6,
+    ) -> Option<BaseboardId> {
         if let Some(handle) = self.connecting.remove2(&addr) {
             // The connection has not yet completed its handshake
             info!(
@@ -700,6 +725,7 @@ impl ConnMgr {
                 "remote_addr" => %addr
             );
             handle.abort();
+            None
         } else {
             if let Some(handle) = self.established.remove3(&addr) {
                 info!(
@@ -709,6 +735,9 @@ impl ConnMgr {
                     "peer_id" => %handle.baseboard_id
                 );
                 handle.abort();
+                Some(handle.baseboard_id)
+            } else {
+                None
             }
         }
     }
