@@ -155,6 +155,9 @@ mod illumos {
                         }
 
                         info!(&log, "tofino monitor exiting");
+                        // Exiting with a status code of 0 communicates to our
+                        // sled-agent parent that the tofino is gone and that we
+                        // have shut down the switch zone.
                         std::process::exit(0);
                     }
                     x => error!(&log, "unexpected device event: {x}"),
