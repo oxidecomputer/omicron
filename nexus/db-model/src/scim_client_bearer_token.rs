@@ -47,7 +47,7 @@ impl From<ScimClientBearerToken> for views::ScimClientBearerTokenValue {
             id: t.id,
             time_created: t.time_created,
             time_expires: t.time_expires,
-            bearer_token: t.bearer_token,
+            bearer_token: format!("oxide-scim-{}", t.bearer_token),
         }
     }
 }
