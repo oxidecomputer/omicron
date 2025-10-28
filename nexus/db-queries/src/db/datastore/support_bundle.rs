@@ -339,20 +339,22 @@ impl DataStore {
                                 // this bundle failing. This should ensure that
                                 // any storage it might have been using is
                                 // cleaned up.
-                                SupportBundleState::Collecting => Some(bundle.id),
+                                SupportBundleState::Collecting => {
+                                    Some(bundle.id)
+                                }
                                 // If the bundle was marked "active", we need to
                                 // re-assign the "owning Nexus" so it can later
                                 // be deleted, but the bundle itself has already
                                 // been stored on a sled.
                                 //
                                 // There's no need to fail it.
-                                SupportBundleState::Active |
-                                    // If the bundle has already been marked
-                                    // "Destroying/Failing/Failed", it's already
-                                    // irreversibly marked for deletion.
-                                    SupportBundleState::Destroying |
-                                    SupportBundleState::Failing |
-                                    SupportBundleState::Failed => None,
+                                SupportBundleState::Active => None,
+                                // If the bundle has already been marked
+                                // "Destroying/Failing/Failed", it's already
+                                // irreversibly marked for deletion.
+                                SupportBundleState::Destroying
+                                | SupportBundleState::Failing
+                                | SupportBundleState::Failed => None,
                             }
                         })
                         .collect::<Vec<_>>();
@@ -364,10 +366,12 @@ impl DataStore {
                                 // If the bundle might be using any storage on
                                 // the provisioned sled, it gets assigned to a
                                 // new Nexus.
-                                SupportBundleState::Collecting |
-                                    SupportBundleState::Active |
-                                    SupportBundleState::Destroying |
-                                    SupportBundleState::Failing => Some(bundle.id),
+                                SupportBundleState::Collecting
+                                | SupportBundleState::Active
+                                | SupportBundleState::Destroying
+                                | SupportBundleState::Failing => {
+                                    Some(bundle.id)
+                                }
                                 SupportBundleState::Failed => None,
                             }
                         })
