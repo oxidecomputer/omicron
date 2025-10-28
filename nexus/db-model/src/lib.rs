@@ -509,9 +509,7 @@ impl DatabaseString for ProjectRole {
         match self {
             ProjectRole::Admin => "admin",
             ProjectRole::Collaborator => "collaborator",
-            ProjectRole::LimitedCollaborator => {
-                "limited-collaborator"
-            }
+            ProjectRole::LimitedCollaborator => "limited-collaborator",
             ProjectRole::Viewer => "viewer",
         }
         .into()
@@ -524,9 +522,7 @@ impl DatabaseString for ProjectRole {
         match s {
             "admin" => Ok(ProjectRole::Admin),
             "collaborator" => Ok(ProjectRole::Collaborator),
-            "limited-collaborator" => {
-                Ok(ProjectRole::LimitedCollaborator)
-            }
+            "limited-collaborator" => Ok(ProjectRole::LimitedCollaborator),
             "viewer" => Ok(ProjectRole::Viewer),
             _ => {
                 Err(anyhow!("unsupported Project role from database: {:?}", s))
