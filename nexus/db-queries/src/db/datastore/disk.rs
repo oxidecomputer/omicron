@@ -307,9 +307,18 @@ impl DataStore {
                 }
 
                 (disk, None) => {
+                    // The above paginated query attempts to get all types of
+                    // disk in one query, instead of matching on the disk type
+                    // of each returned disk row and doing additional queries.
+                    //
+                    // If we're in this branch then that query didn't return the
+                    // type-specific information for a disk. It's possible that
+                    // disk was constructed wrong, or that a new disk type
+                    // hasn't been added to the above query and this match.
                     return Err(Error::internal_error(&format!(
-                        "disk {} is invalid!",
+                        "disk {} is type {:?}, but no type-specific row found!",
                         disk.id(),
+                        disk.disk_type,
                     )));
                 }
             }
