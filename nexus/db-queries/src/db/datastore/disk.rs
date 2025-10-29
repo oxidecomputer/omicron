@@ -213,7 +213,7 @@ impl DataStore {
         Ok(disk)
     }
 
-    /// Return all the Crucible Disks matching a list of volume ids. Currently
+    /// Return all the Crucible Disks matching a list of volume IDs. Currently
     /// this is only used by omdb.
     pub async fn disks_get_matching_volumes(
         &self,
