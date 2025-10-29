@@ -50,6 +50,7 @@ use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
@@ -65,6 +66,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
@@ -1233,6 +1235,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "webhook_deliverator" => {
             print_task_webhook_deliverator(details);
+        }
+        "fm_sitrep_loader" => {
+            print_task_fm_sitrep_loader(details);
         }
         _ => {
             println!(
@@ -3096,6 +3101,33 @@ mod ereporter_status_fields {
         REPORTERS_WITH_ERRORS,
     ]) + 1;
     pub const NUM_WIDTH: usize = 4;
+}
+
+fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
+    match serde_json::from_value::<SitrepLoadStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(SitrepLoadStatus::Error(error)) => {
+            println!("    task did not complete successfully: {error}");
+        }
+        Ok(SitrepLoadStatus::NoSitrep) => {
+            println!("    no FM situation report available to load");
+        }
+        Ok(SitrepLoadStatus::Loaded { version, time_loaded }) => {
+            println!(
+                "    loaded latest FM situation report as of {}:",
+                humantime::format_rfc3339_millis(time_loaded.into())
+            );
+            let fm::SitrepVersion { id, version, time_made_current } = version;
+            println!("        sitrep {id:?} (v{version})");
+            println!(
+                "        made current at: {}",
+                humantime::format_rfc3339_millis(time_made_current.into()),
+            );
+        }
+    };
 }
 
 const ERRICON: &str = "/!\\";
