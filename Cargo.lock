@@ -16390,6 +16390,7 @@ dependencies = [
  "slog-term",
  "strum 0.27.2",
  "tar",
+ "tempfile",
  "tokio",
 ]
 

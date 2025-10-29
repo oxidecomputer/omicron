@@ -216,6 +216,107 @@ impl<'a> Downloader<'a> {
     ) -> Self {
         Self { log, output_dir, versions_dir }
     }
+
+    /// Build a binary from a git repository at a specific commit.
+    ///
+    /// This function:
+    /// 1. Checks for cached binaries at `out/.build-cache/{project}/{commit}/`
+    /// 2. If not cached, shallow clones the repo to a temp directory
+    /// 3. Builds the specified binaries with cargo
+    /// 4. Caches the built binaries
+    /// 5. Returns paths to the cached binaries
+    async fn build_from_git(
+        &self,
+        project: &str,
+        repo_url: &str,
+        commit: &str,
+        binaries: &[(&str, &[&str])], // (binary_name, cargo_args)
+    ) -> Result<Vec<Utf8PathBuf>> {
+        let cache_dir =
+            self.output_dir.join(".build-cache").join(project).join(commit);
+
+        // Check if all binaries are already cached
+        let mut cached_paths = Vec::new();
+        let mut all_cached = true;
+        for (binary_name, _) in binaries {
+            let cached_path = cache_dir.join(binary_name);
+            if !cached_path.exists() {
+                all_cached = false;
+                break;
+            }
+            cached_paths.push(cached_path);
+        }
+
+        if all_cached {
+            info!(self.log, "Found cached binaries for {project} at {commit}"; "cache_dir" => %cache_dir);
+            return Ok(cached_paths);
+        }
+
+        // Need to build - create temp directory
+        info!(self.log, "Building {project} from source at commit {commit}");
+        let temp_dir = tempfile::tempdir()?;
+        let temp_path = Utf8PathBuf::try_from(temp_dir.path().to_path_buf())?;
+
+        // Shallow clone the repository
+        info!(self.log, "Cloning {repo_url}");
+        let mut clone_cmd = Command::new("git");
+        clone_cmd
+            .arg("clone")
+            .arg("--depth")
+            .arg("1")
+            .arg("--branch")
+            .arg(commit)
+            .arg(repo_url)
+            .arg(&temp_path);
+
+        let clone_output = clone_cmd.output().await?;
+        if !clone_output.status.success() {
+            let stderr = String::from_utf8_lossy(&clone_output.stderr);
+            bail!("Failed to clone {repo_url}: {stderr}");
+        }
+
+        // Build each binary
+        tokio::fs::create_dir_all(&cache_dir).await?;
+        let mut result_paths = Vec::new();
+
+        for (binary_name, cargo_args) in binaries {
+            info!(self.log, "Building {binary_name}"; "args" => ?cargo_args);
+
+            let mut build_cmd = Command::new("cargo");
+            build_cmd
+                .arg("build")
+                .arg("--bin")
+                .arg(binary_name)
+                .args(*cargo_args)
+                .current_dir(&temp_path);
+
+            let build_output = build_cmd.output().await?;
+            if !build_output.status.success() {
+                let stderr = String::from_utf8_lossy(&build_output.stderr);
+                bail!("Failed to build {binary_name}: {stderr}");
+            }
+
+            // Determine source path based on whether --release was used
+            let is_release = cargo_args.contains(&"--release");
+            let profile = if is_release { "release" } else { "debug" };
+            let source_path =
+                temp_path.join("target").join(profile).join(binary_name);
+
+            if !source_path.exists() {
+                bail!("Expected binary not found at {source_path}");
+            }
+
+            // Copy to cache
+            let cached_path = cache_dir.join(binary_name);
+            tokio::fs::copy(&source_path, &cached_path).await?;
+            set_permissions(&cached_path, 0o755).await?;
+
+            result_paths.push(cached_path);
+        }
+
+        info!(self.log, "Successfully built and cached {project} binaries");
+        Ok(result_paths)
+    }
 }
 
 /// Parses a file of the format:
@@ -738,13 +839,30 @@ impl Downloader<'_> {
             }
             Os::Illumos => {}
             Os::Mac => {
-                warn!(self.log, "WARNING: Dendrite not available for Mac");
-                warn!(self.log, "Network APIs will be unavailable");
+                info!(self.log, "Building dendrite from source for macOS");
 
-                let path = bin_dir.join("dpd");
-                tokio::fs::write(&path, "echo 'unsupported os' && exit 1")
+                let binaries = [
+                    ("dpd", &["--release", "--features=tofino_stub"][..]),
+                    ("swadm", &["--release"][..]),
+                ];
+
+                let built_binaries = self
+                    .build_from_git(
+                        "dendrite",
+                        "https://github.com/oxidecomputer/dendrite",
+                        &commit,
+                        &binaries,
+                    )
                     .await?;
-                set_permissions(&path, 0o755).await?;
+
+                // Copy built binaries to bin_dir
+                for (binary_path, (binary_name, _)) in
+                    built_binaries.iter().zip(binaries.iter())
+                {
+                    let dest = bin_dir.join(binary_name);
+                    tokio::fs::copy(binary_path, &dest).await?;
+                    set_permissions(&dest, 0o755).await?;
+                }
             }
         }
 
@@ -807,7 +925,26 @@ impl Downloader<'_> {
                 set_permissions(&path, 0o755).await?;
                 tokio::fs::copy(path, binary_dir.join(filename)).await?;
             }
-            _ => (),
+            Os::Mac => {
+                info!(self.log, "Building maghemite from source for macOS");
+
+                let binaries = [("mgd", &["--no-default-features"][..])];
+
+                let built_binaries = self
+                    .build_from_git(
+                        "maghemite",
+                        "https://github.com/oxidecomputer/maghemite",
+                        &commit,
+                        &binaries,
+                    )
+                    .await?;
+
+                // Copy built binary to binary_dir
+                let dest = binary_dir.join("mgd");
+                tokio::fs::copy(&built_binaries[0], &dest).await?;
+                set_permissions(&dest, 0o755).await?;
+            }
+            Os::Illumos => (),
         }
 
         Ok(())
