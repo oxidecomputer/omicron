@@ -47,7 +47,7 @@ enum Commands {
     Current(ShowArgs),
 
     /// Show details on a situation report.
-    #[clap(alias = "info")]
+    #[clap(alias = "show")]
     Info {
         /// The UUID of the sitrep to show, or "current" to show the current
         /// sitrep.
