@@ -146,7 +146,7 @@ impl DataStore {
             .await
             .map_err(network_interface::InsertError::External)?;
         opctx
-            .authorize(authz::Action::CreateChild, authz_subnet)
+            .authorize(authz::Action::Read, authz_subnet)
             .await
             .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await

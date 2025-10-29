@@ -12,8 +12,8 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
-    create_local_user, create_project, create_vpc, create_vpc_with_error,
-    grant_iam, objects_list_page_authz, test_params,
+    create_default_ip_pool, create_local_user, create_project, create_vpc,
+    create_vpc_with_error, grant_iam, objects_list_page_authz, test_params,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -22,6 +22,7 @@ use nexus_types::external_api::views::{Silo, Vpc};
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::Instance;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -381,4 +382,98 @@ async fn test_vpc_limited_collaborator_role(
     .parsed_body()
     .unwrap();
     assert_eq!(error.message, "Forbidden");
+}
+
+#[nexus_test]
+async fn test_limited_collaborator_can_create_instance(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create IP pool and project (with default VPC and subnet)
+    create_default_ip_pool(client).await;
+    let project_name = "test-project";
+    create_project(&client, &project_name).await;
+
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    let silo: Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Create a local user and grant them limited-collaborator at the silo level
+    let limited_user = create_local_user(
+        client,
+        &silo,
+        &"limited-instance-creator".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::LimitedCollaborator,
+        limited_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // First verify the project exists and user can see it
+    use dropshot::ResultsPage;
+    use nexus_types::external_api::views::Project;
+    let projects_url = "/v1/projects";
+    let projects: Vec<Project> = NexusRequest::object_get(client, projects_url)
+        .authn_as(AuthnMode::SiloUser(limited_user.id))
+        .execute()
+        .await
+        .expect("limited-collaborator should be able to list projects")
+        .parsed_body::<ResultsPage<Project>>()
+        .unwrap()
+        .items;
+
+    assert!(
+        projects.iter().any(|p| p.identity.name == project_name),
+        "limited-collaborator should see the project"
+    );
+
+    // Test: User with silo.limited-collaborator role CAN create an instance
+    let instances_url = format!("/v1/instances?project={}", project_name);
+    let instance_name = "test-instance";
+
+    let instance: Instance = NexusRequest::objects_post(
+        client,
+        &instances_url,
+        &params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: instance_name.parse().unwrap(),
+                description: "test instance created by limited-collaborator".to_string(),
+            },
+            ncpus: omicron_common::api::external::InstanceCpuCount(2),
+            memory: omicron_common::api::external::ByteCount::from_gibibytes_u32(4),
+            hostname: "test-instance".parse().unwrap(),
+            user_data: vec![],
+            ssh_public_keys: None,
+            network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![],
+            disks: vec![],
+            boot_disk: None,
+            cpu_platform: None,
+            start: true,
+            auto_restart_policy: None,
+            anti_affinity_groups: vec![],
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("limited-collaborator should be able to create instance")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(instance.identity.name, instance_name);
 }
