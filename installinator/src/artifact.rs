@@ -212,7 +212,7 @@ impl ArtifactClient {
         report: EventReport,
     ) -> Result<(), ClientError> {
         self.client
-            .report_progress(&update_id, &report)
+            .report_progress(&update_id, &report.into_generic())
             .await
             .map(|resp| resp.into_inner())
     }

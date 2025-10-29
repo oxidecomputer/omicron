@@ -24,12 +24,10 @@ progenitor::generate_api!(
     },
     replace = {
         Duration = std::time::Duration,
-        EventReportForInstallinatorSpec = installinator_common::EventReport,
+        EventReportForGenericSpec = update_engine::events::EventReport<update_engine::NestedSpec>,
         M2Slot = omicron_common::disk::M2Slot,
-        ProgressEventForGenericSpec = installinator_common::ProgressEvent<update_engine::NestedSpec>,
-        ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
-        StepEventForGenericSpec = installinator_common::StepEvent<update_engine::NestedSpec>,
-        StepEventForInstallinatorSpec = installinator_common::StepEvent,
+        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
+        StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::NestedSpec>,
     }
 );
 

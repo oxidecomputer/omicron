@@ -5263,7 +5263,6 @@ dependencies = [
  "anyhow",
  "dropshot",
  "hyper",
- "installinator-common",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5271,6 +5270,7 @@ dependencies = [
  "serde",
  "slog",
  "tufaceous-artifact",
+ "update-engine",
  "uuid",
 ]
 
@@ -5278,7 +5278,6 @@ dependencies = [
 name = "installinator-client"
 version = "0.1.0"
 dependencies = [
- "installinator-common",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

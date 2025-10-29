@@ -15,11 +15,11 @@ use dropshot::{
     RequestContext, TypedBody,
 };
 use hyper::header;
-use installinator_common::EventReport;
 use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tufaceous_artifact::ArtifactHashId;
+use update_engine::{NestedSpec, events::EventReport};
 
 const PROGRESS_REPORT_MAX_BYTES: usize = 4 * 1024 * 1024;
 
@@ -57,7 +57,7 @@ pub trait InstallinatorApi {
     async fn report_progress(
         rqctx: RequestContext<Self::Context>,
         path: Path<ReportQuery>,
-        report: TypedBody<EventReport>,
+        report: TypedBody<EventReport<NestedSpec>>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
