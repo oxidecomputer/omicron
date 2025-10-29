@@ -5,7 +5,7 @@
 //! Interface for installinator to make API requests.
 
 progenitor::generate_api!(
-    spec = "../../openapi/installinator/installinator-1.0.0-cdf050.json",
+    spec = "../../openapi/installinator/installinator-1.0.0-c0ed87.json",
     interface = Positional,
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
@@ -24,12 +24,10 @@ progenitor::generate_api!(
     },
     replace = {
         Duration = std::time::Duration,
-        EventReportForInstallinatorSpec = installinator_common::EventReport,
+        EventReportForGenericSpec = update_engine::events::EventReport<update_engine::NestedSpec>,
         M2Slot = omicron_common::disk::M2Slot,
-        ProgressEventForGenericSpec = installinator_common::ProgressEvent<update_engine::NestedSpec>,
-        ProgressEventForInstallinatorSpec = installinator_common::ProgressEvent,
-        StepEventForGenericSpec = installinator_common::StepEvent<update_engine::NestedSpec>,
-        StepEventForInstallinatorSpec = installinator_common::StepEvent,
+        ProgressEventForGenericSpec = update_engine::events::ProgressEvent<update_engine::NestedSpec>,
+        StepEventForGenericSpec = update_engine::events::StepEvent<update_engine::NestedSpec>,
     }
 );
 
