@@ -446,7 +446,7 @@ async fn test_scim_client_token_bearer_auth(
     RequestBuilder::new(client, Method::GET, "/scim/v2/Users")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR))
