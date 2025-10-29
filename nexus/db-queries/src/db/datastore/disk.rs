@@ -1160,6 +1160,9 @@ impl DataStore {
             .collect())
     }
 
+    /// Returns a Some(disk) that has a matching volume ID, None if no disk
+    /// matches that volume ID, or an error. Only disks of type `Crucible` have
+    /// volumes, so that is the returned type.
     pub async fn disk_for_volume_id(
         &self,
         volume_id: VolumeUuid,
