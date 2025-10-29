@@ -7,7 +7,7 @@
 # upload JUnit XML files, but unfortunately we cannot run it in Buildomat, as it requires a secret.
 #
 # To work around that, we use this script to grab the JUnit XML files from all finished Buildomat
-# jobs (as part of a GitHub Check Suite) and upload it. The script requires the GitHub Check Suite
+# jobs (as part of a GitHub Check Suite) and upload it. The script53061078286 requires the GitHub Check Suite
 # ID of the Buildomat job, and takes care of retrieving the rest of the metadata from the API.
 #
 # While the script is meant to be executed in a GitHub Actions workflow triggering after the
@@ -159,6 +159,24 @@ for check_run_id in $(jq -r .check_runs[].id api/check_suite_runs); do
         echo "skipping job ${job_name}, as it doesn't contain any JUnit report"
         continue
     fi
+
+    # Determine the variant based on the job name
+    log_step "determining variant for job ${job_name}..."
+    case "${job_name}" in
+        "build-and-test (helios)")
+            variant="helios"
+            ;;
+        "build-and-test (ubuntu-22.04)")
+            variant="ubuntu"
+            ;;
+        *)
+            # Error rather than warn here to avoid silently failing to upload
+            # JUnit reports.
+            echo "error: unknown job name '${job_name}', cannot determine variant" >&2
+            exit 1
+            ;;
+    esac
+    echo "variant set to: ${variant}" >&2
 
     # Configure the environment to override Trunk's CI detection (with CUSTOM=true) and to provide all
     # the relevant information about the CI run. Otherwise Trunk will either pick up nothing (when
