@@ -236,7 +236,7 @@ impl super::Nexus {
             .db_datastore
             .disk_list(opctx, &authz_project, pagparams)
             .await?;
-        Ok(disks.into_iter().map(|disk| disk.into()).collect())
+        Ok(disks.into_iter().map(Into::into).collect())
     }
 
     pub(crate) async fn notify_disk_updated(

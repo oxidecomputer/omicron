@@ -110,7 +110,7 @@ impl Disk {
     }
 
     pub fn slot(&self) -> Option<u8> {
-        self.slot.map(|x| x.into())
+        self.slot.map(Into::into)
     }
 }
 
