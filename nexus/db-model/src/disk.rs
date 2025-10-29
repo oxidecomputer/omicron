@@ -71,6 +71,11 @@ pub struct Disk {
     /// size of blocks (512, 2048, or 4096)
     pub block_size: BlockSize,
 
+    /// Information unique to each type of disk is stored in a separate table
+    /// (where rows are matched based on the disk_id field in that table) and
+    /// combined into a higher level `datastore::Disk` enum.
+    ///
+    /// For `Crucible` disks, see the `disk_type_crucible` table.
     pub disk_type: DiskType,
 }
 
