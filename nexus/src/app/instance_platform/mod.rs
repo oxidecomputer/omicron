@@ -212,7 +212,8 @@ impl DisksByIdBuilder {
 
         if self.slot_usage.contains(&slot) {
             return Err(Error::internal_error(&format!(
-                "disk PCI slot {slot} used more than once",
+                "disk PCI slot {slot} used more than once, cannot attach {}",
+                disk.id(),
             )));
         }
 
