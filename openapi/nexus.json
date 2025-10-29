@@ -11184,7 +11184,7 @@
         "tags": [
           "system/update"
         ],
-        "summary": "Fetch system release repository description by version",
+        "summary": "Fetch system release repository by version",
         "operationId": "system_update_repository_view",
         "parameters": [
           {
