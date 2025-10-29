@@ -257,15 +257,12 @@ impl<'a> Downloader<'a> {
         let temp_dir = tempfile::tempdir()?;
         let temp_path = Utf8PathBuf::try_from(temp_dir.path().to_path_buf())?;
 
-        // Shallow clone the repository
+        // Clone and checkout the specific commit
         info!(self.log, "Cloning {repo_url}");
         let mut clone_cmd = Command::new("git");
         clone_cmd
             .arg("clone")
-            .arg("--depth")
-            .arg("1")
-            .arg("--branch")
-            .arg(commit)
+            .arg("--filter=blob:none")
             .arg(repo_url)
             .arg(&temp_path);
 
@@ -273,6 +270,17 @@ impl<'a> Downloader<'a> {
         if !clone_output.status.success() {
             let stderr = String::from_utf8_lossy(&clone_output.stderr);
             bail!("Failed to clone {repo_url}: {stderr}");
+        }
+
+        // Checkout the specific commit
+        info!(self.log, "Checking out commit {commit}");
+        let mut checkout_cmd = Command::new("git");
+        checkout_cmd.arg("checkout").arg(commit).current_dir(&temp_path);
+
+        let checkout_output = checkout_cmd.output().await?;
+        if !checkout_output.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+            bail!("Failed to checkout {commit}: {stderr}");
         }
 
         // Build each binary
