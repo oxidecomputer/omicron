@@ -4,6 +4,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-collaborator                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::IpPoolList
@@ -11,6 +12,7 @@ resource: authz::IpPoolList
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-collaborator                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 policy: {Admin: {Admin}}
@@ -19,6 +21,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo-collaborator                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::IpPoolList
@@ -26,6 +29,7 @@ resource: authz::IpPoolList
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
   silo-collaborator                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 policy: {Viewer: {Viewer}}
@@ -34,6 +38,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo-collaborator                 ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
 
 resource: authz::IpPoolList
@@ -41,6 +46,7 @@ resource: authz::IpPoolList
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo-collaborator                 ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
 
 policy: {Admin: {Viewer}}
@@ -49,6 +55,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo-collaborator                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: authz::IpPoolList
@@ -56,6 +63,7 @@ resource: authz::IpPoolList
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo-collaborator                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 policy: {Viewer: {Admin, Viewer}}
@@ -64,6 +72,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo-collaborator                 ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
+  silo-limited-collaborator         ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo-viewer                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
 
 resource: authz::IpPoolList
@@ -71,6 +80,7 @@ resource: authz::IpPoolList
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
   silo-collaborator                 ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
+  silo-limited-collaborator         ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
   silo-viewer                       ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
 
 policy: {Admin: {Admin}, Viewer: {Viewer}}
@@ -79,6 +89,7 @@ resource: Fleet id "001de000-1334-4000-8000-000000000000"
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo-collaborator                 ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
 
 resource: authz::IpPoolList
@@ -86,5 +97,6 @@ resource: authz::IpPoolList
   USER                              Q  R LC RP  M MP CC  D
   silo-admin                        ✘  ✘  ✔  ✘  ✔  ✔  ✔  ✔
   silo-collaborator                 ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo-limited-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo-viewer                       ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
 

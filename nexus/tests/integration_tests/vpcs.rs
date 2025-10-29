@@ -17,7 +17,7 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
-use nexus_types::external_api::shared::ProjectRole;
+use nexus_types::external_api::shared::{ProjectRole, SiloRole};
 use nexus_types::external_api::views::{Silo, Vpc};
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -281,7 +281,7 @@ async fn test_vpc_limited_collaborator_role(
     )
     .await;
 
-    // Create a local user and give them the LimitedCollaborator role
+    // Create a local user and give them the LimitedCollaborator role at the silo level
     let limited_user = create_local_user(
         client,
         &silo,
@@ -290,10 +290,11 @@ async fn test_vpc_limited_collaborator_role(
     )
     .await;
 
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
     grant_iam(
         client,
-        &project_url,
-        ProjectRole::LimitedCollaborator,
+        &silo_url,
+        SiloRole::LimitedCollaborator,
         limited_user.id,
         AuthnMode::PrivilegedUser,
     )
@@ -344,12 +345,13 @@ async fn test_vpc_limited_collaborator_role(
     .unwrap();
     assert_eq!(vpc.identity.name, vpc_name2);
 
-    // Test 3: User with LimitedCollaborator role CAN read/list VPCs (viewer inheritance)
+    // Test 3: User with silo.limited-collaborator role CAN read/list VPCs
+    // (inherits project.limited-collaborator → project.viewer)
     let vpcs_list: Vec<Vpc> = NexusRequest::object_get(client, &vpcs_url)
         .authn_as(AuthnMode::SiloUser(limited_user.id))
         .execute()
         .await
-        .expect("LimitedCollaborator should be able to list VPCs")
+        .expect("silo.limited-collaborator should be able to list VPCs")
         .parsed_body::<dropshot::ResultsPage<Vpc>>()
         .unwrap()
         .items;
@@ -358,7 +360,8 @@ async fn test_vpc_limited_collaborator_role(
         "Should see default VPC and the created VPCs"
     );
 
-    // Test 4: User with LimitedCollaborator role CANNOT create a VPC
+    // Test 4: User with silo.limited-collaborator role CANNOT create a VPC
+    // (inherits project.limited-collaborator, which cannot modify networking)
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &vpcs_url)
             .body(Some(&params::VpcCreate {

@@ -63,8 +63,9 @@ has_role(actor: AuthenticatedActor, role: String, resource: Resource)
 # - fleet.collaborator    (can manage Silos)
 # - fleet.viewer          (can read most non-siloed resources in the system)
 # - silo.admin            (superuser for the silo)
-# - silo.collaborator     (can create and own Organizations)
-# - silo.viewer           (can read most resources within the Silo)
+# - silo.collaborator     (can create and own Organizations; grants project.admin on all projects)
+# - silo.limited-collaborator (grants project.limited-collaborator on all projects)
+# - silo.viewer           (can read most resources within the Silo; grants project.viewer)
 # - organization.admin    (complete control over an organization)
 # - organization.collaborator (can manage Projects)
 # - organization.viewer   (can read most resources within the Organization)
@@ -126,17 +127,18 @@ resource Silo {
 	    "read",
 	    "create_child",
 	];
-	roles = [ "admin", "collaborator", "viewer" ];
+	roles = [ "admin", "collaborator", "limited-collaborator", "viewer" ];
 
 	# Roles implied by other roles on this resource
-	"viewer" if "collaborator";
+	"viewer" if "limited-collaborator";
+	"limited-collaborator" if "collaborator";
 	"collaborator" if "admin";
 
 	# Permissions granted directly by roles on this resource
 	"list_children" if "viewer";
 	"read" if "viewer";
 
-	"create_child" if "collaborator";
+	"create_child" if "limited-collaborator";
 	"modify" if "admin";
 
 	# Permissions implied by roles on this resource's parent (Fleet).  Fleet
@@ -201,6 +203,7 @@ resource Project {
 	# Roles implied by roles on this resource's parent (Silo)
 	relations = { parent_silo: Silo };
 	"admin" if "collaborator" on "parent_silo";
+	"limited-collaborator" if "limited-collaborator" on "parent_silo";
 	"viewer" if "viewer" on "parent_silo";
 }
 has_relation(silo: Silo, "parent_silo", project: Project)

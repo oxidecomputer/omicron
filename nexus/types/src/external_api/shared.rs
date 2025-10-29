@@ -156,6 +156,7 @@ pub enum FleetRole {
 pub enum SiloRole {
     Admin,
     Collaborator,
+    LimitedCollaborator,
     Viewer,
 }
 

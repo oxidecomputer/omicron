@@ -24300,6 +24300,7 @@
         "enum": [
           "admin",
           "collaborator",
+          "limited_collaborator",
           "viewer"
         ]
       },

@@ -484,6 +484,7 @@ impl DatabaseString for SiloRole {
         match self {
             SiloRole::Admin => "admin",
             SiloRole::Collaborator => "collaborator",
+            SiloRole::LimitedCollaborator => "limited-collaborator",
             SiloRole::Viewer => "viewer",
         }
         .into()
@@ -496,6 +497,7 @@ impl DatabaseString for SiloRole {
         match s {
             "admin" => Ok(SiloRole::Admin),
             "collaborator" => Ok(SiloRole::Collaborator),
+            "limited-collaborator" => Ok(SiloRole::LimitedCollaborator),
             "viewer" => Ok(SiloRole::Viewer),
             _ => Err(anyhow!("unsupported Silo role from database: {:?}", s)),
         }
