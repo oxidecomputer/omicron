@@ -7,7 +7,7 @@
 # upload JUnit XML files, but unfortunately we cannot run it in Buildomat, as it requires a secret.
 #
 # To work around that, we use this script to grab the JUnit XML files from all finished Buildomat
-# jobs (as part of a GitHub Check Suite) and upload it. The script53061078286 requires the GitHub Check Suite
+# jobs (as part of a GitHub Check Suite) and upload it. The script requires the GitHub Check Suite
 # ID of the Buildomat job, and takes care of retrieving the rest of the metadata from the API.
 #
 # While the script is meant to be executed in a GitHub Actions workflow triggering after the
