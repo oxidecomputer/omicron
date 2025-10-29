@@ -14827,6 +14827,7 @@ dependencies = [
  "hex",
  "hkdf",
  "iddqd",
+ "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",

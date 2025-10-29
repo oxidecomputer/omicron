@@ -8,6 +8,8 @@
 use crate::connection_manager::{
     ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner,
 };
+use crate::ledgers::PersistentStateLedger;
+use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, error, info, o};
@@ -47,8 +49,8 @@ const CONN_TO_MAIN_CHANNEL_BOUND: usize = 1024;
 pub struct Config {
     pub baseboard_id: BaseboardId,
     pub listen_addr: SocketAddrV6,
-    //    pub tq_state_ledger_paths: Vec<Utf8PathBuf>,
-    //  pub network_config_ledger_paths: Vec<Utf8PathBuf>,
+    pub tq_ledger_paths: Vec<Utf8PathBuf>,
+    pub network_config_ledger_paths: Vec<Utf8PathBuf>,
     pub sprockets: SprocketsConfig,
 }
 
@@ -323,8 +325,8 @@ impl NodeTaskHandle {
 pub struct NodeTask {
     shutdown: bool,
     log: Logger,
-    #[expect(unused)]
     config: Config,
+    tq_ledger_generation: u64,
     node: Node,
     ctx: NodeCtx,
     conn_mgr: ConnMgr,
@@ -351,8 +353,20 @@ impl NodeTask {
 
         let baseboard_id = config.baseboard_id.clone();
 
-        // TODO: Load persistent state from ledger
-        let mut ctx = NodeCtx::new(config.baseboard_id.clone());
+        let (mut ctx, tq_ledger_generation) = if let Some(ps_ledger) =
+            PersistentStateLedger::load(&log, config.tq_ledger_paths.clone())
+                .await
+        {
+            (
+                NodeCtx::new_with_persistent_state(
+                    config.baseboard_id.clone(),
+                    ps_ledger.state,
+                ),
+                ps_ledger.generation,
+            )
+        } else {
+            (NodeCtx::new(config.baseboard_id.clone()), 0)
+        };
         let node = Node::new(&log, &mut ctx);
         let conn_mgr = ConnMgr::new(
             &log,
@@ -367,6 +381,7 @@ impl NodeTask {
                 shutdown: false,
                 log,
                 config,
+                tq_ledger_generation,
                 node,
                 ctx,
                 conn_mgr,
@@ -406,6 +421,10 @@ impl NodeTask {
     }
 
     // Handle messages from connection management tasks
+    //
+    // We persist state at the end of this method, which always occurs before
+    // we send any outgoing messages in the `run` loop as a response of handling
+    // this message.
     async fn on_conn_msg(&mut self, msg: ConnToMainMsg) {
         let task_id = msg.task_id;
         match msg.msg {
@@ -435,9 +454,14 @@ impl NodeTask {
                 todo!();
             }
         }
+        self.save_persistent_state().await;
     }
 
-    // TODO: Process `ctx`: save persistent state
+    // Handle API requests from sled-agent
+    //
+    // NOTE: We persist state where necessary before responding to clients. Any
+    // resulting output messages will also be sent in the `run` loop after we
+    // persist state.
     async fn on_api_request(&mut self, request: NodeApiRequest) {
         match request {
             NodeApiRequest::BootstrapAddresses(addrs) => {
@@ -467,6 +491,7 @@ impl NodeTask {
                             CommitStatus::Pending
                         }
                     });
+                self.save_persistent_state().await;
                 let _ = tx.send(res);
             }
             NodeApiRequest::ConnMgrStatus { tx } => {
@@ -489,6 +514,7 @@ impl NodeTask {
             NodeApiRequest::LrtqUpgrade { msg, tx } => {
                 let res =
                     self.node.coordinate_upgrade_from_lrtq(&mut self.ctx, msg);
+                self.save_persistent_state().await;
                 let _ = tx.send(res);
             }
             NodeApiRequest::NodeStatus { tx } => {
@@ -511,17 +537,32 @@ impl NodeTask {
                             CommitStatus::Pending
                         }
                     });
+                self.save_persistent_state().await;
                 let _ = tx.send(res);
             }
             NodeApiRequest::Reconfigure { msg, tx } => {
                 let res =
                     self.node.coordinate_reconfiguration(&mut self.ctx, msg);
+                self.save_persistent_state().await;
                 let _ = tx.send(res);
             }
             NodeApiRequest::Shutdown => {
                 info!(self.log, "Shutting down Node tokio tasks");
                 self.shutdown = true;
             }
+        }
+    }
+
+    /// Save `PersistentState` to storage if necessary
+    pub async fn save_persistent_state(&mut self) {
+        if self.ctx.persistent_state_change_check_and_reset() {
+            self.tq_ledger_generation = PersistentStateLedger::save(
+                &self.log,
+                self.config.tq_ledger_paths.clone(),
+                self.tq_ledger_generation,
+                self.ctx.persistent_state().clone(),
+            )
+            .await;
         }
     }
 }
@@ -580,7 +621,15 @@ mod tests {
                     },
                     roots: vec![cert_path(dir.clone(), &root_prefix())],
                 };
-                Config { baseboard_id, listen_addr, sprockets }
+                let tq_ledger_paths =
+                    vec![dir.join(format!("test-tq-ledger-[{i}]"))];
+                Config {
+                    baseboard_id,
+                    listen_addr,
+                    sprockets,
+                    tq_ledger_paths,
+                    network_config_ledger_paths: vec![],
+                }
             })
             .collect()
     }
@@ -1469,6 +1518,153 @@ mod tests {
             )
             .await
             .unwrap();
+
+        setup.cleanup_successful();
+    }
+
+    /// Ensure state is persisted as we expect
+    #[tokio::test]
+    pub async fn tq_persistent_state() {
+        let num_nodes = 4;
+        let mut setup =
+            TestSetup::spawn_nodes("tq_initial_config", num_nodes).await;
+        let rack_id = RackUuid::new_v4();
+
+        // Trigger an initial configuration by using the first node as a
+        // coordinator. We're pretending to be the sled-agent with instruction from
+        // Nexus here.
+        let initial_config = ReconfigureMsg {
+            rack_id,
+            epoch: Epoch(1),
+            last_committed_epoch: None,
+            members: setup.members().cloned().collect(),
+            threshold: trust_quorum_protocol::Threshold(3),
+        };
+
+        // Tell nodes how to reach each other
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+
+        let coordinator = setup.node_handles.first().unwrap();
+        coordinator.reconfigure(initial_config).await.unwrap();
+
+        let poll_interval = Duration::from_millis(10);
+        let poll_max = Duration::from_secs(10);
+
+        // Wait for the coordinator to see `PrepareAck`s from all nodes
+        wait_for_condition(
+            async || {
+                let Ok(Some(s)) = coordinator.coordinator_status().await else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                if s.acked_prepares.len() == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Simulate a crash of the last node.
+        let join_handle = setup.join_handles.pop().unwrap();
+        let node_handle = setup.node_handles.pop().unwrap();
+        node_handle.shutdown().await.unwrap();
+        join_handle.await.unwrap();
+        let _ = setup.listen_addrs.pop().unwrap();
+
+        // Now Bring it back up with the same persistent state, which contains
+        // the initial config and prepare. Commit should work and everything
+        // should pick up as expected.
+        let (mut task, handle) = NodeTask::new(
+            setup.configs.last().unwrap().clone(),
+            &setup.logctx.log,
+        )
+        .await;
+        let listen_addr = handle.listen_addr();
+        setup.node_handles.push(handle);
+        setup.join_handles.push(tokio::spawn(async move { task.run().await }));
+        setup.listen_addrs.push(listen_addr);
+
+        // Tell nodes how to reach each other
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+
+        // Commit at each node
+        //
+        // Nexus retries this idempotent command until each node acks. So we
+        // simulate that here.
+        wait_for_condition(
+            async || {
+                let mut acked = 0;
+                for h in &setup.node_handles {
+                    if h.commit(rack_id, Epoch(1)).await.unwrap() {
+                        acked += 1;
+                    }
+                }
+                if acked == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Now load the rack secret at all nodes
+        let mut secret = None;
+        for h in &setup.node_handles {
+            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
+            if secret.is_none() {
+                secret = Some(rs.clone());
+            }
+            assert_eq!(&rs, secret.as_ref().unwrap());
+        }
+
+        // Simulate crash and restart again
+        let join_handle = setup.join_handles.pop().unwrap();
+        let node_handle = setup.node_handles.pop().unwrap();
+        node_handle.shutdown().await.unwrap();
+        join_handle.await.unwrap();
+        let _ = setup.listen_addrs.pop().unwrap();
+        let (mut task, handle) = NodeTask::new(
+            setup.configs.last().unwrap().clone(),
+            &setup.logctx.log,
+        )
+        .await;
+        let listen_addr = handle.listen_addr();
+        setup.node_handles.push(handle);
+        setup.join_handles.push(tokio::spawn(async move { task.run().await }));
+        setup.listen_addrs.push(listen_addr);
+
+        // Tell nodes how to reach each other
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+
+        // Now load the rack secret at all nodes
+        let mut secret = None;
+        for h in &setup.node_handles {
+            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
+            if secret.is_none() {
+                secret = Some(rs.clone());
+            }
+            assert_eq!(&rs, secret.as_ref().unwrap());
+        }
 
         setup.cleanup_successful();
     }
