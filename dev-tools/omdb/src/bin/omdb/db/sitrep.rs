@@ -28,6 +28,7 @@ use uuid::Uuid;
 
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
+use nexus_db_schema::schema::inv_collection::dsl as inv_collection_dsl;
 
 #[derive(Debug, Args, Clone)]
 pub(super) struct SitrepArgs {
@@ -197,8 +198,8 @@ pub(super) async fn cmd_db_sitrep_history(
 async fn cmd_db_sitrep_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
-    args: &ShowArgs,
+    _fetch_opts: &DbFetchOptions,
+    _args: &ShowArgs,
     sitrep: SitrepIdOrCurrent,
 ) -> anyhow::Result<()> {
     let ctx = || match sitrep {
@@ -209,15 +210,12 @@ async fn cmd_db_sitrep_show(
             format!("looking up fault management sitrep {id:?}")
         }
     };
+    let conn = datastore.pool_connection_for_tests().await?;
 
     let (maybe_version, sitrep) = match sitrep {
         SitrepIdOrCurrent::Id(id) => {
             let sitrep =
                 datastore.fm_sitrep_read(opctx, id).await.with_context(ctx)?;
-            let conn = datastore
-                .pool_connection_for_tests()
-                .await
-                .with_context(ctx)?;
             let version = history_dsl::fm_sitrep_history
                 .filter(history_dsl::sitrep_id.eq(id.into_untyped_uuid()))
                 .select(model::SitrepVersion::as_select())
@@ -239,7 +237,6 @@ async fn cmd_db_sitrep_show(
     };
 
     let fm::Sitrep { metadata } = sitrep;
-    println!("\n{:=<80}", "== FAULT MANAGEMENT SITUATION REPORT ");
     let fm::SitrepMetadata {
         id,
         creator_id,
@@ -253,10 +250,106 @@ async fn cmd_db_sitrep_show(
     const PARENT_SITREP_ID: &'static str = "parent sitrep ID";
     const CREATED_BY: &'static str = "created by";
     const CREATED_AT: &'static str = "created at";
+    const COMMENT: &'static str = "comment";
+    const STATUS: &'static str = "status";
+    const VERSION: &'static str = "  version";
+    const MADE_CURRENT_AT: &'static str = "  made current at";
+    const INV_COLLECTION_ID: &'static str = "inventory collection ID";
+    const INV_STARTED_AT: &'static str = "  started at";
+    const INV_FINISHED_AT: &'static str = "  finished at";
 
-    const WIDTH: usize =
-        const_max_len(&[ID, PARENT_SITREP_ID, CREATED_AT, CREATED_BY]);
-    println!("    {ID:>WIDTH$}: {id}");
+    const WIDTH: usize = const_max_len(&[
+        ID,
+        PARENT_SITREP_ID,
+        CREATED_AT,
+        CREATED_BY,
+        COMMENT,
+        STATUS,
+        VERSION,
+        MADE_CURRENT_AT,
+        INV_COLLECTION_ID,
+        INV_STARTED_AT,
+        INV_FINISHED_AT,
+    ]);
+
+    println!("\n{:=<80}", "== FAULT MANAGEMENT SITUATION REPORT ");
+    println!("    {ID:>WIDTH$}: {id:?}");
+    println!("    {PARENT_SITREP_ID:>WIDTH$}: {parent_sitrep_id:?}");
+    println!("    {CREATED_BY:>WIDTH$}: {creator_id}");
+    println!("    {CREATED_AT:>WIDTH$}: {time_created}");
+    if comment.is_empty() {
+        println!("    {COMMENT:>WIDTH$}: N/A\n");
+    } else {
+        println!("    {COMMENT:>WIDTH$}:");
+        println!("{}\n", textwrap::indent(&comment, "      "));
+    }
+
+    match maybe_version {
+        None => println!(
+            "    {STATUS:>WIDTH$}: not committed to the sitrep history"
+        ),
+        Some(fm::SitrepVersion { version, time_made_current, .. }) => {
+            let current_version =
+                datastore.fm_get_current_sitrep_version(&opctx).await;
+            if matches!(current_version, Ok(Some(ref v)) if v.id == id) {
+                println!("    {STATUS:>WIDTH$}: this is the current sitrep!",);
+            } else {
+                println!("    {STATUS:>WIDTH$}: in the sitrep history");
+            }
+            println!("    {VERSION:>WIDTH$}: v{version}");
+            println!("    {MADE_CURRENT_AT:>WIDTH$}: {time_made_current}");
+            match current_version {
+                Ok(Some(v)) if v.id == id => {}
+                Ok(Some(fm::SitrepVersion { version, id, .. })) => {
+                    println!(
+                        "(i)   note: the current sitrep is {id:?} \
+                        (at v{version})",
+                    );
+                }
+                Ok(None) => {
+                    eprintln!(
+                        "/!\\ WEIRD: this sitrep is in the sitrep history, \
+                         but there is no current sitrep. this should not \
+                         happen!"
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "/!\\ failed to determine the current sitrep \
+                         version: {err}"
+                    );
+                }
+            };
+        }
+    }
+
+    println!("\n{:-<80}", "== DIAGNOSIS INPUTS ");
+    println!("    {INV_COLLECTION_ID:>WIDTH$}: {inv_collection_id:?}");
+    let inv_collection = inv_collection_dsl::inv_collection
+        .filter(
+            inv_collection_dsl::id.eq(inv_collection_id.into_untyped_uuid()),
+        )
+        .select(model::InvCollection::as_select())
+        .first_async(&*conn)
+        .await
+        .optional();
+    match inv_collection {
+        Err(err) => {
+            eprintln!(
+                "/!\\ failed to fetch inventory collection details: {err}"
+            );
+        }
+        Ok(Some(model::InvCollection { time_started, time_done, .. })) => {
+            println!("    {INV_STARTED_AT:>WIDTH$}: {time_started}");
+            println!("    {INV_FINISHED_AT:>WIDTH$}: {time_done}");
+        }
+        Ok(None) => {
+            println!(
+                "      note: this collection no longer exists (perhaps it has \
+                 been pruned?)"
+            )
+        }
+    }
 
     Ok(())
 }
