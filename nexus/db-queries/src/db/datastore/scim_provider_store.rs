@@ -1282,14 +1282,15 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             )
             .await
             .map_err(external_error_to_provider_error)?;
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1756,14 +1757,15 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             .await
             .map_err(external_error_to_provider_error)?;
 
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
