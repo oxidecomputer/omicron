@@ -64,7 +64,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.16.0", default-features = false, features = ["allocator-api2", "inline-more"] }
-heck = { version = "0.4.1" }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
@@ -203,7 +202,6 @@ generic-array = { version = "0.14.7", default-features = false, features = ["mor
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.16.0", default-features = false, features = ["allocator-api2", "inline-more"] }
-heck = { version = "0.4.1" }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
