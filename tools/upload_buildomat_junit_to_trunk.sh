@@ -160,6 +160,24 @@ for check_run_id in $(jq -r .check_runs[].id api/check_suite_runs); do
         continue
     fi
 
+    # Determine the variant based on the job name
+    log_step "determining variant for job ${job_name}..."
+    case "${job_name}" in
+        "build-and-test (helios)")
+            variant="helios"
+            ;;
+        "build-and-test (ubuntu-22.04)")
+            variant="ubuntu"
+            ;;
+        *)
+            # Error rather than warn here to avoid silently failing to upload
+            # JUnit reports.
+            echo "error: unknown job name '${job_name}', cannot determine variant" >&2
+            exit 1
+            ;;
+    esac
+    echo "variant set to: ${variant}" >&2
+
     # Configure the environment to override Trunk's CI detection (with CUSTOM=true) and to provide all
     # the relevant information about the CI run. Otherwise Trunk will either pick up nothing (when
     # running the script locally) or it will pick up the details of the GHA workflow running this.
