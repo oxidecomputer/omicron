@@ -27,6 +27,7 @@ use nexus_auth::authz::SiloUserList;
 use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatabaseString;
+use nexus_db_model::IdentityType;
 use nexus_types::external_api::shared::SiloRole;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
@@ -494,6 +495,22 @@ impl<'a> CrdbScimProviderStore<'a> {
                 .await?;
         }
 
+        // Cleanup role assignment records for the deleted user
+        {
+            use nexus_db_schema::schema::role_assignment::dsl;
+
+            diesel::delete(dsl::role_assignment)
+                .filter(
+                    dsl::resource_type
+                        .eq(self.authz_silo.resource_type().to_string()),
+                )
+                .filter(dsl::resource_id.eq(self.authz_silo.resource_id()))
+                .filter(dsl::identity_type.eq(IdentityType::SiloUser))
+                .filter(dsl::identity_id.eq(to_db_typed_uuid(user_id)))
+                .execute_async(conn)
+                .await?;
+        }
+
         Ok(true)
     }
 
@@ -793,19 +810,13 @@ impl<'a> CrdbScimProviderStore<'a> {
                 if admin_group_name == display_name {
                     // XXX code copied from silo create
 
-                    let authz_silo = authz::Silo::new(
-                        authz::FLEET,
-                        self.authz_silo.id(),
-                        LookupType::ById(self.authz_silo.id()),
-                    );
-
                     use nexus_db_schema::schema::role_assignment::dsl;
 
                     let new_assignment = model::RoleAssignment::new(
                         model::IdentityType::SiloGroup,
                         group_id.into_untyped_uuid(),
-                        authz_silo.resource_type(),
-                        authz_silo.resource_id(),
+                        self.authz_silo.resource_type(),
+                        self.authz_silo.resource_id(),
                         &SiloRole::Admin.to_database_string(),
                     );
 
@@ -1172,6 +1183,22 @@ impl<'a> CrdbScimProviderStore<'a> {
 
             diesel::delete(dsl::silo_group_membership)
                 .filter(dsl::silo_group_id.eq(to_db_typed_uuid(group_id)))
+                .execute_async(conn)
+                .await?;
+        }
+
+        // Cleanup role assignment records for the deleted group
+        {
+            use nexus_db_schema::schema::role_assignment::dsl;
+
+            diesel::delete(dsl::role_assignment)
+                .filter(
+                    dsl::resource_type
+                        .eq(self.authz_silo.resource_type().to_string()),
+                )
+                .filter(dsl::resource_id.eq(self.authz_silo.resource_id()))
+                .filter(dsl::identity_id.eq(to_db_typed_uuid(group_id)))
+                .filter(dsl::identity_type.eq(IdentityType::SiloGroup))
                 .execute_async(conn)
                 .await?;
         }
