@@ -182,7 +182,7 @@ pub(super) async fn cmd_db_sitrep_history(
             v: version.version.into(),
             id: id.into_untyped_uuid(),
             created_at: time_created,
-            comment: comment,
+            comment,
         }
     });
 

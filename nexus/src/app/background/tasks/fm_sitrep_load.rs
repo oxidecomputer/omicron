@@ -84,7 +84,7 @@ impl SitrepLoader {
             .fm_current_sitrep_version(opctx)
             .await
         {
-            Ok(Some(version)) => version.into(),
+            Ok(Some(version)) => version,
             Ok(None) => match old {
                 Some(SitrepVersion { version, id, .. }) => {
                     // We should never go from "some sitrep" to "no sitrep";
