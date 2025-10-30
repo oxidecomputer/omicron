@@ -160,42 +160,6 @@ pub enum SiloRole {
     Viewer,
 }
 
-/// Roles that can be assigned to users at the Project scope.
-///
-/// Project roles form a hierarchy where higher roles inherit permissions from
-/// lower roles:
-///   Admin > Collaborator > LimitedCollaborator > Viewer
-///
-/// # Role Descriptions
-///
-/// - **Admin**: Full control over the project and all resources within it,
-///   including managing project membership and roles.
-///
-/// - **Collaborator**: Can create and modify most project resources, including
-///   networking infrastructure (VPCs, subnets, routers, internet gateways).
-///   Cannot manage project membership or roles.
-///
-/// - **LimitedCollaborator**: Can create and modify non-networking resources
-///   (instances, disks, snapshots, images) but **cannot** create or modify
-///   networking infrastructure. Has read-only access to networking resources.
-///   This role is useful for users who need to work with compute resources
-///   but should not reconfigure the network.
-///
-/// - **Viewer**: Read-only access to all project resources. Cannot create or
-///   modify anything.
-///
-/// # Authorization System Integration
-///
-/// The distinction between Collaborator and LimitedCollaborator is enforced
-/// through the authorization macro system (see nexus/authz-macros):
-///
-/// - Resources marked with `InProjectLimited` grant modify/create permissions
-///   to `limited-collaborator` and above (instances, disks, etc.)
-///
-/// - Resources marked with `InProjectFull` require the full `collaborator`
-///   role for modify/create permissions (VPCs, subnets, routers, etc.)
-///
-/// See also: nexus/auth/src/authz/omicron.polar for the Polar policy rules.
 #[derive(
     Clone,
     Copy,
