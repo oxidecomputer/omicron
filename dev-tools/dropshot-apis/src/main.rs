@@ -53,7 +53,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
     let apis = vec![
         ManagedApiConfig {
             title: "Bootstrap Agent API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                bootstrap_agent_api::supported_versions(),
+            ),
             metadata: ManagedApiMetadata {
                 description: Some("Per-sled API for setup and teardown"),
                 contact_url: Some("https://oxide.computer"),
@@ -172,7 +174,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         },
         ManagedApiConfig {
             title: "Installinator API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                installinator_api::supported_versions(),
+            ),
             metadata: ManagedApiMetadata {
                 description: Some(
                     "API for installinator to fetch artifacts \
@@ -205,7 +209,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         },
         ManagedApiConfig {
             title: "Nexus internal API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                nexus_internal_api::supported_versions(),
+            ),
             metadata: ManagedApiMetadata {
                 description: Some("Nexus internal API"),
                 contact_url: Some("https://oxide.computer"),
@@ -261,7 +267,9 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         },
         ManagedApiConfig {
             title: "Oxide TUF Repo Depot API",
-            versions: Versions::new_lockstep(semver::Version::new(0, 0, 1)),
+            versions: Versions::new_versioned(
+                repo_depot_api::supported_versions(),
+            ),
             metadata: ManagedApiMetadata {
                 description: Some("API for fetching update artifacts"),
                 contact_url: Some("https://oxide.computer"),
