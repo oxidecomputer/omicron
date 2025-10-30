@@ -117,7 +117,7 @@ fn get_instances_url() -> String {
     format!("/v1/instances?{}", get_project_selector())
 }
 
-fn get_instance_url(instance_name: &str) -> String {
+pub fn get_instance_url(instance_name: &str) -> String {
     format!("/v1/instances/{}?{}", instance_name, get_project_selector())
 }
 
