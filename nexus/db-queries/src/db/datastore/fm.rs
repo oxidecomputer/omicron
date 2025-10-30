@@ -98,7 +98,7 @@ impl DataStore {
     ///
     /// This is equivalent to reading the current sitrep version using
     /// [`DataStore::fm_current_sitrep_version`], and then reading the sitrep
-    /// itself using [`DataStore::fm_sitrep_read_on_conn`].
+    /// itself using [`DataStore::fm_sitrep_read`].
     ///
     /// If this method returns `None`, there is no current sitrep, meaning that
     /// no sitreps have been created.
@@ -196,7 +196,7 @@ impl DataStore {
     }
 }
 
-/// Errors returned by [`Datastore::fm_sitrep_insert`].
+/// Errors returned by [`DataStore::fm_sitrep_insert`].
 #[derive(Debug, thiserror::Error)]
 pub enum InsertSitrepError {
     #[error(transparent)]
