@@ -1130,6 +1130,17 @@ impl ApiResourceWithRolesType for Project {
     type AllowedRoles = ProjectRole;
 }
 
+// ============================================================================
+// Project Resources - Non-Networking (InProjectLimited)
+//
+// These resources can be created and modified by users with the
+// "limited-collaborator" role and above. These are "regular" project resources
+// that users can work with without needing permission to reconfigure network
+// infrastructure.
+//
+// Examples: Instances, Disks, Snapshots, Images, Floating IPs
+// ============================================================================
+
 authz_resource! {
     name = "Disk",
     parent = "Project",
@@ -1185,6 +1196,21 @@ authz_resource! {
     roles_allowed = false,
     polar_snippet = InProjectLimited,
 }
+
+// ============================================================================
+// Project Resources - Networking Infrastructure (InProjectFull)
+//
+// These resources require the full "collaborator" role to create or modify.
+// Users with only the "limited-collaborator" role can *read* these resources
+// (via viewer inheritance) but cannot create or modify them.
+//
+// This distinction allows organizations to restrict who can reconfigure the
+// network topology while still allowing those users to work with compute
+// resources (instances, disks, etc.) within the existing network.
+//
+// Resources in this category: VPCs, Subnets, Routers, Router Routes,
+// Internet Gateways, and their child resources (IP pools, IP addresses)
+// ============================================================================
 
 authz_resource! {
     name = "Vpc",

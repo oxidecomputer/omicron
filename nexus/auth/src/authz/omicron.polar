@@ -190,6 +190,12 @@ resource Project {
 	roles = [ "admin", "collaborator", "limited-collaborator", "viewer" ];
 
 	# Roles implied by other roles on this resource
+	# Role hierarchy: admin > collaborator > limited-collaborator > viewer
+	#
+	# The "limited-collaborator" role can create/modify non-networking
+	# resources (instances, disks, etc.) but cannot create/modify networking
+	# infrastructure (VPCs, subnets, routers, internet gateways).
+	# See nexus/authz-macros for InProjectLimited vs InProjectFull.
 	"viewer" if "limited-collaborator";
 	"limited-collaborator" if "collaborator";
 	"collaborator" if "admin";

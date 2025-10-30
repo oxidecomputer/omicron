@@ -265,11 +265,25 @@ enum PolarSnippet {
     /// Generate it as a resource nested within a Project (either directly or
     /// indirectly). Grants modify/create permissions to `limited-collaborator`
     /// and above.
+    ///
+    /// Use this for resources that users with limited permissions should be
+    /// able to manage: instances, disks, snapshots, images, floating IPs, etc.
+    /// These are "regular" project resources that don't involve reconfiguring
+    /// network infrastructure.
     InProjectLimited,
 
     /// Generate it as a resource nested within a Project.
     /// Requires the full `collaborator` role (not `limited-collaborator`)
     /// to modify or create these resources.
+    ///
+    /// Use this for networking infrastructure resources: VPCs, subnets,
+    /// routers, internet gateways, and their children. Users with the
+    /// `limited-collaborator` role can still *read* these resources (via
+    /// viewer inheritance) but cannot create or modify them.
+    ///
+    /// This distinction allows organizations to restrict who can reconfigure
+    /// the network while still allowing those users to work with compute
+    /// resources.
     InProjectFull,
 }
 
