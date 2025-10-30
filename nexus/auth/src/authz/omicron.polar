@@ -138,7 +138,7 @@ resource Silo {
 	"list_children" if "viewer";
 	"read" if "viewer";
 
-	"create_child" if "limited-collaborator";
+	"create_child" if "collaborator";
 	"modify" if "admin";
 
 	# Permissions implied by roles on this resource's parent (Fleet).  Fleet

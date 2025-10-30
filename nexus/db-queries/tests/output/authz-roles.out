@@ -227,7 +227,7 @@ resource: Silo "silo1"
   fleet-viewer                      ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator                ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✔  ✘
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-admin                 ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-collaborator          ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
