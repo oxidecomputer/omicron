@@ -452,14 +452,17 @@ async fn test_limited_collaborator_can_create_instance(
         &params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
                 name: instance_name.parse().unwrap(),
-                description: "test instance created by limited-collaborator".to_string(),
+                description: "test instance created by limited-collaborator"
+                    .to_string(),
             },
             ncpus: omicron_common::api::external::InstanceCpuCount(2),
-            memory: omicron_common::api::external::ByteCount::from_gibibytes_u32(4),
+            memory:
+                omicron_common::api::external::ByteCount::from_gibibytes_u32(4),
             hostname: "test-instance".parse().unwrap(),
             user_data: vec![],
             ssh_public_keys: None,
-            network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
             boot_disk: None,
@@ -519,7 +522,8 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .await;
 
     // Test 1: Cannot create VPC subnet
-    let subnets_url = format!("/v1/vpc-subnets?project={}&vpc=default", project_name);
+    let subnets_url =
+        format!("/v1/vpc-subnets?project={}&vpc=default", project_name);
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &subnets_url)
             .body(Some(&params::VpcSubnetCreate {
@@ -542,7 +546,8 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     assert_eq!(error.message, "Forbidden");
 
     // Test 2: Cannot create VPC router
-    let routers_url = format!("/v1/vpc-routers?project={}&vpc=default", project_name);
+    let routers_url =
+        format!("/v1/vpc-routers?project={}&vpc=default", project_name);
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &routers_url)
             .body(Some(&params::VpcRouterCreate {
@@ -562,7 +567,8 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     assert_eq!(error.message, "Forbidden");
 
     // Test 3: Cannot create internet gateway
-    let igw_url = format!("/v1/internet-gateways?project={}&vpc=default", project_name);
+    let igw_url =
+        format!("/v1/internet-gateways?project={}&vpc=default", project_name);
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &igw_url)
             .body(Some(&params::InternetGatewayCreate {
@@ -732,7 +738,8 @@ async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
     assert_eq!(fip.identity.name, fip_name);
 
     // Test 2: Limited-collaborator CAN update a floating IP
-    let fip_url = format!("/v1/floating-ips/{}?project={}", fip_name, project_name);
+    let fip_url =
+        format!("/v1/floating-ips/{}?project={}", fip_name, project_name);
     let updated_fip: FloatingIp = NexusRequest::object_put(
         client,
         &fip_url,
