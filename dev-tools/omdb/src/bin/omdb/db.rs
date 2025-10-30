@@ -65,7 +65,6 @@ use nexus_db_errors::OptionalError;
 use nexus_db_lookup::DataStoreConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::CrucibleDataset;
-use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::DnsName;
 use nexus_db_model::DnsVersion;
@@ -116,7 +115,9 @@ use nexus_db_model::to_db_typed_uuid;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::CrucibleDisk;
 use nexus_db_queries::db::datastore::CrucibleTargets;
+use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::datastore::InstanceStateComputer;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
@@ -180,6 +181,7 @@ mod blueprints;
 mod db_metadata;
 mod ereport;
 mod saga;
+mod sitrep;
 mod user_data_export;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
@@ -378,6 +380,13 @@ enum DbCommands {
     RegionSnapshotReplacement(RegionSnapshotReplacementArgs),
     /// Commands for querying and interacting with sagas
     Saga(saga::SagaArgs),
+    /// Commands for querying and interacting with fault management situation
+    /// reports.
+    Sitrep(sitrep::SitrepArgs),
+    /// Show the current history of fault management situation reports.
+    ///
+    /// This is an alias for `omdb db sitrep history`.
+    Sitreps(sitrep::SitrepHistoryArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
     /// Print information about customer instances.
@@ -1297,6 +1306,12 @@ impl DbArgs {
                     DbCommands::Saga(args) => {
                         args.exec(&omdb, &opctx, &datastore).await
                     }
+                    DbCommands::Sitrep(args) => {
+                        sitrep::cmd_db_sitrep(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::Sitreps(args) => {
+                        sitrep::cmd_db_sitrep_history(&opctx, &datastore, &fetch_opts, args).await
+                    }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await
                     }
@@ -1910,7 +1925,7 @@ async fn cmd_db_disk_list(
 
     let disks = query
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .select(Disk::as_select())
+        .select(db::model::Disk::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading disks")?;
@@ -2096,11 +2111,10 @@ async fn cmd_db_rack_list(
     Ok(())
 }
 
-/// Run `omdb db disk info <UUID>`.
-async fn cmd_db_disk_info(
+async fn crucible_disk_info(
     opctx: &OpContext,
     datastore: &DataStore,
-    args: &DiskInfoArgs,
+    disk: CrucibleDisk,
 ) -> Result<(), anyhow::Error> {
     // The row describing the instance
     #[derive(Tabled)]
@@ -2125,20 +2139,17 @@ async fn cmd_db_disk_info(
         physical_disk: String,
     }
 
-    use nexus_db_schema::schema::disk::dsl as disk_dsl;
-
     let conn = datastore.pool_connection_for_tests().await?;
 
-    let disk = disk_dsl::disk
-        .filter(disk_dsl::id.eq(args.uuid))
-        .limit(1)
-        .select(Disk::as_select())
-        .load_async(&*conn)
-        .await
-        .context("loading requested disk")?;
+    let disk_name = disk.name().to_string();
 
-    let Some(disk) = disk.into_iter().next() else {
-        bail!("no disk: {} found", args.uuid);
+    let volume_id = disk.volume_id().to_string();
+
+    let disk_state = disk.runtime().disk_state.to_string();
+
+    let import_address = match disk.pantry_address() {
+        Some(ref pa) => pa.clone().to_string(),
+        None => "-".to_string(),
     };
 
     // For information about where this disk is attached.
@@ -2172,7 +2183,7 @@ async fn cmd_db_disk_info(
         };
 
         let instance_name = instance.instance().name().to_string();
-        let disk_name = disk.name().to_string();
+
         if instance.vmm().is_some() {
             let propolis_id =
                 instance.instance().runtime().propolis_id.unwrap();
@@ -2184,48 +2195,36 @@ async fn cmd_db_disk_info(
                 .await
                 .context("failed to look up sled")?;
 
-            let import_address = match disk.pantry_address {
-                Some(ref pa) => pa.clone().to_string(),
-                None => "-".to_string(),
-            };
             UpstairsRow {
                 host_serial: my_sled.serial_number().to_string(),
                 disk_name,
                 instance_name,
                 propolis_zone: format!("oxz_propolis-server_{}", propolis_id),
-                volume_id: disk.volume_id().to_string(),
-                disk_state: disk.runtime_state.disk_state.to_string(),
+                volume_id,
+                disk_state,
                 import_address,
             }
         } else {
-            let import_address = match disk.pantry_address {
-                Some(ref pa) => pa.clone().to_string(),
-                None => "-".to_string(),
-            };
             UpstairsRow {
                 host_serial: NOT_ON_SLED_MSG.to_string(),
                 disk_name,
                 instance_name,
                 propolis_zone: NO_ACTIVE_PROPOLIS_MSG.to_string(),
-                volume_id: disk.volume_id().to_string(),
-                disk_state: disk.runtime_state.disk_state.to_string(),
+                volume_id,
+                disk_state,
                 import_address,
             }
         }
     } else {
         // If the disk is not attached to anything, just print empty
         // fields.
-        let import_address = match disk.pantry_address {
-            Some(ref pa) => pa.clone().to_string(),
-            None => "-".to_string(),
-        };
         UpstairsRow {
             host_serial: "-".to_string(),
-            disk_name: disk.name().to_string(),
+            disk_name,
             instance_name: "-".to_string(),
             propolis_zone: "-".to_string(),
-            volume_id: disk.volume_id().to_string(),
-            disk_state: disk.runtime_state.disk_state.to_string(),
+            volume_id,
+            disk_state,
             import_address,
         }
     };
@@ -2274,7 +2273,21 @@ async fn cmd_db_disk_info(
     println!("{}", table);
 
     get_and_display_vcr(disk.volume_id(), datastore).await?;
+
     Ok(())
+}
+
+/// Run `omdb db disk info <UUID>`.
+async fn cmd_db_disk_info(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    args: &DiskInfoArgs,
+) -> Result<(), anyhow::Error> {
+    match datastore.disk_get(opctx, args.uuid).await? {
+        Disk::Crucible(disk) => {
+            crucible_disk_info(opctx, datastore, disk).await
+        }
+    }
 }
 
 // Given a UUID, search the database for a volume with that ID
@@ -2397,7 +2410,7 @@ async fn cmd_db_disk_physical(
             .context("loading region")?;
 
         for rs in regions {
-            volume_ids.insert(rs.volume_id().into_untyped_uuid());
+            volume_ids.insert(rs.volume_id());
         }
     }
 
@@ -2405,17 +2418,14 @@ async fn cmd_db_disk_physical(
     // that is part of a dataset on a pool on our disk.  The next step is
     // to find the virtual disks associated with these volume IDs and
     // display information about those disks.
-    use nexus_db_schema::schema::disk::dsl;
-    let mut query = dsl::disk.into_boxed();
-    if !fetch_opts.include_deleted {
-        query = query.filter(dsl::time_deleted.is_null());
-    }
 
-    let disks = query
-        .filter(dsl::volume_id.eq_any(volume_ids))
-        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
-        .select(Disk::as_select())
-        .load_async(&*conn)
+    let disks: Vec<CrucibleDisk> = datastore
+        .disks_get_matching_volumes(
+            &conn,
+            &volume_ids,
+            fetch_opts.include_deleted,
+            i64::from(u32::from(fetch_opts.fetch_limit)),
+        )
         .await
         .context("loading disks")?;
 
@@ -2989,7 +2999,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
         bs: String,
         bpe: u64,
         ec: u32,
-        gen: u64,
+        generation: u64,
         read_only: bool,
     }
 
@@ -3035,7 +3045,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
             block_size,
             blocks_per_extent,
             extent_count,
-            gen,
+            generation,
             opts,
         } => {
             let row = VCRRegion {
@@ -3043,7 +3053,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
                 bs: block_size.to_string(),
                 bpe: blocks_per_extent,
                 ec: extent_count,
-                gen,
+                generation,
                 read_only: opts.read_only,
             };
             let table = tabled::Table::new(&[row])
@@ -3472,26 +3482,20 @@ async fn volume_used_by(
     fetch_opts: &DbFetchOptions,
     volumes: &[Uuid],
 ) -> Result<Vec<VolumeUsedBy>, anyhow::Error> {
-    let disks_used: Vec<Disk> = {
-        let volumes = volumes.to_vec();
+    let disks_used: Vec<CrucibleDisk> = {
+        let conn = datastore.pool_connection_for_tests().await?;
+        let volumes: HashSet<VolumeUuid> = volumes
+            .iter()
+            .map(|id| VolumeUuid::from_untyped_uuid(*id))
+            .collect();
+
         datastore
-            .pool_connection_for_tests()
-            .await?
-            .transaction_async(async move |conn| {
-                use nexus_db_schema::schema::disk::dsl;
-
-                conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
-
-                paginated(
-                    dsl::disk,
-                    dsl::id,
-                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
-                )
-                .filter(dsl::volume_id.eq_any(volumes))
-                .select(Disk::as_select())
-                .load_async(&conn)
-                .await
-            })
+            .disks_get_matching_volumes(
+                &conn,
+                &volumes,
+                fetch_opts.include_deleted,
+                i64::from(u32::from(fetch_opts.fetch_limit)),
+            )
             .await?
     };
 
@@ -4632,7 +4636,7 @@ async fn cmd_db_instance_info(
     }
 
     let disks = query
-        .select(Disk::as_select())
+        .select(db::model::Disk::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .with_context(ctx)?;

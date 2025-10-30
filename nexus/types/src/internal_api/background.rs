@@ -23,7 +23,9 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
@@ -142,6 +144,39 @@ impl InstanceUpdaterStatus {
     }
 }
 
+/// The status of a `multicast_reconciler` background task activation.
+#[derive(Default, Serialize, Deserialize, Debug)]
+pub struct MulticastGroupReconcilerStatus {
+    /// Whether the multicast reconciler is disabled due to the feature not
+    /// being enabled.
+    ///
+    /// We use disabled here to match other background task status structs.
+    pub disabled: bool,
+    /// Number of multicast groups transitioned from "Creating" to "Active" state.
+    pub groups_created: usize,
+    /// Number of multicast groups cleaned up (fully removed after "Deleting").
+    pub groups_deleted: usize,
+    /// Number of active multicast groups verified on dataplane switches.
+    pub groups_verified: usize,
+    /// Number of members processed ("Joining"→"Joined", "Left" with
+    /// time_deleted→hard-deleted cleanup).
+    pub members_processed: usize,
+    /// Number of members deleted (Left + time_deleted).
+    pub members_deleted: usize,
+    /// Errors that occurred during reconciliation operations.
+    pub errors: Vec<String>,
+}
+
+impl MulticastGroupReconcilerStatus {
+    pub fn total_groups_processed(&self) -> usize {
+        self.groups_created + self.groups_deleted + self.groups_verified
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+}
+
 /// The status of an `instance_reincarnation` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {
@@ -157,7 +192,7 @@ pub struct InstanceReincarnationStatus {
     /// UUIDs of instances which changed state before they could be
     /// reincarnated.
     pub changed_state: Vec<ReincarnatableInstance>,
-    /// Any errors that occured while finding instances in need of reincarnation.
+    /// Any errors that occurred while finding instances in need of reincarnation.
     pub errors: Vec<String>,
     /// Errors that occurred while restarting individual instances.
     pub restart_errors: Vec<(ReincarnatableInstance, String)>,
@@ -387,8 +422,23 @@ pub enum TufArtifactReplicationOperation {
     Copy { hash: ArtifactHash, source_sled: SledUuid },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct TufRepoPrunerStatus {
+/// High-level status of the TUF repo pruner background task.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
+pub enum TufRepoPrunerStatus {
+    /// The TUF repo pruner is disabled.
+    Disabled {
+        /// The reason why the pruner is disabled.
+        reason: String,
+    },
+    /// The TUF repo pruner is enabled and ran successfully.
+    Enabled(TufRepoPrunerDetails),
+}
+
+/// Details about a TUF repo pruner run when the task is enabled.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TufRepoPrunerDetails {
     // Input
     /// how many recent releases we're configured to keep
     pub nkeep_recent_releases: u8,
@@ -408,7 +458,7 @@ pub struct TufRepoPrunerStatus {
     pub warnings: Vec<String>,
 }
 
-impl std::fmt::Display for TufRepoPrunerStatus {
+impl std::fmt::Display for TufRepoPrunerDetails {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn print_collection(c: &IdOrdMap<TufRepoInfo>) -> String {
             if c.is_empty() {
@@ -475,6 +525,22 @@ impl std::fmt::Display for TufRepoPrunerStatus {
     }
 }
 
+impl std::fmt::Display for TufRepoPrunerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TufRepoPrunerStatus::Disabled { reason } => {
+                writeln!(f, "    status: disabled")?;
+                writeln!(f, "    reason: {}", reason)?;
+                Ok(())
+            }
+            TufRepoPrunerStatus::Enabled(details) => {
+                writeln!(f, "    status: enabled")?;
+                details.fmt(f)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TufRepoInfo {
     pub id: TufRepoUuid,
@@ -505,25 +571,30 @@ pub struct BlueprintRendezvousStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStats {
-    pub debug_dataset: DebugDatasetsRendezvousStats,
+    pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
+    pub local_storage_dataset: DatasetsRendezvousStats,
 }
 
+/// Stats for the rendezvous table that stores Crucible datasets
+///
+/// These were created before reconfigurator so there are less fields than other
+/// reconfigurator managed rendezvous tables.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
 pub struct CrucibleDatasetsRendezvousStats {
-    /// Number of new Crucible datasets recorded.
+    /// Number of new datasets recorded.
     ///
-    /// This is a count of in-service Crucible datasets that were also present
-    /// in inventory and newly-inserted into `crucible_dataset`.
+    /// This is a count of in-service datasets that were also present in
+    /// inventory and newly-inserted into the associated table.
     pub num_inserted: usize,
-    /// Number of Crucible datasets that would have been inserted, except
-    /// records for them already existed.
+    /// Number of datasets that would have been inserted, except records for
+    /// them already existed.
     pub num_already_exist: usize,
-    /// Number of Crucible datasets that the current blueprint says are
-    /// in-service, but we did not attempt to insert them because they're not
-    /// present in the latest inventory collection.
+    /// Number of datasets that the current blueprint says are in-service, but
+    /// we did not attempt to insert them because they're not present in the
+    /// latest inventory collection.
     pub num_not_in_inventory: usize,
 }
 
@@ -543,31 +614,36 @@ impl slog::KV for CrucibleDatasetsRendezvousStats {
     }
 }
 
+/// Stats for rendezvous tables
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
-pub struct DebugDatasetsRendezvousStats {
-    /// Number of new Debug datasets recorded.
+pub struct DatasetsRendezvousStats {
+    /// Number of new datasets recorded.
     ///
-    /// This is a count of in-service Debug datasets that were also present
-    /// in inventory and newly-inserted into `rendezvous_debug_dataset`.
+    /// This is a count of in-service datasets that were also present in
+    /// inventory and newly-inserted into their table.
     pub num_inserted: usize,
-    /// Number of Debug datasets that would have been inserted, except
-    /// records for them already existed.
+
+    /// Number of datasets that would have been inserted, except records for
+    /// them already existed.
     pub num_already_exist: usize,
-    /// Number of Debug datasets that the current blueprint says are
-    /// in-service, but we did not attempt to insert them because they're not
-    /// present in the latest inventory collection.
+
+    /// Number of datasets that the current blueprint says are in-service, but
+    /// we did not attempt to insert them because they're not present in the
+    /// latest inventory collection.
     pub num_not_in_inventory: usize,
-    /// Number of Debug datasets that we tombstoned based on their disposition
-    /// in the current blueprint being expunged.
+
+    /// Number of datasets that we tombstoned based on their disposition in the
+    /// current blueprint being expunged.
     pub num_tombstoned: usize,
-    /// Number of Debug datasets that we would have tombstoned, except they were
+
+    /// Number of datasets that we would have tombstoned, except they were
     /// already tombstoned or deleted.
     pub num_already_tombstoned: usize,
 }
 
-impl slog::KV for DebugDatasetsRendezvousStats {
+impl slog::KV for DatasetsRendezvousStats {
     fn serialize(
         &self,
         _record: &slog::Record,
@@ -757,15 +833,55 @@ pub struct EreporterStatus {
     pub errors: Vec<String>,
 }
 
+/// The status of a `fm_sitrep_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepLoadStatus {
+    /// An error occurred.
+    Error(String),
+
+    /// There is no current sitrep.
+    NoSitrep,
+
+    /// We've loaded the most recent sitrep as of `time_loaded`.
+    Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
+}
+
+/// The status of a `fm_sitrep_gc` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepGcStatus {
+    pub orphaned_sitreps_found: usize,
+    pub orphaned_sitreps_deleted: usize,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeError {
+    /// ID of the sled we failed to send a probe to.
+    pub sled_id: SledUuid,
+    /// IP address of the sled we failed to send a probe to.
+    pub sled_ip: Ipv6Addr,
+    /// Error message describing the failure.
+    pub error: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeDistributorStatus {
+    /// Count of successfully sent probes to each sled.
+    pub probes_by_sled: HashMap<SledUuid, usize>,
+    /// Errors when sending a probe.
+    pub errors: Vec<ProbeError>,
+}
+
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;
+    use super::TufRepoPrunerDetails;
     use super::TufRepoPrunerStatus;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
 
     #[test]
-    fn test_display_tuf_repo_pruner_status() {
+    fn test_display_tuf_repo_pruner_status_enabled() {
         let repo1 = TufRepoInfo {
             id: "4e8a87a0-3102-4014-99d3-e1bf486685bd".parse().unwrap(),
             system_version: "1.2.3".parse().unwrap(),
@@ -778,7 +894,7 @@ mod test {
         };
         let repo_map: IdOrdMap<_> = std::iter::once(repo1.clone()).collect();
 
-        let status = TufRepoPrunerStatus {
+        let details = TufRepoPrunerDetails {
             nkeep_recent_releases: 1,
             nkeep_recent_uploads: 2,
             repos_keep_target_release: repo_map,
@@ -789,9 +905,22 @@ mod test {
                 .collect(),
             warnings: vec![String::from("fake-oh problem-oh")],
         };
+        let status = TufRepoPrunerStatus::Enabled(details);
 
         assert_contents(
-            "output/tuf_repo_pruner_status.out",
+            "output/tuf_repo_pruner_status_enabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_tuf_repo_pruner_status_disabled() {
+        let status = TufRepoPrunerStatus::Disabled {
+            reason: "disabled in this test".to_string(),
+        };
+
+        assert_contents(
+            "output/tuf_repo_pruner_status_disabled.out",
             &status.to_string(),
         );
     }

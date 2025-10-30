@@ -905,7 +905,7 @@ impl DataStore {
                     for dataset in datasets {
                         use nexus_db_schema::schema::crucible_dataset::dsl;
                         let zpool_id = dataset.pool_id();
-                        Zpool::insert_resource(
+                        let _: CrucibleDataset = Zpool::insert_resource(
                             zpool_id.into(),
                             diesel::insert_into(dsl::crucible_dataset)
                                 .values(dataset.clone())
@@ -1062,7 +1062,7 @@ mod test {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use async_bb8_diesel::AsyncSimpleConnection;
-    use id_map::IdMap;
+    use iddqd::IdOrdMap;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup};
@@ -1379,7 +1379,7 @@ mod test {
     }
 
     fn make_sled_config_only_zones(
-        blueprint_zones: BTreeMap<SledUuid, IdMap<BlueprintZoneConfig>>,
+        blueprint_zones: BTreeMap<SledUuid, IdOrdMap<BlueprintZoneConfig>>,
     ) -> BTreeMap<SledUuid, BlueprintSledConfig> {
         blueprint_zones
             .into_iter()
@@ -1389,8 +1389,8 @@ mod test {
                     BlueprintSledConfig {
                         state: SledState::Active,
                         sled_agent_generation: Generation::new().next(),
-                        disks: IdMap::new(),
-                        datasets: IdMap::new(),
+                        disks: IdOrdMap::new(),
+                        datasets: IdOrdMap::new(),
                         zones,
                         remove_mupdate_override: None,
                         host_phase_2:
@@ -1525,7 +1525,7 @@ mod test {
                 },
             ]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
         blueprint_zones.insert(
             sled2.id(),
@@ -1862,7 +1862,7 @@ mod test {
                 },
             ]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
 
         let datasets = vec![];
@@ -2113,7 +2113,7 @@ mod test {
                 image_source: BlueprintZoneImageSource::InstallDataset,
             }]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
 
         let datasets = vec![];
@@ -2358,7 +2358,7 @@ mod test {
                 image_source: BlueprintZoneImageSource::InstallDataset,
             }]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
         let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
@@ -2503,7 +2503,7 @@ mod test {
                 },
             ]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
 
         let blueprint_id = BlueprintUuid::new_v4();

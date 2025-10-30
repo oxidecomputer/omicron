@@ -428,6 +428,7 @@ async fn cmd_reconfigurator_config_history(
         version: String,
         planner_enabled: String,
         add_zones_with_mupdate_override: String,
+        tuf_repo_pruner_enabled: String,
         time_modified: String,
     }
 
@@ -441,6 +442,7 @@ async fn cmd_reconfigurator_config_history(
                         planner_enabled,
                         planner_config:
                             PlannerConfig { add_zones_with_mupdate_override },
+                        tuf_repo_pruner_enabled,
                     },
                 time_modified,
             } = s;
@@ -449,6 +451,7 @@ async fn cmd_reconfigurator_config_history(
                 planner_enabled: planner_enabled.to_string(),
                 add_zones_with_mupdate_override:
                     add_zones_with_mupdate_override.to_string(),
+                tuf_repo_pruner_enabled: tuf_repo_pruner_enabled.to_string(),
                 time_modified: time_modified.to_string(),
             }
         })

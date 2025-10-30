@@ -316,7 +316,6 @@ mod test {
     use crate::Sled;
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
-    use id_map::IdMap;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::config::Host;
     use internal_dns_types::config::Zone;
@@ -330,9 +329,9 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -691,7 +690,7 @@ mod test {
             // Convert the inventory `OmicronZonesConfig`s into
             // `BlueprintZoneConfig`s. This is going to get more painful over
             // time as we add to blueprints, but for now we can make this work.
-            let zones = ledgered_sled_config
+            let zones: IdOrdMap<_> = ledgered_sled_config
                 .zones
                 .into_iter()
                 .map(|config| -> BlueprintZoneConfig {
@@ -711,8 +710,8 @@ mod test {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     sled_agent_generation: ledgered_sled_config.generation,
-                    disks: IdMap::new(),
-                    datasets: IdMap::new(),
+                    disks: IdOrdMap::new(),
+                    datasets: IdOrdMap::new(),
                     zones,
                     remove_mupdate_override: None,
                     host_phase_2:
@@ -749,8 +748,13 @@ mod test {
         // not currently in service.
         let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
-        blueprint.sleds.values_mut().next().unwrap().zones.insert(
-            BlueprintZoneConfig {
+        blueprint
+            .sleds
+            .values_mut()
+            .next()
+            .unwrap()
+            .zones
+            .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
                     ready_for_cleanup: false,
@@ -768,8 +772,8 @@ mod test {
                     },
                 ),
                 image_source: BlueprintZoneImageSource::InstallDataset,
-            },
-        );
+            })
+            .expect("duplicate zone");
 
         // To generate the blueprint's DNS config, we need to make up a
         // different set of information about the Quiesced fake system.
@@ -1562,12 +1566,10 @@ mod test {
         }
         .build()
         .unwrap();
-        let collection = CollectionBuilder::new("test").build();
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
             &planning_input,
-            &collection,
             "test suite",
             PlannerRng::from_entropy(),
         )
@@ -1584,13 +1586,22 @@ mod test {
         // * 127.0.0.1 (Nexus)
         // * ::1 (external DNS)
         //
-        // However, when the builder compiles its list of "IPs already in use",
-        // it _ignores_ loopback addresses, meaning we still have two external
-        // IPs available for new zones (127.0.0.1 and ::1).
+        // However, when the allocator compiles its list of "IPs already in
+        // use", it _ignores_ loopback addresses, meaning we still have two
+        // external IPs available for new zones (127.0.0.1 and ::1).
+        let new_nexus_external_ip =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator")
+            .for_new_nexus()
+            .expect("found external IP for Nexus");
         builder
             .sled_add_zone_nexus(
                 sled_id,
                 BlueprintZoneImageSource::InstallDataset,
+                new_nexus_external_ip,
                 blueprint.nexus_generation,
             )
             .unwrap();

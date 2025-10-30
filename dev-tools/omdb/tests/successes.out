@@ -89,9 +89,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL                                    IP           ROLE      POLICY      STATE   ID                                   
- sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -102,9 +102,9 @@ EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL                                    IP           ROLE      POLICY      STATE   ID                                   
- sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -334,6 +334,14 @@ task: "external_endpoints"
     on each one
 
 
+task: "fm_sitrep_gc"
+    garbage collects fault management situation reports
+
+
+task: "fm_sitrep_loader"
+    loads the current fault management situation report from the database
+
+
 task: "instance_reincarnation"
     schedules start sagas for failed instances that can be automatically
     restarted
@@ -363,6 +371,11 @@ task: "metrics_producer_gc"
     unregisters Oximeter metrics producers that have not renewed their lease
 
 
+task: "multicast_reconciler"
+    reconciles multicast group and member state with dendrite switch
+    configuration
+
+
 task: "nat_garbage_collector"
     prunes soft-deleted NAT entries from nat_entry table based on a
     predetermined retention policy
@@ -374,6 +387,10 @@ task: "phantom_disks"
 
 task: "physical_disk_adoption"
     ensure new physical disks are automatically marked in-service
+
+
+task: "probe_distributor"
+    distributes networking probe zones to sleds
 
 
 task: "read_only_region_replacement_start"
@@ -580,6 +597,12 @@ task: "blueprint_rendezvous"
         num_inserted:         0
         num_already_exist:    0
         num_not_in_inventory: 0
+    local_storage_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -608,6 +631,19 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "fm_sitrep_gc"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    orphaned sitreps found:      0
+    orphaned sitreps deleted:    0
+
+task: "fm_sitrep_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    no FM situation report available to load
 
 task: "instance_reincarnation"
   configured period: every <REDACTED_DURATION>m
@@ -673,6 +709,12 @@ task: "metrics_producer_gc"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
 
+task: "multicast_reconciler"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "multicast_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "errors": Array [], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
+
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -685,6 +727,13 @@ task: "physical_disk_adoption"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
+
+task: "probe_distributor"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    succesfully-pushed probes: 0 total
+    errors while pushing probes: 0 total
 
 task: "read_only_region_replacement_start"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -838,6 +887,7 @@ task: "tuf_repo_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    status: enabled
     configuration:
         nkeep_recent_releases: 3
         nkeep_recent_uploads:  3
@@ -1115,6 +1165,12 @@ task: "blueprint_rendezvous"
         num_inserted:         0
         num_already_exist:    0
         num_not_in_inventory: 0
+    local_storage_dataset rendezvous counts:
+        num_inserted:           0
+        num_already_exist:      0
+        num_not_in_inventory:   0
+        num_tombstoned:         0
+        num_already_tombstoned: 0
 
 task: "crdb_node_id_collector"
   configured period: every <REDACTED_DURATION>m
@@ -1143,6 +1199,19 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "fm_sitrep_gc"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    orphaned sitreps found:      0
+    orphaned sitreps deleted:    0
+
+task: "fm_sitrep_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    no FM situation report available to load
 
 task: "instance_reincarnation"
   configured period: every <REDACTED_DURATION>m
@@ -1208,6 +1277,12 @@ task: "metrics_producer_gc"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
 
+task: "multicast_reconciler"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "multicast_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "errors": Array [], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
+
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1220,6 +1295,13 @@ task: "physical_disk_adoption"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
+
+task: "probe_distributor"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    succesfully-pushed probes: 0 total
+    errors while pushing probes: 0 total
 
 task: "read_only_region_replacement_start"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1373,6 +1455,7 @@ task: "tuf_repo_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    status: enabled
     configuration:
         nkeep_recent_releases: 3
         nkeep_recent_uploads:  3
@@ -1752,6 +1835,7 @@ stdout:
 Reconfigurator config:
     version: 1
     modified time: <REDACTED_TIMESTAMP>
+    tuf repo pruner enabled: true
     planner enabled: false
     planner config:
         add zones with mupdate override:   false
@@ -1784,30 +1868,30 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 Installed RoT Bootloader Software
-BASEBOARD_ID                                        STAGE0_VERSION STAGE0_NEXT_VERSION 
-FAKE_SIM_SIDECAR:SimSidecar0                        unknown        unknown             
-FAKE_SIM_SIDECAR:SimSidecar1                        unknown        unknown             
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown        unknown             
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown        unknown             
+BASEBOARD_ID                 STAGE0_VERSION STAGE0_NEXT_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0 unknown        unknown             
+FAKE_SIM_SIDECAR:SimSidecar1 unknown        unknown             
+i86pc:SimGimlet00            unknown        unknown             
+i86pc:SimGimlet01            unknown        unknown             
 
 Installed RoT Software
-BASEBOARD_ID                                        SLOT_A_VERSION   SLOT_B_VERSION                
-FAKE_SIM_SIDECAR:SimSidecar0                        unknown (active) unknown                       
-FAKE_SIM_SIDECAR:SimSidecar1                        unknown (active) unknown                       
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown          unknown (ACTIVE SLOT UNKNOWN) 
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown          unknown (ACTIVE SLOT UNKNOWN) 
+BASEBOARD_ID                 SLOT_A_VERSION   SLOT_B_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0 unknown (active) unknown        
+FAKE_SIM_SIDECAR:SimSidecar1 unknown (active) unknown        
+i86pc:SimGimlet00            unknown (active) unknown        
+i86pc:SimGimlet01            unknown (active) unknown        
 
 Installed SP Software
-BASEBOARD_ID                                        SLOT0_VERSION SLOT1_VERSION 
-FAKE_SIM_SIDECAR:SimSidecar0                        unknown       unknown       
-FAKE_SIM_SIDECAR:SimSidecar1                        unknown       unknown       
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown       unknown       
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown       unknown       
+BASEBOARD_ID                 SLOT0_VERSION SLOT1_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0 unknown       unknown       
+FAKE_SIM_SIDECAR:SimSidecar1 unknown       unknown       
+i86pc:SimGimlet00            unknown       unknown       
+i86pc:SimGimlet01            unknown       unknown       
 
 Installed Host Phase 1 Software
-BASEBOARD_ID                                        SLED_ID                              SLOT_A_VERSION SLOT_B_VERSION                
-sim-gimlet:sim-..........<REDACTED_UUID>........... ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
-sim-gimlet:sim-..........<REDACTED_UUID>........... ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
+BASEBOARD_ID      SLED_ID                              SLOT_A_VERSION   SLOT_B_VERSION 
+i86pc:SimGimlet00 ..........<REDACTED_UUID>........... unknown (active) unknown        
+i86pc:SimGimlet01 ..........<REDACTED_UUID>........... unknown (active) unknown        
 
 Installed Host Phase 2 Software
 SLED_ID                              SLOT_A_VERSION      SLOT_B_VERSION 
@@ -1832,7 +1916,8 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-*   planner enabled:   false -> true
+    tuf repo pruner enabled:   true (unchanged)
+*   planner enabled:::::::::   false -> true
     planner config:
         add zones with mupdate override:   false (unchanged)
 ---------------------------------------------
@@ -1844,7 +1929,8 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    planner enabled:   true (unchanged)
+    tuf repo pruner enabled:   true (unchanged)
+    planner enabled:::::::::   true (unchanged)
     planner config:
     *   add zones with mupdate override:   false -> true
 ---------------------------------------------
@@ -1858,6 +1944,7 @@ stdout:
 Reconfigurator config:
     version: 3
     modified time: <REDACTED_TIMESTAMP>
+    tuf repo pruner enabled: true
     planner enabled: true
     planner config:
         add zones with mupdate override:   true

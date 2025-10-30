@@ -1031,8 +1031,12 @@ mod tests {
                 .unwrap();
         }
 
-        let poll_interval = Duration::from_millis(1);
+        let logctx = &setup.logctx;
+
+        let poll_interval = Duration::from_millis(10);
         let poll_max = Duration::from_secs(10);
+
+        debug!(logctx.log, "BEFORE initial connection");
 
         // Wait for all nodes have `num_nodes - 1` established connections
         wait_for_condition(
@@ -1062,9 +1066,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Pause time so we can jump it for reconnects
-        tokio::time::pause();
-
         // Killing a single node should cause all other nodes to start
         // reconnecting. This should cause the task id counter to start
         // incrementing at all nodes and for their to be one fewer established
@@ -1073,9 +1074,6 @@ mod tests {
         h.shutdown().await.unwrap();
         setup.join_handles.pop().unwrap();
         let stopped_addr = h.listen_addr;
-
-        // Speed up reconnection in the test
-        tokio::time::advance(RECONNECT_TIME).await;
 
         let poll_interval = Duration::from_millis(50);
         wait_for_condition(
@@ -1107,6 +1105,10 @@ mod tests {
                 if valid == num_nodes - 1 {
                     Ok(())
                 } else {
+                    // Speed up reconnection in the test
+                    tokio::time::pause();
+                    tokio::time::advance(RECONNECT_TIME).await;
+                    tokio::time::resume();
                     Err(CondCheckError::<()>::NotYet)
                 }
             },
@@ -1115,6 +1117,8 @@ mod tests {
         )
         .await
         .unwrap();
+
+        debug!(logctx.log, "AFTER poll for conns with node down");
 
         // Now let's bring back up the old node and ensure full connectivity again
         let (mut task, handle) = NodeTask::new(
@@ -1133,12 +1137,15 @@ mod tests {
             h.load_peer_addresses(listen_addrs.clone()).await.unwrap();
         }
 
+        debug!(logctx.log, "BEFORE last poll for conns with all nodes up");
+
         // Wait for all nodes have `num_nodes - 1` established connections
         wait_for_condition(
             async || {
                 let mut count = 0;
                 for h in &setup.node_handles {
                     let status = h.conn_mgr_status().await.unwrap();
+                    debug!(logctx.log, "{status:#?}");
                     if status
                         .connections
                         .iter()
@@ -1151,6 +1158,10 @@ mod tests {
                 if count == num_nodes {
                     Ok(())
                 } else {
+                    // Speed up reconnection in the test
+                    tokio::time::pause();
+                    tokio::time::advance(RECONNECT_TIME).await;
+                    tokio::time::resume();
                     Err(CondCheckError::<()>::NotYet)
                 }
             },
@@ -1159,6 +1170,8 @@ mod tests {
         )
         .await
         .unwrap();
+
+        debug!(logctx.log, "BEFORE CLEANUP");
 
         setup.cleanup_successful();
     }

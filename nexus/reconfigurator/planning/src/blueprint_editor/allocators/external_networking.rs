@@ -7,6 +7,7 @@ use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
@@ -31,6 +32,8 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use strum::IntoEnumIterator as _;
 
+use crate::blueprint_builder::BlueprintBuilder;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ExternalNetworkingError {
     #[error("no external DNS IP addresses are available")]
@@ -46,7 +49,7 @@ pub enum ExternalNetworkingError {
 }
 
 #[derive(Debug)]
-pub(super) struct ExternalNetworkingAllocator {
+pub struct ExternalNetworkingAllocator {
     // These fields mirror how RSS chooses addresses for zone NICs.
     boundary_ntp_v4_ips: AvailableIterator<'static, Ipv4Addr>,
     boundary_ntp_v6_ips: AvailableIterator<'static, Ipv6Addr>,
@@ -67,7 +70,38 @@ pub(super) struct ExternalNetworkingAllocator {
 }
 
 impl ExternalNetworkingAllocator {
-    pub(super) fn new<'b>(
+    /// Construct an `ExternalNetworkingAllocator` that hands out IPs based on
+    /// `external_ip_policy`, treating any IPs used by in-service zones
+    /// in `blueprint` as already-in-use.
+    #[cfg(test)]
+    pub(crate) fn from_blueprint(
+        blueprint: &nexus_types::deployment::Blueprint,
+        external_ip_policy: &ExternalIpPolicy,
+    ) -> anyhow::Result<Self> {
+        Self::new(
+            blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .map(|(_sled_id, zone)| zone),
+            external_ip_policy,
+        )
+    }
+
+    /// Construct an `ExternalNetworkingAllocator` that hands out IPs based on
+    /// `external_ip_policy`, treating any IPs used by in-service zones
+    /// described by `builder` as already-in-use.
+    pub fn from_current_zones(
+        builder: &BlueprintBuilder<'_>,
+        external_ip_policy: &ExternalIpPolicy,
+    ) -> anyhow::Result<Self> {
+        Self::new(
+            builder
+                .current_zones(BlueprintZoneDisposition::is_in_service)
+                .map(|(_sled_id, zone)| zone),
+            external_ip_policy,
+        )
+    }
+
+    fn new<'b>(
         running_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
         external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {
@@ -264,7 +298,7 @@ impl ExternalNetworkingAllocator {
         })
     }
 
-    pub(super) fn for_new_nexus(
+    pub fn for_new_nexus(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
         let external_ip = self.external_ip_alloc.claim_next_exclusive_ip()?;
@@ -301,7 +335,7 @@ impl ExternalNetworkingAllocator {
         })
     }
 
-    pub(super) fn for_new_boundary_ntp(
+    pub fn for_new_boundary_ntp(
         &mut self,
     ) -> Result<ExternalSnatNetworkingChoice, ExternalNetworkingError> {
         let snat_cfg = self.external_ip_alloc.claim_next_snat_ip()?;
@@ -338,7 +372,7 @@ impl ExternalNetworkingAllocator {
         })
     }
 
-    pub(super) fn for_new_external_dns(
+    pub fn for_new_external_dns(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
         let external_ip = self
@@ -381,19 +415,19 @@ impl ExternalNetworkingAllocator {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ExternalNetworkingChoice {
-    pub(crate) external_ip: IpAddr,
-    pub(crate) nic_ip: IpAddr,
-    pub(crate) nic_subnet: IpNet,
-    pub(crate) nic_mac: MacAddr,
+pub struct ExternalNetworkingChoice {
+    pub external_ip: IpAddr,
+    pub nic_ip: IpAddr,
+    pub nic_subnet: IpNet,
+    pub nic_mac: MacAddr,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ExternalSnatNetworkingChoice {
-    pub(crate) snat_cfg: SourceNatConfig,
-    pub(crate) nic_ip: IpAddr,
-    pub(crate) nic_subnet: IpNet,
-    pub(crate) nic_mac: MacAddr,
+pub struct ExternalSnatNetworkingChoice {
+    pub snat_cfg: SourceNatConfig,
+    pub nic_ip: IpAddr,
+    pub nic_subnet: IpNet,
+    pub nic_mac: MacAddr,
 }
 
 /// Combines a base iterator with an `in_use` set, filtering out any elements

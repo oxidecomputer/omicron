@@ -576,8 +576,8 @@ source.type = "prebuilt"
 source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
-source.commit = "6bd2660d651332f38949cdfd3d23d751ca54b120"
-source.sha256 = "bf38d83d61ea7b2923fc7bd3aa563627e1f270b4bf18b1fc7bc744ddedc3b8bc"
+source.commit = "669fe557b66f44aed3c622bd17bc092f08797e0c"
+source.sha256 = "a32b40a0581bab2d90f6f691ef17fcfb1c5925798afb7f8ab86e6ece168e637d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -595,10 +595,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "75ea3408643664877aa603ffc65996ed6dc34c0a"
+source.commit = "7103cd3a3d7b0112d2949dd135db06fef0c156bb"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "fd0e150de5792a1d04b2cf4c4754d828284227ee4526ea5d08b01cfa71e2dd6a"
+source.sha256 = "8e245572e4b8d1c018884268a6afdf7f79efc22e61b4ed5b5526957bf61ccdcd"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -607,27 +607,27 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "75ea3408643664877aa603ffc65996ed6dc34c0a"
+source.commit = "7103cd3a3d7b0112d2949dd135db06fef0c156bb"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "096b56c0db4e28a8bb216ee3bf96c06040a764101d8a3f497a175cf790613bd2"
+source.sha256 = "7998ddb0bda4c97e3d5fec7c8079bbdfb27ef06dba69ab2867278dc2cd7544f4"
 output.type = "zone"
 output.intermediate_only = true
 
-[package.crucible-dtrace]
-# This package contains a select set of DTrace script that operate on DTrace
+[package.crucible-utils]
+# This package contains a select set of tools an DTrace scripts that operate on DTrace
 # probes that exist for consumers of the crucible upstairs library.  These
 # scripts are extracted onto the global zone.  The source commit here should
 # match a version of Crucible that contain probes used by the upstairs.  In most
 # cases this means the version of Crucible that Propolis is using.
-service_name = "crucible_dtrace"
+service_name = "crucible_utils"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "75ea3408643664877aa603ffc65996ed6dc34c0a"
+source.commit = "7103cd3a3d7b0112d2949dd135db06fef0c156bb"
 # The SHA256 digest is automatically posted to:
-# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-dtrace.sha256.txt
-source.sha256 = "46d1ec24e068124f33d3fbc2bcb4246c886089da95ba76a0a69a8facee1dc8ec"
+# https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-utils.sha256.txt
+source.sha256 = "cc661b84fd258467ec1961e8c9879f76d2d07903fb9161012afa75c37490e24f"
 output.type = "tarball"
 
 # Refer to
@@ -638,10 +638,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "aaa51291b747928a1d69e4b6059a54163d4d2e6d"
+source.commit = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "9c5aee66f1b70d63cc0cbc02ad15821614691678563c5f9375632c72b1696761"
+source.sha256 = "e71b9f6544d753a7710e2295434d4c481599019026c698a492c9e38d659a86b0"
 output.type = "zone"
 
 [package.mg-ddm-gz]

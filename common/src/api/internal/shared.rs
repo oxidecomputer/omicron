@@ -943,6 +943,9 @@ pub enum DatasetKind {
 
     // Other datasets
     Debug,
+
+    /// Used for transient storage, contains volumes delegated to VMMs
+    LocalStorage,
 }
 
 impl Serialize for DatasetKind {
@@ -998,12 +1001,20 @@ impl DatasetKind {
     }
 
     /// Returns true if this dataset is delegated to a non-global zone.
+    ///
+    /// Note: the `zoned` property of a dataset controls whether or not a
+    /// dataset is managed from a non-global zone. This function's intent is
+    /// different in the sense that it's asking whether or not a dataset will be
+    /// delegated to a non-global zone, not managed by a non-global zone.
     pub fn zoned(&self) -> bool {
         use DatasetKind::*;
         match self {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
-            TransientZoneRoot | TransientZone { .. } | Debug => false,
+
+            TransientZoneRoot | TransientZone { .. } | Debug | LocalStorage => {
+                false
+            }
         }
     }
 
@@ -1041,6 +1052,7 @@ impl fmt::Display for DatasetKind {
                 return Ok(());
             }
             Debug => "debug",
+            LocalStorage => "local_storage",
         };
         write!(f, "{}", s)
     }
@@ -1067,6 +1079,7 @@ impl FromStr for DatasetKind {
             "internal_dns" => InternalDns,
             "zone" => TransientZoneRoot,
             "debug" => Debug,
+            "local_storage" => LocalStorage,
             other => {
                 if let Some(name) = other.strip_prefix("zone/") {
                     TransientZone { name: name.to_string() }
@@ -1162,6 +1175,7 @@ mod tests {
             DatasetKind::TransientZoneRoot,
             DatasetKind::TransientZone { name: String::from("myzone") },
             DatasetKind::Debug,
+            DatasetKind::LocalStorage,
         ];
 
         assert_eq!(kinds.len(), DatasetKind::COUNT);

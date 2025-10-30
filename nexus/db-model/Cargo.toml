@@ -62,3 +62,5 @@ tufaceous-artifact.workspace = true
 camino-tempfile.workspace = true
 expectorate.workspace = true
 regex.workspace = true
+proptest.workspace = true
+test-strategy.workspace = true

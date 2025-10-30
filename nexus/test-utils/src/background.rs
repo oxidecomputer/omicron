@@ -54,9 +54,29 @@ pub async fn wait_background_task(
 
 /// Given the name of a background task, activate it, then wait for it to
 /// complete. Return the `BackgroundTask` object from this invocation.
+///
+/// The `timeout` parameter controls how long to wait for the task to go idle
+/// before activating it, and how long to wait for it to complete after
+/// activation. Defaults to 10 seconds if not specified.
 pub async fn activate_background_task(
     lockstep_client: &ClientTestContext,
     task_name: &str,
+) -> BackgroundTask {
+    activate_background_task_with_timeout(
+        lockstep_client,
+        task_name,
+        Duration::from_secs(10),
+    )
+    .await
+}
+
+/// Like `activate_background_task`, but with a configurable timeout.
+///
+/// Use this variant when you need a longer timeout.
+pub async fn activate_background_task_with_timeout(
+    lockstep_client: &ClientTestContext,
+    task_name: &str,
+    timeout: Duration,
 ) -> BackgroundTask {
     // If it is running, wait for an existing task to complete - this function
     // has to wait for _this_ activation to finish.
@@ -83,7 +103,7 @@ pub async fn activate_background_task(
             Err(CondCheckError::<()>::NotYet)
         },
         &Duration::from_millis(50),
-        &Duration::from_secs(10),
+        &timeout,
     )
     .await
     .expect("task never went to idle");
@@ -163,7 +183,7 @@ pub async fn activate_background_task(
             }
         },
         &Duration::from_millis(50),
-        &Duration::from_secs(60),
+        &timeout,
     )
     .await
     .unwrap();
