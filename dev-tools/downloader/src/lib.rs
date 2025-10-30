@@ -228,7 +228,6 @@ impl<'a> Downloader<'a> {
     async fn build_from_git(
         &self,
         project: &str,
-        repo_url: &str,
         commit: &str,
         binaries: &[(&str, &[&str])], // (binary_name, cargo_args)
     ) -> Result<Vec<Utf8PathBuf>> {
@@ -258,12 +257,13 @@ impl<'a> Downloader<'a> {
         let temp_path = Utf8PathBuf::try_from(temp_dir.path().to_path_buf())?;
 
         // Clone and checkout the specific commit
+        let repo_url = format!("https://github.com/oxidecomputer/{}", project);
         info!(self.log, "Cloning {repo_url}");
         let mut clone_cmd = Command::new("git");
         clone_cmd
             .arg("clone")
             .arg("--filter=blob:none")
-            .arg(repo_url)
+            .arg(&repo_url)
             .arg(&temp_path);
 
         let clone_output = clone_cmd.output().await?;
@@ -293,6 +293,7 @@ impl<'a> Downloader<'a> {
             let mut build_cmd = Command::new("cargo");
             build_cmd
                 .arg("build")
+                .arg("--release")
                 .arg("--bin")
                 .arg(binary_name)
                 .args(*cargo_args)
@@ -304,11 +305,9 @@ impl<'a> Downloader<'a> {
                 bail!("Failed to build {binary_name}: {stderr}");
             }
 
-            // Determine source path based on whether --release was used
-            let is_release = cargo_args.contains(&"--release");
-            let profile = if is_release { "release" } else { "debug" };
+            // Always build in release mode
             let source_path =
-                temp_path.join("target").join(profile).join(binary_name);
+                temp_path.join("target").join("release").join(binary_name);
 
             if !source_path.exists() {
                 bail!("Expected binary not found at {source_path}");
@@ -850,18 +849,12 @@ impl Downloader<'_> {
                 info!(self.log, "Building dendrite from source for macOS");
 
                 let binaries = [
-                    ("dpd", &["--release", "--features=tofino_stub"][..]),
-                    ("swadm", &["--release"][..]),
+                    ("dpd", &["--features=tofino_stub"][..]),
+                    ("swadm", &[][..]),
                 ];
 
-                let built_binaries = self
-                    .build_from_git(
-                        "dendrite",
-                        "https://github.com/oxidecomputer/dendrite",
-                        &commit,
-                        &binaries,
-                    )
-                    .await?;
+                let built_binaries =
+                    self.build_from_git("dendrite", &commit, &binaries).await?;
 
                 // Copy built binaries to bin_dir
                 for (binary_path, (binary_name, _)) in
@@ -939,12 +932,7 @@ impl Downloader<'_> {
                 let binaries = [("mgd", &["--no-default-features"][..])];
 
                 let built_binaries = self
-                    .build_from_git(
-                        "maghemite",
-                        "https://github.com/oxidecomputer/maghemite",
-                        &commit,
-                        &binaries,
-                    )
+                    .build_from_git("maghemite", &commit, &binaries)
                     .await?;
 
                 // Copy built binary to binary_dir
