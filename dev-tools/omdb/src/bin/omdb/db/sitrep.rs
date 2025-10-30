@@ -290,7 +290,7 @@ async fn cmd_db_sitrep_show(
         ),
         Some(fm::SitrepVersion { version, time_made_current, .. }) => {
             let current_version =
-                datastore.fm_get_current_sitrep_version(&opctx).await;
+                datastore.fm_current_sitrep_version(&opctx).await;
             if matches!(current_version, Ok(Some(ref v)) if v.id == id) {
                 println!("    {STATUS:>WIDTH$}: this is the current sitrep!",);
             } else {

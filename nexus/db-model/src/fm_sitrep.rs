@@ -2,7 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Types for representing fault management sitreps in the database.
+//! Types for representing fault management situation reports (sitreps) in the
+//! database.
+//!
+//! The fault management sitrep, and the ways in which it is represented in
+//! CRDB, is described in detail in [RFD
+//! 603](https://rfd.shared.oxide.computer/rfd/0603).
+//!
+//! These types are used when inserting and reading sitreps in CRDB; when in
+//! use, the sitrep is represented as a [`nexus_types::fm::Sitrep`]. See the
+//! documentation in [`nexus_types::fm`] for more information.
 
 use crate::SqlU32;
 use crate::typed_uuid::DbTypedUuid;

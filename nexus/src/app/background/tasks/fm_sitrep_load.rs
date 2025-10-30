@@ -81,7 +81,7 @@ impl SitrepLoader {
         let time_loaded = Utc::now();
         let current_version: SitrepVersion = match self
             .datastore
-            .fm_get_current_sitrep_version(opctx)
+            .fm_current_sitrep_version(opctx)
             .await
         {
             Ok(Some(version)) => version.into(),

@@ -34,20 +34,23 @@ use omicron_uuid_kinds::SitrepUuid;
 use uuid::Uuid;
 
 impl DataStore {
-    pub async fn fm_get_current_sitrep_version(
+    /// Reads the current [sitrep version](fm::SitrepVersion) from CRDB.
+    ///
+    /// If no sitreps have been generated, this returns `None`.
+    pub async fn fm_current_sitrep_version(
         &self,
         opctx: &OpContext,
     ) -> Result<Option<fm::SitrepVersion>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         let version = self
-            .fm_get_current_sitrep_version_on_conn(&conn)
+            .fm_current_sitrep_version_on_conn(&conn)
             .await?
             .map(Into::into);
         Ok(version)
     }
 
-    async fn fm_get_current_sitrep_version_on_conn(
+    async fn fm_current_sitrep_version_on_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Option<model::SitrepVersion>, Error> {
@@ -60,17 +63,17 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    /// Reads the [`fm::SitrepMetadata`] describing the sitrep with the given
+    /// ID, if one exists.
     pub async fn fm_sitrep_metadata_read(
         &self,
         opctx: &OpContext,
         id: SitrepUuid,
-    ) -> Result<Option<fm::SitrepMetadata>, Error> {
+    ) -> Result<fm::SitrepMetadata, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let meta = self
-            .fm_sitrep_metadata_read_on_conn(id, &conn)
-            .await?
-            .map(Into::into);
+        let meta =
+            self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
         Ok(meta)
     }
 
@@ -78,23 +81,34 @@ impl DataStore {
         &self,
         id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<Option<model::SitrepMetadata>, Error> {
+    ) -> Result<model::SitrepMetadata, Error> {
         sitrep_dsl::fm_sitrep
             .filter(sitrep_dsl::id.eq(id.into_untyped_uuid()))
             .select(model::SitrepMetadata::as_select())
             .first_async(conn)
             .await
             .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .ok_or_else(|| {
+                Error::non_resourcetype_not_found(format!("sitrep {id:?}"))
+            })
     }
 
+    /// Reads the *entire* current sitrep, along with its version.
+    ///
+    /// This is equivalent to reading the current sitrep version using
+    /// [`DataStore::fm_current_sitrep_version`], and then reading the sitrep
+    /// itself using [`DataStore::fm_sitrep_read_on_conn`].
+    ///
+    /// If this method returns `None`, there is no current sitrep, meaning that
+    /// no sitreps have been created.
     pub async fn fm_sitrep_read_current(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<(fm::SitrepVersion, fm::Sitrep)>, Error> {
+    ) -> Result<Option<(fm::SitrepVersion, Sitrep)>, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         let version: fm::SitrepVersion =
-            match self.fm_get_current_sitrep_version_on_conn(&conn).await? {
+            match self.fm_current_sitrep_version_on_conn(&conn).await? {
                 Some(version) => version.into(),
                 None => return Ok(None),
             };
@@ -102,6 +116,7 @@ impl DataStore {
         Ok(Some((version, sitrep)))
     }
 
+    /// Reads the entire content of the sitrep with the provided ID, if one exists.
     pub async fn fm_sitrep_read(
         &self,
         opctx: &OpContext,
@@ -117,13 +132,8 @@ impl DataStore {
         id: SitrepUuid,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Sitrep, Error> {
-        let metadata = self
-            .fm_sitrep_metadata_read_on_conn(id, &conn)
-            .await?
-            .ok_or_else(|| {
-                Error::non_resourcetype_not_found(format!("sitrep {id:?}"))
-            })?
-            .into();
+        let metadata =
+            self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
         // TODO(eliza): this is where we would read all the other sitrep data,
         // if there was any.
