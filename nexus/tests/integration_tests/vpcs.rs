@@ -23,6 +23,7 @@ use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::{RouteDestination, RouteTarget};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -476,4 +477,289 @@ async fn test_limited_collaborator_can_create_instance(
     .unwrap();
 
     assert_eq!(instance.identity.name, instance_name);
+}
+
+#[nexus_test]
+async fn test_limited_collaborator_blocked_from_networking_resources(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create IP pool and project
+    create_default_ip_pool(client).await;
+    let project_name = "test-project";
+    create_project(&client, &project_name).await;
+
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    let silo: Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Create a local user with limited-collaborator role at the silo level
+    let limited_user = create_local_user(
+        client,
+        &silo,
+        &"limited-networking-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::LimitedCollaborator,
+        limited_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Test 1: Cannot create VPC subnet
+    let subnets_url = format!("/v1/vpc-subnets?project={}&vpc=default", project_name);
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &subnets_url)
+            .body(Some(&params::VpcSubnetCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "forbidden-subnet".parse().unwrap(),
+                    description: "should not be created".to_string(),
+                },
+                ipv4_block: "10.0.1.0/24".parse().unwrap(),
+                ipv6_block: None,
+                custom_router: None,
+            }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "Forbidden");
+
+    // Test 2: Cannot create VPC router
+    let routers_url = format!("/v1/vpc-routers?project={}&vpc=default", project_name);
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &routers_url)
+            .body(Some(&params::VpcRouterCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "forbidden-router".parse().unwrap(),
+                    description: "should not be created".to_string(),
+                },
+            }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "Forbidden");
+
+    // Test 3: Cannot create internet gateway
+    let igw_url = format!("/v1/internet-gateways?project={}&vpc=default", project_name);
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &igw_url)
+            .body(Some(&params::InternetGatewayCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "forbidden-gateway".parse().unwrap(),
+                    description: "should not be created".to_string(),
+                },
+            }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "Forbidden");
+
+    // Setup for remaining tests: Create IGW and router as privileged user
+    let igw_name = "test-gateway";
+    let _igw = NexusRequest::objects_post(
+        client,
+        &igw_url,
+        &params::InternetGatewayCreate {
+            identity: IdentityMetadataCreateParams {
+                name: igw_name.parse().unwrap(),
+                description: "test gateway".to_string(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("privileged user should create gateway")
+    .parsed_body::<nexus_types::external_api::views::InternetGateway>()
+    .unwrap();
+
+    let router_name = "test-router";
+    let _router = NexusRequest::objects_post(
+        client,
+        &routers_url,
+        &params::VpcRouterCreate {
+            identity: IdentityMetadataCreateParams {
+                name: router_name.parse().unwrap(),
+                description: "test router".to_string(),
+            },
+        },
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("privileged user should create router")
+    .parsed_body::<nexus_types::external_api::views::VpcRouter>()
+    .unwrap();
+
+    // Test 4: Cannot create router route
+    let routes_url = format!(
+        "/v1/vpc-router-routes?project={}&vpc=default&router={}",
+        project_name, router_name
+    );
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &routes_url)
+            .body(Some(&params::RouterRouteCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "forbidden-route".parse().unwrap(),
+                    description: "should not be created".to_string(),
+                },
+                target: RouteTarget::Ip("192.168.1.1".parse().unwrap()),
+                destination: RouteDestination::Ip("10.0.2.0".parse().unwrap()),
+            }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "Forbidden");
+
+    // Test 5: Cannot attach IP pool to internet gateway
+    let pool_attach_url = format!(
+        "/v1/internet-gateway-ip-pools?project={}&vpc=default&gateway={}",
+        project_name, igw_name
+    );
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &pool_attach_url)
+            .body(Some(&params::InternetGatewayIpPoolCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "forbidden-pool-attach".parse().unwrap(),
+                    description: "should not be created".to_string(),
+                },
+                ip_pool: "default".parse().unwrap(),
+            }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "Forbidden");
+}
+
+#[nexus_test]
+async fn test_limited_collaborator_can_manage_floating_ips_and_nics(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create IP pool and project (with default VPC and subnet)
+    create_default_ip_pool(client).await;
+    let project_name = "test-project";
+    create_project(&client, &project_name).await;
+
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    let silo: Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Create a local user with limited-collaborator role at the silo level
+    let limited_user = create_local_user(
+        client,
+        &silo,
+        &"limited-fip-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::LimitedCollaborator,
+        limited_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Test 1: Limited-collaborator CAN create a floating IP
+    let fips_url = format!("/v1/floating-ips?project={}", project_name);
+    let fip_name = "test-fip";
+    use nexus_types::external_api::views::FloatingIp;
+    let fip: FloatingIp = NexusRequest::objects_post(
+        client,
+        &fips_url,
+        &params::FloatingIpCreate {
+            identity: IdentityMetadataCreateParams {
+                name: fip_name.parse().unwrap(),
+                description: "test floating ip".to_string(),
+            },
+            ip: None,
+            pool: None,
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("limited-collaborator should be able to create floating IP")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(fip.identity.name, fip_name);
+
+    // Test 2: Limited-collaborator CAN update a floating IP
+    let fip_url = format!("/v1/floating-ips/{}?project={}", fip_name, project_name);
+    let updated_fip: FloatingIp = NexusRequest::object_put(
+        client,
+        &fip_url,
+        Some(&params::FloatingIpUpdate {
+            identity: IdentityMetadataUpdateParams {
+                name: Some(fip_name.parse().unwrap()),
+                description: Some("updated description".to_string()),
+            },
+        }),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("limited-collaborator should be able to update floating IP")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(updated_fip.identity.description, "updated description");
+
+    // Test 3: Limited-collaborator CAN delete a floating IP
+    NexusRequest::object_delete(client, &fip_url)
+        .authn_as(AuthnMode::SiloUser(limited_user.id))
+        .execute()
+        .await
+        .expect("limited-collaborator should be able to delete floating IP");
+
+    // Note: We don't explicitly test NIC CRUD here because:
+    // - NIC creation is tested in test_limited_collaborator_can_create_instance
+    //   (NICs are created as part of instance creation)
+    // - The key authorization check (Read on VpcSubnet) is what we fixed
 }
