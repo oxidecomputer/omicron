@@ -760,7 +760,12 @@ has_relation(silo: Silo, "parent_silo", scim_client_bearer_token_list: ScimClien
 has_relation(fleet: Fleet, "parent_fleet", collection: ScimClientBearerTokenList)
 	if collection.silo.fleet = fleet;
 
-# Describes the policy for managing project networking
+# VpcList is a synthetic resource for controlling VPC creation.
+# Unlike other project resources, VPC creation requires the full "collaborator"
+# role rather than "limited-collaborator", enforcing the networking restriction.
+# This allows organizations to restrict who can reconfigure the network topology
+# while still allowing users with limited-collaborator to work with compute
+# resources (instances, disks, etc.) within the existing network.
 resource VpcList {
 	permissions = [ "list_children", "create_child" ];
 

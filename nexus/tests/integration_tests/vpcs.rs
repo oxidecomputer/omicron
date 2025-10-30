@@ -23,7 +23,12 @@ use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
-use omicron_common::api::external::{RouteDestination, RouteTarget};
+use omicron_common::api::external::{
+    RouteDestination, RouteTarget, VpcFirewallRuleAction,
+    VpcFirewallRuleDirection, VpcFirewallRuleFilter, VpcFirewallRulePriority,
+    VpcFirewallRuleStatus, VpcFirewallRuleTarget, VpcFirewallRuleUpdate,
+    VpcFirewallRuleUpdateParams,
+};
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -521,6 +526,28 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     )
     .await;
 
+    // Test 0: Cannot create VPC
+    let vpcs_url = format!("/v1/vpcs?project={}", project_name);
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &vpcs_url)
+            .body(Some(&params::VpcCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "forbidden-vpc".parse().unwrap(),
+                    description: "should not be created".to_string(),
+                },
+                ipv6_prefix: None,
+                dns_name: "forbidden".parse().unwrap(),
+            }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "Forbidden");
+
     // Test 1: Cannot create VPC subnet
     let subnets_url =
         format!("/v1/vpc-subnets?project={}&vpc=default", project_name);
@@ -663,6 +690,40 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
                 },
                 ip_pool: "default".parse().unwrap(),
             }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+    assert_eq!(error.message, "Forbidden");
+
+    // Test 6: Cannot modify VPC firewall rules
+    let firewall_url =
+        format!("/v1/vpc-firewall-rules?project={}&vpc=default", project_name);
+    let new_rules = VpcFirewallRuleUpdateParams {
+        rules: vec![VpcFirewallRuleUpdate {
+            name: "forbidden-rule".parse().unwrap(),
+            action: VpcFirewallRuleAction::Allow,
+            description: "should not be created".to_string(),
+            status: VpcFirewallRuleStatus::Enabled,
+            targets: vec![VpcFirewallRuleTarget::Vpc(
+                "default".parse().unwrap(),
+            )],
+            filters: VpcFirewallRuleFilter {
+                hosts: None,
+                ports: None,
+                protocols: None,
+            },
+            direction: VpcFirewallRuleDirection::Inbound,
+            priority: VpcFirewallRulePriority(100),
+        }],
+    };
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, &firewall_url)
+            .body(Some(&new_rules))
             .expect_status(Some(StatusCode::FORBIDDEN)),
     )
     .authn_as(AuthnMode::SiloUser(limited_user.id))
