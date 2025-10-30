@@ -89,8 +89,8 @@ impl<'a> CrdbScimProviderStore<'a> {
         CrdbScimProviderStore { authz_silo, datastore, opctx }
     }
 
-    /// Nuke sessions, tokens, etc, for deactivated users
-    async fn on_user_active_to_false_in_txn(
+    /// Remove a users sessions and tokens
+    async fn remove_user_sessions_and_tokens_in_txn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         user_id: SiloUserUuid,
@@ -114,6 +114,15 @@ impl<'a> CrdbScimProviderStore<'a> {
         }
 
         Ok(())
+    }
+
+    /// Nuke sessions, tokens, etc, for deactivated users
+    async fn on_user_active_to_false_in_txn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        user_id: SiloUserUuid,
+    ) -> Result<(), diesel::result::Error> {
+        self.remove_user_sessions_and_tokens_in_txn(conn, user_id).await
     }
 
     async fn get_user_groups_for_user_in_txn(
@@ -510,6 +519,10 @@ impl<'a> CrdbScimProviderStore<'a> {
                 .execute_async(conn)
                 .await?;
         }
+
+        // Finally we should cleanup all auth related things like sessions and
+        // tokens.
+        self.remove_user_sessions_and_tokens_in_txn(conn, user_id).await?;
 
         Ok(true)
     }
