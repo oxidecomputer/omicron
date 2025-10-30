@@ -32,7 +32,7 @@ this document should act as a jumping-off point.
 * Add helper functions to `LookupPath` to make it possible to fetch the resource by either UUID or name (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/db/lookup.rs#L225-L237[Example])
 ** These are often named `pub fn <my_resource>_name`, or `pub fn <my_resource>_id`
 * Use the https://github.com/oxidecomputer/omicron/blob/main/nexus/authz-macros/src/lib.rs[`authz_resource!` macro] to define a new `authz::...` structure, which is returned from the **Lookup** functions (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/authz/api_resources.rs#L758-L764[Example])
-** If you define `polar_snippet = InProject` (for developer resources) or `polar_snippet = FleetChild` (for operator resources), most of the polar policy is automatically defined for you
+** If you define `polar_snippet = InProjectLimited` or `polar_snippet = InProjectFull` (for developer resources) or `polar_snippet = FleetChild` (for operator resources), most of the polar policy is automatically defined for you
 ** If you define `polar_snippet = Custom`, you should edit the omicron.polar file to describe the authorization policy for your object (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/authz/omicron.polar#L376-L393[Example])
 * Either way, you should add reference the new resource when https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/authz/oso_generic.rs#L119-L148[constructing the Oso structure]
 

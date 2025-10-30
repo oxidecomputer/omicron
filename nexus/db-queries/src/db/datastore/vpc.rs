@@ -375,7 +375,8 @@ impl DataStore {
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Vpc> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        let authz_vpc_list = authz::VpcList::new(authz_project.clone());
+        opctx.authorize(authz::Action::ListChildren, &authz_vpc_list).await?;
 
         use nexus_db_schema::schema::vpc::dsl;
         match pagparams {
@@ -2976,6 +2977,7 @@ mod tests {
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_db_model::IncompleteNetworkInterface;
+    use nexus_db_model::IpConfig;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SledBuilder;
@@ -3290,6 +3292,9 @@ mod tests {
                 .zone_type
                 .external_networking()
                 .expect("external networking for zone type");
+            let IpAddr::V4(ip) = nic.ip else {
+                panic!("Expected an IPv4 address for this NIC");
+            };
             IncompleteNetworkInterface::new_service(
                 nic.id,
                 zone_config.id.into_untyped_uuid(),
@@ -3298,7 +3303,7 @@ mod tests {
                     name: nic.name.clone(),
                     description: nic.name.to_string(),
                 },
-                nic.ip,
+                IpConfig::from_ipv4(ip),
                 nic.mac,
                 nic.slot,
             )
@@ -4032,8 +4037,7 @@ mod tests {
                         name: "nic".parse().unwrap(),
                         description: "A NIC...".into(),
                     },
-                    None,
-                    vec![],
+                    IpConfig::auto_ipv4(),
                 )
                 .unwrap(),
             )

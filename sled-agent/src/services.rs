@@ -443,6 +443,7 @@ struct SwitchZoneConfig {
     id: Uuid,
     addresses: Vec<Ipv6Addr>,
     services: Vec<SwitchService>,
+    underlay_info: Option<UnderlayInfo>,
 }
 
 /// Describes one of several services that may be deployed in a switch zone
@@ -2444,7 +2445,7 @@ impl ServiceManager {
         bootstrap_name_and_address: Option<(String, Ipv6Addr)>,
         device_names: &[String],
     ) -> Result<RunningZone, Error> {
-        let SwitchZoneConfig { id, services, addresses } = config;
+        let SwitchZoneConfig { id, services, addresses, .. } = config;
 
         let disabled_dns_client_service =
             ServiceBuilder::new("network/dns/client")
@@ -3265,16 +3266,14 @@ impl ServiceManager {
         };
         addresses.push(Ipv6Addr::LOCALHOST);
 
-        let request =
-            SwitchZoneConfig { id: Uuid::new_v4(), addresses, services };
-
-        self.ensure_switch_zone(
-            Some(request),
-            filesystems,
-            data_links,
+        let request = SwitchZoneConfig {
+            id: Uuid::new_v4(),
+            addresses,
+            services,
             underlay_info,
-        )
-        .await?;
+        };
+
+        self.ensure_switch_zone(Some(request), filesystems, data_links).await?;
 
         Ok(())
     }
@@ -3494,8 +3493,6 @@ impl ServiceManager {
             vec![],
             // data_links=
             vec![],
-            // underlay_info=
-            None,
         )
         .await
     }
@@ -3514,7 +3511,6 @@ impl ServiceManager {
         request: SwitchZoneConfig,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
-        underlay_info: Option<UnderlayInfo>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
         *zone = SwitchZoneState::Initializing {
@@ -3524,8 +3520,7 @@ impl ServiceManager {
             worker: Some(Task {
                 exit_tx,
                 initializer: tokio::task::spawn(async move {
-                    self.initialize_switch_zone_loop(underlay_info, exit_rx)
-                        .await
+                    self.initialize_switch_zone_loop(exit_rx).await
                 }),
             }),
         };
@@ -3537,7 +3532,6 @@ impl ServiceManager {
         request: Option<SwitchZoneConfig>,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
-        underlay_info: Option<UnderlayInfo>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -3552,7 +3546,6 @@ impl ServiceManager {
                     request,
                     filesystems,
                     data_links,
-                    underlay_info,
                 );
             }
             (
@@ -3918,7 +3911,7 @@ impl ServiceManager {
 
                 // We also need to ensure any uplinks are configured. Spawn a
                 // task that goes into an infinite retry loop until it succeeds.
-                if let Some(underlay_info) = underlay_info {
+                if let Some(underlay_info) = request.underlay_info.clone() {
                     if let Some(old_worker) = worker.take() {
                         old_worker.stop().await;
                     }
@@ -3978,15 +3971,15 @@ impl ServiceManager {
     async fn try_initialize_switch_zone(
         &self,
         sled_zone: &mut SwitchZoneState,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<UnderlayInfo>, Error> {
         let SwitchZoneState::Initializing {
             request,
             filesystems,
             data_links,
-            ..
-        } = &*sled_zone
+            worker,
+        } = sled_zone
         else {
-            return Ok(());
+            return Ok(None);
         };
 
         // The switch zone must use the ramdisk in order to receive requests
@@ -4003,19 +3996,28 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
+        let underlay_info = request.underlay_info.clone();
+
+        // Even though we've initialized the zone, the `worker` task may still
+        // be running to configure uplinks. If we drop `worker` now it will
+        // cause that task to exit before it gets a chance to do so. This is all
+        // very unsatisfying and needs some serious rework:
+        // https://github.com/oxidecomputer/omicron/issues/8970 and
+        // https://github.com/oxidecomputer/omicron/issues/9182 are strongly
+        // related.
+        let worker = worker.take();
         *sled_zone = SwitchZoneState::Running {
             request: request.clone(),
             zone: Box::new(zone),
-            worker: None,
+            worker,
         };
-        Ok(())
+        Ok(underlay_info)
     }
 
     // Body of a tokio task responsible for running until the switch zone is
     // inititalized, or it has been told to stop.
     async fn initialize_switch_zone_loop(
         &self,
-        underlay_info: Option<UnderlayInfo>,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
         // We don't really expect failures trying to initialize the switch zone
@@ -4025,13 +4027,25 @@ impl ServiceManager {
 
         // First, go into a loop to bring up the switch zone; retry until we
         // succeed or are told to give up via `exit_rx`.
-        loop {
+        let underlay_info = loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
-                    Ok(()) => {
-                        info!(self.inner.log, "initialized switch zone");
-                        break;
+                    Ok(None) => {
+                        info!(
+                            self.inner.log,
+                            "initialized switch zone \
+                             (no underlay info available yet)",
+                        );
+                        return;
+                    }
+                    Ok(Some(underlay_info)) => {
+                        info!(
+                            self.inner.log,
+                            "initialized switch zone (underlay info \
+                             available: will attempt uplink configuration)",
+                        );
+                        break underlay_info;
                     }
                     Err(e) => {
                         warn!(
@@ -4060,17 +4074,15 @@ impl ServiceManager {
                     continue;
                 }
             };
-        }
+        };
 
-        // Then, if we have underlay info, go into a loop trying to configure
-        // our uplinks. As above, retry until we succeed or are told to stop.
-        if let Some(underlay_info) = underlay_info {
-            self.ensure_switch_zone_uplinks_configured_loop(
-                &underlay_info,
-                exit_rx,
-            )
-            .await;
-        }
+        // Then go into a loop trying to configure our uplinks. As above, retry
+        // until we succeed or are told to stop.
+        self.ensure_switch_zone_uplinks_configured_loop(
+            &underlay_info,
+            exit_rx,
+        )
+        .await;
     }
 }
 
