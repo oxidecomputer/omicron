@@ -2187,7 +2187,9 @@ async fn test_scim_list_users_with_groups(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_scim_list_groups_with_members(cptestctx: &ControlPlaneTestContext) {
+async fn test_scim_list_groups_with_members(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = OpContext::for_tests(
