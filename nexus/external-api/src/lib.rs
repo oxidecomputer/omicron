@@ -650,19 +650,6 @@ pub trait NexusExternalApi {
         query_params: Query<params::SiloSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Delete all SCIM tokens
-    ///
-    /// Specify the silo by name or ID using the `silo` query parameter.
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/system/scim/tokens",
-        tags = ["system/silos"],
-    }]
-    async fn scim_token_delete_all(
-        rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::SiloSelector>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
     // SCIM user endpoints
     // XXX is "silos" the correct tag?
 
@@ -3202,7 +3189,7 @@ pub trait NexusExternalApi {
         body: StreamingBody,
     ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError>;
 
-    /// Fetch system release repository description by version
+    /// Fetch system release repository by version
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repositories/{system_version}",

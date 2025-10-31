@@ -10,8 +10,6 @@ use nexus_db_model::SledCpuFamily as DbSledCpuFamily;
 use nexus_db_model::SledSystemHardware;
 use nexus_db_model::SledUpdate;
 use nexus_lockstep_client::types::SledId;
-use nexus_sled_agent_shared::inventory::SledCpuFamily;
-use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_test_utils::TEST_SUITE_PASSWORD;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -21,11 +19,10 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::Rack;
-use nexus_types::internal_api::params::SledAgentInfo;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::SledUuid;
 use std::time::Duration;
-use uuid::Uuid;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -106,7 +103,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
         .wait_for_at_least_one_inventory_collection(Duration::from_secs(60))
         .await;
 
-    let internal_client = &cptestctx.internal_client;
+    let internal_client = cptestctx.internal_client();
     let external_client = &cptestctx.external_client;
     let list_url = "/v1/system/hardware/sleds-uninitialized";
     let mut uninitialized_sleds =
@@ -127,28 +124,20 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     // Insert one of these fake sleds into the `sled` table.
     // Just pick some random fields other than `baseboard`
     let baseboard = uninitialized_sleds.pop().unwrap().baseboard;
-    let sled_uuid = Uuid::new_v4();
-    let sa = SledAgentInfo {
+    let sled_uuid = SledUuid::new_v4();
+    let sa = nexus_client::types::SledAgentInfo {
         sa_address: "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
         repo_depot_port: 8081,
-        role: SledRole::Gimlet,
-        baseboard,
+        role: nexus_client::types::SledRole::Gimlet,
+        baseboard: baseboard.into(),
         usable_hardware_threads: 32,
-        usable_physical_ram: ByteCount::from_gibibytes_u32(100),
-        reservoir_size: ByteCount::from_mebibytes_u32(100),
-        cpu_family: SledCpuFamily::Unknown,
+        usable_physical_ram: ByteCount::from_gibibytes_u32(100).into(),
+        reservoir_size: ByteCount::from_mebibytes_u32(100).into(),
+        cpu_family: nexus_client::types::SledCpuFamily::Unknown,
         generation: Generation::new(),
         decommissioned: false,
     };
-    internal_client
-        .make_request(
-            Method::POST,
-            format!("/sled-agents/{sled_uuid}").as_str(),
-            Some(&sa),
-            StatusCode::NO_CONTENT,
-        )
-        .await
-        .unwrap();
+    internal_client.sled_agent_put(&sled_uuid, &sa).await.unwrap();
 
     // Ensure there's only one unintialized sled remaining, and it's not
     // the one that was just added into the `sled` table
