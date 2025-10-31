@@ -8803,7 +8803,6 @@ dependencies = [
  "ed25519-dalek",
  "either",
  "elliptic-curve",
- "env_logger",
  "ff",
  "flate2",
  "form_urlencoded",
