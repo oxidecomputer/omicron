@@ -358,20 +358,22 @@ impl<'a> CrdbScimProviderStore<'a> {
         // Select user fields and optional group fields
         // Note: We need to explicitly select the group columns to work with the
         // boxed query and LEFT JOIN
-        let rows: Vec<(model::SiloUser, Option<(Uuid, Option<String>)>)> =
-            query
-                .select((
-                    model::SiloUser::as_select(),
-                    (group_dsl::id, group_dsl::display_name).nullable(),
-                ))
-                .load_async(conn)
-                .await?;
-
-        // Group the results by user_id
-        let mut users_map: HashMap<
+        type UserRow = (model::SiloUser, Option<(Uuid, Option<String>)>);
+        type UsersMap = HashMap<
             Uuid,
             (Option<model::SiloUser>, Vec<(SiloGroupUuid, String)>),
-        > = HashMap::new();
+        >;
+
+        let rows: Vec<UserRow> = query
+            .select((
+                model::SiloUser::as_select(),
+                (group_dsl::id, group_dsl::display_name).nullable(),
+            ))
+            .load_async(conn)
+            .await?;
+
+        // Group the results by user_id
+        let mut users_map: UsersMap = HashMap::new();
 
         for (user, maybe_group_info) in rows {
             let user_id = user.identity.id.into_untyped_uuid();
