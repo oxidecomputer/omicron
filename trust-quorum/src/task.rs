@@ -14,23 +14,16 @@ use slog::{Logger, debug, error, info, o};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
-use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::sleep;
 use trust_quorum_protocol::{
     Alarm, BaseboardId, CommitError, Configuration, Epoch, ExpungedMetadata,
     LoadRackSecretError, LrtqUpgradeError, LrtqUpgradeMsg, Node, NodeCallerCtx,
     NodeCommonCtx, NodeCtx, PersistentState, PrepareAndCommitError,
     ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
 };
-
-#[cfg(not(test))]
-const LOAD_RACK_SECRET_RETRY_TIMEOUT: Duration = Duration::from_millis(500);
-#[cfg(test)]
-const LOAD_RACK_SECRET_RETRY_TIMEOUT: Duration = Duration::from_millis(5);
 
 /// We only expect a handful of messages at a time.
 const API_CHANNEL_BOUND: usize = 32;
@@ -245,20 +238,13 @@ impl NodeTaskHandle {
     pub async fn load_rack_secret(
         &self,
         epoch: Epoch,
-    ) -> Result<ReconstructedRackSecret, NodeApiError> {
-        loop {
-            let (tx, rx) = oneshot::channel();
-            self.tx
-                .send(NodeApiRequest::LoadRackSecret { epoch, responder: tx })
-                .await?;
-            if let Some(rack_secret) = rx.await?? {
-                return Ok(rack_secret);
-            };
-
-            // The task returns immediately with `None` if the secret is still
-            // being loaded. We must therefore retry.
-            sleep(LOAD_RACK_SECRET_RETRY_TIMEOUT).await;
-        }
+    ) -> Result<Option<ReconstructedRackSecret>, NodeApiError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(NodeApiRequest::LoadRackSecret { epoch, responder: tx })
+            .await?;
+        let rs = rx.await??;
+        Ok(rs)
     }
 
     /// Return `Ok(true)` if the configuration has committed, `Ok(false)` if
@@ -542,7 +528,7 @@ mod tests {
     use camino::Utf8PathBuf;
     use dropshot::test_util::{LogContext, log_prefix_for_test};
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
-    use omicron_test_utils::dev::test_setup_log;
+    use omicron_test_utils::dev::{self, test_setup_log};
     use omicron_uuid_kinds::GenericUuid;
     use secrecy::ExposeSecretMut;
     use sled_hardware_types::Baseboard;
@@ -740,6 +726,36 @@ mod tests {
         pub fn cleanup_successful(self) {
             self.logctx.cleanup_successful();
             std::fs::remove_dir_all(self.dir).unwrap();
+        }
+
+        pub async fn wait_for_rack_secrets_and_assert_equality(
+            &self,
+            node_indexes: BTreeSet<usize>,
+            epoch: Epoch,
+        ) -> Result<(), dev::poll::Error<NodeApiError>> {
+            let poll_interval = Duration::from_millis(10);
+            let poll_max = Duration::from_secs(10);
+            wait_for_condition(
+                async || {
+                    let mut secret = None;
+                    for (i, h) in self.node_handles.iter().enumerate() {
+                        if node_indexes.contains(&i) {
+                            let Some(rs) = h.load_rack_secret(epoch).await?
+                            else {
+                                return Err(CondCheckError::NotYet);
+                            };
+                            if secret.is_none() {
+                                secret = Some(rs.clone());
+                            }
+                            assert_eq!(&rs, secret.as_ref().unwrap());
+                        }
+                    }
+                    Ok(())
+                },
+                &poll_interval,
+                &poll_max,
+            )
+            .await
         }
     }
 
@@ -964,14 +980,13 @@ mod tests {
         .unwrap();
 
         // Now load the rack secret at all nodes
-        let mut secret = None;
-        for h in &setup.node_handles {
-            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
-            if secret.is_none() {
-                secret = Some(rs.clone());
-            }
-            assert_eq!(&rs, secret.as_ref().unwrap());
-        }
+        setup
+            .wait_for_rack_secrets_and_assert_equality(
+                (0..num_nodes).collect(),
+                Epoch(1),
+            )
+            .await
+            .unwrap();
 
         setup.cleanup_successful();
     }
@@ -1109,14 +1124,13 @@ mod tests {
         assert!(status.persistent_state.commits.contains(&Epoch(1)));
 
         // Now load the rack secret at all nodes
-        let mut secret = None;
-        for h in &setup.node_handles {
-            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
-            if secret.is_none() {
-                secret = Some(rs.clone());
-            }
-            assert_eq!(&rs, secret.as_ref().unwrap());
-        }
+        setup
+            .wait_for_rack_secrets_and_assert_equality(
+                (0..num_nodes).collect(),
+                Epoch(1),
+            )
+            .await
+            .unwrap();
 
         setup.cleanup_successful();
     }
@@ -1202,14 +1216,13 @@ mod tests {
         .unwrap();
 
         // Now load the rack secret at all nodes
-        let mut secret = None;
-        for h in &setup.node_handles {
-            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
-            if secret.is_none() {
-                secret = Some(rs.clone());
-            }
-            assert_eq!(&rs, secret.as_ref().unwrap());
-        }
+        setup
+            .wait_for_rack_secrets_and_assert_equality(
+                (0..num_nodes).collect(),
+                Epoch(1),
+            )
+            .await
+            .unwrap();
 
         // Tell all but the last node how to reach each other
         // This should disconnect the last node from everybody
@@ -1332,22 +1345,22 @@ mod tests {
 
         // Load the secret at epoch 1. This should trigger a `CommitAdvance`
         // response from nodes that committed at epoch 2.
-        let res =
-            setup.node_handles.last().unwrap().load_rack_secret(Epoch(1)).await;
-
-        println!("res = {res:#?}");
-
-        let rs = last_node.load_rack_secret(Epoch(2)).await.unwrap();
-
-        // Ensure the rack secret is the same as at another node
-        let expected = setup
-            .node_handles
-            .first()
-            .unwrap()
-            .load_rack_secret(Epoch(2))
+        setup
+            .wait_for_rack_secrets_and_assert_equality(
+                BTreeSet::from([num_nodes - 1]),
+                Epoch(1),
+            )
             .await
             .unwrap();
-        assert_eq!(rs, expected);
+
+        // Ensure the rack secret at epoch 2 is the same as at another node
+        setup
+            .wait_for_rack_secrets_and_assert_equality(
+                BTreeSet::from([0, num_nodes - 1]),
+                Epoch(2),
+            )
+            .await
+            .unwrap();
 
         setup.cleanup_successful();
     }
@@ -1424,14 +1437,13 @@ mod tests {
         .unwrap();
 
         // Now load the rack secret at all nodes
-        let mut secret = None;
-        for h in &setup.node_handles {
-            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
-            if secret.is_none() {
-                secret = Some(rs.clone());
-            }
-            assert_eq!(&rs, secret.as_ref().unwrap());
-        }
+        setup
+            .wait_for_rack_secrets_and_assert_equality(
+                (0..num_nodes).collect(),
+                Epoch(1),
+            )
+            .await
+            .unwrap();
 
         setup.cleanup_successful();
     }
