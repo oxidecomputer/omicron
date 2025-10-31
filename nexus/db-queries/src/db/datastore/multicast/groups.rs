@@ -4,12 +4,11 @@
 
 //! Multicast group management and IP allocation.
 //!
-//! This module provides database operations for multicast groups following
-//! the bifurcated design from [RFD 488](https://rfd.shared.oxide.computer/rfd/488):
+//! Database operations for multicast groups following the bifurcated design
+//! from [RFD 488](https://rfd.shared.oxide.computer/rfd/488):
 //!
-//! - External groups: External-facing, allocated from IP pools, involving
-//!   operators.
-//! - Underlay groups: System-generated admin-scoped IPv6 multicast groups.
+//! - External groups: customer-facing, allocated from IP pools
+//! - Underlay groups: system-generated admin-scoped IPv6 multicast groups
 
 use std::net::IpAddr;
 
@@ -119,13 +118,11 @@ impl DataStore {
     pub async fn multicast_group_create(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
         params: &params::MulticastGroupCreate,
         authz_pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalMulticastGroup> {
         self.allocate_external_multicast_group(
             opctx,
-            rack_id,
             MulticastGroupAllocationParams {
                 identity: params.identity.clone(),
                 ip: params.multicast_ip,
@@ -328,14 +325,10 @@ impl DataStore {
 
     /// Allocate an external multicast group from an IP Pool.
     ///
-    /// The rack_id should come from the requesting nexus instance (the rack
-    /// that received the API request).
-    ///
     /// See [`Self::allocate_external_multicast_group_on_conn`] for the connection-reusing variant.
     pub(crate) async fn allocate_external_multicast_group(
         &self,
         opctx: &OpContext,
-        rack_id: Uuid,
         params: MulticastGroupAllocationParams,
     ) -> CreateResult<ExternalMulticastGroup> {
         let group_id = Uuid::new_v4();
@@ -393,7 +386,6 @@ impl DataStore {
                 name: Name(params.identity.name.clone()),
                 description: params.identity.description.clone(),
                 ip_pool_id: authz_pool.id(),
-                rack_id,
                 explicit_address: params.ip,
                 source_ips: source_ip_networks,
                 mvlan: params.mvlan.map(|vlan_id| u16::from(vlan_id) as i16),
@@ -757,12 +749,7 @@ mod tests {
             mvlan: None,
         };
         datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params1,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params1, Some(authz_pool.clone()))
             .await
             .expect("Should create first group");
 
@@ -778,12 +765,7 @@ mod tests {
             mvlan: None,
         };
         datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params2,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params2, Some(authz_pool.clone()))
             .await
             .expect("Should create second group");
 
@@ -799,12 +781,7 @@ mod tests {
             mvlan: None,
         };
         let result3 = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params3,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params3, Some(authz_pool.clone()))
             .await;
         assert!(
             result3.is_err(),
@@ -879,12 +856,7 @@ mod tests {
         };
 
         let group_default = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params_default,
-                None,
-            )
+            .multicast_group_create(&opctx, &params_default, None)
             .await
             .expect("Should create group from default pool");
 
@@ -911,12 +883,7 @@ mod tests {
             mvlan: None,
         };
         let group_explicit = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params_explicit,
-                None,
-            )
+            .multicast_group_create(&opctx, &params_explicit, None)
             .await
             .expect("Should create group from explicit pool");
 
@@ -1046,12 +1013,7 @@ mod tests {
         };
 
         let external_group = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params, Some(authz_pool.clone()))
             .await
             .expect("Should create external group");
 
@@ -1149,12 +1111,7 @@ mod tests {
         };
 
         let group = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(), // rack_id
-                &params,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params, Some(authz_pool.clone()))
             .await
             .expect("Should create multicast group");
 
@@ -1613,12 +1570,7 @@ mod tests {
         };
 
         let group = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(), // rack_id
-                &params,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params, Some(authz_pool.clone()))
             .await
             .expect("Should create multicast group");
 
@@ -1753,7 +1705,6 @@ mod tests {
         let group = datastore
             .multicast_group_create(
                 &opctx,
-                Uuid::new_v4(),
                 &group_params,
                 Some(authz_pool.clone()),
             )
@@ -1967,12 +1918,7 @@ mod tests {
         };
 
         let group1 = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params, Some(authz_pool.clone()))
             .await
             .expect("Should create first group");
         assert_eq!(group1.multicast_ip.ip(), target_ip);
@@ -2002,7 +1948,6 @@ mod tests {
         let group2 = datastore
             .multicast_group_create(
                 &opctx,
-                Uuid::new_v4(),
                 &params2,
                 Some(authz_pool.clone()),
             )
@@ -2087,12 +2032,7 @@ mod tests {
         };
 
         let group1 = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params1,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params1, Some(authz_pool.clone()))
             .await
             .expect("Should create first group");
         let allocated_ip = group1.multicast_ip.ip();
@@ -2110,12 +2050,7 @@ mod tests {
         };
 
         let result2 = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params2,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params2, Some(authz_pool.clone()))
             .await;
         assert!(
             result2.is_err(),
@@ -2146,12 +2081,7 @@ mod tests {
         };
 
         let group3 = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params3,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params3, Some(authz_pool.clone()))
             .await
             .expect("Should create third group after first was deleted");
 
@@ -2238,12 +2168,7 @@ mod tests {
         };
 
         let group = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params, Some(authz_pool.clone()))
             .await
             .expect("Should create multicast group");
 
@@ -2371,12 +2296,7 @@ mod tests {
         };
 
         let group = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params,
-                Some(authz_pool),
-            )
+            .multicast_group_create(&opctx, &params, Some(authz_pool))
             .await
             .expect("Should create multicast group");
 
@@ -2507,32 +2427,17 @@ mod tests {
 
         // Create groups (all are fleet-wide)
         datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params_1,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params_1, Some(authz_pool.clone()))
             .await
             .expect("Should create fleet-group-1");
 
         datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params_2,
-                Some(authz_pool.clone()),
-            )
+            .multicast_group_create(&opctx, &params_2, Some(authz_pool.clone()))
             .await
             .expect("Should create fleet-group-2");
 
         datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params_3,
-                Some(authz_pool),
-            )
+            .multicast_group_create(&opctx, &params_3, Some(authz_pool))
             .await
             .expect("Should create fleet-group-3");
 
@@ -2631,12 +2536,7 @@ mod tests {
 
         // Create group - starts in "Creating" state
         let group = datastore
-            .multicast_group_create(
-                &opctx,
-                Uuid::new_v4(),
-                &params,
-                Some(authz_pool),
-            )
+            .multicast_group_create(&opctx, &params, Some(authz_pool))
             .await
             .expect("Should create multicast group");
 

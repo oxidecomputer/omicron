@@ -4,17 +4,17 @@
 
 //! Member-specific multicast reconciler functions.
 //!
-//! This module handles multicast group member lifecycle operations within an
-//! RPW. Members represent endpoints that receive multicast traffic,
-//! typically instances running on compute sleds, but potentially other
-//! resource types in the future.
+//! This module handles multicast group member lifecycle operations. Members
+//! represent endpoints that receive multicast traffic, typically instances
+//! running on compute sleds, but potentially other resource types in the
+//! future.
 //!
 //! # RPW Member Processing Model
 //!
 //! Member management is more complex than group management because members have
 //! dynamic lifecycle tied to instance state (start/stop/migrate) and require
-//! dataplane updates. The RPW ensures eventual consistency between
-//! intended membership (database) and actual forwarding (dataplane configuration).
+//! dataplane updates. The RPW maintains eventual consistency between intended
+//! membership (database) and actual forwarding (dataplane configuration).
 //!
 //! ## 3-State Member Lifecycle
 //!
@@ -43,9 +43,10 @@
 //! - **Dataplane updates**: Applying and removing configuration via DPD
 //!   client(s) on switches
 //! - **Sled migration**: Detecting moves and updating dataplane configuration
-//!   accordingly (no transition to "Left")
+//!   (no transition to "Left")
 //! - **Cleanup**: Removing orphaned switch state for deleted members
-//! - **Extensible processing**: Support for different member types as we evolve
+//! - **Extensible processing**: Support for different member types (designed for
+//!   future extension)
 //!
 //! ## Separation of Concerns: RPW +/- Sagas
 //!
@@ -73,28 +74,30 @@
 //! ## State Transitions
 //!
 //! ### JOINING State Transitions
-//! | Condition | Group State | Instance Valid | Has sled_id | Action | Next State |
-//! |-----------|-------------|----------------|-------------|---------|------------|
-//! | 1 | "Creating" | Any | Any | Wait | "Joining" (NoChange) |
-//! | 2 | "Active" | Invalid | Any | Transition + clear sled_id | "Left" |
-//! | 3 | "Active" | Valid | No | Wait/Skip | "Joining" (NoChange) |
-//! | 4 | "Active" | Valid | Yes | DPD updates + transition | "Joined" |
+//! | # | Group State | Instance Valid | Has sled_id | Action | Next State |
+//! |---|-------------|----------------|-------------|---------|------------|
+//! | 1 | "Creating" | Any | Any | Wait for activation | "Joining" |
+//! | 2 | "Active" | Invalid | Any | Clear sled_id → "Left" | "Left" |
+//! | 3 | "Active" | Valid | No | Wait for sled assignment | "Joining" |
+//! | 4 | "Active" | Valid | Yes | Add to DPD → "Joined" | "Joined" |
 //!
 //! ### JOINED State Transitions
-//! | Condition | Instance Valid | Action | Next State |
-//! |-----------|----------------|---------|------------|
-//! | 1 | Invalid | Remove from dataplane switch state + clear sled_id + transition | "Left" |
-//! | 2 | Valid | No action | "Joined" (NoChange) |
+//! | # | Instance Valid | Sled Changed | Has sled_id | Action | Next State |
+//! |---|----------------|--------------|-------------|---------|------------|
+//! | 1 | Invalid | Any | Any | Remove DPD + clear sled_id → "Left" | "Left" |
+//! | 2 | Valid | Yes | Yes | Remove old + update sled_id + add new | "Joined" |
+//! | 3 | Valid | No | Yes | Verify DPD config (idempotent) | "Joined" |
+//! | 4 | Valid | N/A | No | Remove DPD → "Left" (edge case) | "Left" |
 //!
 //! ### LEFT State Transitions
-//! | Condition | time_deleted | Instance Valid | Group State | Action | Next State |
-//! |-----------|-------------|----------------|-------------|---------|------------|
-//! | 1 | Set | Any | Any | Cleanup via DPD clients | NeedsCleanup |
-//! | 2 | None | Invalid | Any | No action | "Left" (NoChange) |
-//! | 3 | None | Valid | "Creating" | No action | "Left" (NoChange) |
-//! | 4 | None | Valid | "Active" | Transition | "Joining" |
+//! | # | time_deleted | Instance Valid | Group State | Action | Next State |
+//! |---|--------------|----------------|-------------|---------|------------|
+//! | 1 | Set | Any | Any | Cleanup DPD config | NeedsCleanup |
+//! | 2 | None | Invalid | Any | No action (stay stopped) | "Left" |
+//! | 3 | None | Valid | "Creating" | Wait for activation | "Left" |
+//! | 4 | None | Valid | "Active" | Reactivate member | "Joining" |
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -104,23 +107,34 @@ use slog::{debug, info, trace, warn};
 use uuid::Uuid;
 
 use nexus_db_model::{
-    MulticastGroup, MulticastGroupMember, MulticastGroupMemberState,
-    MulticastGroupState,
+    DbTypedUuid, MulticastGroup, MulticastGroupMember,
+    MulticastGroupMemberState, MulticastGroupState, Sled,
 };
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::multicast::ops::member_reconcile::ReconcileAction;
+use nexus_db_queries::db::datastore::multicast::ops::member_reconcile::{
+    ReconcileAction, ReconcileJoiningResult,
+};
+use nexus_types::deployment::SledFilter;
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{DataPageParams, InstanceState};
 use omicron_uuid_kinds::{
-    GenericUuid, InstanceUuid, MulticastGroupUuid, PropolisUuid, SledUuid,
+    GenericUuid, InstanceUuid, MulticastGroupUuid, PropolisUuid, SledKind,
+    SledUuid,
 };
 
-use super::{MulticastGroupReconciler, MulticastSwitchPort, StateTransition};
+use super::{MulticastGroupReconciler, StateTransition, SwitchBackplanePort};
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
 
 /// Pre-fetched instance state data for batch processing.
 /// Maps instance_id -> (is_valid_for_multicast, current_sled_id).
 type InstanceStateMap = HashMap<Uuid, (bool, Option<SledUuid>)>;
+
+/// Represents a sled_id update for a multicast group member.
+#[derive(Debug, Clone, Copy)]
+struct SledIdUpdate {
+    old: Option<DbTypedUuid<SledKind>>,
+    new: Option<DbTypedUuid<SledKind>>,
+}
 
 /// Trait for processing different types of multicast group members.
 trait MemberStateProcessor {
@@ -407,46 +421,8 @@ impl MulticastGroupReconciler {
 
     /// Instance-specific handler for members in "Joining" state.
     ///
-    /// Handles sled_id updates and validates instance state before proceeding.
-    ///
-    /// # Goal
-    ///
-    /// This task operates in an environment where multiple Nexus instances
-    /// may be processing the same member concurrently. The design follows
-    /// optimistic concurrency patterns with eventual consistency guarantees.
-    ///
-    /// ## Scenarios to Handle
-    ///
-    /// 1. **Multiple Nexus instances processing same member**: Each Nexus reads
-    ///    the member state, checks instance validity, and attempts updates. The
-    ///    reconciler uses compare-and-swap (CAS) operations for state transitions
-    ///    to ensure only one Nexus succeeds when race conditions occur.
-    ///
-    /// 2. **Instance state evolving during processing**: Between reading instance
-    ///    state and updating the member record, the instance may have migrated,
-    ///    stopped, or changed state. The reconciler detects this via CAS failures
-    ///    and returns `NoChange`, allowing the next reconciliation cycle to
-    ///    process the updated state.
-    ///
-    /// 3. **Sled migration during reconciliation**: If an instance migrates while
-    ///    a Nexus is processing its member, the conditional sled_id update will
-    ///    fail. The Nexus returns `NoChange` and the next reconciliation cycle
-    ///    will process the new sled_id.
-    ///
-    /// ## CAS Operations
-    ///
-    /// - **sled_id update**: `multicast_group_member_update_sled_id_if_current`
-    ///   checks that sled_id matches the expected value before updating
-    /// - **State transitions**: `multicast_group_member_to_left_if_current`
-    ///   and `multicast_group_member_set_state_if_current` ensure state changes
-    ///   only proceed if the current state matches expectations
-    ///
-    /// ## Eventual Consistency
-    ///
-    /// The reconciler ensures eventual consistency through repeated reconciliation
-    /// cycles. If a CAS operation fails due to concurrent modification, the
-    /// function returns `NoChange` rather than failing. The next reconciliation
-    /// cycle will re-read the updated state and process it correctly.
+    /// Validates instance state and attempts to transition the member to "Joined"
+    /// when ready. Uses CAS operations for concurrent-safe state updates.
     async fn handle_instance_joining(
         &self,
         opctx: &OpContext,
@@ -455,15 +431,54 @@ impl MulticastGroupReconciler {
         instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
-        let (instance_valid, current_sled_id) = instance_states
-            .get(&member.parent_id)
-            .copied()
-            .unwrap_or((false, None));
+        // Extract pre-fetched instance state
+        let (instance_valid, current_sled_id) =
+            self.get_instance_state_from_cache(instance_states, member);
 
+        // Execute reconciliation CAS operation
+        let reconcile_result = self
+            .execute_joining_reconciliation(
+                opctx,
+                group,
+                member,
+                instance_valid,
+                current_sled_id,
+            )
+            .await?;
+
+        // Process reconciliation result
+        self.process_joining_reconcile_result(
+            opctx,
+            group,
+            member,
+            instance_valid,
+            reconcile_result,
+            dataplane_client,
+        )
+        .await
+    }
+
+    /// Extract instance state from pre-fetched cache.
+    fn get_instance_state_from_cache(
+        &self,
+        instance_states: &InstanceStateMap,
+        member: &MulticastGroupMember,
+    ) -> (bool, Option<SledUuid>) {
+        instance_states.get(&member.parent_id).copied().unwrap_or((false, None))
+    }
+
+    /// Execute the reconciliation CAS operation for a member in "Joining" state.
+    async fn execute_joining_reconciliation(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+        instance_valid: bool,
+        current_sled_id: Option<SledUuid>,
+    ) -> Result<ReconcileJoiningResult, anyhow::Error> {
         let current_sled_id_db = current_sled_id.map(|id| id.into());
 
-        let reconcile_result = self
-            .datastore
+        self.datastore
             .multicast_group_member_reconcile_joining(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
@@ -472,58 +487,38 @@ impl MulticastGroupReconciler {
                 current_sled_id_db,
             )
             .await
-            .context("failed to reconcile member in 'Joining' state")?;
+            .context("failed to reconcile member in 'Joining' state")
+    }
 
+    /// Process the result of a "Joining" state reconciliation operation.
+    async fn process_joining_reconcile_result(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+        instance_valid: bool,
+        reconcile_result: ReconcileJoiningResult,
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<StateTransition, anyhow::Error> {
         match reconcile_result.action {
             ReconcileAction::TransitionedToLeft => {
-                info!(
-                    opctx.log,
-                    "multicast member lifecycle transition: 'Joining' → 'Left' (instance invalid)";
-                    "member_id" => %member.id,
-                    "instance_id" => %member.parent_id,
-                    "group_id" => %group.id(),
-                    "group_name" => group.name().as_str(),
-                    "group_multicast_ip" => %group.multicast_ip,
-                    "forwarding_status" => "EXCLUDED",
-                    "reason" => "instance_not_valid_for_multicast_traffic"
-                );
-                Ok(StateTransition::StateChanged)
+                self.handle_transitioned_to_left(opctx, group, member).await
             }
 
             ReconcileAction::UpdatedSledId { old, new } => {
-                debug!(
-                    opctx.log,
-                    "updated member sled_id, checking if ready to join";
-                    "member_id" => %member.id,
-                    "old_sled_id" => ?old,
-                    "new_sled_id" => ?new,
-                    "group_state" => ?group.state,
-                    "instance_valid" => instance_valid
-                );
-
-                self.try_complete_join_if_ready(
+                self.handle_sled_id_updated(
                     opctx,
                     group,
                     member,
                     instance_valid,
+                    SledIdUpdate { old, new },
                     dataplane_client,
                 )
                 .await
             }
 
             ReconcileAction::NotFound | ReconcileAction::NoChange => {
-                if member.state == MulticastGroupMemberState::Joined {
-                    debug!(
-                        opctx.log,
-                        "member already in 'Joined' state, no action needed";
-                        "member_id" => %member.id,
-                        "group_id" => %group.id(),
-                        "group_name" => group.name().as_str()
-                    );
-                    return Ok(StateTransition::NoChange);
-                }
-
-                self.try_complete_join_if_ready(
+                self.handle_no_change_or_not_found(
                     opctx,
                     group,
                     member,
@@ -533,6 +528,88 @@ impl MulticastGroupReconciler {
                 .await
             }
         }
+    }
+
+    /// Handle the case where a member was transitioned to "Left" state.
+    async fn handle_transitioned_to_left(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+    ) -> Result<StateTransition, anyhow::Error> {
+        info!(
+            opctx.log,
+            "multicast member lifecycle transition: 'Joining' → 'Left'";
+            "member_id" => %member.id,
+            "instance_id" => %member.parent_id,
+            "group_id" => %group.id(),
+            "group_name" => group.name().as_str(),
+            "group_multicast_ip" => %group.multicast_ip,
+            "reason" => "instance_not_valid_for_multicast_traffic"
+        );
+        Ok(StateTransition::StateChanged)
+    }
+
+    /// Handle the case where a member's sled_id was updated.
+    async fn handle_sled_id_updated(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+        instance_valid: bool,
+        sled_id_update: SledIdUpdate,
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<StateTransition, anyhow::Error> {
+        debug!(
+            opctx.log,
+            "updated member sled_id, checking if ready to join";
+            "member_id" => %member.id,
+            "old_sled_id" => ?sled_id_update.old,
+            "new_sled_id" => ?sled_id_update.new,
+            "group_state" => ?group.state,
+            "instance_valid" => instance_valid
+        );
+
+        self.try_complete_join_if_ready(
+            opctx,
+            group,
+            member,
+            instance_valid,
+            dataplane_client,
+        )
+        .await
+    }
+
+    /// Handle the case where no changes were made or member was not found.
+    async fn handle_no_change_or_not_found(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+        instance_valid: bool,
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<StateTransition, anyhow::Error> {
+        // Check if member is already in Joined state
+        if member.state == MulticastGroupMemberState::Joined {
+            debug!(
+                opctx.log,
+                "member already in 'Joined' state, no action needed";
+                "member_id" => %member.id,
+                "group_id" => %group.id(),
+                "group_name" => group.name().as_str()
+            );
+            return Ok(StateTransition::NoChange);
+        }
+
+        // Try to complete the join if conditions are met
+        self.try_complete_join_if_ready(
+            opctx,
+            group,
+            member,
+            instance_valid,
+            dataplane_client,
+        )
+        .await
     }
 
     fn is_ready_to_join(
@@ -589,178 +666,332 @@ impl MulticastGroupReconciler {
             .copied()
             .unwrap_or((false, None));
 
-        if !instance_valid {
-            // Instance became invalid - remove from dataplane and transition to "Left"
-            // Remove from dataplane first
-            if let Err(e) = self
-                .remove_member_from_dataplane(opctx, member, dataplane_client)
-                .await
-            {
-                warn!(
-                    opctx.log,
-                    "failed to remove member from dataplane, will retry";
-                    "member_id" => %member.id,
-                    "error" => ?e
-                );
-                return Err(e);
-            }
-
-            // Update database state (atomically set Left and clear sled_id)
-            let updated = self
-                .datastore
-                .multicast_group_member_to_left_if_current(
-                    opctx,
-                    MulticastGroupUuid::from_untyped_uuid(group.id()),
-                    InstanceUuid::from_untyped_uuid(member.parent_id),
-                    MulticastGroupMemberState::Joined,
-                )
-                .await
-                .context(
-                    "failed to conditionally transition member from 'Joined' to 'Left'",
-                )?;
-
-            if !updated {
-                debug!(
-                    opctx.log,
-                    "skipping Joined→Left transition due to concurrent update";
-                    "member_id" => %member.id,
-                    "instance_id" => %member.parent_id,
-                    "group_id" => %group.id()
-                );
-                return Ok(StateTransition::NoChange);
-            }
-
-            info!(
-                opctx.log,
-                "multicast member lifecycle transition: 'Joined' → 'Left' (instance invalid)";
-                "member_id" => %member.id,
-                "instance_id" => %member.parent_id,
-                "group_id" => %group.id(),
-                "group_multicast_ip" => %group.multicast_ip,
-                "forwarding_status" => "REMOVED",
-                "dpd_operation" => "remove_member_from_underlay_group",
-                "reason" => "instance_no_longer_valid_for_multicast_traffic"
-            );
-            Ok(StateTransition::StateChanged)
-        } else if let Some(sled_id) = current_sled_id {
-            // Instance is valid - check for sled migration
-            if member.sled_id != Some(sled_id.into()) {
-                debug!(
-                    opctx.log,
-                    "detected sled migration for joined member - re-applying configuration";
-                    "member_id" => %member.id,
-                    "group_id" => %group.id(),
-                    "group_name" => group.name().as_str(),
-                    "old_sled_id" => ?member.sled_id,
-                    "new_sled_id" => %sled_id
-                );
-
-                // Remove from old sled's dataplane first
-                if let Err(e) = self
-                    .remove_member_from_dataplane(
-                        opctx,
-                        member,
-                        dataplane_client,
-                    )
-                    .await
-                {
-                    warn!(
-                        opctx.log,
-                        "failed to remove member from old sled, will retry";
-                        "member_id" => %member.id,
-                        "old_sled_id" => ?member.sled_id,
-                        "error" => ?e
-                    );
-                    return Err(e);
-                }
-
-                // Update sled_id in database using CAS to avoid clobbering concurrent changes
-                let updated = self
-                    .datastore
-                    .multicast_group_member_update_sled_id_if_current(
-                        opctx,
-                        InstanceUuid::from_untyped_uuid(member.parent_id),
-                        member.sled_id,
-                        Some(sled_id.into()),
-                    )
-                    .await
-                    .context("failed to conditionally update member sled_id for migration")?;
-
-                if !updated {
-                    debug!(
-                        opctx.log,
-                        "skipping sled_id update after migration due to concurrent change";
-                        "member_id" => %member.id,
-                        "group_id" => %group.id(),
-                        "old_sled_id" => ?member.sled_id,
-                        "new_sled_id" => %sled_id
-                    );
-                    return Ok(StateTransition::NoChange);
-                }
-
-                // Re-apply configuration on new sled
-                self.complete_instance_member_join(
+        match (instance_valid, current_sled_id) {
+            // Invalid instance -> remove from dataplane and transition to "Left"
+            (false, _) => {
+                self.handle_invalid_instance(
                     opctx,
                     group,
                     member,
                     dataplane_client,
                 )
-                .await?;
+                .await
+            }
 
+            // Valid instance with sled, but sled changed (migration)
+            (true, Some(sled_id)) if member.sled_id != Some(sled_id.into()) => {
+                self.handle_sled_migration(
+                    opctx,
+                    group,
+                    member,
+                    sled_id,
+                    dataplane_client,
+                )
+                .await
+            }
+
+            // Valid instance with sled, sled unchanged -> verify configuration
+            (true, Some(_sled_id)) => {
+                self.verify_members(opctx, group, member, dataplane_client)
+                    .await?;
+                trace!(
+                    opctx.log,
+                    "member configuration verified, no changes needed";
+                    "member_id" => %member.id,
+                    "group_id" => %group.id()
+                );
+                Ok(StateTransition::NoChange)
+            }
+
+            // Valid instance but no sled_id (shouldn't typically happen in "Joined" state)
+            (true, None) => {
+                self.handle_joined_without_sled(
+                    opctx,
+                    group,
+                    member,
+                    dataplane_client,
+                )
+                .await
+            }
+        }
+    }
+
+    /// Handle a joined member whose instance became invalid.
+    async fn handle_invalid_instance(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<StateTransition, anyhow::Error> {
+        // Remove from dataplane first
+        if let Err(e) = self
+            .remove_member_from_dataplane(opctx, member, dataplane_client)
+            .await
+        {
+            warn!(
+                opctx.log,
+                "failed to remove member from dataplane, will retry";
+                "member_id" => %member.id,
+                "error" => ?e
+            );
+            return Err(e);
+        }
+
+        // Update database state (atomically set "Left" and clear sled_id)
+        let updated = self
+            .datastore
+            .multicast_group_member_to_left_if_current(
+                opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(member.parent_id),
+                MulticastGroupMemberState::Joined,
+            )
+            .await
+            .context(
+                "failed to conditionally transition member from 'Joined' to 'Left'",
+            )?;
+
+        if !updated {
+            debug!(
+                opctx.log,
+                "skipping Joined→Left transition due to concurrent update";
+                "member_id" => %member.id,
+                "instance_id" => %member.parent_id,
+                "group_id" => %group.id()
+            );
+            return Ok(StateTransition::NoChange);
+        }
+
+        info!(
+            opctx.log,
+            "multicast member lifecycle transition: 'Joined' → 'Left' (instance invalid)";
+            "member_id" => %member.id,
+            "instance_id" => %member.parent_id,
+            "group_id" => %group.id(),
+            "group_multicast_ip" => %group.multicast_ip,
+            "dpd_operation" => "remove_member_from_underlay_group",
+            "reason" => "instance_no_longer_valid_for_multicast_traffic"
+        );
+        Ok(StateTransition::StateChanged)
+    }
+
+    /// Handle sled migration for a "Joined" member.
+    async fn handle_sled_migration(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+        new_sled_id: SledUuid,
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<StateTransition, anyhow::Error> {
+        info!(
+            opctx.log,
+            "detected sled migration for 'Joined' member - re-applying configuration";
+            "member_id" => %member.id,
+            "instance_id" => %member.parent_id,
+            "group_id" => %group.id(),
+            "group_name" => group.name().as_str(),
+            "group_multicast_ip" => %group.multicast_ip,
+            "old_sled_id" => ?member.sled_id,
+            "new_sled_id" => %new_sled_id
+        );
+
+        // Remove from old sled's dataplane first
+        if let Err(e) = self
+            .remove_member_from_dataplane(opctx, member, dataplane_client)
+            .await
+        {
+            warn!(
+                opctx.log,
+                "failed to remove member from old sled, will retry";
+                "member_id" => %member.id,
+                "old_sled_id" => ?member.sled_id,
+                "error" => ?e
+            );
+            return Err(e);
+        }
+
+        // Update sled_id in database using CAS
+        let updated = self
+            .datastore
+            .multicast_group_member_update_sled_id_if_current(
+                opctx,
+                InstanceUuid::from_untyped_uuid(member.parent_id),
+                member.sled_id,
+                Some(new_sled_id.into()),
+            )
+            .await
+            .context(
+                "failed to conditionally update member sled_id for migration",
+            )?;
+
+        if !updated {
+            debug!(
+                opctx.log,
+                "skipping sled_id update after migration due to concurrent change";
+                "member_id" => %member.id,
+                "group_id" => %group.id(),
+                "old_sled_id" => ?member.sled_id,
+                "new_sled_id" => %new_sled_id
+            );
+            return Ok(StateTransition::NoChange);
+        }
+
+        // Re-apply configuration on new sled
+        // If this fails (e.g., sled not yet in inventory), transition to "Joining" for retry
+        match self
+            .complete_instance_member_join(
+                opctx,
+                group,
+                member,
+                dataplane_client,
+            )
+            .await
+        {
+            Ok(()) => {
                 info!(
                     opctx.log,
                     "member configuration re-applied after sled migration";
                     "member_id" => %member.id,
+                    "instance_id" => %member.parent_id,
                     "group_id" => %group.id(),
                     "group_name" => group.name().as_str(),
-                    "new_sled_id" => %sled_id
+                    "group_multicast_ip" => %group.multicast_ip,
+                    "new_sled_id" => %new_sled_id,
+                    "dpd_operation" => "re_add_member_to_underlay_multicast_group"
                 );
                 Ok(StateTransition::StateChanged)
-            } else {
-                // Instance still valid and sled unchanged - verify member dataplane configuration
-                self.verify_members(opctx, group, member, dataplane_client)
-                    .await?;
-                Ok(StateTransition::NoChange)
             }
-        } else {
-            // Instance is valid but has no sled_id (shouldn't happen in Joined state)
-            warn!(
-                opctx.log,
-                "joined member has no sled_id - transitioning to 'Left'";
-                "member_id" => %member.id,
-                "parent_id" => %member.parent_id
-            );
-
-            // Remove from dataplane and transition to "Left"
-            if let Err(e) = self
-                .remove_member_from_dataplane(opctx, member, dataplane_client)
-                .await
-            {
+            Err(e) => {
+                // Failed to join on new sled - transition to "Joining" and retry next cycle
+                // Example case: sled not yet in inventory (`sp_slot` mapping unavailable)
                 warn!(
                     opctx.log,
-                    "failed to remove member with no sled_id from dataplane";
+                    "failed to complete join on new sled after migration - transitioning to 'Joining' for retry";
                     "member_id" => %member.id,
-                    "error" => ?e
+                    "group_id" => %group.id(),
+                    "new_sled_id" => %new_sled_id,
+                    "error" => %e
                 );
-                return Err(e);
+
+                // TODO: Cross-validate inventory sled→port mapping via DDM operational state
+                //
+                // We currently trust inventory (MGS/SP topology) for sled→port
+                // mapping.
+                //
+                // We could add validation using DDM on switches to confirm
+                // operational connectivity:
+                //
+                // Query DDM (underlay routing daemon on switches):
+                //   - GET /peers → Map<peer_addr, PeerInfo>
+                //   - **Needs API addition**: DDM's PeerInfo should include
+                //     port/interface or similar field showing which rear port
+                //     each underlay peer is reachable through
+                //   - Cross-reference: Does sled's underlay address appear as
+                //     an "Active" peer on the expected rear port?
+                //
+                // On mismatch: Could invalidate cache, transition member to
+                // "Left", or trigger inventory reconciliation. Prevents wasted
+                // retries on sleds with actual connectivity loss vs. inventory
+                // mismatch.
+
+                let updated = self
+                    .datastore
+                    .multicast_group_member_set_state_if_current(
+                        opctx,
+                        MulticastGroupUuid::from_untyped_uuid(group.id()),
+                        InstanceUuid::from_untyped_uuid(member.parent_id),
+                        MulticastGroupMemberState::Joined,
+                        MulticastGroupMemberState::Joining,
+                    )
+                    .await
+                    .context(
+                        "failed to transition member to 'Joining' after join failure",
+                    )?;
+
+                if updated {
+                    info!(
+                        opctx.log,
+                        "member transitioned to 'Joining' - will retry on next reconciliation cycle";
+                        "member_id" => %member.id,
+                        "group_id" => %group.id(),
+                        "new_sled_id" => %new_sled_id
+                    );
+                    Ok(StateTransition::StateChanged)
+                } else {
+                    // Let the next cycle handle it
+                    Ok(StateTransition::NoChange)
+                }
             }
-
-            let _ = self
-                .datastore
-                .multicast_group_member_set_state_if_current(
-                    opctx,
-                    MulticastGroupUuid::from_untyped_uuid(group.id()),
-                    InstanceUuid::from_untyped_uuid(member.parent_id),
-                    MulticastGroupMemberState::Joined,
-                    MulticastGroupMemberState::Left,
-                )
-                .await
-                .context(
-                    "failed to conditionally transition member with no sled_id to Left",
-                )?;
-
-            Ok(StateTransition::StateChanged)
         }
+    }
+
+    /// Handle edge case where a "Joined" member has no sled_id.
+    async fn handle_joined_without_sled(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<StateTransition, anyhow::Error> {
+        warn!(
+            opctx.log,
+            "'Joined' member has no sled_id - transitioning to 'Left'";
+            "member_id" => %member.id,
+            "parent_id" => %member.parent_id
+        );
+
+        // Remove from dataplane and transition to "Left"
+        if let Err(e) = self
+            .remove_member_from_dataplane(opctx, member, dataplane_client)
+            .await
+        {
+            warn!(
+                opctx.log,
+                "failed to remove member with no sled_id from dataplane";
+                "member_id" => %member.id,
+                "error" => ?e
+            );
+            return Err(e);
+        }
+
+        let updated = self
+            .datastore
+            .multicast_group_member_set_state_if_current(
+                opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                InstanceUuid::from_untyped_uuid(member.parent_id),
+                MulticastGroupMemberState::Joined,
+                MulticastGroupMemberState::Left,
+            )
+            .await
+            .context(
+                "failed to conditionally transition member with no sled_id to 'Left'",
+            )?;
+
+        if !updated {
+            debug!(
+                opctx.log,
+                "skipping 'Joined'→'Left' transition (no sled_id) due to concurrent update";
+                "member_id" => %member.id,
+                "parent_id" => %member.parent_id,
+                "group_id" => %group.id()
+            );
+            return Ok(StateTransition::NoChange);
+        }
+
+        info!(
+            opctx.log,
+            "multicast member forced to 'Left' state due to missing sled_id";
+            "member_id" => %member.id,
+            "instance_id" => %member.parent_id,
+            "group_id" => %group.id(),
+            "group_multicast_ip" => %group.multicast_ip,
+            "dpd_operation" => "remove_member_from_underlay_group",
+            "reason" => "inconsistent_state_sled_id_missing_in_joined_state"
+        );
+        Ok(StateTransition::StateChanged)
     }
 
     /// Instance-specific handler for members in "Left" state.
@@ -772,20 +1003,27 @@ impl MulticastGroupReconciler {
         instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
-        // Check if this member is marked for deletion (time_deleted set)
-        if member.time_deleted.is_some() {
-            // Member marked for removal - ensure it's cleaned up from dataplane
-            self.cleanup_deleted_member(opctx, group, member, dataplane_client)
-                .await?;
-            Ok(StateTransition::NeedsCleanup)
-        } else {
-            // Get pre-fetched instance state and sled_id
-            let (instance_valid, current_sled_id) = instance_states
-                .get(&member.parent_id)
-                .copied()
-                .unwrap_or((false, None));
+        // Get pre-fetched instance state and sled_id
+        let (instance_valid, current_sled_id) = instance_states
+            .get(&member.parent_id)
+            .copied()
+            .unwrap_or((false, None));
 
-            if instance_valid && group.state == MulticastGroupState::Active {
+        match (member.time_deleted.is_some(), instance_valid, &group.state) {
+            // Member marked for deletion -> cleanup from dataplane
+            (true, _, _) => {
+                self.cleanup_deleted_member(
+                    opctx,
+                    group,
+                    member,
+                    dataplane_client,
+                )
+                .await?;
+                Ok(StateTransition::NeedsCleanup)
+            }
+
+            // Instance valid and group active -> transition to "Joining"
+            (false, true, MulticastGroupState::Active) => {
                 debug!(
                     opctx.log,
                     "transitioning member from 'Left' to 'Joining' - instance became valid and group is active";
@@ -794,6 +1032,7 @@ impl MulticastGroupReconciler {
                     "group_id" => %group.id(),
                     "group_name" => group.name().as_str()
                 );
+
                 let updated = if let Some(sled_id) = current_sled_id {
                     self.datastore
                         .multicast_group_member_left_to_joining_if_current(
@@ -820,6 +1059,7 @@ impl MulticastGroupReconciler {
                             "failed to conditionally transition member from Left to Joining",
                         )?
                 };
+
                 if !updated {
                     debug!(
                         opctx.log,
@@ -829,6 +1069,7 @@ impl MulticastGroupReconciler {
                     );
                     return Ok(StateTransition::NoChange);
                 }
+
                 info!(
                     opctx.log,
                     "member transitioned to 'Joining' state";
@@ -837,19 +1078,19 @@ impl MulticastGroupReconciler {
                     "group_name" => group.name().as_str()
                 );
                 Ok(StateTransition::StateChanged)
-            } else {
-                // Stay in "Left" state
-                Ok(StateTransition::NoChange)
             }
+
+            // Otherwise, we stay in the "Left" state
+            _ => Ok(StateTransition::NoChange),
         }
     }
 
     /// Batch-fetch instance states for multiple members to avoid N+1 queries.
     /// Returns a map of instance_id -> (is_valid_for_multicast, current_sled_id).
     ///
-    /// 1. Batch-fetching all instance records in one query via the datastore
-    /// 2. Batch-fetching all VMM records in one query via the datastore
-    /// 3. Building the result map from the fetched data
+    /// - Batch-fetching all instance records in one query via the datastore
+    /// - Batch-fetching all VMM records in one query via the datastore
+    /// - Building the result map from the fetched data
     async fn batch_fetch_instance_states(
         &self,
         opctx: &OpContext,
@@ -910,6 +1151,100 @@ impl MulticastGroupReconciler {
         Ok(state_map)
     }
 
+    /// Look up an instance's current sled_id and update the member record if found.
+    ///
+    /// Returns `None` if the instance has no sled assignment or cannot be found.
+    async fn lookup_and_update_member_sled_id(
+        &self,
+        opctx: &OpContext,
+        member: &MulticastGroupMember,
+    ) -> Result<Option<DbTypedUuid<SledKind>>, anyhow::Error> {
+        debug!(
+            opctx.log,
+            "member has no sled_id, attempting to look up instance sled";
+            "member" => ?member
+        );
+
+        let instance_id = InstanceUuid::from_untyped_uuid(member.parent_id);
+
+        // Try to get instance state
+        let instance_state = match self
+            .datastore
+            .instance_get_state(opctx, &instance_id)
+            .await
+        {
+            Ok(Some(state)) => state,
+            Ok(None) => {
+                debug!(
+                    opctx.log,
+                    "instance not found, cannot complete join";
+                    "member" => ?member
+                );
+                return Ok(None);
+            }
+            Err(e) => {
+                debug!(
+                    opctx.log,
+                    "failed to look up instance state";
+                    "member" => ?member,
+                    "error" => ?e
+                );
+                return Ok(None);
+            }
+        };
+
+        // Try to get sled_id from VMM
+        let current_sled_id = match instance_state.propolis_id {
+            Some(propolis_id) => {
+                match self
+                    .datastore
+                    .vmm_fetch(
+                        opctx,
+                        &PropolisUuid::from_untyped_uuid(propolis_id),
+                    )
+                    .await
+                {
+                    Ok(vmm) => Some(SledUuid::from_untyped_uuid(
+                        vmm.sled_id.into_untyped_uuid(),
+                    )),
+                    Err(_) => None,
+                }
+            }
+            None => None,
+        };
+
+        match current_sled_id {
+            Some(sled_id) => {
+                debug!(
+                    opctx.log,
+                    "found instance sled, updating member record";
+                    "member" => ?member,
+                    "sled_id" => %sled_id
+                );
+
+                // Update the member record with the correct sled_id
+                self.datastore
+                    .multicast_group_member_update_sled_id(
+                        opctx,
+                        InstanceUuid::from_untyped_uuid(member.parent_id),
+                        Some(sled_id.into()),
+                    )
+                    .await
+                    .context("failed to update member sled_id")?;
+
+                Ok(Some(sled_id.into()))
+            }
+            None => {
+                debug!(
+                    opctx.log,
+                    "instance has no sled_id, cannot complete join";
+                    "member" => ?member
+                );
+                Ok(None)
+            }
+        }
+    }
+
     /// Complete a member join operation ("Joining" -> "Joined") for an instance.
     async fn complete_instance_member_join(
         &self,
@@ -925,95 +1260,16 @@ impl MulticastGroupReconciler {
             "group" => ?group
         );
 
-        // Get sled_id from member record, or look it up if missing
+        // Get sled_id from member record, or look it up and update if missing
         let sled_id = match member.sled_id {
             Some(id) => id,
             None => {
-                debug!(
-                    opctx.log,
-                    "member has no sled_id, attempting to look up instance sled";
-                    "member" => ?member
-                );
-
-                // Try to find the instance's current sled
-                let instance_id =
-                    InstanceUuid::from_untyped_uuid(member.parent_id);
                 match self
-                    .datastore
-                    .instance_get_state(opctx, &instance_id)
-                    .await
+                    .lookup_and_update_member_sled_id(opctx, member)
+                    .await?
                 {
-                    Ok(Some(instance_state)) => {
-                        // Get sled_id from VMM if instance has one
-                        let current_sled_id = if let Some(propolis_id) =
-                            instance_state.propolis_id
-                        {
-                            match self
-                                .datastore
-                                .vmm_fetch(
-                                    opctx,
-                                    &PropolisUuid::from_untyped_uuid(
-                                        propolis_id,
-                                    ),
-                                )
-                                .await
-                            {
-                                Ok(vmm) => Some(SledUuid::from_untyped_uuid(
-                                    vmm.sled_id.into_untyped_uuid(),
-                                )),
-                                Err(_) => None,
-                            }
-                        } else {
-                            None
-                        };
-
-                        if let Some(current_sled_id) = current_sled_id {
-                            debug!(
-                                opctx.log,
-                                "found instance sled, updating member record";
-                                "member" => ?member,
-                                "sled_id" => %current_sled_id
-                            );
-
-                            // Update the member record with the correct sled_id
-                            self.datastore
-                                .multicast_group_member_update_sled_id(
-                                    opctx,
-                                    InstanceUuid::from_untyped_uuid(
-                                        member.parent_id,
-                                    ),
-                                    Some(current_sled_id.into()),
-                                )
-                                .await
-                                .context("failed to update member sled_id")?;
-
-                            current_sled_id.into()
-                        } else {
-                            debug!(
-                                opctx.log,
-                                "instance has no sled_id, cannot complete join";
-                                "member" => ?member
-                            );
-                            return Ok(());
-                        }
-                    }
-                    Ok(None) => {
-                        debug!(
-                            opctx.log,
-                            "instance not found, cannot complete join";
-                            "member" => ?member
-                        );
-                        return Ok(());
-                    }
-                    Err(e) => {
-                        debug!(
-                            opctx.log,
-                            "failed to look up instance state";
-                            "member" => ?member,
-                            "error" => ?e
-                        );
-                        return Ok(());
-                    }
+                    Some(id) => id,
+                    None => return Ok(()), // No sled available, cannot join
                 }
             }
         };
@@ -1027,7 +1283,7 @@ impl MulticastGroupReconciler {
         )
         .await?;
 
-        // Transition to "Joined" state (only if still in Joining)
+        // Transition to "Joined" state (only if still in "Joining")
         let updated = self
             .datastore
             .multicast_group_member_set_state_if_current(
@@ -1087,7 +1343,7 @@ impl MulticastGroupReconciler {
 
         // Resolve sled to switch port configurations
         let port_configs = self
-            .resolve_sled_to_switch_ports(opctx, sled_id)
+            .resolve_sled_to_switch_ports(opctx, sled_id, dataplane_client)
             .await
             .context("failed to resolve sled to switch ports")?;
 
@@ -1099,7 +1355,7 @@ impl MulticastGroupReconciler {
             };
 
             dataplane_client
-                .add_member(opctx, &underlay_group, dataplane_member)
+                .add_member(&underlay_group, dataplane_member)
                 .await
                 .context("failed to apply member configuration via DPD")?;
 
@@ -1118,16 +1374,14 @@ impl MulticastGroupReconciler {
             "member_id" => %member.id,
             "instance_id" => %member.parent_id,
             "sled_id" => %sled_id,
-            "switch_ports_configured" => port_configs.len(),
-            "dpd_operation" => "add_member_to_underlay_multicast_group",
-            "forwarding_status" => "ACTIVE",
-            "traffic_direction" => "Underlay"
+            "switch_count" => port_configs.len(),
+            "dpd_operation" => "add_member_to_underlay_multicast_group"
         );
 
         Ok(())
     }
 
-    /// Remove member dataplane configuration (via DPD).
+    /// Remove member dataplane configuration (via DPD-client).
     async fn remove_member_from_dataplane(
         &self,
         opctx: &OpContext,
@@ -1159,7 +1413,11 @@ impl MulticastGroupReconciler {
         if let Some(sled_id) = member.sled_id {
             // Resolve sled to switch port configurations
             let port_configs = self
-                .resolve_sled_to_switch_ports(opctx, sled_id.into())
+                .resolve_sled_to_switch_ports(
+                    opctx,
+                    sled_id.into(),
+                    dataplane_client,
+                )
                 .await
                 .context("failed to resolve sled to switch ports")?;
 
@@ -1173,7 +1431,7 @@ impl MulticastGroupReconciler {
                     };
 
                 dataplane_client
-                    .remove_member(opctx, &underlay_group, dataplane_member)
+                    .remove_member(&underlay_group, dataplane_member)
                     .await
                     .context("failed to remove member configuration via DPD")?;
 
@@ -1191,9 +1449,8 @@ impl MulticastGroupReconciler {
                 "member_id" => %member.id,
                 "instance_id" => %member.parent_id,
                 "sled_id" => %sled_id,
-                "switch_ports_cleaned" => port_configs.len(),
+                "switch_count" => port_configs.len(),
                 "dpd_operation" => "remove_member_from_underlay_multicast_group",
-                "forwarding_status" => "INACTIVE",
                 "cleanup_reason" => "instance_state_change_or_migration"
             );
         }
@@ -1281,7 +1538,11 @@ impl MulticastGroupReconciler {
 
         // Resolve expected member configurations
         let expected_port_configs = self
-            .resolve_sled_to_switch_ports(opctx, sled_id.into())
+            .resolve_sled_to_switch_ports(
+                opctx,
+                sled_id.into(),
+                dataplane_client,
+            )
             .await
             .context("failed to resolve sled to switch ports")?;
 
@@ -1295,7 +1556,7 @@ impl MulticastGroupReconciler {
 
             // Check if member needs to be re-added
             match dataplane_client
-                .add_member(opctx, &underlay_group, expected_member)
+                .add_member(&underlay_group, expected_member)
                 .await
             {
                 Ok(()) => {
@@ -1374,13 +1635,117 @@ impl MulticastGroupReconciler {
     async fn check_sled_cache(
         &self,
         cache_key: SledUuid,
-    ) -> Option<Vec<MulticastSwitchPort>> {
+    ) -> Option<Vec<SwitchBackplanePort>> {
         let cache = self.sled_mapping_cache.read().await;
         let (cached_at, mappings) = &*cache;
-        if cached_at.elapsed().unwrap_or(self.cache_ttl) < self.cache_ttl {
+        if cached_at.elapsed().unwrap_or(self.sled_cache_ttl)
+            < self.sled_cache_ttl
+        {
             return mappings.get(&cache_key).cloned();
         }
         None
+    }
+
+    /// Detect backplane topology change and invalidate sled cache if needed.
+    async fn handle_backplane_topology_change(
+        &self,
+        opctx: &OpContext,
+        previous_map: &Option<
+            BTreeMap<
+                dpd_client::types::PortId,
+                dpd_client::types::BackplaneLink,
+            >,
+        >,
+        new_map: &BTreeMap<
+            dpd_client::types::PortId,
+            dpd_client::types::BackplaneLink,
+        >,
+    ) {
+        if let Some(prev_map) = previous_map {
+            if prev_map.len() != new_map.len()
+                || prev_map.keys().collect::<Vec<_>>()
+                    != new_map.keys().collect::<Vec<_>>()
+            {
+                warn!(
+                    opctx.log,
+                    "backplane map topology change detected";
+                    "previous_port_count" => prev_map.len(),
+                    "new_port_count" => new_map.len()
+                );
+                info!(
+                    opctx.log,
+                    "invalidating sled mapping cache due to backplane topology change"
+                );
+                self.invalidate_sled_mapping_cache().await;
+            }
+        }
+    }
+
+    /// Fetch the backplane map from DPD-client with caching.
+    ///
+    /// The client respons with the entire mapping of all cubbies in a rack.
+    ///
+    /// The backplane map should remain consistent same across all switches,
+    /// so we query one switch and cache the result.
+    async fn fetch_backplane_map(
+        &self,
+        opctx: &OpContext,
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<
+        BTreeMap<dpd_client::types::PortId, dpd_client::types::BackplaneLink>,
+        anyhow::Error,
+    > {
+        // Check cache first
+        let previous_map = {
+            let cache = self.backplane_map_cache.read().await;
+            if let Some((cached_at, ref map)) = *cache {
+                if cached_at.elapsed().unwrap_or(self.backplane_cache_ttl)
+                    < self.backplane_cache_ttl
+                {
+                    trace!(
+                        opctx.log,
+                        "backplane map cache hit";
+                        "port_count" => map.len()
+                    );
+                    return Ok(map.clone());
+                }
+                // Cache expired but keep reference to previous map for comparison
+                Some(map.clone())
+            } else {
+                None
+            }
+        };
+
+        // Cache miss - fetch from DPD via dataplane client
+        debug!(
+            opctx.log,
+            "fetching backplane map from DPD (cache miss or stale)"
+        );
+
+        let backplane_map =
+            dataplane_client.fetch_backplane_map().await.context(
+                "failed to query backplane_map from DPD via dataplane client",
+            )?;
+
+        // Detect topology change and invalidate sled cache if needed
+        self.handle_backplane_topology_change(
+            opctx,
+            &previous_map,
+            &backplane_map,
+        )
+        .await;
+
+        info!(
+            opctx.log,
+            "fetched backplane map from DPD";
+            "port_count" => backplane_map.len()
+        );
+
+        // Update cache
+        let mut cache = self.backplane_map_cache.write().await;
+        *cache = Some((SystemTime::now(), backplane_map.clone()));
+
+        Ok(backplane_map)
     }
 
     /// Resolve a sled ID to switch ports for multicast traffic.
@@ -1388,14 +1753,17 @@ impl MulticastGroupReconciler {
         &self,
         opctx: &OpContext,
         sled_id: SledUuid,
-    ) -> Result<Vec<MulticastSwitchPort>, anyhow::Error> {
+        dataplane_client: &MulticastDataplaneClient,
+    ) -> Result<Vec<SwitchBackplanePort>, anyhow::Error> {
         // Check cache first
         if let Some(port_configs) = self.check_sled_cache(sled_id).await {
             return Ok(port_configs); // Return even if empty - sled exists but may not be scrimlet
         }
 
         // Refresh cache if stale or missing entry
-        if let Err(e) = self.refresh_sled_mapping_cache(opctx).await {
+        if let Err(e) =
+            self.refresh_sled_mapping_cache(opctx, dataplane_client).await
+        {
             warn!(
                 opctx.log,
                 "failed to refresh sled mapping cache, using stale data";
@@ -1423,168 +1791,230 @@ impl MulticastGroupReconciler {
         )))
     }
 
-    /// Refresh the sled-to-switch-port mapping cache.
+    /// Find SP in inventory for a given sled's baseboard.
+    /// Tries exact match (serial + part), then falls back to serial-only.
+    fn find_sp_for_sled<'a>(
+        &self,
+        inventory: &'a nexus_types::inventory::Collection,
+        sled: &Sled,
+    ) -> Option<&'a nexus_types::inventory::ServiceProcessor> {
+        // Try exact match first (serial + part)
+        if let Some((_bb, sp)) = inventory.sps.iter().find(|(bb, _sp)| {
+            bb.serial_number == sled.serial_number()
+                && bb.part_number == sled.part_number()
+        }) {
+            return Some(sp);
+        }
+
+        // Fall back to serial-only match
+        inventory
+            .sps
+            .iter()
+            .find(|(bb, _sp)| bb.serial_number == sled.serial_number())
+            .map(|(_bb, sp)| sp)
+    }
+
+    /// Map a single sled to switch port(s), validating against backplane map.
+    /// Returns Ok(Some(ports)) on success, Ok(None) if validation failed.
+    fn map_sled_to_ports(
+        &self,
+        opctx: &OpContext,
+        sled: &Sled,
+        sp_slot: u32,
+        backplane_map: &BTreeMap<
+            dpd_client::types::PortId,
+            dpd_client::types::BackplaneLink,
+        >,
+    ) -> Result<Option<Vec<SwitchBackplanePort>>, anyhow::Error> {
+        let port_id = dpd_client::types::PortId::Rear(
+            dpd_client::types::Rear::try_from(format!("rear{sp_slot}"))
+                .context("invalid rear port number")?,
+        );
+
+        // Validate against hardware backplane map
+        if !backplane_map.contains_key(&port_id) {
+            warn!(
+                opctx.log,
+                "sled sp_slot validation failed - not in hardware backplane map";
+                "sled_id" => %sled.id(),
+                "sp_slot" => sp_slot,
+                "expected_port" => %format!("rear{}", sp_slot),
+                "reason" => "inventory_sp_slot_out_of_range_for_platform",
+                "action" => "skipped_sled_in_mapping_cache"
+            );
+            return Ok(None);
+        }
+
+        debug!(
+            opctx.log,
+            "mapped sled to rear port via inventory";
+            "sled_id" => %sled.id(),
+            "sp_slot" => sp_slot,
+            "rear_port" => %format!("rear{}", sp_slot)
+        );
+
+        Ok(Some(vec![SwitchBackplanePort {
+            port_id,
+            link_id: dpd_client::types::LinkId(0),
+            direction: dpd_client::types::Direction::Underlay,
+        }]))
+    }
+
+    /// Refresh the sled-to-switch-port mapping cache using inventory data.
+    ///
+    /// Maps each sled to its physical rear (backplane) port on the switch by:
+    /// 1. Getting sled's baseboard serial/part from the sled record
+    /// 2. Looking up the service processor (SP) in inventory for that baseboard
+    ///    (SP information is collected from MGS by the inventory collector)
+    /// 3. Using `sp.sp_slot` (cubby number) to determine the rear port identifier
+    /// 4. Creating `PortId::Rear(RearPort::try_from(format!("rear{sp_slot}")))`
+    ///
+    /// On the Dendrite side (switch's DPD daemon), a similar  mapping is performed:
+    ///
+    /// ```rust
+    /// // From dendrite/dpd/src/port_map.rs rev_ab_port_map()
+    /// for entry in SIDECAR_REV_AB_BACKPLANE_MAP.iter() {
+    ///     let port = PortId::Rear(RearPort::try_from(entry.cubby).unwrap());
+    ///     inner.insert(port, Connector::QSFP(entry.tofino_connector.into()));
+    /// }
+    /// ```
+    ///
+    /// Where `entry.cubby` is the physical cubby/slot number (same as our `sp_slot`),
+    /// and this maps it to a `PortId::Rear` that DPD can program on the Tofino ASIC.
     async fn refresh_sled_mapping_cache(
         &self,
         opctx: &OpContext,
+        dataplane_client: &MulticastDataplaneClient,
     ) -> Result<(), anyhow::Error> {
-        // Get all scrimlets (switch-connected sleds) from the database
+        // Fetch required data
+        let inventory = self
+            .datastore
+            .inventory_get_latest_collection(opctx)
+            .await
+            .context("failed to get latest inventory collection")?
+            .ok_or_else(|| {
+                anyhow::Error::msg("no inventory collection available")
+            })?;
+
+        // First attempt with current backplane map
+        let mut backplane_map =
+            self.fetch_backplane_map(opctx, dataplane_client).await?;
+
         let sleds = self
             .datastore
-            .sled_list_all_batched(
-                opctx,
-                nexus_types::deployment::SledFilter::Commissioned,
-            )
+            .sled_list_all_batched(opctx, SledFilter::InService)
             .await
-            .context("failed to list sleds")?;
+            .context("failed to list in-service sleds for inventory mapping")?;
 
-        // Filter to only scrimlets
-        let scrimlets: Vec<_> =
-            sleds.into_iter().filter(|sled| sled.is_scrimlet()).collect();
-
-        trace!(
-            opctx.log,
-            "building sled mapping cache for scrimlets";
-            "scrimlet_count" => scrimlets.len()
-        );
-
+        // Build sled → port mappings
         let mut mappings = HashMap::new();
+        let mut validation_failures = 0;
+        let mut retry_with_fresh_backplane = false;
 
-        // For each scrimlet, determine its switch location from switch port data
-        for sled in scrimlets {
-            // Query switch ports to find which switch this sled is associated with
-            // In the Oxide rack, each scrimlet has a co-located switch
-            // We need to find switch ports that correspond to this sled's location
-            let switch_ports = self
-                .datastore
-                .switch_port_list(opctx, &DataPageParams::max_page())
-                .await
-                .context("failed to list switch ports")?;
-
-            // Find ports that map to this scrimlet
-            let instance_switch_ports = match self
-                .find_instance_switch_ports_for_sled(&sled, &switch_ports)
-            {
-                Some(ports) => ports,
-                None => {
-                    return Err(anyhow::Error::msg(format!(
-                        "no instance switch ports found for sled {} - cannot create multicast mapping (sled rack_id: {})",
-                        sled.id(),
-                        sled.rack_id
-                    )));
-                }
-            };
-
-            // Create mappings for all available instance ports on this sled
-            let mut sled_port_configs = Vec::new();
-            for instance_switch_port in instance_switch_ports.iter() {
-                // Set port and link IDs
-                let port_id = instance_switch_port
-                    .port_name
-                    .as_str()
-                    .parse()
-                    .context("failed to parse port name")?;
-                let link_id = dpd_client::types::LinkId(0);
-
-                let config = MulticastSwitchPort {
-                    port_id,
-                    link_id,
-                    direction: dpd_client::types::Direction::Underlay,
-                };
-
-                sled_port_configs.push(config);
-
+        for sled in &sleds {
+            let Some(sp) = self.find_sp_for_sled(&inventory, sled) else {
                 debug!(
                     opctx.log,
-                    "mapped scrimlet to instance port";
+                    "no SP data found for sled in current inventory collection";
                     "sled_id" => %sled.id(),
-                    "switch_location" => %instance_switch_port.switch_location,
-                    "port_name" => %instance_switch_port.port_name
+                    "serial_number" => sled.serial_number(),
+                    "part_number" => sled.part_number()
                 );
+                continue;
+            };
+
+            match self.map_sled_to_ports(
+                opctx,
+                sled,
+                sp.sp_slot.into(),
+                &backplane_map,
+            )? {
+                Some(ports) => {
+                    mappings.insert(sled.id(), ports);
+                }
+                None => {
+                    validation_failures += 1;
+                    // If we have validation failures, we should refresh backplane map
+                    retry_with_fresh_backplane = true;
+                }
             }
+        }
 
-            // Store all port configs for this sled
-            mappings.insert(sled.id(), sled_port_configs);
-
+        // If we had validation failures, invalidate backplane cache and retry once
+        if retry_with_fresh_backplane && validation_failures > 0 {
             info!(
                 opctx.log,
-                "mapped scrimlet to all instance ports";
-                "sled_id" => %sled.id(),
-                "port_count" => instance_switch_ports.len()
+                "sled validation failures detected - invalidating backplane cache and retrying";
+                "validation_failures" => validation_failures
+            );
+
+            // Invalidate the backplane cache
+            self.invalidate_backplane_cache().await;
+
+            // Fetch fresh backplane map
+            backplane_map = self
+                .fetch_backplane_map(opctx, dataplane_client)
+                .await
+                .context(
+                    "failed to fetch fresh backplane map after invalidation",
+                )?;
+
+            // Retry mapping with fresh backplane data
+            mappings.clear();
+            validation_failures = 0;
+
+            for sled in &sleds {
+                let Some(sp) = self.find_sp_for_sled(&inventory, sled) else {
+                    continue;
+                };
+
+                match self.map_sled_to_ports(
+                    opctx,
+                    sled,
+                    sp.sp_slot.into(),
+                    &backplane_map,
+                )? {
+                    Some(ports) => {
+                        mappings.insert(sled.id(), ports);
+                    }
+                    None => {
+                        // Even with fresh data, this sled doesn't validate
+                        validation_failures += 1;
+                        warn!(
+                            opctx.log,
+                            "sled still fails validation with fresh backplane map";
+                            "sled_id" => %sled.id(),
+                            "sp_slot" => sp.sp_slot
+                        );
+                    }
+                }
+            }
+        }
+
+        // Update cache
+        let sled_count = mappings.len();
+        let mut cache = self.sled_mapping_cache.write().await;
+        *cache = (SystemTime::now(), mappings);
+
+        // Log results
+        if validation_failures > 0 {
+            warn!(
+                opctx.log,
+                "sled mapping cache refreshed with validation failures";
+                "total_sleds" => sleds.len(),
+                "mapped_sleds" => sled_count,
+                "validation_failures" => validation_failures
+            );
+        } else {
+            info!(
+                opctx.log,
+                "sled mapping cache refreshed successfully";
+                "total_sleds" => sleds.len(),
+                "mapped_sleds" => sled_count
             );
         }
 
-        let mut cache = self.sled_mapping_cache.write().await;
-        let mappings_len = mappings.len();
-        *cache = (SystemTime::now(), mappings);
-
-        info!(
-            opctx.log,
-            "sled mapping cache refreshed";
-            "scrimlet_mappings" => mappings_len
-        );
-
         Ok(())
-    }
-
-    /// Find switch ports on the same rack as the given sled.
-    /// This is the general switch topology logic.
-    fn find_rack_ports_for_sled<'a>(
-        &self,
-        sled: &nexus_db_model::Sled,
-        switch_ports: &'a [nexus_db_model::SwitchPort],
-    ) -> Vec<&'a nexus_db_model::SwitchPort> {
-        switch_ports
-            .iter()
-            .filter(|port| port.rack_id == sled.rack_id)
-            .collect()
-    }
-
-    /// Filter ports to only include instance ports (QSFP ports for instance traffic).
-    /// This is the instance-specific port logic.
-    fn filter_to_instance_switch_ports<'a>(
-        &self,
-        ports: &[&'a nexus_db_model::SwitchPort],
-    ) -> Vec<&'a nexus_db_model::SwitchPort> {
-        ports
-            .iter()
-            .filter(|port| {
-                match port
-                    .port_name
-                    .as_str()
-                    .parse::<dpd_client::types::PortId>()
-                {
-                    Ok(dpd_client::types::PortId::Qsfp(_)) => true,
-                    _ => false,
-                }
-            })
-            .copied()
-            .collect()
-    }
-
-    /// Find the appropriate instance switch ports for a given sled.
-    /// This combines general switch logic with instance-specific filtering.
-    fn find_instance_switch_ports_for_sled<'a>(
-        &self,
-        sled: &nexus_db_model::Sled,
-        switch_ports: &'a [nexus_db_model::SwitchPort],
-    ) -> Option<Vec<&'a nexus_db_model::SwitchPort>> {
-        // General switch logic: find ports on same rack
-        let rack_ports = self.find_rack_ports_for_sled(sled, switch_ports);
-
-        if rack_ports.is_empty() {
-            return None;
-        }
-
-        // Instance-specific logic: filter to instance ports only
-        let instance_switch_ports =
-            self.filter_to_instance_switch_ports(&rack_ports);
-
-        if !instance_switch_ports.is_empty() {
-            Some(instance_switch_ports)
-        } else {
-            None
-        }
     }
 
     /// Cleanup a member that is marked for deletion (time_deleted set).
@@ -1621,7 +2051,7 @@ impl MulticastGroupReconciler {
                 &DataPageParams::max_page(),
             )
             .await
-            .context("failed to list Creating multicast groups")?;
+            .context("failed to list 'Creating' multicast groups")?;
 
         let active_groups = self
             .datastore
@@ -1631,7 +2061,7 @@ impl MulticastGroupReconciler {
                 &DataPageParams::max_page(),
             )
             .await
-            .context("failed to list Active multicast groups")?;
+            .context("failed to list 'Active' multicast groups")?;
 
         groups.extend(active_groups);
 

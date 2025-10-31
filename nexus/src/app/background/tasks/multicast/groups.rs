@@ -490,10 +490,7 @@ impl MulticastGroupReconciler {
 
         // Check if DPD state matches DB state (read-before-write for drift detection)
         let needs_update = match dataplane_client
-            .fetch_external_group_for_drift_check(
-                opctx,
-                group.multicast_ip.ip(),
-            )
+            .fetch_external_group_for_drift_check(group.multicast_ip.ip())
             .await
         {
             Ok(Some(dpd_group)) => {

@@ -132,7 +132,8 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
         cptestctx,
         "group-lifecycle-1",
         instances[0].identity.id,
-        "Left", // Instance is stopped, so should be Left
+        // Instance is stopped, so should be "Left"
+        nexus_db_model::MulticastGroupMemberState::Left,
     )
     .await;
 
@@ -161,7 +162,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
             cptestctx,
             "group-lifecycle-2",
             instances[i + 1].identity.id,
-            "Left", // Stopped instances
+            nexus_db_model::MulticastGroupMemberState::Left, // Stopped instances
         )
         .await;
     }
@@ -190,7 +191,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
             cptestctx,
             group_name,
             instances[3].identity.id,
-            "Left", // Stopped instance
+            nexus_db_model::MulticastGroupMemberState::Left, // Stopped instance
         )
         .await;
     }
@@ -243,8 +244,7 @@ async fn test_multicast_lifecycle(cptestctx: &ControlPlaneTestContext) {
             object_get(client, &group_url).await;
         assert_eq!(
             current_group.state, "Active",
-            "Group {} should remain Active throughout lifecycle",
-            group_name
+            "Group {group_name} should remain Active throughout lifecycle"
         );
         assert_eq!(current_group.identity.id, groups[i].identity.id);
     }
@@ -413,13 +413,14 @@ async fn test_multicast_group_attach_limits(
     )
     .await;
 
-    // Wait for members to reach "Left" state for each group (instance is stopped, so reconciler transitions "Joining"→"Left")
+    // Wait for members to reach "Left" state for each group
+    // (instance is stopped, so member starts in "Left" state with no sled_id)
     for group_name in &multicast_group_names {
         wait_for_member_state(
             cptestctx,
             group_name,
             instance.identity.id,
-            "Left",
+            nexus_db_model::MulticastGroupMemberState::Left,
         )
         .await;
     }
@@ -440,8 +441,7 @@ async fn test_multicast_group_attach_limits(
         assert_eq!(
             members.len(),
             1,
-            "Instance should be member of group {}",
-            group_name
+            "Instance should be member of group {group_name}"
         );
         assert_eq!(members[0].instance_id, instance.identity.id);
     }
@@ -494,12 +494,12 @@ async fn test_multicast_group_instance_state_transitions(
     // Verify instance is stopped and in multicast group
     assert_eq!(stopped_instance.runtime.run_state, InstanceState::Stopped);
 
-    // Wait for member to reach "Left" state (reconciler transitions "Joining"→"Left" for stopped instance)
+    // Wait for member to reach "Left" state (stopped instance members start in "Left" state)
     wait_for_member_state(
         cptestctx,
         "state-test-group",
         stopped_instance.identity.id,
-        "Left",
+        nexus_db_model::MulticastGroupMemberState::Left,
     )
     .await;
 
@@ -568,10 +568,7 @@ async fn test_multicast_group_instance_state_transitions(
     // Clean up
     object_delete(
         client,
-        &format!(
-            "/v1/instances/{}?project={}",
-            "state-test-instance", PROJECT_NAME
-        ),
+        &format!("/v1/instances/state-test-instance?project={PROJECT_NAME}"),
     )
     .await;
     object_delete(client, &mcast_group_url("state-test-group")).await;
@@ -623,12 +620,12 @@ async fn test_multicast_group_persistence_through_stop_start(
     let nexus = &cptestctx.server.server_context().nexus;
     instance_simulate(nexus, &instance_id).await;
 
-    // Wait for member to be joined (reconciler will be triggered by instance start)
+    // Wait for member to be joined (reconciler will process the sled_id set by instance start)
     wait_for_member_state(
         cptestctx,
         "persist-test-group",
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -651,8 +648,7 @@ async fn test_multicast_group_persistence_through_stop_start(
 
     // Stop the instance
     let instance_stop_url = format!(
-        "/v1/instances/{}/stop?project={}",
-        "persist-test-instance", PROJECT_NAME
+        "/v1/instances/persist-test-instance/stop?project={PROJECT_NAME}"
     );
     nexus_test_utils::http_testing::NexusRequest::new(
         nexus_test_utils::http_testing::RequestBuilder::new(
@@ -703,8 +699,7 @@ async fn test_multicast_group_persistence_through_stop_start(
 
     // Start the instance again
     let instance_start_url = format!(
-        "/v1/instances/{}/start?project={}",
-        "persist-test-instance", PROJECT_NAME
+        "/v1/instances/persist-test-instance/start?project={PROJECT_NAME}"
     );
     nexus_test_utils::http_testing::NexusRequest::new(
         nexus_test_utils::http_testing::RequestBuilder::new(
@@ -753,7 +748,7 @@ async fn test_multicast_group_persistence_through_stop_start(
         cptestctx,
         "persist-test-group",
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -834,7 +829,8 @@ async fn test_multicast_concurrent_operations(
             cptestctx,
             "concurrent-test-group",
             instance.identity.id,
-            "Joined", // create_instance() starts instances, so they should be Joined
+            // create_instance() starts instances, so they should be Joined
+            nexus_db_model::MulticastGroupMemberState::Joined,
         )
         .await;
     }
@@ -847,8 +843,6 @@ async fn test_multicast_concurrent_operations(
         4,
         "All 4 instances should be members after concurrent addition"
     );
-
-    // Concurrent rapid attach/detach cycles (stress test state transitions)
 
     // Detach first two instances concurrently
     let instance_names_to_detach =
@@ -921,7 +915,7 @@ async fn test_multicast_concurrent_operations(
             cptestctx,
             "concurrent-test-group",
             member.instance_id,
-            "Joined",
+            nexus_db_model::MulticastGroupMemberState::Joined,
         )
         .await;
     }
@@ -935,9 +929,9 @@ async fn test_multicast_concurrent_operations(
 /// is deleted without ever starting (orphaned member cleanup).
 ///
 /// When an instance is created and added to a multicast group but never started,
-/// the member enters "Joining" state with sled_id=NULL. If the instance is then
+/// the member enters "Left" state with sled_id=NULL. If the instance is then
 /// deleted before ever starting, the RPW reconciler must detect and clean up the
-/// orphaned member to prevent it from remaining stuck in "Joining" state.
+/// orphaned member.
 #[nexus_test]
 async fn test_multicast_member_cleanup_instance_never_started(
     cptestctx: &ControlPlaneTestContext,
@@ -1001,7 +995,8 @@ async fn test_multicast_member_cleanup_instance_never_started(
     let instance: Instance =
         object_create(client, &instance_url, &instance_params).await;
 
-    // Add instance as multicast member (will be in "Joining" state with no sled_id)
+    // Add instance as multicast member (will be in "Left" state since instance
+    // is stopped with no sled_id)
     let member_add_url = format!(
         "{}?project={project_name}",
         mcast_group_members_url(group_name)
@@ -1017,9 +1012,14 @@ async fn test_multicast_member_cleanup_instance_never_started(
     )
     .await;
 
-    // Wait specifically for member to reach "Left" state since instance was created stopped
-    wait_for_member_state(cptestctx, group_name, instance.identity.id, "Left")
-        .await;
+    // Wait for member to reach "Left" state (stopped instance with no sled_id)
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance.identity.id,
+        nexus_db_model::MulticastGroupMemberState::Left,
+    )
+    .await;
 
     // Verify member count
     let members = list_multicast_group_members(client, group_name).await;
@@ -1124,7 +1124,7 @@ async fn test_multicast_group_membership_during_migration(
         cptestctx,
         group_name,
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -1269,7 +1269,7 @@ async fn test_multicast_group_membership_during_migration(
         cptestctx,
         group_name,
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -1278,6 +1278,10 @@ async fn test_multicast_group_membership_during_migration(
         final_member_state.state, "Joined",
         "Member should be in 'Joined' state after migration completes"
     );
+
+    // Verify inventory-based port mapping updated correctly after migration
+    // This confirms the RPW reconciler correctly mapped the new sled to its rear port
+    verify_inventory_based_port_mapping(cptestctx, &instance_id).await;
 
     // Verify mvlan persisted in DPD after migration
     let post_migration_dpd_group = dpd_client
@@ -1343,7 +1347,7 @@ async fn test_multicast_group_membership_during_migration(
 /// interfering with each other's membership states. The reconciler correctly processes
 /// concurrent sled_id changes for all members, ensuring each reaches Joined state on
 /// their respective target sleds.
-#[nexus_test(extra_sled_agents = 2)]
+#[nexus_test(extra_sled_agents = 1)]
 async fn test_multicast_group_concurrent_member_migrations(
     cptestctx: &ControlPlaneTestContext,
 ) {
@@ -1381,6 +1385,9 @@ async fn test_multicast_group_concurrent_member_migrations(
     object_create::<_, MulticastGroup>(client, &group_url, &group_params).await;
     wait_for_group_active(client, group_name).await;
 
+    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    ensure_multicast_test_ready(cptestctx).await;
+
     // Create multiple instances all in the same multicast group
     let instance_specs = [
         ("concurrent-instance-1", &[group_name][..]),
@@ -1414,7 +1421,7 @@ async fn test_multicast_group_concurrent_member_migrations(
             cptestctx,
             group_name,
             instance.identity.id,
-            "Joined",
+            nexus_db_model::MulticastGroupMemberState::Joined,
         )
         .await;
     }
@@ -1557,7 +1564,7 @@ async fn test_multicast_group_concurrent_member_migrations(
             cptestctx,
             group_name,
             instance.identity.id,
-            "Joined",
+            nexus_db_model::MulticastGroupMemberState::Joined,
         )
         .await;
     }

@@ -2,21 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Multicast group management for network traffic distribution
+//! Multicast group management for network traffic distribution.
 //!
-//! This module provides multicast group management operations including
-//! group creation, member management, and integration with IP pools
-//! following the bifurcated design from [RFD 488](https://rfd.shared.oxide.computer/rfd/488).
+//! Group creation, member management, and IP pool integration following
+//! the bifurcated design from [RFD 488](https://rfd.shared.oxide.computer/rfd/488).
 //!
 //! ## Fleet-Scoped Authorization Model
 //!
 //! Multicast groups are **fleet-scoped resources** (authz parent = "Fleet"),
-//! similar to IP pools. This design decision enables:
+//! similar to IP pools. This enables:
 //!
 //! - **Cross-project multicast**: Instances from different projects can join
-//!   the same multicast group, enabling collaboration without IP waste.
+//!   the same group without IP waste
 //! - **Cross-silo multicast**: Instances from different silos can join the
-//!   same group (when pools are linked to multiple silos).
+//!   same group (when pools are linked to multiple silos)
 //!
 //! ### Authorization Rules
 //!
@@ -144,7 +143,7 @@ impl super::Nexus {
         // Create multicast group (fleet-scoped, uses DEFAULT_MULTICAST_VNI)
         let group = self
             .db_datastore
-            .multicast_group_create(opctx, self.rack_id(), params, authz_pool)
+            .multicast_group_create(opctx, params, authz_pool)
             .await?;
 
         // Activate reconciler to process the new group ("Creating" → "Active")

@@ -4,8 +4,8 @@
 
 //! Shared multicast dataplane operations for sagas and reconciler.
 //!
-//! This module provides a unified interface for multicast group and member
-//! operations in the dataplane (DPD - Data Plane Daemon).
+//! Unified interface for multicast group and member operations in the
+//! dataplane (DPD - Data Plane Daemon).
 //!
 //! ## VNI and Forwarding Model
 //!
@@ -18,9 +18,8 @@
 //! - Forwarding decisions happen at the underlay layer
 //! - Security relies on underlay group membership validation
 //!
-//! This design enables cross-project and cross-silo multicast
-//! while maintaining security through API authorization and underlay membership
-//! control.
+//! This enables cross-project and cross-silo multicast while maintaining
+//! security through API authorization and underlay membership control.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -43,7 +42,6 @@ use dpd_client::types::{
 use internal_dns_resolver::Resolver;
 
 use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
-use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, SwitchLocation};
@@ -324,7 +322,6 @@ impl MulticastDataplaneClient {
     /// Apply multicast group configuration across switches (via DPD).
     pub(crate) async fn create_groups(
         &self,
-        _opctx: &OpContext,
         external_group: &ExternalMulticastGroup,
         underlay_group: &UnderlayMulticastGroup,
     ) -> MulticastDataplaneResult<(
@@ -339,7 +336,7 @@ impl MulticastDataplaneClient {
             "underlay_group_id" => %underlay_group.id,
             "underlay_multicast_ip" => %underlay_group.multicast_ip,
             "vni" => ?external_group.vni,
-            "target_switches" => self.switch_count(),
+            "switch_count" => self.switch_count(),
             "multicast_scope" => if external_group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
             "source_mode" => if external_group.source_ips.is_empty() { "ASM" } else { "SSM" },
             "dpd_operation" => "create_groups"
@@ -434,9 +431,8 @@ impl MulticastDataplaneClient {
                 "external_multicast_ip" => %external_group.multicast_ip.ip(),
                 "underlay_multicast_ip" => %underlay_group.multicast_ip.ip(),
                 "multicast_scope" => if external_group.multicast_ip.ip().is_ipv4() { "IPv4_External" } else { "IPv6_External" },
-                "target_switches" => self.switch_count(),
+                "switch_count" => self.switch_count(),
                 "dpd_error" => %e,
-                "impact" => "multicast_traffic_will_not_be_forwarded",
                 "recovery" => "saga_will_rollback_partial_configuration",
                 "dpd_operation" => "create_groups"
             );
@@ -459,9 +455,8 @@ impl MulticastDataplaneClient {
             "external_multicast_ip" => %external_group.multicast_ip,
             "underlay_group_id" => %underlay_group.id,
             "underlay_multicast_ip" => ?underlay_last.group_ip,
-            "switches_configured" => programmed_switches.len(),
+            "switch_count" => programmed_switches.len(),
             "dpd_operations_completed" => "[create_external_group, create_underlay_group, configure_nat_mapping]",
-            "forwarding_status" => "ACTIVE_ON_ALL_SWITCHES",
             "external_forwarding_vlan" => ?external_last.external_forwarding.vlan_id,
             "dpd_operation" => "create_groups"
         );
@@ -472,7 +467,6 @@ impl MulticastDataplaneClient {
     /// Update a multicast group's tag (name) and/or sources in the dataplane.
     pub(crate) async fn update_groups(
         &self,
-        _opctx: &OpContext,
         params: GroupUpdateParams<'_>,
     ) -> MulticastDataplaneResult<(
         MulticastGroupUnderlayResponse,
@@ -525,8 +519,6 @@ impl MulticastDataplaneClient {
             .iter()
             .map(|ip| IpSrc::Exact(ip.ip()))
             .collect::<Vec<_>>();
-
-        // DPD now supports sources=[] for ASM, so always pass sources
 
         let update_operations =
             dpd_clients.into_iter().map(|(switch_location, client)| {
@@ -638,9 +630,8 @@ impl MulticastDataplaneClient {
                 "external_multicast_ip" => %params.external_group.multicast_ip.ip(),
                 "underlay_multicast_ip" => %params.underlay_group.multicast_ip.ip(),
                 "update_operation" => "modify_tag_and_sources",
-                "target_switches" => self.switch_count(),
-                "dpd_error" => %e,
-                "impact" => "multicast_group_configuration_may_be_inconsistent_across_switches"
+                "switch_count" => self.switch_count(),
+                "dpd_error" => %e
             );
             e
         })?;
@@ -742,8 +733,7 @@ impl MulticastDataplaneClient {
                     "member_link_id" => %member.link_id,
                     "member_direction" => ?member.direction,
                     "switch_location" => %location,
-                    "dpd_operation" => %format!("{}_member_in_underlay_group", operation_name.as_str()),
-                    "forwarding_table_updated" => true
+                    "dpd_operation" => %format!("{}_member_in_underlay_group", operation_name.as_str())
                 );
 
                 Ok::<(), Error>(())
@@ -757,7 +747,6 @@ impl MulticastDataplaneClient {
     /// Add a member to a multicast group in the dataplane.
     pub(crate) async fn add_member(
         &self,
-        _opctx: &OpContext,
         underlay_group: &UnderlayMulticastGroup,
         member: MulticastGroupMember,
     ) -> MulticastDataplaneResult<()> {
@@ -769,7 +758,7 @@ impl MulticastDataplaneClient {
             "member_port_id" => %member.port_id,
             "member_link_id" => %member.link_id,
             "member_direction" => ?member.direction,
-            "target_switches" => self.switch_count(),
+            "switch_count" => self.switch_count(),
             "dpd_operation" => "update_underlay_group_members"
         );
 
@@ -795,7 +784,6 @@ impl MulticastDataplaneClient {
     /// Remove a member from a multicast group in the dataplane.
     pub(crate) async fn remove_member(
         &self,
-        _opctx: &OpContext,
         underlay_group: &UnderlayMulticastGroup,
         member: MulticastGroupMember,
     ) -> MulticastDataplaneResult<()> {
@@ -807,7 +795,7 @@ impl MulticastDataplaneClient {
             "member_port_id" => %member.port_id,
             "member_link_id" => %member.link_id,
             "member_direction" => ?member.direction,
-            "target_switches" => self.switch_count(),
+            "switch_count" => self.switch_count(),
             "dpd_operation" => "update_underlay_group_members"
         );
 
@@ -830,24 +818,170 @@ impl MulticastDataplaneClient {
         .await
     }
 
+    /// Detect and log cross-switch drift for multicast groups.
+    ///
+    /// We logs errors if:
+    /// - Group is present on some switches but missing on others (presence drift)
+    /// - Group has different configurations across switches (config drift)
+    fn log_drift_issues<'a>(
+        &self,
+        group_ip: IpAddr,
+        first_location: &SwitchLocation,
+        first_config: &MulticastGroupResponse,
+        found_results: &[&'a (
+            &'a SwitchLocation,
+            Option<MulticastGroupResponse>,
+        )],
+        not_found_count: usize,
+    ) {
+        let total_switches = found_results.len() + not_found_count;
+
+        // Check for cross-switch presence drift (group missing on some switches)
+        if not_found_count > 0 {
+            error!(
+                self.log,
+                "cross-switch drift detected: group missing on some switches";
+                "group_ip" => %group_ip,
+                "switches_with_group" => found_results.len(),
+                "switches_without_group" => not_found_count,
+                "total_switches" => total_switches,
+                "dpd_operation" => "fetch_external_group_for_drift_check"
+            );
+        }
+
+        // Check for config mismatches between switches (functional style)
+        found_results
+            .iter()
+            .filter_map(|(loc, resp)| resp.as_ref().map(|r| (loc, r)))
+            .filter(|(_, cfg)| *cfg != first_config)
+            .for_each(|(location, _)| {
+                error!(
+                    self.log,
+                    "cross-switch drift detected: different configs on switches";
+                    "group_ip" => %group_ip,
+                    "first_switch" => %first_location,
+                    "mismatched_switch" => %location,
+                    "dpd_operation" => "fetch_external_group_for_drift_check"
+                );
+            });
+    }
+
     /// Fetch external multicast group DPD state for RPW drift detection.
     ///
-    /// **RPW use only**: This queries a single switch to check if the group's
-    /// DPD configuration matches the database state. Used by the reconciler's
-    /// read-before-write pattern to decide whether to launch an UPDATE saga.
-    ///
-    /// **Single-switch query**: Queries only the first available switch for
-    /// efficiency. If drift is detected on any switch, the UPDATE saga will
-    /// fix all switches atomically. Worst case: one reconciler cycle of
-    /// detection latency if only some switches have drift.
-    ///
-    /// **Not for sagas**: Sagas should use `create_groups`/`update_groups`
-    /// which operate on all switches with `try_join_all`.
+    /// Queries all switches to detect configuration drift. If any switch has
+    /// different state (missing group, different config), it will return the
+    /// found state, so the reconciler can trigger an UPDATE
+    /// saga that will fix all switches atomically.
     pub(crate) async fn fetch_external_group_for_drift_check(
         &self,
-        _opctx: &OpContext,
         group_ip: IpAddr,
     ) -> MulticastDataplaneResult<Option<MulticastGroupExternalResponse>> {
+        debug!(
+            self.log,
+            "fetching external group state from all switches for drift detection";
+            "group_ip" => %group_ip,
+            "switch_count" => self.switch_count(),
+            "dpd_operation" => "fetch_external_group_for_drift_check"
+        );
+
+        let fetch_ops = self.dpd_clients.iter().map(|(location, client)| {
+            let log = self.log.clone();
+            async move {
+                match client.multicast_group_get(&group_ip).await {
+                    Ok(response) => {
+                        Ok((location, Some(response.into_inner())))
+                    }
+                    Err(DpdError::ErrorResponse(resp))
+                        if resp.status() == reqwest::StatusCode::NOT_FOUND =>
+                    {
+                        debug!(
+                            log,
+                            "external group not found on switch";
+                            "group_ip" => %group_ip,
+                            "switch" => %location,
+                            "dpd_operation" => "fetch_external_group_for_drift_check"
+                        );
+                        Ok((location, None))
+                    }
+                    Err(e) => {
+                        error!(
+                            log,
+                            "external group fetch failed";
+                            "group_ip" => %group_ip,
+                            "switch" => %location,
+                            "error" => %e,
+                            "dpd_operation" => "fetch_external_group_for_drift_check"
+                        );
+                        Err(Error::internal_error(&format!(
+                            "failed to fetch external group from DPD: {e}"
+                        )))
+                    }
+                }
+            }
+        });
+
+        let results = try_join_all(fetch_ops).await?;
+
+        // Partition results into found/not-found for drift analysis
+        let (found, not_found): (Vec<_>, Vec<_>) =
+            results.iter().partition(|(_, resp)| resp.is_some());
+
+        if found.is_empty() {
+            // Group doesn't exist on any switch
+            debug!(
+                self.log,
+                "external group not found on any switch (expected for new groups)";
+                "group_ip" => %group_ip,
+                "switches_queried" => results.len(),
+                "dpd_operation" => "fetch_external_group_for_drift_check"
+            );
+            return Ok(None);
+        }
+
+        // Get first found config for comparison and return value
+        let (first_location, first_config) = found
+            .first()
+            .and_then(|(loc, resp)| resp.as_ref().map(|r| (*loc, r)))
+            .expect(
+                "found_results non-empty check guarantees at least one element",
+            );
+
+        // Detect and log any cross-switch drift
+        self.log_drift_issues(
+            group_ip,
+            first_location,
+            first_config,
+            &found,
+            not_found.len(),
+        );
+
+        debug!(
+            self.log,
+            "external group state fetched from all switches";
+            "group_ip" => %group_ip,
+            "switches_queried" => results.len(),
+            "switches_with_group" => found.len(),
+            "dpd_operation" => "fetch_external_group_for_drift_check"
+        );
+
+        // Return first found config (reconciler will compare with DB and launch UPDATE if needed)
+        Ok(Some(first_config.clone().into_external_response()?))
+    }
+
+    /// Fetch the hardware backplane map from DPD for topology validation.
+    ///
+    /// Queries a single switch to get the backplane topology map, which should
+    /// be identical across all switches. Used by the reconciler to validate that
+    /// inventory `sp_slot` values are within the valid range for
+    /// the current hardware.
+    pub(crate) async fn fetch_backplane_map(
+        &self,
+    ) -> MulticastDataplaneResult<
+        std::collections::BTreeMap<
+            dpd_client::types::PortId,
+            dpd_client::types::BackplaneLink,
+        >,
+    > {
         let (switch_location, client) =
             self.dpd_clients.iter().next().ok_or_else(|| {
                 Error::internal_error("no DPD clients available")
@@ -855,40 +989,56 @@ impl MulticastDataplaneClient {
 
         debug!(
             self.log,
-            "fetching external group state from DPD for drift detection";
-            "group_ip" => %group_ip,
+            "fetching backplane map from DPD for topology validation";
             "switch" => %switch_location,
             "query_scope" => "single_switch",
-            "dpd_operation" => "fetch_external_group_for_drift_check"
+            "dpd_operation" => "fetch_backplane_map"
         );
 
-        match client.multicast_group_get(&group_ip).await {
+        match client.backplane_map().await {
             Ok(response) => {
-                Ok(Some(response.into_inner().into_external_response()?))
-            }
-            Err(DpdError::ErrorResponse(resp))
-                if resp.status() == reqwest::StatusCode::NOT_FOUND =>
-            {
+                let backplane_map_raw = response.into_inner();
+
+                // Convert HashMap<String, BackplaneLink> to BTreeMap<PortId, BackplaneLink>
+                // DPD returns string keys like "rear0", "rear1" - parse them to PortId
+                let backplane_map: std::collections::BTreeMap<_, _> = backplane_map_raw
+                    .into_iter()
+                    .filter_map(|(port_str, link)| {
+                        match dpd_client::types::PortId::try_from(port_str.as_str()) {
+                            Ok(port_id) => Some((port_id, link)),
+                            Err(e) => {
+                                error!(
+                                    self.log,
+                                    "failed to parse port ID from backplane map";
+                                    "port_str" => %port_str,
+                                    "error" => %e,
+                                    "dpd_operation" => "fetch_backplane_map"
+                                );
+                                None
+                            }
+                        }
+                    })
+                    .collect();
+
                 debug!(
                     self.log,
-                    "external group not found in DPD (expected for new groups)";
-                    "group_ip" => %group_ip,
+                    "backplane map fetched from DPD";
                     "switch" => %switch_location,
-                    "dpd_operation" => "fetch_external_group_for_drift_check"
+                    "port_count" => backplane_map.len(),
+                    "dpd_operation" => "fetch_backplane_map"
                 );
-                Ok(None)
+                Ok(backplane_map)
             }
             Err(e) => {
                 error!(
                     self.log,
-                    "external group fetch failed";
-                    "group_ip" => %group_ip,
+                    "backplane map fetch failed";
                     "switch" => %switch_location,
                     "error" => %e,
-                    "dpd_operation" => "fetch_external_group_for_drift_check"
+                    "dpd_operation" => "fetch_backplane_map"
                 );
                 Err(Error::internal_error(&format!(
-                    "failed to fetch external group from DPD: {e}"
+                    "failed to fetch backplane map from DPD: {e}"
                 )))
             }
         }

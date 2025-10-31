@@ -2081,13 +2081,19 @@ pub async fn start_sled_agent(
     sim_mode: sim::SimMode,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
-    let config = sim::Config::for_testing(
+    // Generate a baseboard serial number that matches the SP configuration
+    // (SimGimlet00, SimGimlet01, etc.) so that inventory can link sled agents
+    // to their corresponding SPs via baseboard_id.
+    let baseboard_serial = format!("SimGimlet{:02}", sled_index);
+
+    let config = sim::Config::for_testing_with_baseboard(
         id,
         sim_mode,
         Some(nexus_address),
         Some(update_directory),
         sim::ZpoolConfig::None,
         SledCpuFamily::AmdMilan,
+        Some(baseboard_serial),
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await

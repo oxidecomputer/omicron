@@ -13,11 +13,13 @@ use dropshot::test_util::ClientTestContext;
 use http::{Method, StatusCode};
 use slog::{debug, info, warn};
 
+use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     link_ip_pool, object_create, object_delete,
 };
+use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::params::{
     InstanceCreate, InstanceNetworkInterfaceAttachment, IpPoolCreate,
     MulticastGroupCreate,
@@ -26,11 +28,12 @@ use nexus_types::external_api::shared::{IpRange, Ipv4Range};
 use nexus_types::external_api::views::{
     IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
 };
-use nexus_types::identity::Resource;
+use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceState, NameOrId,
 };
+use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
@@ -52,17 +55,17 @@ mod networking_integration;
 const POLL_INTERVAL: Duration = Duration::from_millis(80);
 const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Helpers for building multicast API URLs.
-/// Multicast groups are fleet-scoped, so no project parameter is needed.
+/// Build URL for listing all multicast groups (fleet-scoped).
 pub(crate) fn mcast_groups_url() -> String {
     "/v1/multicast-groups".to_string()
 }
 
+/// Build URL for a specific multicast group by name.
 pub(crate) fn mcast_group_url(group_name: &str) -> String {
     format!("/v1/multicast-groups/{group_name}")
 }
 
-/// Multicast group members are identified by UUID, so no project parameter is needed for listing.
+/// Build URL for listing members of a multicast group.
 pub(crate) fn mcast_group_members_url(group_name: &str) -> String {
     format!("/v1/multicast-groups/{group_name}/members")
 }
@@ -167,8 +170,7 @@ pub(crate) async fn wait_for_multicast_reconciler(
 ///
 /// This is like `wait_for_condition` but activates the multicast reconciler
 /// periodically (not on every poll) to drive state changes. We activate the
-/// reconciler every 500ms instead of every 80ms poll to reduce overhead while
-/// still ensuring the reconciler processes changes promptly.
+/// reconciler every 500ms.
 ///
 /// Useful for tests that need to wait for reconciler-driven state changes
 /// (e.g., member state transitions).
@@ -213,15 +215,125 @@ where
     .await
 }
 
+/// Ensure inventory collection has completed with SP data for all sleds.
+///
+/// This function verifies that inventory has SP data for EVERY in-service sled,
+/// not just that inventory completed.
+///
+/// This is required for multicast member operations which map sled_id → sp_slot
+/// → switch ports via inventory.
+pub(crate) async fn ensure_inventory_ready(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let log = &cptestctx.logctx.log;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+
+    info!(log, "waiting for inventory with SP data for all sleds");
+
+    // Wait for inventory to have SP data for ALL in-service sleds
+    match wait_for_condition(
+        || async {
+            let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+
+            // Get all in-service sleds
+            let sleds = match datastore
+                .sled_list_all_batched(&opctx, SledFilter::InService)
+                .await
+            {
+                Ok(sleds) => sleds,
+                Err(e) => {
+                    warn!(log, "failed to list sleds: {e}");
+                    return Err(CondCheckError::<String>::NotYet);
+                }
+            };
+
+            if sleds.is_empty() {
+                warn!(log, "no in-service sleds found yet");
+                return Err(CondCheckError::<String>::NotYet);
+            }
+
+            // Get latest inventory
+            let inventory =
+                match datastore.inventory_get_latest_collection(&opctx).await {
+                    Ok(Some(inv)) => inv,
+                    Ok(None) => {
+                        debug!(log, "no inventory collection yet");
+                        return Err(CondCheckError::<String>::NotYet);
+                    }
+                    Err(e) => {
+                        warn!(log, "failed to get inventory: {e}");
+                        return Err(CondCheckError::<String>::NotYet);
+                    }
+                };
+
+            // Verify inventory has SP data for each sled
+            let mut missing_sleds = Vec::new();
+            for sled in &sleds {
+                let has_sp = inventory.sps.iter().any(|(bb, _)| {
+                    (bb.serial_number == sled.serial_number()
+                        && bb.part_number == sled.part_number())
+                        || bb.serial_number == sled.serial_number()
+                });
+
+                if !has_sp {
+                    missing_sleds.push(sled.serial_number().to_string());
+                }
+            }
+
+            if missing_sleds.is_empty() {
+                info!(
+                    log,
+                    "inventory has SP data for all {} sleds",
+                    sleds.len()
+                );
+                Ok(())
+            } else {
+                debug!(
+                    log,
+                    "inventory missing SP data for {} sleds: {:?}",
+                    missing_sleds.len(),
+                    missing_sleds
+                );
+                Err(CondCheckError::<String>::NotYet)
+            }
+        },
+        &Duration::from_millis(500), // Check every 500ms
+        &Duration::from_secs(120),   // Wait up to 120s
+    )
+    .await
+    {
+        Ok(_) => {
+            info!(log, "inventory ready with SP data for all sleds");
+        }
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "inventory did not get SP data for all sleds within {elapsed:?}"
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!("failed waiting for inventory: {err}");
+        }
+    }
+}
+
+/// Ensure multicast test prerequisites are ready.
+///
+/// This combines inventory collection (for sled → switch port mapping) and
+/// DPD readiness (for switch operations) into a single call. Use this at the
+/// beginning of multicast tests that will add instances to groups.
+pub(crate) async fn ensure_multicast_test_ready(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    ensure_inventory_ready(cptestctx).await;
+    ensure_dpd_ready(cptestctx).await;
+}
+
 /// Ensure DPD (switch infrastructure) is ready and responsive.
 ///
 /// This ensures that switch zones are up and DPD APIs are responding before
 /// running tests that depend on dataplane operations. Helps prevent flaky tests
 /// where the reconciler tries to contact DPD before switch zones are up.
-///
-/// Best practice: Call this at the beginning of every multicast test,
-/// right after getting the test context. It's fast when DPD is already up
-/// (immediate return on success).
 ///
 /// Uses a simple ping by listing groups - any successful response means DPD is ready.
 pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
@@ -436,12 +548,13 @@ pub(crate) async fn list_multicast_group_members(
 pub(crate) async fn wait_for_group_state(
     client: &ClientTestContext,
     group_name: &str,
-    expected_state: &str,
+    expected_state: nexus_db_model::MulticastGroupState,
 ) -> MulticastGroup {
+    let expected_state_as_str = expected_state.to_string();
     match wait_for_condition(
         || async {
             let group = get_multicast_group(client, group_name).await;
-            if group.state == expected_state {
+            if group.state == expected_state_as_str {
                 Ok(group)
             } else {
                 Err(CondCheckError::<()>::NotYet)
@@ -455,12 +568,12 @@ pub(crate) async fn wait_for_group_state(
         Ok(group) => group,
         Err(poll::Error::TimedOut(elapsed)) => {
             panic!(
-                "group {group_name} did not reach state '{expected_state}' within {elapsed:?}",
+                "group {group_name} did not reach state '{expected_state_as_str}' within {elapsed:?}",
             );
         }
         Err(poll::Error::PermanentError(err)) => {
             panic!(
-                "failed waiting for group {group_name} to reach state '{expected_state}': {err:?}",
+                "failed waiting for group {group_name} to reach state '{expected_state_as_str}': {err:?}",
             );
         }
     }
@@ -471,11 +584,16 @@ pub(crate) async fn wait_for_group_active(
     client: &ClientTestContext,
     group_name: &str,
 ) -> MulticastGroup {
-    wait_for_group_state(client, group_name, "Active").await
+    wait_for_group_state(
+        client,
+        group_name,
+        nexus_db_model::MulticastGroupState::Active,
+    )
+    .await
 }
 
 /// Wait for a specific member to reach the expected state
-/// (e.g., "Joined", "Joining", "Left").
+/// (e.g., Joined, Joining, Left).
 ///
 /// For "Joined" state, this function uses `wait_for_condition_with_reconciler`
 /// to ensure the reconciler processes member state transitions.
@@ -483,17 +601,26 @@ pub(crate) async fn wait_for_member_state(
     cptestctx: &ControlPlaneTestContext,
     group_name: &str,
     instance_id: uuid::Uuid,
-    expected_state: &str,
+    expected_state: nexus_db_model::MulticastGroupMemberState,
 ) -> MulticastGroupMember {
     let client = &cptestctx.external_client;
     let lockstep_client = &cptestctx.lockstep_client;
+    let expected_state_as_str = expected_state.to_string();
+
+    // For "Joined" state, ensure instance has a sled_id assigned
+    // (no need to check inventory again since ensure_inventory_ready() already
+    // verified all sleds have SP data at test setup)
+    if expected_state == nexus_db_model::MulticastGroupMemberState::Joined {
+        let instance_uuid = InstanceUuid::from_untyped_uuid(instance_id);
+        wait_for_instance_sled_assignment(cptestctx, &instance_uuid).await;
+    }
 
     let check_member = || async {
         let members = list_multicast_group_members(client, group_name).await;
 
         // If we're looking for "Joined" state, we need to ensure the member exists first
         // and then wait for the reconciler to process it
-        if expected_state == "Joined" {
+        if expected_state == nexus_db_model::MulticastGroupMemberState::Joined {
             if let Some(member) =
                 members.iter().find(|m| m.instance_id == instance_id)
             {
@@ -520,7 +647,7 @@ pub(crate) async fn wait_for_member_state(
             if let Some(member) =
                 members.iter().find(|m| m.instance_id == instance_id)
             {
-                if member.state == expected_state {
+                if member.state == expected_state_as_str {
                     Ok(member.clone())
                 } else {
                     Err(CondCheckError::NotYet)
@@ -532,7 +659,9 @@ pub(crate) async fn wait_for_member_state(
     };
 
     // Use reconciler-activating wait for "Joined" state
-    let result = if expected_state == "Joined" {
+    let result = if expected_state
+        == nexus_db_model::MulticastGroupMemberState::Joined
+    {
         wait_for_condition_with_reconciler(
             lockstep_client,
             check_member,
@@ -553,12 +682,12 @@ pub(crate) async fn wait_for_member_state(
         Ok(member) => member,
         Err(poll::Error::TimedOut(elapsed)) => {
             panic!(
-                "member {instance_id} in group {group_name} did not reach state '{expected_state}' within {elapsed:?}",
+                "member {instance_id} in group {group_name} did not reach state '{expected_state_as_str}' within {elapsed:?}",
             );
         }
         Err(poll::Error::PermanentError(err)) => {
             panic!(
-                "failed waiting for member {instance_id} in group {group_name} to reach state '{expected_state}': {err:?}",
+                "failed waiting for member {instance_id} in group {group_name} to reach state '{expected_state_as_str}': {err:?}",
             );
         }
     }
@@ -576,10 +705,7 @@ pub(crate) async fn wait_for_instance_sled_assignment(
 ) {
     let datastore = cptestctx.server.server_context().nexus.datastore();
     let log = &cptestctx.logctx.log;
-    let opctx = nexus_db_queries::context::OpContext::for_tests(
-        log.clone(),
-        datastore.clone(),
-    );
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
 
     info!(
         log,
@@ -656,6 +782,163 @@ pub(crate) async fn wait_for_instance_sled_assignment(
             );
         }
     }
+}
+
+/// Assert that all members in an underlay group use rear (backplane) ports
+/// with Underlay direction.
+///
+/// This is a lightweight check that validates we're using backplane ports
+/// (not QSFP external ports) for underlay traffic. Use this in any test
+/// that fetches an underlay group.
+///
+/// For a more thorough check that also validates the exact rear port number
+/// matches inventory sp_slot, use [`verify_inventory_based_port_mapping()`].
+pub(crate) fn assert_underlay_members_use_rear_ports(
+    members: &[dpd_client::types::MulticastGroupMember],
+) {
+    for member in members {
+        assert!(
+            matches!(member.port_id, dpd_client::types::PortId::Rear(_)),
+            "Underlay member should use rear (backplane) port, got: {:?}",
+            member.port_id
+        );
+        assert_eq!(
+            member.direction,
+            dpd_client::types::Direction::Underlay,
+            "Underlay member should have Underlay direction"
+        );
+    }
+}
+
+/// Verify that inventory-based sled-to-switch-port mapping worked correctly.
+///
+/// This validates the entire flow:
+/// instance → sled → inventory → sp_slot → rear{N} → DPD underlay member
+///
+/// Asserts that the DPD underlay group contains a member with rear port matching
+/// the instance's sled's sp_slot from inventory. This confirms that the multicast
+/// reconciler correctly used inventory data to map the sled to the appropriate
+/// switch backplane port.
+pub(crate) async fn verify_inventory_based_port_mapping(
+    cptestctx: &ControlPlaneTestContext,
+    instance_uuid: &InstanceUuid,
+) {
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    // Get sled_id for the running instance
+    let sled_id = nexus
+        .active_instance_info(instance_uuid, None)
+        .await
+        .expect("active_instance_info call succeeds")
+        .expect("Instance should be on a sled")
+        .sled_id;
+
+    // Get the multicast member for this instance to find its external_group_id
+    let members = datastore
+        .multicast_group_members_list_by_instance(&opctx, *instance_uuid, false)
+        .await
+        .expect("list multicast members for instance");
+
+    let member = members
+        .first()
+        .expect("instance should have at least one multicast membership");
+
+    let external_group_id = member.external_group_id;
+
+    // Fetch the external multicast group to get underlay_group_id
+    use omicron_uuid_kinds::MulticastGroupUuid;
+    let external_group = datastore
+        .multicast_group_fetch(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(external_group_id),
+        )
+        .await
+        .expect("fetch external multicast group");
+
+    let underlay_group_id = external_group
+        .underlay_group_id
+        .expect("external group should have underlay_group_id");
+
+    // Fetch the underlay group to get its multicast IP
+    let underlay_group = datastore
+        .underlay_multicast_group_fetch(&opctx, underlay_group_id)
+        .await
+        .expect("fetch underlay multicast group");
+
+    let underlay_multicast_ip = underlay_group.multicast_ip.ip();
+
+    // Fetch latest inventory collection
+    let inventory = datastore
+        .inventory_get_latest_collection(&opctx)
+        .await
+        .expect("fetch latest inventory collection")
+        .expect("inventory collection should exist");
+
+    // Get the sled record to find its baseboard info
+    let sleds = datastore
+        .sled_list_all_batched(&opctx, SledFilter::InService)
+        .await
+        .expect("list in-service sleds");
+    let sled =
+        sleds.into_iter().find(|s| s.id() == sled_id).expect("found sled");
+
+    // Find SP for this sled using baseboard matching (serial + part number)
+    let sp = inventory
+        .sps
+        .iter()
+        .find(|(bb, _)| {
+            bb.serial_number == sled.serial_number()
+                && bb.part_number == sled.part_number()
+        })
+        .or_else(|| {
+            // Fallback to serial-only match if exact match not found
+            inventory
+                .sps
+                .iter()
+                .find(|(bb, _)| bb.serial_number == sled.serial_number())
+        })
+        .map(|(_, sp)| sp)
+        .expect("found ServiceProcessor for sled");
+
+    let expected_rear_port = sp.sp_slot;
+
+    // Fetch DPD underlay group configuration using the underlay multicast IP
+    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
+    let underlay_group_response = dpd_client
+        .multicast_group_get(&underlay_multicast_ip)
+        .await
+        .expect("DPD multicast_group_get succeeds")
+        .into_inner();
+
+    // Extract underlay members from the response
+    let members = match underlay_group_response {
+        dpd_client::types::MulticastGroupResponse::Underlay {
+            members, ..
+        } => members,
+        dpd_client::types::MulticastGroupResponse::External { .. } => {
+            panic!("Expected Underlay group, got External");
+        }
+    };
+
+    // Construct the expected PortId for comparison
+    let expected_port_id = dpd_client::types::PortId::Rear(
+        dpd_client::types::Rear::try_from(format!("rear{expected_rear_port}"))
+            .expect("valid rear port string"),
+    );
+
+    // Verify DPD has an underlay member with the expected rear port
+    let has_expected_member = members.iter().any(|m| {
+        matches!(m.direction, dpd_client::types::Direction::Underlay)
+            && m.port_id == expected_port_id
+    });
+
+    assert!(
+        has_expected_member,
+        "Expected underlay member with rear{expected_rear_port} not found in DPD"
+    );
 }
 
 /// Wait for a multicast group to have a specific number of members.
@@ -741,9 +1024,10 @@ pub(crate) async fn instance_for_multicast_groups(
     start: bool,
     multicast_group_names: &[&str],
 ) -> Instance {
-    // Ensure DPD is ready before creating instances with multicast groups
-    // This prevents the reconciler from failing when it tries to add members
+    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    // Inventory is needed for sled → switch port mapping, DPD for switch operations
     if !multicast_group_names.is_empty() {
+        ensure_inventory_ready(cptestctx).await;
         ensure_dpd_ready(cptestctx).await;
     }
 
@@ -1107,14 +1391,15 @@ pub(crate) async fn stop_instances(
 
 /// Attach multiple instances to a multicast group in parallel.
 ///
-/// Ensures DPD is ready once before attaching all instances, avoiding redundant checks.
+/// Ensures inventory and DPD are ready once before attaching all instances, avoiding redundant checks.
 pub(crate) async fn multicast_group_attach_bulk(
     cptestctx: &ControlPlaneTestContext,
     project_name: &str,
     instance_names: &[&str],
     group_name: &str,
 ) {
-    // Check DPD readiness once for all attachments
+    // Check inventory and DPD readiness once for all attachments
+    ensure_inventory_ready(cptestctx).await;
     ensure_dpd_ready(cptestctx).await;
 
     let attach_futures = instance_names.iter().map(|instance_name| {

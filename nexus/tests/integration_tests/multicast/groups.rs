@@ -787,7 +787,7 @@ async fn test_multicast_group_member_operations(
         cptestctx,
         group_name,
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -870,11 +870,13 @@ async fn test_multicast_group_member_operations(
         "Underlay group should have exactly 1 member after member addition"
     );
 
+    // Assert all underlay members use rear (backplane) ports with Underlay direction
+    assert_underlay_members_use_rear_ports(&underlay_group.members);
+
     // Test removing instance from multicast group using path-based DELETE
     let member_remove_url = format!(
-        "{}/{}?project={project_name}",
-        mcast_group_members_url(group_name),
-        instance_name
+        "{}/{instance_name}?project={project_name}",
+        mcast_group_members_url(group_name)
     );
 
     NexusRequest::new(
@@ -974,8 +976,7 @@ async fn test_instance_multicast_endpoints(
 
     // Test: List instance multicast groups (should be empty initially)
     let instance_groups_url = format!(
-        "/v1/instances/{}/multicast-groups?project={}",
-        instance_name, project_name
+        "/v1/instances/{instance_name}/multicast-groups?project={project_name}"
     );
     let instance_memberships: ResultsPage<MulticastGroupMember> =
         object_get(client, &instance_groups_url).await;
@@ -987,8 +988,7 @@ async fn test_instance_multicast_endpoints(
 
     // Test: Join group1 using instance-centric endpoint
     let instance_join_group1_url = format!(
-        "/v1/instances/{}/multicast-groups/{}?project={project_name}",
-        instance_name, group1_name
+        "/v1/instances/{instance_name}/multicast-groups/{group1_name}?project={project_name}"
     );
     // Use PUT method but expect 201 Created (not 200 OK like object_put)
     // This is correct HTTP semantics - PUT can return 201 when creating new resource
@@ -1014,7 +1014,7 @@ async fn test_instance_multicast_endpoints(
         cptestctx,
         group1_name,
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -1042,9 +1042,8 @@ async fn test_instance_multicast_endpoints(
 
     // Join group2 using group-centric endpoint (test both directions)
     let member_add_url = format!(
-        "{}?project={}",
-        mcast_group_members_url(group2_name),
-        project_name
+        "{}?project={project_name}",
+        mcast_group_members_url(group2_name)
     );
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
@@ -1058,7 +1057,7 @@ async fn test_instance_multicast_endpoints(
         cptestctx,
         group2_name,
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -1104,8 +1103,7 @@ async fn test_instance_multicast_endpoints(
 
     // Leave group1 using instance-centric endpoint
     let instance_leave_group1_url = format!(
-        "/v1/instances/{}/multicast-groups/{}?project={project_name}",
-        instance_name, group1_name
+        "/v1/instances/{instance_name}/multicast-groups/{group1_name}?project={project_name}"
     );
     object_delete(client, &instance_leave_group1_url).await;
 
@@ -1141,10 +1139,8 @@ async fn test_instance_multicast_endpoints(
 
     // Leave group2 using group-centric endpoint
     let member_remove_url = format!(
-        "{}/{}?project={}",
-        mcast_group_members_url(group2_name),
-        instance_name,
-        project_name
+        "{}/{instance_name}?project={project_name}",
+        mcast_group_members_url(group2_name)
     );
 
     NexusRequest::new(
@@ -1238,9 +1234,8 @@ async fn test_multicast_group_member_errors(
     // Test adding member to nonexistent group
     let nonexistent_group = "nonexistent-group";
     let member_add_bad_group_url = format!(
-        "{}?project={}",
-        mcast_group_members_url(nonexistent_group),
-        project_name
+        "{}?project={project_name}",
+        mcast_group_members_url(nonexistent_group)
     );
     object_create_error(
         client,
@@ -1372,7 +1367,7 @@ async fn test_instance_deletion_removes_multicast_memberships(
         cptestctx,
         group_name,
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -1477,7 +1472,7 @@ async fn test_member_operations_via_rpw_reconciler(
         cptestctx,
         group_name,
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -1502,9 +1497,8 @@ async fn test_member_operations_via_rpw_reconciler(
 
     // Test: Remove member via API (should use RPW pattern via reconciler)
     let member_remove_url = format!(
-        "{}/{}?project={project_name}",
-        mcast_group_members_url(group_name),
-        instance_name
+        "{}/{instance_name}?project={project_name}",
+        mcast_group_members_url(group_name)
     );
 
     NexusRequest::new(
@@ -1726,7 +1720,7 @@ fn validate_dpd_group_response(
             IpAddr::V6(group_ip.0)
         }
     };
-    assert_eq!(ip, *expected_ip, "DPD group IP mismatch in {}", test_context);
+    assert_eq!(ip, *expected_ip, "DPD group IP mismatch in {test_context}");
 
     match dpd_group {
         dpd_types::MulticastGroupResponse::External {
@@ -1738,16 +1732,14 @@ fn validate_dpd_group_response(
                 // but we can validate if they do
                 // Note: External groups may not expose member count directly
                 eprintln!(
-                    "Note: External group member validation skipped in {}",
-                    test_context
+                    "Note: External group member validation skipped in {test_context}"
                 );
             }
 
             // Validate external group specific fields
             assert_ne!(
                 *external_group_id, 0,
-                "DPD external_group_id should be non-zero in {}",
-                test_context
+                "DPD external_group_id should be non-zero in {test_context}"
             );
         }
         dpd_types::MulticastGroupResponse::Underlay {
@@ -1760,23 +1752,22 @@ fn validate_dpd_group_response(
                 assert_eq!(
                     members.len(),
                     expected_count,
-                    "DPD underlay group member count mismatch in {}: expected {}, got {}",
-                    test_context,
-                    expected_count,
+                    "DPD underlay group member count mismatch in {test_context}: expected {expected_count}, got {}",
                     members.len()
                 );
             }
 
+            // Assert all underlay members use rear (backplane) ports with Underlay direction
+            assert_underlay_members_use_rear_ports(members);
+
             // Validate underlay group specific fields
             assert_ne!(
                 *external_group_id, 0,
-                "DPD external_group_id should be non-zero in {}",
-                test_context
+                "DPD external_group_id should be non-zero in {test_context}"
             );
             assert_ne!(
                 *underlay_group_id, 0,
-                "DPD underlay_group_id should be non-zero in {}",
-                test_context
+                "DPD underlay_group_id should be non-zero in {test_context}"
             );
         }
     }
@@ -2688,7 +2679,7 @@ async fn test_multicast_group_mvlan_with_member_operations(
         cptestctx,
         group_name,
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 
@@ -2795,7 +2786,7 @@ async fn test_multicast_group_mvlan_reconciler_update(
         cptestctx,
         group_name,
         instance.identity.id,
-        "Joined",
+        nexus_db_model::MulticastGroupMemberState::Joined,
     )
     .await;
 

@@ -50,9 +50,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
     /* We fill this as part of the RPW */
     underlay_group_id UUID,
 
-    /* Rack ID where the group was created */
-    rack_id UUID NOT NULL,
-
     /* DPD tag to couple external/underlay state for this group */
     tag STRING(63),
 

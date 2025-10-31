@@ -1,7 +1,7 @@
 //! Multicast group member management operations.
 //!
-//! Provides database operations for managing multicast group memberships,
-//! including adding/removing members and lifecycle coordination.
+//! Database operations for managing multicast group memberships - adding/
+//! removing members and lifecycle coordination.
 
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -370,7 +370,7 @@ impl DataStore {
     ///
     /// Returns the `member_id` for this `(group, instance)` pair.
     ///
-    /// See [`ops::member_attach::AttachMemberToGroupStatement`] for CTE implementation.
+    /// See `crate::db::datastore::multicast::ops::member_attach::AttachMemberToGroupStatement` for CTE implementation.
     pub async fn multicast_group_member_attach_to_instance(
         &self,
         opctx: &OpContext,
@@ -905,7 +905,6 @@ mod tests {
         let creating_group = datastore
             .multicast_group_create(
                 &opctx,
-                Uuid::new_v4(),
                 &creating_group_params,
                 Some(setup.authz_pool.clone()),
             )

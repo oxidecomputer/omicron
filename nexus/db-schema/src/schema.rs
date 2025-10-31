@@ -2771,7 +2771,6 @@ table! {
         source_ips -> Array<Inet>,
         mvlan -> Nullable<Int2>,
         underlay_group_id -> Nullable<Uuid>,
-        rack_id -> Uuid,
         tag -> Nullable<Text>,
         state -> crate::enums::MulticastGroupStateEnum,
         version_added -> Int8,

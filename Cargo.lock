@@ -8682,6 +8682,7 @@ dependencies = [
  "slog-error-chain",
  "slog-term",
  "smf 0.2.3",
+ "sp-sim",
  "sprockets-tls",
  "static_assertions",
  "strum 0.27.2",

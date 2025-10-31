@@ -69,6 +69,12 @@ use tokio::task::{self, JoinHandle};
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
 
+/// Baseboard model used for simulated Gimlets.
+///
+/// Set to "i86pc", the same illumos platform identifier that real hardware reports,
+/// so simulated sleds can match with simulated SPs in inventory.
+pub const FAKE_GIMLET_MODEL: &str = "i86pc";
+
 // Type alias for the remote end of an MGS serial console connection.
 type AttachedMgsSerialConsole =
     Arc<Mutex<Option<(SpComponent, Sender<SpPort>)>>>;
@@ -895,10 +901,8 @@ impl Handler {
 
     fn sp_state_impl(&self) -> SpStateV2 {
         // Make the Baseboard a PC so that our testbeds work as expected.
-        const FAKE_GIMLET_MODEL: &[u8] = b"i86pc";
-
         let mut model = [0; 32];
-        model[..FAKE_GIMLET_MODEL.len()].copy_from_slice(FAKE_GIMLET_MODEL);
+        model[..FAKE_GIMLET_MODEL.len()].copy_from_slice(FAKE_GIMLET_MODEL.as_bytes());
 
         SpStateV2 {
             hubris_archive_id: [0; 8],

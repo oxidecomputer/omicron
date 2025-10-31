@@ -199,12 +199,7 @@ pub async fn create_test_group_with_state(
     };
 
     let group = datastore
-        .multicast_group_create(
-            &opctx,
-            Uuid::new_v4(), // rack_id
-            &params,
-            Some(setup.authz_pool.clone()),
-        )
+        .multicast_group_create(&opctx, &params, Some(setup.authz_pool.clone()))
         .await
         .expect("Should create multicast group");
 

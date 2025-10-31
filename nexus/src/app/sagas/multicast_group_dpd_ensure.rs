@@ -2,14 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Saga for ensuring multicast dataplane configuration is applied (via DPD).
+//! Saga for applying multicast dataplane configuration via DPD.
 //!
-//! This saga atomically applies both external and underlay multicast
-//! configuration via DPD. Either both are successfully applied on all
-//! switches, or partial changes are rolled back.
+//! Atomically applies external and underlay multicast configuration via DPD.
+//! Either both are successfully applied on all switches, or partial changes
+//! are rolled back.
 //!
-//! The saga is triggered by the RPW reconciler when a multicast group is in
-//! "Creating" state and needs to make updates to the dataplane.
+//! Triggered by RPW reconciler when a multicast group is in "Creating" state
+//! and needs dataplane updates.
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -122,8 +122,8 @@ async fn mgde_fetch_group_data(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Fetch both groups using the same connection to ensure consistent state view
-    // (sequential fetches since we're using the same connection)
+    // Fetch both groups on same connection for consistent state view
+    // (sequential fetches since using same connection)
     let external_group = osagactx
         .datastore()
         .multicast_group_fetch_on_conn(&conn, params.external_group_id)
@@ -136,7 +136,7 @@ async fn mgde_fetch_group_data(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Validate that groups are in correct state
+    // Validate groups are in correct state
     match external_group.state {
         nexus_db_model::MulticastGroupState::Creating => {}
         other_state => {
@@ -168,16 +168,11 @@ async fn mgde_fetch_group_data(
     Ok((external_group, underlay_group))
 }
 
-/// Apply both external and underlay groups in the dataplane atomically.
+/// Apply external and underlay groups in dataplane atomically.
 async fn mgde_update_dataplane(
     sagactx: NexusActionContext,
 ) -> Result<DataplaneUpdateResponse, ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
     let (external_group, underlay_group) = sagactx
         .lookup::<(MulticastGroup, UnderlayMulticastGroup)>("group_data")?;
 
@@ -202,7 +197,7 @@ async fn mgde_update_dataplane(
     );
 
     let (underlay_response, external_response) = dataplane
-        .create_groups(&opctx, &external_group, &underlay_group)
+        .create_groups(&external_group, &underlay_group)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -265,7 +260,7 @@ async fn mgde_rollback_dataplane(
     Ok(())
 }
 
-/// Update multicast group state to "Active" after successfully applying DPD configuration.
+/// Update multicast group state to "Active" after applying DPD configuration.
 async fn mgde_update_group_state(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {

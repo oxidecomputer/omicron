@@ -129,12 +129,20 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Verify both stopped instances are in identical "Left" state
+    //
+    // State transition: "Joining" → "Left" (reconciler detects invalid instance)
+    // Create saga creates member with state="Joining", sled_id=NULL
+    // Reconciler runs, sees instance_valid=false (stopped/no VMM)
+    // Reconciler immediately transitions "Joining"→"Left" (no DPD programming)
+    //
+    // This verifies the reconciler correctly handles stopped instances without
+    // requiring inventory/DPD readiness (unlike running instances).
     for (i, instance) in [&instance1, &instance2].iter().enumerate() {
         wait_for_member_state(
             cptestctx,
             group_name,
             instance.identity.id,
-            "Left", // Stopped instances should be Left
+            nexus_db_model::MulticastGroupMemberState::Left,
         )
         .await;
 
@@ -224,8 +232,14 @@ async fn test_multicast_api_behavior(cptestctx: &ControlPlaneTestContext) {
     );
 
     assert_eq!(member_uuid.instance_id, instance_uuid);
-    // Instance is stopped (start: false), so reconciler will set member to "Left" state
-    wait_for_member_state(cptestctx, group_name, instance_uuid, "Left").await;
+    // Instance is stopped (start: false), so reconciler transitions "Joining"→"Left"
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance_uuid,
+        nexus_db_model::MulticastGroupMemberState::Left,
+    )
+    .await;
 
     // Verify membership via UUID-based instance group list (no project parameter)
     let instance_groups_url =

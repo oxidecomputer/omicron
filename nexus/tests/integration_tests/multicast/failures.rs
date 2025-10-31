@@ -186,8 +186,8 @@ async fn test_multicast_reconciler_state_consistency_validation(
         // The reconciler cannot activate groups without DPD communication
         assert_eq!(
             fetched_group.state, "Creating",
-            "Group {} should remain in Creating state when DPD is unavailable, found: {}",
-            group_name, fetched_group.state
+            "Group {group_name} should remain in Creating state when DPD is unavailable, found: {}",
+            fetched_group.state
         );
     }
 

@@ -2,14 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Saga for updating multicast group state in the dataplane (via DPD).
+//! Saga for updating multicast group state in dataplane via DPD.
 //!
-//! This saga handles atomic updates of both external and underlay
-//! multicast groups in DPD. It reads the current state from the database
-//! and applies it to all switches.
+//! Handles atomic updates of external and underlay multicast groups in DPD.
+//! Reads current state from database and applies to all switches.
 //!
-//! The saga is idempotent and can be called multiple times safely. If the
-//! group state hasn't changed, the DPD update is effectively a no-op.
+//! Idempotent saga can be called multiple times safely. If group state hasn't
+//! changed, DPD-update is effectively a no-op.
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -103,7 +102,7 @@ async fn mgu_fetch_group_data(
 
     debug!(
         osagactx.log(),
-        "fetching multicast group data for DPD update";
+        "fetching multicast group data for DPD-update";
         "external_group_id" => %params.external_group_id,
         "underlay_group_id" => %params.underlay_group_id
     );
@@ -127,7 +126,7 @@ async fn mgu_fetch_group_data(
 
     debug!(
         osagactx.log(),
-        "successfully fetched multicast group data for DPD update";
+        "successfully fetched multicast group data for DPD-update";
         "external_group_id" => %external_group.id(),
         "external_group_name" => external_group.name().as_str(),
         "external_ip" => %external_group.multicast_ip,
@@ -139,16 +138,11 @@ async fn mgu_fetch_group_data(
     Ok((external_group, underlay_group))
 }
 
-/// Update both external and underlay groups in the dataplane atomically.
+/// Update external and underlay groups in dataplane atomically.
 async fn mgu_update_dataplane(
     sagactx: NexusActionContext,
 ) -> Result<DataplaneUpdateResponse, ActionError> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
     let (external_group, underlay_group) = sagactx
         .lookup::<(MulticastGroup, UnderlayMulticastGroup)>("group_data")?;
 
@@ -173,15 +167,12 @@ async fn mgu_update_dataplane(
     );
 
     let (underlay_response, external_response) = dataplane
-        .update_groups(
-            &opctx,
-            GroupUpdateParams {
-                external_group: &external_group,
-                underlay_group: &underlay_group,
-                new_name: external_group.name().as_str(),
-                new_sources: &external_group.source_ips,
-            },
-        )
+        .update_groups(GroupUpdateParams {
+            external_group: &external_group,
+            underlay_group: &underlay_group,
+            new_name: external_group.name().as_str(),
+            new_sources: &external_group.source_ips,
+        })
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -199,7 +190,7 @@ async fn mgu_update_dataplane(
     })
 }
 
-/// Rollback multicast group updates by removing groups from DPD.
+/// Roll back multicast group updates by removing groups from DPD.
 async fn mgu_rollback_dataplane(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {

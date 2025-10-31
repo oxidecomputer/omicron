@@ -1056,6 +1056,8 @@ impl BackgroundTasksInitializer {
                 resolver.clone(),
                 sagas.clone(),
                 args.multicast_enabled,
+                config.multicast_reconciler.sled_cache_ttl_secs,
+                config.multicast_reconciler.backplane_cache_ttl_secs,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],

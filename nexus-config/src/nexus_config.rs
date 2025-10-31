@@ -882,11 +882,49 @@ pub struct MulticastGroupReconcilerConfig {
     /// reconciles multicast group state with dendrite switch configuration
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// TTL (in seconds) for the sled-to-switch-port mapping cache.
+    ///
+    /// This cache maps sled IDs to their physical switch ports. It changes when
+    /// sleds are added/removed or inventory is updated.
+    ///
+    /// Default: 3600 seconds (1 hour)
+    #[serde(
+        default = "MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs"
+    )]
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sled_cache_ttl_secs: Duration,
+
+    /// TTL (in seconds) for the backplane hardware topology cache.
+    ///
+    /// This cache stores the hardware platform's port mapping. It effectively
+    /// never changes during normal operation.
+    ///
+    /// Default: 86400 seconds (24 hours) with smart invalidation
+    #[serde(
+        default = "MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs"
+    )]
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub backplane_cache_ttl_secs: Duration,
+}
+
+impl MulticastGroupReconcilerConfig {
+    const fn default_sled_cache_ttl_secs() -> Duration {
+        Duration::from_secs(3600) // 1 hour
+    }
+
+    const fn default_backplane_cache_ttl_secs() -> Duration {
+        Duration::from_secs(86400) // 24 hours
+    }
 }
 
 impl Default for MulticastGroupReconcilerConfig {
     fn default() -> Self {
-        Self { period_secs: Duration::from_secs(60) }
+        Self {
+            period_secs: Duration::from_secs(60),
+            sled_cache_ttl_secs: Self::default_sled_cache_ttl_secs(),
+            backplane_cache_ttl_secs: Self::default_backplane_cache_ttl_secs(),
+        }
     }
 }
 
@@ -1460,6 +1498,8 @@ mod test {
                         },
                         multicast_reconciler: MulticastGroupReconcilerConfig {
                             period_secs: Duration::from_secs(60),
+                            sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
+                            backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
                         },
                     },
                     multicast: MulticastConfig { enabled: false },

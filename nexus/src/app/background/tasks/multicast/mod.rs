@@ -7,17 +7,16 @@
 //!
 //! # Reliable Persistent Workflow (RPW)
 //!
-//! This module implements the RPW pattern for multicast groups, providing
-//! eventual consistency between the database state and the physical network
-//! switches (Dendrite). Unlike sagas which handle immediate transactional
-//! operations, RPW handles ongoing background reconciliation.
+//! This module implements the RPW pattern for multicast groups. It ensures
+//! eventual consistency between database state and the physical network
+//! switches (Dendrite). Sagas handle immediate transactional operations;
+//! RPW handles ongoing background reconciliation.
 //!
-//! ## Why RPW for Multicast?
+//! ## Distributed State Convergence
 //!
-//! Multicast operations require systematic convergence across multiple
-//! distributed components:
+//! Multicast converges state across several distributed components:
 //! - Database state (groups, members, routing configuration)
-//! - Dataplane state (Match-action tables via Dendrite/DPD)
+//! - Dataplane state (match-action tables via Dendrite/DPD)
 //! - Instance lifecycle (start/stop/migrate affecting group membership)
 //! - Network topology (sled-to-switch mappings, port configurations)
 //!
@@ -42,14 +41,14 @@
 //! The multicast implementation uses a bifurcated design with paired groups:
 //!
 //! **External Groups** (customer-facing):
-//! - IPv4/IPv6 addresses allocated from customer IP pools
+//! - IPv4/IPv6 addresses allocated from IP pools
 //! - Exposed via operator APIs and network interfaces
 //! - Subject to VPC routing and firewall policies
 //!
 //! **Underlay Groups** (admin-scoped IPv6):
-//! - IPv6 multicast scope values per RFC 7346; admin-local is ff04::/16
+//! - IPv6 multicast scope per RFC 7346; admin-local is ff04::/16
 //!   <https://www.rfc-editor.org/rfc/rfc7346>
-//! - Used for internal rack forwarding to guests
+//! - Internal rack forwarding to guest instances
 //! - Mapped 1:1 with external groups via deterministic mapping
 //!
 //! ### Forwarding Architecture (Incoming multicast traffic to guests)
@@ -71,7 +70,7 @@
 //! - **Group lifecycle**: "Creating" → "Active" → "Deleting" → hard-deleted
 //! - **Member lifecycle**: "Joining" → "Joined" → "Left" → soft-deleted → hard-deleted
 //! - **Dataplane updates**: DPD API calls for P4 table updates
-//! - **Topology mapping**: Sled-to-switch-port resolution with caching
+//! - **Topology mapping**: Sled-to-switch-port resolution (with caching)
 //!
 //! ## Deletion Semantics: Groups vs Members
 //!
@@ -84,17 +83,14 @@
 //!
 //! **Members** use dual-purpose "Left" state with soft-delete:
 //! - Instance stopped: state="Left", time_deleted=NULL
-//!   - Can rejoin when instance starts again
+//!   - Can rejoin when instance starts
 //!   - RPW can transition back to "Joining" when instance becomes valid
-//! - Instance deleted: state="Left", time_deleted=SET (PERMANENT - soft-deleted)
+//! - Instance deleted: state="Left", time_deleted=SET (permanent soft-delete)
 //!   - Cannot be reactivated (new attach creates new member record)
 //!   - RPW removes DPD configuration
 //!   - Cleanup task eventually hard-deletes the row
-//!
-//! This design allows stopped instances to resume multicast on restart while
-//! ensuring deleted instances have their memberships fully cleaned up.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -105,7 +101,7 @@ use futures::future::BoxFuture;
 use internal_dns_resolver::Resolver;
 use ipnet::Ipv6Net;
 use serde_json::json;
-use slog::{error, info, trace};
+use slog::{error, info};
 use tokio::sync::RwLock;
 
 use nexus_config::DEFAULT_UNDERLAY_MULTICAST_NET;
@@ -120,12 +116,25 @@ use crate::app::background::BackgroundTask;
 use crate::app::multicast::dataplane::MulticastDataplaneClient;
 use crate::app::saga::StartSaga;
 
-pub mod groups;
-pub mod members;
+pub(crate) mod groups;
+pub(crate) mod members;
 
 /// Type alias for the sled mapping cache.
 type SledMappingCache =
-    Arc<RwLock<(SystemTime, HashMap<SledUuid, Vec<MulticastSwitchPort>>)>>;
+    Arc<RwLock<(SystemTime, HashMap<SledUuid, Vec<SwitchBackplanePort>>)>>;
+
+/// Type alias for the backplane map cache.
+type BackplaneMapCache = Arc<
+    RwLock<
+        Option<(
+            SystemTime,
+            BTreeMap<
+                dpd_client::types::PortId,
+                dpd_client::types::BackplaneLink,
+            >,
+        )>,
+    >,
+>;
 
 /// Result of processing a state transition for multicast entities.
 #[derive(Debug)]
@@ -140,7 +149,7 @@ pub(crate) enum StateTransition {
 
 /// Switch port configuration for multicast group members.
 #[derive(Clone, Debug)]
-pub(crate) struct MulticastSwitchPort {
+pub(crate) struct SwitchBackplanePort {
     /// Switch port ID
     pub port_id: dpd_client::types::PortId,
     /// Switch link ID
@@ -156,10 +165,14 @@ pub(crate) struct MulticastGroupReconciler {
     resolver: Resolver,
     sagas: Arc<dyn StartSaga>,
     underlay_admin_prefix: Ipv6Net,
-    /// Cache for sled-to-switch-port mappings.
-    /// Maps (`cache_id`, `sled_id`) → switch port for multicast traffic.
+    /// Cache for sled-to-backplane-port mappings.
+    /// Maps sled_id → rear backplane ports for multicast traffic routing.
     sled_mapping_cache: SledMappingCache,
-    cache_ttl: Duration,
+    sled_cache_ttl: Duration,
+    /// Cache for backplane hardware topology from DPD.
+    /// Maps PortId → BackplaneLink for platform-specific port validation.
+    backplane_map_cache: BackplaneMapCache,
+    backplane_cache_ttl: Duration,
     /// Maximum number of members to process concurrently per group.
     member_concurrency_limit: usize,
     /// Maximum number of groups to process concurrently.
@@ -174,6 +187,8 @@ impl MulticastGroupReconciler {
         resolver: Resolver,
         sagas: Arc<dyn StartSaga>,
         enabled: bool,
+        sled_cache_ttl: Duration,
+        backplane_cache_ttl: Duration,
     ) -> Self {
         // Use the configured underlay admin-local prefix (DEFAULT_UNDERLAY_MULTICAST_NET)
         let underlay_admin_prefix: Ipv6Net = DEFAULT_UNDERLAY_MULTICAST_NET
@@ -190,28 +205,30 @@ impl MulticastGroupReconciler {
                 SystemTime::now(),
                 HashMap::new(),
             ))),
-            cache_ttl: Duration::from_secs(3600), // 1 hour - refresh topology mappings regularly
+            sled_cache_ttl,
+            backplane_map_cache: Arc::new(RwLock::new(None)),
+            backplane_cache_ttl,
             member_concurrency_limit: 100,
             group_concurrency_limit: 100,
             enabled,
         }
     }
 
-    /// Generate appropriate tag for multicast groups.
+    /// Generate tag for multicast groups.
     ///
-    /// Both external and underlay groups use the same meaningful tag based on
-    /// group name. This creates logical pairing for management and cleanup
-    /// operations.
+    /// Both external and underlay groups use the same tag (the group name).
+    /// This pairs them logically for management and cleanup operations.
     pub(crate) fn generate_multicast_tag(group: &MulticastGroup) -> String {
         group.name().to_string()
     }
 
     /// Generate admin-scoped IPv6 multicast address from an external multicast
-    /// address within the configured underlay admin-local prefix
-    /// (DEFAULT_UNDERLAY_MULTICAST_NET) using bitmask mapping. This preserves
-    /// exactly `host_bits = 128 - prefix_len` low bits (LSBs) from the external
-    /// address (i.e., the lower bits of the group ID) and sets the high bits
-    /// from the prefix.
+    /// address.
+    ///
+    /// Maps external addresses into the configured underlay admin-local prefix
+    /// (DEFAULT_UNDERLAY_MULTICAST_NET) using bitmask mapping. Preserves the
+    /// lower `128 - prefix_len` bits from the external address (the group ID)
+    /// and sets the high bits from the prefix.
     ///
     /// Admin-local scope (ff04::/16) is defined in RFC 7346.
     /// See: <https://www.rfc-editor.org/rfc/rfc7346>
@@ -223,6 +240,27 @@ impl MulticastGroupReconciler {
             self.underlay_admin_prefix,
             external_ip,
         )
+    }
+
+    /// Invalidate the backplane map cache, forcing refresh on next access.
+    ///
+    /// Called when:
+    /// - Sled validation fails (sp_slot not in cached backplane map)
+    /// - Need to refresh topology data after detecting potential changes
+    pub(crate) async fn invalidate_backplane_cache(&self) {
+        let mut cache = self.backplane_map_cache.write().await;
+        *cache = None; // Clear the cache entirely
+    }
+
+    /// Invalidate the sled mapping cache, forcing refresh on next access.
+    ///
+    /// Called when:
+    /// - Backplane topology changes detected (different port count/layout)
+    /// - Need to re-validate sled mappings against new topology
+    pub(crate) async fn invalidate_sled_mapping_cache(&self) {
+        let mut cache = self.sled_mapping_cache.write().await;
+        // Set timestamp to epoch to force refresh
+        *cache = (SystemTime::UNIX_EPOCH, cache.1.clone());
     }
 }
 

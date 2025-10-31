@@ -2,37 +2,36 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! CAS operations for reconciling members in "Joining" state.
+//! CAS operations for reconciling "Joining" state members.
 //!
-//! This module provides Compare-And-Swap (CAS) operations specifically for the
-//! "Joining" member state. Unlike the atomic CTE in member_attach (which handles
-//! the initial attachment), these simpler CAS operations work for reconciliation:
+//! Compare-And-Swap operations for the "Joining" member state. Unlike the atomic
+//! CTE in member_attach (handles initial attachment), these simpler CAS operations
+//! work for reconciliation since:
 //!
 //! - Instance state is fetched before calling
-//! - Multiple reconcilers on the same member is safe (idempotent)
+//! - Multiple reconcilers on same member is safe (idempotent)
 //!
-//! "Joining" is the handoff point from control plane operations to RPW and has
-//! the most complex states to handle:
+//! "Joining" is the handoff point from control plane to RPW, with the most
+//! complex state transitions:
 //!
 //! - Multiple possible next states (→ "Joined" or → "Left")
-//! - Multi-field updates (state + sled_id) that must be atomic
+//! - Multi-field updates (state + sled_id) must be atomic
 //! - Conditional logic based on instance_valid and sled_id changes
 //!
-//! Other states ("Joined", "Left") have simpler transitions and use direct
-//! datastore methods (e.g., `multicast_group_member_to_left_if_current`).
+//! Other states ("Joined", "Left") have simpler transitions using direct datastore
+//! methods (e.g., `multicast_group_member_to_left_if_current`).
 //!
 //! ## Operations
 //!
-//! 1. Instance invalid → transition to "Left" and clear sled_id
+//! 1. Instance invalid → transition to "Left", clear sled_id
 //! 2. sled_id changed → update to new sled (migration)
 //! 3. No change → return current state
 //!
 //! ## Usage
 //!
-//! Callers maintain their own member state from batch fetches and use the
-//! returned `ReconcileAction` to decide what happened. The `current_state` and
-//! `current_sled_id` fields may be stale after a failed CAS, so callers should
-//! use their own state view for decisions.
+//! Callers maintain member state from batch fetches and use returned `ReconcileAction`
+//! to decide what happened. The `current_state` and `current_sled_id` fields may be
+//! stale after failed CAS, so callers should use their own state view for decisions.
 
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -48,18 +47,18 @@ use nexus_db_schema::schema::multicast_group_member::dsl;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_uuid_kinds::SledKind;
 
-/// Result of reconciling a member in "Joining" state.
+/// Result of reconciling a "Joining" state member.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReconcileJoiningResult {
-    /// The action that was taken
+    /// Action taken during reconciliation
     pub action: ReconcileAction,
-    /// Current state after the operation (None if member not found)
+    /// Current state after operation (None if member not found)
     pub current_state: Option<MulticastGroupMemberState>,
-    /// Current sled_id after the operation (None if member not found or has no sled)
+    /// Current sled_id after operation (None if member not found or has no sled)
     pub current_sled_id: Option<DbTypedUuid<SledKind>>,
 }
 
-/// Actions that can be taken when reconciling a joining member.
+/// Actions taken when reconciling a "Joining" member.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ReconcileAction {
     /// Transitioned to "Left" because instance became invalid
@@ -75,7 +74,7 @@ pub enum ReconcileAction {
     NotFound,
 }
 
-/// Errors that can occur when reconciling a multicast group member.
+/// Errors from reconciling a multicast group member.
 #[derive(Debug)]
 pub enum ReconcileMemberError {
     /// Database constraint violation (unique index, etc.)
@@ -99,19 +98,19 @@ impl From<ReconcileMemberError> for ExternalError {
     }
 }
 
-/// Reconcile a member in "Joining" state using simple CAS operations.
+/// Reconcile a "Joining" state member using simple CAS operations.
 ///
-/// This function takes the instance validity and desired sled_id as inputs
-/// (from separate instance/VMM lookups) and performs the appropriate CAS
-/// operation to update the member state.
+/// Takes instance validity and desired sled_id as inputs (from separate
+/// instance/VMM lookups) and performs appropriate CAS operation to update
+/// member state.
 ///
 /// # Arguments
 ///
 /// - `conn`: Database connection
-/// - `group_id`: The multicast group
-/// - `instance_id`: The instance being reconciled
-/// - `instance_valid`: Whether instance is in a valid state for multicast
-/// - `current_sled_id`: The instance's current sled_id (from VMM lookup)
+/// - `group_id`: Multicast group
+/// - `instance_id`: Instance being reconciled
+/// - `instance_valid`: Whether instance is in valid state for multicast
+/// - `current_sled_id`: Instance's current sled_id (from VMM lookup)
 pub async fn reconcile_joining_member(
     conn: &async_bb8_diesel::Connection<DbConnection>,
     group_id: Uuid,

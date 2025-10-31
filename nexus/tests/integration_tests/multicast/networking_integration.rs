@@ -116,6 +116,9 @@ async fn test_multicast_with_external_ip_basic(
     instance_simulate(nexus, &instance_uuid).await;
     instance_wait_for_state(client, instance_uuid, InstanceState::Running)
         .await;
+
+    // Ensure multicast test prerequisites (inventory + DPD) are ready
+    ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Add instance to multicast group
@@ -135,7 +138,13 @@ async fn test_multicast_with_external_ip_basic(
     .await;
 
     // Wait for multicast member to reach "Joined" state
-    wait_for_member_state(cptestctx, group_name, instance_id, "Joined").await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance_id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
 
     // Verify member count
     let members = list_multicast_group_members(client, group_name).await;
@@ -143,8 +152,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Allocate ephemeral external IP to the same instance
     let ephemeral_ip_url = format!(
-        "/v1/instances/{}/external-ips/ephemeral?project={}",
-        instance_name, project_name
+        "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
@@ -186,8 +194,7 @@ async fn test_multicast_with_external_ip_basic(
 
     // Remove ephemeral external IP and verify multicast is unaffected
     let external_ip_detach_url = format!(
-        "/v1/instances/{}/external-ips/ephemeral?project={}",
-        instance_name, project_name
+        "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
     );
     object_delete(client, &external_ip_detach_url).await;
 
@@ -300,6 +307,9 @@ async fn test_multicast_external_ip_lifecycle(
     instance_simulate(nexus, &instance_uuid).await;
     instance_wait_for_state(client, instance_uuid, InstanceState::Running)
         .await;
+
+    // Ensure multicast test prerequisites (inventory + DPD) are ready
+    ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     let member_add_url = format!(
@@ -328,8 +338,7 @@ async fn test_multicast_external_ip_lifecycle(
     for cycle in 1..=3 {
         // Allocate ephemeral external IP
         let ephemeral_ip_url = format!(
-            "/v1/instances/{}/external-ips/ephemeral?project={}",
-            instance_name, project_name
+            "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
         );
         NexusRequest::new(
             RequestBuilder::new(client, Method::POST, &ephemeral_ip_url)
@@ -352,13 +361,11 @@ async fn test_multicast_external_ip_lifecycle(
         assert_eq!(
             members_with_ip.len(),
             1,
-            "Cycle {}: Multicast member should persist during external IP allocation",
-            cycle
+            "Cycle {cycle}: Multicast member should persist during external IP allocation"
         );
         assert_eq!(
             members_with_ip[0].state, "Joined",
-            "Cycle {}: Member should remain Joined",
-            cycle
+            "Cycle {cycle}: Member should remain Joined"
         );
 
         // Verify external IP is attached
@@ -367,14 +374,12 @@ async fn test_multicast_external_ip_lifecycle(
                 .await;
         assert!(
             !external_ips_with_ip.is_empty(),
-            "Cycle {}: Instance should have external IP",
-            cycle
+            "Cycle {cycle}: Instance should have external IP"
         );
 
         // Deallocate ephemeral external IP
         let external_ip_detach_url = format!(
-            "/v1/instances/{}/external-ips/ephemeral?project={}",
-            instance_name, project_name
+            "/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}"
         );
         object_delete(client, &external_ip_detach_url).await;
 
@@ -387,13 +392,11 @@ async fn test_multicast_external_ip_lifecycle(
         assert_eq!(
             members_without_ip.len(),
             1,
-            "Cycle {}: Multicast member should persist after external IP removal",
-            cycle
+            "Cycle {cycle}: Multicast member should persist after external IP removal"
         );
         assert_eq!(
             members_without_ip[0].state, "Joined",
-            "Cycle {}: Member should remain Joined after IP removal",
-            cycle
+            "Cycle {cycle}: Member should remain Joined after IP removal"
         );
 
         // Verify ephemeral external IP is removed (SNAT IP may still be present)
@@ -402,8 +405,7 @@ async fn test_multicast_external_ip_lifecycle(
                 .await;
         assert!(
             external_ips_without_ip.len() <= 1,
-            "Cycle {}: Instance should have at most SNAT IP remaining",
-            cycle
+            "Cycle {cycle}: Instance should have at most SNAT IP remaining"
         );
     }
 
@@ -492,6 +494,9 @@ async fn test_multicast_with_external_ip_at_creation(
     instance_simulate(nexus, &instance_uuid).await;
     instance_wait_for_state(client, instance_uuid, InstanceState::Running)
         .await;
+
+    // Ensure multicast test prerequisites (inventory + DPD) are ready
+    ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Verify external IP was allocated at creation
@@ -519,7 +524,13 @@ async fn test_multicast_with_external_ip_at_creation(
     .await;
 
     // Verify both features work together - wait for member to reach Joined state
-    wait_for_member_state(cptestctx, group_name, instance_id, "Joined").await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance_id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
 
     let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have multicast member");
@@ -621,6 +632,9 @@ async fn test_multicast_with_floating_ip_basic(
     instance_simulate(nexus, &instance_uuid).await;
     instance_wait_for_state(client, instance_uuid, InstanceState::Running)
         .await;
+
+    // Ensure multicast test prerequisites (inventory + DPD) are ready
+    ensure_multicast_test_ready(cptestctx).await;
     wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
 
     // Add instance to multicast group
@@ -640,16 +654,24 @@ async fn test_multicast_with_floating_ip_basic(
     .await;
 
     // Wait for multicast member to reach "Joined" state
-    wait_for_member_state(cptestctx, group_name, instance_id, "Joined").await;
+    wait_for_member_state(
+        cptestctx,
+        group_name,
+        instance_id,
+        nexus_db_model::MulticastGroupMemberState::Joined,
+    )
+    .await;
 
     // Verify member count
     let members = list_multicast_group_members(client, group_name).await;
     assert_eq!(members.len(), 1, "Should have one multicast member");
 
+    // Verify that inventory-based mapping correctly mapped sled → switch port
+    verify_inventory_based_port_mapping(cptestctx, &instance_uuid).await;
+
     // Attach floating IP to the same instance
     let attach_url = format!(
-        "/v1/floating-ips/{}/attach?project={project_name}",
-        floating_ip_name
+        "/v1/floating-ips/{floating_ip_name}/attach?project={project_name}"
     );
     let attach_params = FloatingIpAttach {
         kind: nexus_types::external_api::params::FloatingIpParentKind::Instance,
@@ -698,8 +720,7 @@ async fn test_multicast_with_floating_ip_basic(
 
     // Detach floating IP and verify multicast is unaffected
     let detach_url = format!(
-        "/v1/floating-ips/{}/detach?project={project_name}",
-        floating_ip_name
+        "/v1/floating-ips/{floating_ip_name}/detach?project={project_name}"
     );
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &detach_url)

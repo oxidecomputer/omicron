@@ -27,6 +27,7 @@ mod images;
 mod initialization;
 mod instances;
 mod internet_gateway;
+mod inventory_matching;
 mod ip_pools;
 mod metrics;
 mod metrics_querier;

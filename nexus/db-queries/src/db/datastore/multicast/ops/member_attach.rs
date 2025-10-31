@@ -2,25 +2,21 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! CTE for attaching an instance to a multicast group.
+//! Atomic CTE for attaching instances to multicast groups.
 //!
-//! This uses a CTE to atomically validate the group is "Active" and the instance
-//! exists, then insert or update the member row. The operation is idempotent
-//! and handles these cases:
+//! Uses three CTEs to atomically validate group is "Active" and instance exists,
+//! then inserts or updates the member row. Idempotent operation handles:
 //!
 //! - **No existing member**: Insert new row in "Joining" state
-//! - **Member in "Left" state with time_deleted=NULL**: Transition to "Joining"
-//!     and update `sled_id`
-//! - **Member in "Left" state with time_deleted set**: Insert new row
-//!     (soft-deleted members not reactivated)
-//! - **Member in "Joining"/"Joined"**: No-op (idempotent)
+//! - **Member in "Left" (time_deleted=NULL)**: Transition to "Joining", update sled_id
+//! - **Member in "Left" (time_deleted set)**: Insert new row (soft-delete ignored / not reactivated)
+//! - **Member in "Joining"/"Joined"**: No-op (already attached)
 //!
-//! The upsert only occurs if the group exists and is in "Active" state and the
-//! instance exists (see `active_group` and `instance_sled` CTEs below).
-//! Returns the member ID.
+//! Upsert only runs if group is "Active" and instance exists (validated by
+//! `active_group` and `instance_sled` CTEs). Returns the member ID.
 //!
-//! This addresses TOCTOU concerns by performing group validation, instance
-//! sled_id lookup, and member upsert in a single atomic database operation.
+//! Prevents TOCTOU races: group validation, instance sled_id lookup, and member
+//! upsert all happen in one atomic database operation.
 
 use std::fmt::Debug;
 
@@ -46,28 +42,28 @@ type InstanceExists = Option<bool>;
 /// UUID of the member row (new or existing).
 type MemberId = Option<Uuid>;
 
-/// The raw result tuple returned by the CTE query before parsing.
+/// Raw result tuple from the CTE query before parsing.
 ///
-/// All fields are `Option` because the CTEs may return zero rows if
-/// validations fail (group not active, instance not found, etc.).
+/// All fields are `Option` because CTEs return zero rows when validation fails
+/// (group not active, instance not found, etc.).
 type RawAttachMemberResult = (GroupIsActive, InstanceExists, MemberId);
 
-/// Result of attaching a member to a multicast group.
+/// Result of attaching an instance to a multicast group.
 #[derive(Debug, Clone, PartialEq)]
-pub struct AttachMemberResult {
-    /// Member UUID for this `(group, instance)` pair. New on first attach,
-    /// otherwise the existing id.
+pub(crate) struct AttachMemberResult {
+    /// Member UUID for this (group, instance) pair. New on first attach,
+    /// existing ID on subsequent calls.
     pub member_id: Uuid,
 }
 
-/// Errors that can occur when attaching a member to a multicast group.
+/// Errors from attaching an instance to a multicast group.
 #[derive(Debug)]
-pub enum AttachMemberError {
-    /// The multicast group does not exist or is not "Active".
+pub(crate) enum AttachMemberError {
+    /// Multicast group doesn't exist or isn't "Active"
     GroupNotActive,
-    /// The instance does not exist or has been deleted.
+    /// Instance doesn't exist or has been deleted
     InstanceNotFound,
-    /// Database constraint violation (e.g., unique index violation).
+    /// Database constraint violation (unique index, etc.)
     ConstraintViolation(String),
     /// Other database error
     DatabaseError(DieselError),
@@ -100,19 +96,17 @@ impl From<AttachMemberError> for ExternalError {
 
 /// Atomically attach an instance to a multicast group.
 ///
-/// This performs an unconditional upsert in a single database round-trip:
+/// Single database round-trip performs unconditional upsert:
 ///
-/// - **Insert**: If no member exists, create a new row in "Joining" state
-/// - **Reactivate**: If member exists in "Left" state with time_deleted=NULL,
-///   transition to "Joining" and update `sled_id`
-/// - **Insert new**: If member in "Left" with time_deleted set, create new row
-/// - **Idempotent**: If member is already "Joining" or "Joined", do nothing
+/// - **Insert**: No member exists → create in "Joining" state
+/// - **Reactivate**: Member in "Left" (time_deleted=NULL) → transition to "Joining", update sled_id
+/// - **Insert new**: Member in "Left" (time_deleted set) → create new row
+/// - **Idempotent**: Member already "Joining" or "Joined" → no-op
 ///
-/// The operation atomically validates that both the group and instance exist,
-/// retrieves the instance's current sled_id, and performs the member upsert.
-/// Returns the member ID.
+/// Atomically validates group and instance exist, retrieves instance's current
+/// sled_id, and performs member upsert. Returns member ID.
 #[must_use = "Queries must be executed"]
-pub struct AttachMemberToGroupStatement {
+pub(crate) struct AttachMemberToGroupStatement {
     group_id: Uuid,
     instance_id: Uuid,
     new_member_id: Uuid,
@@ -125,12 +119,12 @@ impl AttachMemberToGroupStatement {
     ///
     /// # Arguments
     ///
-    /// - `group_id`: The multicast group to attach to
-    /// - `instance_id`: The instance being attached as a member
-    /// - `new_member_id`: UUID to use if creating a new member row
+    /// - `group_id`: Multicast group to attach to
+    /// - `instance_id`: Instance being attached as member
+    /// - `new_member_id`: UUID for new member row (if creating)
     ///
-    /// The CTE will atomically validate that the instance exists and retrieve
-    /// its current sled_id from the VMM table.
+    /// Three CTEs atomically validate group is "Active", instance exists, and
+    /// retrieve current sled_id from VMM table, then perform upsert.
     pub fn new(group_id: Uuid, instance_id: Uuid, new_member_id: Uuid) -> Self {
         let now = Utc::now();
         Self {
@@ -168,10 +162,9 @@ impl AttachMemberToGroupStatement {
     ) -> Result<AttachMemberResult, AttachMemberError> {
         let (group_is_active, instance_exists, member_id) = result;
 
-        // Check validations in priority order to provide the most helpful error
-        // message when both validations fail. Instance errors are checked first
-        // because users typically attach their own instances to groups, making
-        // instance-not-found errors more actionable than group-state errors.
+        // Check validations in priority order for most helpful error messages.
+        // Instance errors first since users attach their own instances to groups,
+        // making instance-not-found more actionable than group-state errors.
         if instance_exists != Some(true) {
             return Err(AttachMemberError::InstanceNotFound);
         }
@@ -206,17 +199,16 @@ impl Query for AttachMemberToGroupStatement {
 
 impl RunQueryDsl<DbConnection> for AttachMemberToGroupStatement {}
 
-/// Generates SQL for atomic member attachment via CTE.
+/// Generates SQL for atomic member attachment via three CTEs.
 ///
-/// The CTE validates that both the group and instance exist, retrieves the
-/// instance's current sled_id, then performs an unconditional upsert that
-/// handles insert, reactivation, and idempotent cases. The ON CONFLICT DO
-/// UPDATE only modifies rows in "Left" state.
+/// CTEs validate group and instance exist, retrieve instance's current sled_id,
+/// then perform unconditional upsert (handles insert, reactivation, and
+/// idempotent cases). ON CONFLICT DO UPDATE only modifies rows in "Left" state.
 ///
-/// This addresses TOCTOU concerns by performing all validation and updates
-/// in a single atomic database operation.
+/// Prevents TOCTOU races by performing all validation and updates in one atomic
+/// database operation.
 impl AttachMemberToGroupStatement {
-    /// Generates the `active_group` CTE that checks if the group exists and is active.
+    /// Generates the `active_group` CTE (checks if group exists and is active).
     fn push_active_group_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -232,10 +224,10 @@ impl AttachMemberToGroupStatement {
         Ok(())
     }
 
-    /// Generates the `instance_sled` CTE that validates instance and gets sled_id.
+    /// Generates the `instance_sled` CTE (validates instance and gets sled_id).
     ///
     /// Joins instance and VMM tables via active_propolis_id to get current sled_id.
-    /// Returns one row with (instance_id, sled_id) if instance exists and is not deleted.
+    /// Returns one row with (instance_id, sled_id) if instance exists and not deleted.
     fn push_instance_sled_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -251,17 +243,16 @@ impl AttachMemberToGroupStatement {
         Ok(())
     }
 
-    /// Generates the `upserted_member` CTE that performs the unconditional upsert.
+    /// Generates the `upserted_member` CTE (performs unconditional upsert).
     ///
-    /// This SELECT now joins with both `active_group` and `instance_sled` CTEs to:
-    /// 1. Ensure the group is active (FROM active_group)
-    /// 2. Retrieve the instance's current sled_id (CROSS JOIN instance_sled)
+    /// SELECT joins with both `active_group` and `instance_sled` CTEs to:
+    /// 1. Ensure group is active (FROM active_group)
+    /// 2. Retrieve instance's current sled_id (CROSS JOIN instance_sled)
     ///
-    /// The ON CONFLICT clause uses the partial unique index that only includes rows
-    /// where `time_deleted IS NULL`. This means:
-    /// - Conflict only occurs for members with time_deleted=NULL (active or stopped)
-    /// - Members with time_deleted set are ignored by the constraint (INSERT new row)
-    /// - The UPDATE path preserves time_deleted=NULL for reactivated members
+    /// ON CONFLICT clause uses partial unique index (only rows with time_deleted IS NULL):
+    /// - Conflict only for members with time_deleted=NULL (active or stopped)
+    /// - Members with time_deleted set ignored by constraint (INSERT new row)
+    /// - UPDATE path preserves time_deleted=NULL for reactivated members
     fn push_upserted_member_cte<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -309,11 +300,11 @@ impl AttachMemberToGroupStatement {
         Ok(())
     }
 
-    /// Generates the final SELECT that always returns exactly one row.
+    /// Generates the final SELECT (always returns exactly one row).
     ///
-    /// This uses a LEFT JOIN pattern to ensure we return a row even when
-    /// the group is not active or instance doesn't exist (which would cause
-    /// the `upserted_member` CTE to return zero rows).
+    /// LEFT JOIN pattern ensures we return a row even when group isn't active
+    /// or instance doesn't exist (which causes `upserted_member` CTE to return
+    /// zero rows).
     ///
     fn push_final_select<'a>(
         &'a self,

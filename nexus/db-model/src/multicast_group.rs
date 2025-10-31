@@ -2,27 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Database model types for multicast groups and their membership.
+//! Database models for multicast groups and membership.
 //!
-//! This module implements the bifurcated multicast design from
-//! [RFD 488](https://rfd.shared.oxide.computer/rfd/488), supporting two types
+//! Implements the bifurcated multicast design from
+//! [RFD 488](https://rfd.shared.oxide.computer/rfd/488), with two types
 //! of multicast groups:
 //!
 //! ## External Multicast Groups
 //!
-//! Customer-facing multicast groups allocated from IP pools. These groups:
+//! Customer-facing groups allocated from IP pools:
 //! - Use IPv4/IPv6 addresses from customer IP pools
-//! - Are exposed via customer APIs for application multicast traffic
+//! - Exposed via customer APIs for application multicast traffic
 //! - Support Source-Specific Multicast (SSM) with configurable source IPs
 //! - Follow the Resource trait pattern for user-facing identity management
-//! - Are **fleet-scoped** (not project-scoped) to enable cross-project multicast
+//! - **Fleet-scoped** (not project-scoped) to enable cross-project multicast
 //! - All use `DEFAULT_MULTICAST_VNI` (77) for consistent fleet-wide behavior
 //!
 //! ### VNI and Security Model
 //!
-//! External multicast groups use VNI 77, a reserved system VNI below
-//! `MIN_GUEST_VNI` (1024). This differs from VPC unicast traffic where each
-//! VPC receives its own VNI for tenant isolation.
+//! External multicast groups use VNI 77 (i.e. an arbitrary VNI), a reserved
+//! system VNI below `MIN_GUEST_VNI` (1024). This differs from VPC unicast
+//! traffic where each VPC receives its own VNI for tenant isolation.
 //!
 //! The shared VNI design reflects multicast's fleet-scoped authorization model:
 //! groups are fleet resources (like IP pools) that can span projects and silos.
@@ -31,21 +31,21 @@
 //!
 //! **VNI Selection**: RFD 488 discusses using an "arbitrary multicast VNI for
 //! multicast groups spanning VPCs" since we don't need VPC-specific VNIs for
-//! groups that transcend VPC boundaries. VNI 77 serves as this default/arbitrary
-//! VNI for all external multicast groups. Future implementations may support
-//! per-VPC multicast VNIs if VPC-isolated multicast groups become necessary.
+//! groups that transcend VPC boundaries. VNI 77 is this default VNI for all
+//! external multicast groups. Future implementations may support per-VPC
+//! multicast VNIs if VPC-isolated multicast groups become necessary.
 //!
-//! Security enforcement occurs at two layers:
+//! Security happens at two layers:
 //! - **Control plane**: Fleet admins create groups; users attach instances via API
 //! - **Dataplane**: Switch hardware validates underlay group membership
 //!
-//! This enables cross-project and cross-silo multicast while maintaining explicit
-//! membership control through the underlay forwarding tables.
+//! This allows cross-project and cross-silo multicast while maintaining explicit
+//! membership control through underlay forwarding tables.
 //!
 //! ## Underlay Multicast Groups
 //!
 //! System-generated admin-scoped IPv6 multicast groups for internal forwarding:
-//! - Use IPv6 admin-local scope (ff04::/16) per RFC 7346
+//! - Use IPv6 admin-local multicast scope (ff04::/16) per RFC 7346
 //!   <https://www.rfc-editor.org/rfc/rfc7346>
 //! - Paired 1:1 with external groups for NAT-based forwarding
 //! - Handle rack-internal multicast traffic between switches
@@ -173,7 +173,7 @@ pub struct ExternalMulticastGroup {
     pub ip_pool_id: Uuid,
     /// IP pool range this address was allocated from.
     pub ip_pool_range_id: Uuid,
-    /// VNI for multicast group (derived or random).
+    /// VNI for multicast group.
     pub vni: Vni,
     /// Primary multicast IP address (overlay/external).
     pub multicast_ip: IpNetwork,
@@ -204,8 +204,6 @@ pub struct ExternalMulticastGroup {
     /// Initially None in ["Creating"](MulticastGroupState::Creating) state,
     /// populated by reconciler when group becomes ["Active"](MulticastGroupState::Active).
     pub underlay_group_id: Option<Uuid>,
-    /// Rack ID multicast group was created on.
-    pub rack_id: Uuid,
     /// DPD-client tag used to couple external (overlay) and underlay entries
     /// for this multicast group.
     ///
@@ -354,7 +352,6 @@ pub struct IncompleteExternalMulticastGroup {
     pub mvlan: Option<i16>,
     pub vni: Vni,
     pub tag: Option<String>,
-    pub rack_id: Uuid,
 }
 
 /// Parameters for creating an incomplete external multicast group.
@@ -364,7 +361,6 @@ pub struct IncompleteExternalMulticastGroupParams {
     pub name: Name,
     pub description: String,
     pub ip_pool_id: Uuid,
-    pub rack_id: Uuid,
     pub explicit_address: Option<IpAddr>,
     pub source_ips: Vec<IpNetwork>,
     pub mvlan: Option<i16>,
@@ -386,7 +382,6 @@ impl IncompleteExternalMulticastGroup {
             mvlan: params.mvlan,
             vni: params.vni,
             tag: params.tag,
-            rack_id: params.rack_id,
         }
     }
 }

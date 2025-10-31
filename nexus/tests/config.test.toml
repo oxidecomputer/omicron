@@ -193,6 +193,9 @@ webhook_deliverator.second_retry_backoff_secs = 20
 read_only_region_replacement_start.period_secs = 999999
 sp_ereport_ingester.period_secs = 30
 multicast_reconciler.period_secs = 60
+# Use shorter TTLs for tests to ensure cache invalidation logic is exercised
+multicast_reconciler.sled_cache_ttl_secs = 60
+multicast_reconciler.backplane_cache_ttl_secs = 120
 
 [multicast]
 # Enable multicast functionality for tests (disabled by default in production)
