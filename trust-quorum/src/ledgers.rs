@@ -49,7 +49,7 @@ impl PersistentStateLedger {
         ledger
             .commit()
             .await
-            .expect("Critical: Failed to save bootstore ledger for Fsm::State");
+            .expect("Critical: Failed to save ledger for persistent state");
         ledger.data().generation
     }
 
