@@ -298,9 +298,7 @@ impl<'a> CrdbScimProviderStore<'a> {
         Ok(convert_to_scim_user(new_user, None))
     }
 
-    /// Optimized version of list_users_in_txn that uses a single query with
-    /// joins instead of N+1 queries.
-    async fn list_users_with_groups_in_txn(
+    async fn list_users_with_groups(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<ProviderStoreError>,
@@ -1464,16 +1462,7 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
         let users = self
-            .datastore
-            .transaction_retry_wrapper("scim_list_users")
-            .transaction(&conn, |conn| {
-                let err = err.clone();
-                let filter = filter.clone();
-
-                async move {
-                    self.list_users_with_groups_in_txn(&conn, err, filter).await
-                }
-            })
+            .list_users_with_groups(&conn, err.clone(), filter)
             .await
             .map_err(|e| {
                 if let Some(e) = err.take() {
