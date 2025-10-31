@@ -917,18 +917,27 @@ impl<'a> CrdbScimProviderStore<'a> {
         Ok(convert_to_scim_group(new_group, members))
     }
 
-    async fn list_groups_in_txn(
+    async fn list_groups_with_members(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<ProviderStoreError>,
         filter: Option<FilterOp>,
     ) -> Result<Vec<StoredParts<Group>>, diesel::result::Error> {
-        use nexus_db_schema::schema::silo_group::dsl;
+        use nexus_db_schema::schema::silo_group::dsl as group_dsl;
+        use nexus_db_schema::schema::silo_group_membership::dsl as membership_dsl;
+        use std::collections::HashMap;
 
-        let mut query = dsl::silo_group
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
-            .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
-            .filter(dsl::time_deleted.is_null())
+        let mut query = group_dsl::silo_group
+            .left_join(
+                membership_dsl::silo_group_membership
+                    .on(group_dsl::id.eq(membership_dsl::silo_group_id)),
+            )
+            .filter(group_dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(
+                group_dsl::user_provision_type
+                    .eq(model::UserProvisionType::Scim),
+            )
+            .filter(group_dsl::time_deleted.is_null())
             .into_boxed();
 
         match filter {
@@ -936,7 +945,8 @@ impl<'a> CrdbScimProviderStore<'a> {
                 // displayName is defined as `"caseExact" : false` in RFC 7643,
                 // section 8.7.1
                 query = query.filter(
-                    lower(dsl::display_name).eq(lower(display_name.clone())),
+                    lower(group_dsl::display_name)
+                        .eq(lower(display_name.clone())),
                 );
             }
 
@@ -954,20 +964,60 @@ impl<'a> CrdbScimProviderStore<'a> {
             }
         }
 
-        let groups = query
-            .select(model::SiloGroup::as_returning())
+        // Select group fields and optional member user_id
+        type GroupRow = (model::SiloGroup, Option<Uuid>);
+        type GroupsMap =
+            HashMap<Uuid, (Option<model::SiloGroup>, Vec<SiloUserUuid>)>;
+
+        let rows: Vec<GroupRow> = query
+            .select((
+                model::SiloGroup::as_select(),
+                membership_dsl::silo_user_id.nullable(),
+            ))
             .load_async(conn)
             .await?;
 
-        let mut returned_groups = Vec::with_capacity(groups.len());
+        // Group the results by group_id
+        let mut groups_map: GroupsMap = HashMap::new();
 
-        for group in groups {
-            let members = self
-                .get_group_members_for_group_in_txn(
-                    conn,
-                    group.identity.id.into(),
-                )
-                .await?;
+        for (group, maybe_user_id) in rows {
+            let group_id = group.identity.id.into_untyped_uuid();
+
+            let entry = groups_map
+                .entry(group_id)
+                .or_insert_with(|| (None, Vec::new()));
+
+            // Store the group on first occurrence
+            if entry.0.is_none() {
+                entry.0 = Some(group);
+            }
+
+            // If this row has a member, add it to the group's members
+            if let Some(user_id) = maybe_user_id {
+                entry.1.push(SiloUserUuid::from_untyped_uuid(user_id));
+            }
+        }
+
+        // Convert to the expected return type
+        let mut returned_groups = Vec::with_capacity(groups_map.len());
+
+        for (_group_id, (maybe_group, members)) in groups_map {
+            let group = maybe_group.expect("group should always be present");
+
+            let members = if members.is_empty() {
+                None
+            } else {
+                let mut id_ord_map = IdOrdMap::with_capacity(members.len());
+                for user_id in members {
+                    id_ord_map
+                        .insert_unique(GroupMember {
+                            resource_type: Some(ResourceType::User.to_string()),
+                            value: Some(user_id.to_string()),
+                        })
+                        .expect("user_id should be unique");
+                }
+                Some(id_ord_map)
+            };
 
             let SiloGroup::Scim(group) = group.into() else {
                 // With the user provision type filter, this should never be
@@ -1723,14 +1773,7 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
         let groups = self
-            .datastore
-            .transaction_retry_wrapper("scim_list_groups")
-            .transaction(&conn, |conn| {
-                let err = err.clone();
-                let filter = filter.clone();
-
-                async move { self.list_groups_in_txn(&conn, err, filter).await }
-            })
+            .list_groups_with_members(&conn, err.clone(), filter)
             .await
             .map_err(|e| {
                 if let Some(e) = err.take() {
