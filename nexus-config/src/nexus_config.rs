@@ -1189,6 +1189,7 @@ mod test {
             webhook_deliverator.first_retry_backoff_secs = 45
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
+            fm.sitrep_load_period_secs = 48
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1534,6 +1535,7 @@ mod test {
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
+            fm.sitrep_load_period_secs = 45
 
             [default_region_allocation_strategy]
             type = "random"
