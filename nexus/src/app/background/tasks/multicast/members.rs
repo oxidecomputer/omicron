@@ -1871,7 +1871,7 @@ impl MulticastGroupReconciler {
     ///
     /// On the Dendrite side (switch's DPD daemon), a similar  mapping is performed:
     ///
-    /// ```rust
+    /// ```rust,ignore
     /// // From dendrite/dpd/src/port_map.rs rev_ab_port_map()
     /// for entry in SIDECAR_REV_AB_BACKPLANE_MAP.iter() {
     ///     let port = PortId::Rear(RearPort::try_from(entry.cubby).unwrap());
