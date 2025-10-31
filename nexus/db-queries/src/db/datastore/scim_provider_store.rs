@@ -298,26 +298,49 @@ impl<'a> CrdbScimProviderStore<'a> {
         Ok(convert_to_scim_user(new_user, None))
     }
 
-    async fn list_users_in_txn(
+    /// Optimized version of list_users_in_txn that uses a single query with
+    /// joins instead of N+1 queries.
+    async fn list_users_with_groups_in_txn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<ProviderStoreError>,
         filter: Option<FilterOp>,
     ) -> Result<Vec<StoredParts<User>>, diesel::result::Error> {
-        use nexus_db_schema::schema::silo_user::dsl;
+        use nexus_db_schema::schema::silo_group::dsl as group_dsl;
+        use nexus_db_schema::schema::silo_group_membership::dsl as membership_dsl;
+        use nexus_db_schema::schema::silo_user::dsl as user_dsl;
+        use std::collections::HashMap;
 
-        let mut query = dsl::silo_user
-            .filter(dsl::silo_id.eq(self.authz_silo.id()))
-            .filter(dsl::user_provision_type.eq(model::UserProvisionType::Scim))
-            .filter(dsl::time_deleted.is_null())
+        let mut query = user_dsl::silo_user
+            .left_join(
+                membership_dsl::silo_group_membership
+                    .on(user_dsl::id.eq(membership_dsl::silo_user_id)),
+            )
+            .left_join(
+                group_dsl::silo_group.on(membership_dsl::silo_group_id
+                    .eq(group_dsl::id)
+                    .and(group_dsl::silo_id.eq(self.authz_silo.id()))
+                    .and(
+                        group_dsl::user_provision_type
+                            .eq(model::UserProvisionType::Scim),
+                    )
+                    .and(group_dsl::time_deleted.is_null())),
+            )
+            .filter(user_dsl::silo_id.eq(self.authz_silo.id()))
+            .filter(
+                user_dsl::user_provision_type
+                    .eq(model::UserProvisionType::Scim),
+            )
+            .filter(user_dsl::time_deleted.is_null())
             .into_boxed();
 
         match filter {
             Some(FilterOp::UserNameEq(username)) => {
                 // userName is defined as `"caseExact" : false` in RFC 7643,
                 // section 8.7.1
-                query = query
-                    .filter(lower(dsl::user_name).eq(lower(username.clone())));
+                query = query.filter(
+                    lower(user_dsl::user_name).eq(lower(username.clone())),
+                );
             }
 
             None => {
@@ -334,17 +357,72 @@ impl<'a> CrdbScimProviderStore<'a> {
             }
         }
 
-        let users = query
-            .select(model::SiloUser::as_returning())
-            .load_async(conn)
-            .await?;
-
-        let mut returned_users = Vec::with_capacity(users.len());
-
-        for user in users {
-            let groups = self
-                .get_user_groups_for_user_in_txn(conn, user.identity.id.into())
+        // Select user fields and optional group fields
+        // Note: We need to explicitly select the group columns to work with the
+        // boxed query and LEFT JOIN
+        let rows: Vec<(model::SiloUser, Option<(Uuid, Option<String>)>)> =
+            query
+                .select((
+                    model::SiloUser::as_select(),
+                    (group_dsl::id, group_dsl::display_name).nullable(),
+                ))
+                .load_async(conn)
                 .await?;
+
+        // Group the results by user_id
+        let mut users_map: HashMap<
+            Uuid,
+            (Option<model::SiloUser>, Vec<(SiloGroupUuid, String)>),
+        > = HashMap::new();
+
+        for (user, maybe_group_info) in rows {
+            let user_id = user.identity.id.into_untyped_uuid();
+
+            let entry =
+                users_map.entry(user_id).or_insert_with(|| (None, Vec::new()));
+
+            // Store the user on first occurrence
+            if entry.0.is_none() {
+                entry.0 = Some(user);
+            }
+
+            // If this row has a group, add it to the user's groups
+            if let Some((group_id, maybe_display_name)) = maybe_group_info {
+                let display_name = maybe_display_name.expect(
+                    "the constraint `display_name_consistency` prevents a \
+                    group with provision type 'scim' from having a null \
+                    display_name",
+                );
+
+                entry.1.push((
+                    SiloGroupUuid::from_untyped_uuid(group_id),
+                    display_name,
+                ));
+            }
+        }
+
+        // Convert to the expected return type
+        let mut returned_users = Vec::with_capacity(users_map.len());
+
+        for (_user_id, (maybe_user, groups)) in users_map {
+            let user = maybe_user.expect("user should always be present");
+
+            let groups = if groups.is_empty() {
+                None
+            } else {
+                Some(
+                    groups
+                        .into_iter()
+                        .map(|(group_id, display_name)| UserGroup {
+                            // Note neither the scim2-rs crate or Nexus supports
+                            // nested groups
+                            member_type: Some(UserGroupType::Direct),
+                            value: Some(group_id.to_string()),
+                            display: Some(display_name),
+                        })
+                        .collect(),
+                )
+            };
 
             let SiloUser::Scim(user) = user.into() else {
                 // With the user provision type filter, this should never be
@@ -1392,7 +1470,9 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
                 let err = err.clone();
                 let filter = filter.clone();
 
-                async move { self.list_users_in_txn(&conn, err, filter).await }
+                async move {
+                    self.list_users_with_groups_in_txn(&conn, err, filter).await
+                }
             })
             .await
             .map_err(|e| {
