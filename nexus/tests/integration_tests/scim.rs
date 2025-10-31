@@ -1992,7 +1992,7 @@ async fn test_scim_user_admin_group_priv_conflict(
 }
 
 #[nexus_test]
-async fn test_scim_list_users_with_groups(cptestctx: &ControlPlaneTestContext) {
+async fn test_scim_list_users_and_groups(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
     let opctx = OpContext::for_tests(
@@ -2098,7 +2098,7 @@ async fn test_scim_list_users_with_groups(cptestctx: &ControlPlaneTestContext) {
     .execute_and_parse_unwrap()
     .await;
 
-    let _group3: scim2_rs::Group = NexusRequest::new(
+    let group3: scim2_rs::Group = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, "/scim/v2/Groups")
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
@@ -2181,136 +2181,6 @@ async fn test_scim_list_users_with_groups(cptestctx: &ControlPlaneTestContext) {
     // user5 should have no groups
     let user5 = find_user(&users[4].id);
     assert!(user5.groups.is_none());
-}
-
-#[nexus_test]
-async fn test_scim_list_groups_with_members(
-    cptestctx: &ControlPlaneTestContext,
-) {
-    let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.server_context().nexus;
-    let opctx = OpContext::for_tests(
-        cptestctx.logctx.log.new(o!()),
-        nexus.datastore().clone(),
-    );
-
-    const SILO_NAME: &str = "saml-scim-silo";
-    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
-        .await;
-
-    grant_iam(
-        client,
-        &format!("/v1/system/silos/{SILO_NAME}"),
-        shared::SiloRole::Admin,
-        opctx.authn.actor().unwrap().silo_user_id().unwrap(),
-        AuthnMode::PrivilegedUser,
-    )
-    .await;
-
-    let created_token: views::ScimClientBearerTokenValue =
-        object_create_no_body(
-            client,
-            &format!("/v1/system/scim/tokens?silo={}", SILO_NAME),
-        )
-        .await;
-
-    // Create 5 users
-    let mut users = Vec::new();
-    for i in 1..=5 {
-        let user: scim2_rs::User = NexusRequest::new(
-            RequestBuilder::new(client, Method::POST, "/scim/v2/Users")
-                .header(http::header::CONTENT_TYPE, "application/scim+json")
-                .header(
-                    http::header::AUTHORIZATION,
-                    format!("Bearer oxide-scim-{}", created_token.bearer_token),
-                )
-                .allow_non_dropshot_errors()
-                .raw_body(Some(
-                    serde_json::to_string(&serde_json::json!({
-                        "userName": format!("user{}", i),
-                        "externalId": format!("user{}@example.com", i),
-                    }))
-                    .unwrap(),
-                ))
-                .expect_status(Some(StatusCode::CREATED)),
-        )
-        .execute_and_parse_unwrap()
-        .await;
-        users.push(user);
-    }
-
-    // Create 3 groups with various membership patterns:
-    // - group1: user1, user2, user3
-    // - group2: user1, user4
-    // - group3: no members
-    let group1: scim2_rs::Group = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, "/scim/v2/Groups")
-            .header(http::header::CONTENT_TYPE, "application/scim+json")
-            .header(
-                http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
-            )
-            .allow_non_dropshot_errors()
-            .raw_body(Some(
-                serde_json::to_string(&serde_json::json!({
-                    "displayName": "group1",
-                    "externalId": "group1@example.com",
-                    "members": [
-                        {"value": users[0].id},
-                        {"value": users[1].id},
-                        {"value": users[2].id},
-                    ],
-                }))
-                .unwrap(),
-            ))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .execute_and_parse_unwrap()
-    .await;
-
-    let group2: scim2_rs::Group = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, "/scim/v2/Groups")
-            .header(http::header::CONTENT_TYPE, "application/scim+json")
-            .header(
-                http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
-            )
-            .allow_non_dropshot_errors()
-            .raw_body(Some(
-                serde_json::to_string(&serde_json::json!({
-                    "displayName": "group2",
-                    "externalId": "group2@example.com",
-                    "members": [
-                        {"value": users[0].id},
-                        {"value": users[3].id},
-                    ],
-                }))
-                .unwrap(),
-            ))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .execute_and_parse_unwrap()
-    .await;
-
-    let group3: scim2_rs::Group = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, "/scim/v2/Groups")
-            .header(http::header::CONTENT_TYPE, "application/scim+json")
-            .header(
-                http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
-            )
-            .allow_non_dropshot_errors()
-            .raw_body(Some(
-                serde_json::to_string(&serde_json::json!({
-                    "displayName": "group3",
-                    "externalId": "group3@example.com",
-                }))
-                .unwrap(),
-            ))
-            .expect_status(Some(StatusCode::CREATED)),
-    )
-    .execute_and_parse_unwrap()
-    .await;
 
     // List all groups and verify members
     let response: scim2_rs::ListResponse = NexusRequest::new(
