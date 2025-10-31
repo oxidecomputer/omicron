@@ -203,7 +203,7 @@ impl NodeTaskHandle {
         msg: ReconfigureMsg,
     ) -> Result<(), NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::Reconfigure { msg, tx: tx }).await?;
+        self.tx.send(NodeApiRequest::Reconfigure { msg, tx }).await?;
         rx.await??;
         Ok(())
     }
@@ -214,7 +214,7 @@ impl NodeTaskHandle {
         msg: LrtqUpgradeMsg,
     ) -> Result<(), NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::LrtqUpgrade { msg, tx: tx }).await?;
+        self.tx.send(NodeApiRequest::LrtqUpgrade { msg, tx }).await?;
         rx.await??;
         Ok(())
     }
@@ -226,7 +226,7 @@ impl NodeTaskHandle {
         &self,
     ) -> Result<Option<CoordinatorStatus>, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::CoordinatorStatus { tx: tx }).await?;
+        self.tx.send(NodeApiRequest::CoordinatorStatus { tx }).await?;
         let res = rx.await?;
         Ok(res)
     }
@@ -240,7 +240,7 @@ impl NodeTaskHandle {
         epoch: Epoch,
     ) -> Result<Option<ReconstructedRackSecret>, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::LoadRackSecret { epoch, tx: tx }).await?;
+        self.tx.send(NodeApiRequest::LoadRackSecret { epoch, tx }).await?;
         let rs = rx.await??;
         Ok(rs)
     }
@@ -256,9 +256,7 @@ impl NodeTaskHandle {
         config: Configuration,
     ) -> Result<CommitStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(NodeApiRequest::PrepareAndCommit { config, tx: tx })
-            .await?;
+        self.tx.send(NodeApiRequest::PrepareAndCommit { config, tx }).await?;
         let res = rx.await??;
         Ok(res)
     }
@@ -275,7 +273,7 @@ impl NodeTaskHandle {
         epoch: Epoch,
     ) -> Result<CommitStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::Commit { rack_id, epoch, tx: tx }).await?;
+        self.tx.send(NodeApiRequest::Commit { rack_id, epoch, tx }).await?;
         let res = rx.await??;
         Ok(res)
     }
@@ -302,7 +300,7 @@ impl NodeTaskHandle {
     /// Return information about connectivity to other peers
     pub async fn conn_mgr_status(&self) -> Result<ConnMgrStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::ConnMgrStatus { tx: tx }).await?;
+        self.tx.send(NodeApiRequest::ConnMgrStatus { tx }).await?;
         let res = rx.await?;
         Ok(res)
     }
@@ -310,7 +308,7 @@ impl NodeTaskHandle {
     /// Return internal information for the [`Node`]
     pub async fn status(&self) -> Result<NodeStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::NodeStatus { tx: tx }).await?;
+        self.tx.send(NodeApiRequest::NodeStatus { tx }).await?;
         let res = rx.await?;
         Ok(res)
     }
