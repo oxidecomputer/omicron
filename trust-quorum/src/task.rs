@@ -25,6 +25,12 @@ use trust_quorum_protocol::{
     ReconfigurationError, ReconfigureMsg, ReconstructedRackSecret,
 };
 
+/// Whether or not a configuration has committed or is still underway.
+pub enum CommitStatus {
+    Committed,
+    Pending,
+}
+
 /// We only expect a handful of messages at a time.
 const API_CHANNEL_BOUND: usize = 32;
 
@@ -96,15 +102,15 @@ pub enum NodeApiRequest {
     ClearSecrets,
 
     /// Retrieve connectivity status via the `ConnMgr`
-    ConnMgrStatus { responder: oneshot::Sender<ConnMgrStatus> },
+    ConnMgrStatus { tx: oneshot::Sender<ConnMgrStatus> },
 
     /// Return the status of this node if it is a coordinator
-    CoordinatorStatus { responder: oneshot::Sender<Option<CoordinatorStatus>> },
+    CoordinatorStatus { tx: oneshot::Sender<Option<CoordinatorStatus>> },
 
     /// Load a rack secret for the given epoch
     LoadRackSecret {
         epoch: Epoch,
-        responder: oneshot::Sender<
+        tx: oneshot::Sender<
             Result<Option<ReconstructedRackSecret>, LoadRackSecretError>,
         >,
     },
@@ -112,29 +118,29 @@ pub enum NodeApiRequest {
     /// Coordinate an upgrade from LRTQ at this node
     LrtqUpgrade {
         msg: LrtqUpgradeMsg,
-        responder: oneshot::Sender<Result<(), LrtqUpgradeError>>,
+        tx: oneshot::Sender<Result<(), LrtqUpgradeError>>,
     },
 
     /// Get the overall status of the node
-    NodeStatus { responder: oneshot::Sender<NodeStatus> },
+    NodeStatus { tx: oneshot::Sender<NodeStatus> },
 
     /// `PrepareAndCommit` a configuration at this node
     PrepareAndCommit {
         config: Configuration,
-        responder: oneshot::Sender<Result<bool, PrepareAndCommitError>>,
+        tx: oneshot::Sender<Result<CommitStatus, PrepareAndCommitError>>,
     },
 
     /// `Commit` a configuration at this node
     Commit {
         rack_id: RackUuid,
         epoch: Epoch,
-        responder: oneshot::Sender<Result<bool, CommitError>>,
+        tx: oneshot::Sender<Result<CommitStatus, CommitError>>,
     },
 
     /// Coordinate a reconfiguration at this node
     Reconfigure {
         msg: ReconfigureMsg,
-        responder: oneshot::Sender<Result<(), ReconfigurationError>>,
+        tx: oneshot::Sender<Result<(), ReconfigurationError>>,
     },
 
     /// Shutdown the node's tokio tasks
@@ -197,9 +203,7 @@ impl NodeTaskHandle {
         msg: ReconfigureMsg,
     ) -> Result<(), NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(NodeApiRequest::Reconfigure { msg, responder: tx })
-            .await?;
+        self.tx.send(NodeApiRequest::Reconfigure { msg, tx: tx }).await?;
         rx.await??;
         Ok(())
     }
@@ -210,9 +214,7 @@ impl NodeTaskHandle {
         msg: LrtqUpgradeMsg,
     ) -> Result<(), NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(NodeApiRequest::LrtqUpgrade { msg, responder: tx })
-            .await?;
+        self.tx.send(NodeApiRequest::LrtqUpgrade { msg, tx: tx }).await?;
         rx.await??;
         Ok(())
     }
@@ -224,9 +226,7 @@ impl NodeTaskHandle {
         &self,
     ) -> Result<Option<CoordinatorStatus>, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(NodeApiRequest::CoordinatorStatus { responder: tx })
-            .await?;
+        self.tx.send(NodeApiRequest::CoordinatorStatus { tx: tx }).await?;
         let res = rx.await?;
         Ok(res)
     }
@@ -240,9 +240,7 @@ impl NodeTaskHandle {
         epoch: Epoch,
     ) -> Result<Option<ReconstructedRackSecret>, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(NodeApiRequest::LoadRackSecret { epoch, responder: tx })
-            .await?;
+        self.tx.send(NodeApiRequest::LoadRackSecret { epoch, tx: tx }).await?;
         let rs = rx.await??;
         Ok(rs)
     }
@@ -256,10 +254,10 @@ impl NodeTaskHandle {
     pub async fn prepare_and_commit(
         &self,
         config: Configuration,
-    ) -> Result<bool, NodeApiError> {
+    ) -> Result<CommitStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(NodeApiRequest::PrepareAndCommit { config, responder: tx })
+            .send(NodeApiRequest::PrepareAndCommit { config, tx: tx })
             .await?;
         let res = rx.await??;
         Ok(res)
@@ -275,11 +273,9 @@ impl NodeTaskHandle {
         &self,
         rack_id: RackUuid,
         epoch: Epoch,
-    ) -> Result<bool, NodeApiError> {
+    ) -> Result<CommitStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx
-            .send(NodeApiRequest::Commit { rack_id, epoch, responder: tx })
-            .await?;
+        self.tx.send(NodeApiRequest::Commit { rack_id, epoch, tx: tx }).await?;
         let res = rx.await??;
         Ok(res)
     }
@@ -303,20 +299,23 @@ impl NodeTaskHandle {
         Ok(())
     }
 
+    /// Return information about connectivity to other peers
     pub async fn conn_mgr_status(&self) -> Result<ConnMgrStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::ConnMgrStatus { responder: tx }).await?;
+        self.tx.send(NodeApiRequest::ConnMgrStatus { tx: tx }).await?;
         let res = rx.await?;
         Ok(res)
     }
 
+    /// Return internal information for the [`Node`]
     pub async fn status(&self) -> Result<NodeStatus, NodeApiError> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(NodeApiRequest::NodeStatus { responder: tx }).await?;
+        self.tx.send(NodeApiRequest::NodeStatus { tx: tx }).await?;
         let res = rx.await?;
         Ok(res)
     }
 
+    /// Shutdown this [`NodeTask`] and all its child tasks
     pub async fn shutdown(&self) -> Result<(), NodeApiError> {
         self.tx.send(NodeApiRequest::Shutdown).await?;
         Ok(())
@@ -458,58 +457,68 @@ impl NodeTask {
             NodeApiRequest::ClearSecrets => {
                 self.node.clear_secrets();
             }
-            NodeApiRequest::Commit { rack_id, epoch, responder } => {
+            NodeApiRequest::Commit { rack_id, epoch, tx } => {
                 let res = self
                     .node
                     .commit_configuration(&mut self.ctx, rack_id, epoch)
                     .map(|_| {
-                        self.ctx.persistent_state().commits.contains(&epoch)
+                        if self.ctx.persistent_state().commits.contains(&epoch)
+                        {
+                            CommitStatus::Committed
+                        } else {
+                            CommitStatus::Pending
+                        }
                     });
-                let _ = responder.send(res);
+                let _ = tx.send(res);
             }
-            NodeApiRequest::ConnMgrStatus { responder } => {
+            NodeApiRequest::ConnMgrStatus { tx } => {
                 debug!(self.log, "Received Request for ConnMgrStatus");
-                let _ = responder.send(self.conn_mgr.status());
+                let _ = tx.send(self.conn_mgr.status());
             }
-            NodeApiRequest::CoordinatorStatus { responder } => {
+            NodeApiRequest::CoordinatorStatus { tx } => {
                 let status = self.node.get_coordinator_state().map(|cs| {
                     CoordinatorStatus {
                         config: cs.config().clone(),
                         acked_prepares: cs.op().acked_prepares(),
                     }
                 });
-                let _ = responder.send(status);
+                let _ = tx.send(status);
             }
-            NodeApiRequest::LoadRackSecret { epoch, responder } => {
+            NodeApiRequest::LoadRackSecret { epoch, tx } => {
                 let res = self.node.load_rack_secret(&mut self.ctx, epoch);
-                let _ = responder.send(res);
+                let _ = tx.send(res);
             }
-            NodeApiRequest::LrtqUpgrade { msg, responder } => {
+            NodeApiRequest::LrtqUpgrade { msg, tx } => {
                 let res =
                     self.node.coordinate_upgrade_from_lrtq(&mut self.ctx, msg);
-                let _ = responder.send(res);
+                let _ = tx.send(res);
             }
-            NodeApiRequest::NodeStatus { responder } => {
-                let _ = responder.send(NodeStatus {
+            NodeApiRequest::NodeStatus { tx } => {
+                let _ = tx.send(NodeStatus {
                     connected_peers: self.ctx.connected().clone(),
                     alarms: self.ctx.alarms().clone(),
                     persistent_state: self.ctx.persistent_state().into(),
                 });
             }
-            NodeApiRequest::PrepareAndCommit { config, responder } => {
+            NodeApiRequest::PrepareAndCommit { config, tx } => {
                 let epoch = config.epoch;
                 let res = self
                     .node
                     .prepare_and_commit(&mut self.ctx, config)
                     .map(|_| {
-                        self.ctx.persistent_state().commits.contains(&epoch)
+                        if self.ctx.persistent_state().commits.contains(&epoch)
+                        {
+                            CommitStatus::Committed
+                        } else {
+                            CommitStatus::Pending
+                        }
                     });
-                let _ = responder.send(res);
+                let _ = tx.send(res);
             }
-            NodeApiRequest::Reconfigure { msg, responder } => {
+            NodeApiRequest::Reconfigure { msg, tx } => {
                 let res =
                     self.node.coordinate_reconfiguration(&mut self.ctx, msg);
-                let _ = responder.send(res);
+                let _ = tx.send(res);
             }
             NodeApiRequest::Shutdown => {
                 info!(self.log, "Shutting down Node tokio tasks");
@@ -963,7 +972,10 @@ mod tests {
             async || {
                 let mut acked = 0;
                 for h in &setup.node_handles {
-                    if h.commit(rack_id, Epoch(1)).await.unwrap() {
+                    if matches!(
+                        h.commit(rack_id, Epoch(1)).await.unwrap(),
+                        CommitStatus::Committed
+                    ) {
                         acked += 1;
                     }
                 }
@@ -1068,7 +1080,10 @@ mod tests {
             async || {
                 let mut acked = 0;
                 for h in &setup.node_handles[0..num_nodes - 1] {
-                    if h.commit(rack_id, Epoch(1)).await.unwrap() {
+                    if matches!(
+                        h.commit(rack_id, Epoch(1)).await.unwrap(),
+                        CommitStatus::Committed,
+                    ) {
                         acked += 1;
                     }
                 }
@@ -1104,7 +1119,10 @@ mod tests {
         wait_for_condition(
             async || {
                 let h = &setup.node_handles.last().unwrap();
-                if h.prepare_and_commit(config.clone()).await.unwrap() {
+                if matches!(
+                    h.prepare_and_commit(config.clone()).await.unwrap(),
+                    CommitStatus::Committed
+                ) {
                     Ok(())
                 } else {
                     Err(CondCheckError::<()>::NotYet)
@@ -1199,7 +1217,10 @@ mod tests {
             async || {
                 let mut acked = 0;
                 for h in &setup.node_handles {
-                    if h.commit(rack_id, Epoch(1)).await.unwrap() {
+                    if matches!(
+                        h.commit(rack_id, Epoch(1)).await.unwrap(),
+                        CommitStatus::Committed
+                    ) {
                         acked += 1;
                     }
                 }
@@ -1305,7 +1326,10 @@ mod tests {
             async || {
                 let mut acked = 0;
                 for h in &setup.node_handles[0..num_nodes - 1] {
-                    if h.commit(rack_id, Epoch(2)).await.unwrap() {
+                    if matches!(
+                        h.commit(rack_id, Epoch(2)).await.unwrap(),
+                        CommitStatus::Committed
+                    ) {
                         acked += 1;
                     }
                 }
@@ -1420,7 +1444,10 @@ mod tests {
             async || {
                 let mut acked = 0;
                 for h in &setup.node_handles {
-                    if h.commit(rack_id, Epoch(2)).await.unwrap() {
+                    if matches!(
+                        h.commit(rack_id, Epoch(2)).await.unwrap(),
+                        CommitStatus::Committed
+                    ) {
                         acked += 1;
                     }
                 }
