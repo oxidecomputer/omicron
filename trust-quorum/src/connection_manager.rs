@@ -712,7 +712,7 @@ impl ConnMgr {
     /// listen port, just the ephemeral port.
     ///
     /// Return the `BaseboardId` of the peer if an established connection is
-    // torn down.
+    /// torn down.
     async fn disconnect_client(
         &mut self,
         addr: SocketAddrV6,
