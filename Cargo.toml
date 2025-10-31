@@ -143,6 +143,7 @@ members = [
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
     "typed-rng",
@@ -304,6 +305,7 @@ default-members = [
     "sp-sim",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
     "test-utils",
@@ -370,6 +372,7 @@ assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-trait = "0.1.89"
+attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -471,6 +474,7 @@ gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 trust-quorum = { path = "trust-quorum" }
+trust-quorum-protocol = { path = "trust-quorum/protocol" }
 trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
 glob = "0.3.2"
 guppy = "0.17.20"
@@ -724,7 +728,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "7da1f0b5dcd3d631da18b43ba78a84b1a2b425ee" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
