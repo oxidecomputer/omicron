@@ -2185,3 +2185,187 @@ async fn test_scim_list_users_with_groups(cptestctx: &ControlPlaneTestContext) {
     let user5 = find_user(&users[4].id);
     assert!(user5.groups.is_none());
 }
+
+#[nexus_test]
+async fn test_scim_list_groups_with_members(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let opctx = OpContext::for_tests(
+        cptestctx.logctx.log.new(o!()),
+        nexus.datastore().clone(),
+    );
+
+    const SILO_NAME: &str = "saml-scim-silo";
+    create_silo(&client, SILO_NAME, true, shared::SiloIdentityMode::SamlScim)
+        .await;
+
+    grant_iam(
+        client,
+        &format!("/v1/system/silos/{SILO_NAME}"),
+        shared::SiloRole::Admin,
+        opctx.authn.actor().unwrap().silo_user_id().unwrap(),
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    let created_token: views::ScimClientBearerTokenValue =
+        object_create_no_body(
+            client,
+            &format!("/v1/system/scim/tokens?silo={}", SILO_NAME),
+        )
+        .await;
+
+    // Create 5 users
+    let mut users = Vec::new();
+    for i in 1..=5 {
+        let user: scim2_rs::User = NexusRequest::new(
+            RequestBuilder::new(client, Method::POST, "/scim/v2/Users")
+                .header(http::header::CONTENT_TYPE, "application/scim+json")
+                .header(
+                    http::header::AUTHORIZATION,
+                    format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                )
+                .allow_non_dropshot_errors()
+                .raw_body(Some(
+                    serde_json::to_string(&serde_json::json!({
+                        "userName": format!("user{}", i),
+                        "externalId": format!("user{}@example.com", i),
+                    }))
+                    .unwrap(),
+                ))
+                .expect_status(Some(StatusCode::CREATED)),
+        )
+        .execute_and_parse_unwrap()
+        .await;
+        users.push(user);
+    }
+
+    // Create 3 groups with various membership patterns:
+    // - group1: user1, user2, user3
+    // - group2: user1, user4
+    // - group3: no members
+    let group1: scim2_rs::Group = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/scim/v2/Groups")
+            .header(http::header::CONTENT_TYPE, "application/scim+json")
+            .header(
+                http::header::AUTHORIZATION,
+                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            )
+            .allow_non_dropshot_errors()
+            .raw_body(Some(
+                serde_json::to_string(&serde_json::json!({
+                    "displayName": "group1",
+                    "externalId": "group1@example.com",
+                    "members": [
+                        {"value": users[0].id},
+                        {"value": users[1].id},
+                        {"value": users[2].id},
+                    ],
+                }))
+                .unwrap(),
+            ))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .execute_and_parse_unwrap()
+    .await;
+
+    let group2: scim2_rs::Group = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/scim/v2/Groups")
+            .header(http::header::CONTENT_TYPE, "application/scim+json")
+            .header(
+                http::header::AUTHORIZATION,
+                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            )
+            .allow_non_dropshot_errors()
+            .raw_body(Some(
+                serde_json::to_string(&serde_json::json!({
+                    "displayName": "group2",
+                    "externalId": "group2@example.com",
+                    "members": [
+                        {"value": users[0].id},
+                        {"value": users[3].id},
+                    ],
+                }))
+                .unwrap(),
+            ))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .execute_and_parse_unwrap()
+    .await;
+
+    let group3: scim2_rs::Group = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/scim/v2/Groups")
+            .header(http::header::CONTENT_TYPE, "application/scim+json")
+            .header(
+                http::header::AUTHORIZATION,
+                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            )
+            .allow_non_dropshot_errors()
+            .raw_body(Some(
+                serde_json::to_string(&serde_json::json!({
+                    "displayName": "group3",
+                    "externalId": "group3@example.com",
+                }))
+                .unwrap(),
+            ))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .execute_and_parse_unwrap()
+    .await;
+
+    // List all groups and verify members
+    let response: scim2_rs::ListResponse = NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, "/scim/v2/Groups")
+            .header(http::header::CONTENT_TYPE, "application/scim+json")
+            .header(
+                http::header::AUTHORIZATION,
+                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            )
+            .allow_non_dropshot_errors()
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap()
+    .await;
+
+    let returned_groups: Vec<scim2_rs::Group> = serde_json::from_value(
+        serde_json::to_value(&response.resources).unwrap(),
+    )
+    .unwrap();
+
+    // Find our created groups in the response
+    let find_group = |group_id: &str| {
+        returned_groups
+            .iter()
+            .find(|g| g.id == group_id)
+            .expect("group should be in list")
+    };
+
+    // group1 should have 3 members
+    let returned_group1 = find_group(&group1.id);
+    assert!(returned_group1.members.is_some());
+    let group1_members = returned_group1.members.as_ref().unwrap();
+    assert_eq!(group1_members.len(), 3);
+    let group1_member_ids: std::collections::HashSet<_> = group1_members
+        .iter()
+        .map(|m| m.value.as_ref().unwrap().as_str())
+        .collect();
+    assert!(group1_member_ids.contains(users[0].id.as_str()));
+    assert!(group1_member_ids.contains(users[1].id.as_str()));
+    assert!(group1_member_ids.contains(users[2].id.as_str()));
+
+    // group2 should have 2 members
+    let returned_group2 = find_group(&group2.id);
+    assert!(returned_group2.members.is_some());
+    let group2_members = returned_group2.members.as_ref().unwrap();
+    assert_eq!(group2_members.len(), 2);
+    let group2_member_ids: std::collections::HashSet<_> = group2_members
+        .iter()
+        .map(|m| m.value.as_ref().unwrap().as_str())
+        .collect();
+    assert!(group2_member_ids.contains(users[0].id.as_str()));
+    assert!(group2_member_ids.contains(users[3].id.as_str()));
+
+    // group3 should have no members
+    let returned_group3 = find_group(&group3.id);
+    assert!(returned_group3.members.is_none());
+}
