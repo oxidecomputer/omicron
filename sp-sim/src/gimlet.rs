@@ -902,7 +902,8 @@ impl Handler {
     fn sp_state_impl(&self) -> SpStateV2 {
         // Make the Baseboard a PC so that our testbeds work as expected.
         let mut model = [0; 32];
-        model[..FAKE_GIMLET_MODEL.len()].copy_from_slice(FAKE_GIMLET_MODEL.as_bytes());
+        model[..FAKE_GIMLET_MODEL.len()]
+            .copy_from_slice(FAKE_GIMLET_MODEL.as_bytes());
 
         SpStateV2 {
             hubris_archive_id: [0; 8],

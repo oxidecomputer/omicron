@@ -272,6 +272,13 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         }
     }
 
+    pub fn internal_client(&self) -> nexus_client::Client {
+        nexus_client::Client::new(
+            &format!("http://{}", self.internal_client.bind_address),
+            self.internal_client.client_log.clone(),
+        )
+    }
+
     /// Stop a Dendrite instance for testing failure scenarios
     pub async fn stop_dendrite(
         &self,

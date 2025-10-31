@@ -953,6 +953,7 @@ name = "bootstrap-agent-api"
 version = "0.1.0"
 dependencies = [
  "dropshot",
+ "dropshot-api-manager-types",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -1668,7 +1669,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2954,9 +2955,9 @@ dependencies = [
 
 [[package]]
 name = "drift"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43eb40edecda6106744f5e4f3d4dc78b3adf19d3cfb2d81cc4faa007da91e527"
+checksum = "beebeb5f38023a0c6586ffd39e43bb3280926e18faf576a3e10c95895c99651e"
 dependencies = [
  "anyhow",
  "indexmap 2.11.4",
@@ -3019,9 +3020,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d0c9a9b3587eb5c7da419466203773307767124fa20e84068d9dd06ee34caa9"
+checksum = "0c7a9019bc0bc0ad59881c6607c5eadb6965d5f34f42021477b141c29ce6650d"
 dependencies = [
  "anyhow",
  "atomicwrites",
@@ -3049,9 +3050,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot-api-manager-types"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00be3e4459aae391b88805e9f735c7cf9cf4ed6aad02bc0e92b224b590af39ab"
+checksum = "3c53110ae198fa78c643eceb87c44705319088563d837f751d74345a793c0527"
 dependencies = [
  "anyhow",
  "camino",
@@ -5262,8 +5263,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dropshot",
+ "dropshot-api-manager-types",
  "hyper",
- "installinator-common",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5271,6 +5272,7 @@ dependencies = [
  "serde",
  "slog",
  "tufaceous-artifact",
+ "update-engine",
  "uuid",
 ]
 
@@ -5278,7 +5280,6 @@ dependencies = [
 name = "installinator-client"
 version = "0.1.0"
 dependencies = [
- "installinator-common",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5782,7 +5783,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -6750,6 +6751,7 @@ name = "nexus-internal-api"
 version = "0.1.0"
 dependencies = [
  "dropshot",
+ "dropshot-api-manager-types",
  "http",
  "nexus-types",
  "omicron-common",
@@ -7274,6 +7276,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
+ "nexus-client",
  "nexus-config",
  "nexus-db-queries",
  "nexus-lockstep-client",
@@ -8165,6 +8168,7 @@ dependencies = [
  "mg-admin-client",
  "nexus-auth",
  "nexus-background-task-interface",
+ "nexus-client",
  "nexus-config",
  "nexus-db-lookup",
  "nexus-db-model",
@@ -8558,6 +8562,7 @@ dependencies = [
  "dropshot",
  "futures",
  "libc",
+ "omicron-common",
  "omicron-workspace-hack",
  "oxide-tokio-rt",
  "repo-depot-api",
@@ -8816,7 +8821,6 @@ dependencies = [
  "getrandom 0.3.4",
  "group",
  "hashbrown 0.16.0",
- "heck 0.4.1",
  "hickory-proto 0.25.2",
  "hmac",
  "hyper",
@@ -11103,7 +11107,7 @@ dependencies = [
 [[package]]
 name = "raw-cpuid"
 version = "11.5.0"
-source = "git+https://github.com/oxidecomputer/rust-cpuid.git?rev=0a8dbd2311263f6a59ea58089e33c8331436ff3a#0a8dbd2311263f6a59ea58089e33c8331436ff3a"
+source = "git+https://github.com/oxidecomputer/rust-cpuid.git?rev=a4cf01df76f35430ff5d39dc2fe470bcb953503b#a4cf01df76f35430ff5d39dc2fe470bcb953503b"
 dependencies = [
  "bitflags 2.9.4",
 ]
@@ -11355,6 +11359,7 @@ name = "repo-depot-api"
 version = "0.1.0"
 dependencies = [
  "dropshot",
+ "dropshot-api-manager-types",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "serde",
@@ -13124,7 +13129,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.106",
@@ -15902,7 +15907,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

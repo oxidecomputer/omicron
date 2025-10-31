@@ -3369,7 +3369,7 @@ pub trait NexusExternalApi {
         body: StreamingBody,
     ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError>;
 
-    /// Fetch system release repository description by version
+    /// Fetch system release repository by version
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repositories/{system_version}",
