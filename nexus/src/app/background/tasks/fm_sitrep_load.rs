@@ -175,5 +175,144 @@ impl SitrepLoader {
 
 #[cfg(test)]
 mod test {
-    // TODO
+    use super::*;
+    use crate::app::background::BackgroundTask;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
+    use nexus_types::fm::SitrepMetadata;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SitrepUuid;
+
+    #[tokio::test]
+    async fn test_load_sitreps() {
+        let logctx = dev::test_setup_log("test_inventory_loader");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let (tx, mut sitrep_rx) = watch::channel(None);
+        let mut task = SitrepLoader::new(datastore.clone(), tx);
+
+        // Initially, there should be no sitrep.
+        let status = task.activate(&opctx).await;
+        assert_eq!(*sitrep_rx.borrow_and_update(), None);
+        let status = serde_json::from_value::<Status>(status).unwrap();
+        assert_eq!(status, Status::NoSitrep);
+
+        // Now, create an initial sitrep.
+        let sitrep1_id = SitrepUuid::new_v4();
+        let sitrep1 = Sitrep {
+            metadata: SitrepMetadata {
+                id: sitrep1_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                parent_sitrep_id: None,
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep 1".to_string(),
+                time_created: Utc::now(),
+            },
+        };
+        datastore
+            .fm_sitrep_insert(&opctx, &sitrep1)
+            .await
+            .expect("sitrep should be inserted successfully");
+
+        // It should be loaded.
+        let status = task.activate(&opctx).await;
+        assert_eq!(
+            true,
+            sitrep_rx.has_changed().unwrap(),
+            "sitrep watch should have changed when a sitrep was loaded"
+        );
+        let snapshot = sitrep_rx
+            .borrow_and_update()
+            .clone()
+            .expect("the new sitrep should have been loaded");
+        let (ref loaded_version1, ref loaded_sitrep) = *snapshot;
+        // N.B.: we just compare the IDs here as comparing the whole struct may
+        // not be equal, since the `time_created` field may have been rounded in
+        // CRDB. Which is a shame, but whatever. :/
+        assert_eq!(loaded_sitrep.metadata.id, sitrep1.metadata.id);
+        dbg!(loaded_version1);
+        let status = serde_json::from_value::<Status>(status).unwrap();
+        match status {
+            Status::Loaded { version, .. } => {
+                assert_eq!(&version, loaded_version1);
+            }
+            status => panic!("expected Status::Loaded, got {status:?}",),
+        };
+
+        // A subsequent activation should see the same sitrep.
+        let status = task.activate(&opctx).await;
+        assert_eq!(
+            false,
+            sitrep_rx.has_changed().unwrap(),
+            "sitrep watch should not change if the same sitrep was loaded"
+        );
+        let snapshot = sitrep_rx
+            .borrow_and_update()
+            .clone()
+            .expect("the same should have been loaded");
+        let (ref loaded_version2, ref loaded_sitrep) = *snapshot;
+        assert_eq!(loaded_sitrep.metadata.id, sitrep1.metadata.id);
+        dbg!(loaded_version1, loaded_version2);
+        let status = serde_json::from_value::<Status>(status).unwrap();
+        match status {
+            Status::Loaded { version, .. } => {
+                assert_eq!(&version, loaded_version2);
+            }
+            status => panic!("expected Status::Loaded, got {status:?}",),
+        };
+
+        // Now, create a new sitrep.
+        let sitrep2_id = SitrepUuid::new_v4();
+        let sitrep2 = Sitrep {
+            metadata: SitrepMetadata {
+                id: sitrep2_id,
+                inv_collection_id: CollectionUuid::new_v4(),
+                parent_sitrep_id: Some(sitrep1_id),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep 2".to_string(),
+                time_created: Utc::now(),
+            },
+        };
+        datastore
+            .fm_sitrep_insert(&opctx, &sitrep2)
+            .await
+            .expect("sitrep2 should be inserted successfully");
+
+        // It should be loaded.
+        let status = task.activate(&opctx).await;
+        assert_eq!(
+            true,
+            sitrep_rx.has_changed().unwrap(),
+            "loading a new sitrep should update the watch"
+        );
+        let snapshot = sitrep_rx
+            .borrow_and_update()
+            .clone()
+            .expect("the new sitrep should have been loaded");
+        let (ref loaded_version3, ref loaded_sitrep) = *snapshot;
+        assert_eq!(loaded_sitrep.metadata.id, sitrep2.metadata.id);
+        dbg!(loaded_version3);
+        assert_ne!(loaded_version3, loaded_version2);
+        let status = serde_json::from_value::<Status>(status).unwrap();
+        match status {
+            Status::Loaded { version, .. } => {
+                assert_eq!(&version, loaded_version3);
+            }
+            status => panic!("expected Status::Loaded, got {status:?}",),
+        };
+
+        // XXX(eliza): It would be nice to also be able to test that an orphaned
+        // sitrep (which has not been linked into the sitrep history chain) is
+        // *not* loaded even if it exists. However, that would require
+        // `nexus-db-queries` to expose separate interfaces for creating a
+        // sitrep and inserting it into the history, which I have intentionally
+        // chosen *not* to do to make it harder to do it by mistake.
+        // So, ¯\_(ツ)_/¯
+
+        // Cleanup
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
 }
