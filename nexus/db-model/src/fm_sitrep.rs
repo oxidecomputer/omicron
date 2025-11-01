@@ -25,9 +25,9 @@ pub struct SitrepMetadata {
     pub id: DbTypedUuid<SitrepKind>,
     pub parent_sitrep_id: Option<DbTypedUuid<SitrepKind>>,
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub time_created: DateTime<Utc>,
     pub creator_id: DbTypedUuid<OmicronZoneKind>,
     pub comment: String,
-    pub time_created: DateTime<Utc>,
 }
 
 impl From<SitrepMetadata> for nexus_types::fm::SitrepMetadata {
