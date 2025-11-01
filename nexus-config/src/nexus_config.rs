@@ -562,13 +562,25 @@ pub struct SwitchPortSettingsManagerConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InventoryConfig {
-    /// period (in seconds) for periodic activations of this background task
+    /// period (in seconds) for periodic activations of the background task to
+    /// load the latest inventory collection
+    ///
+    /// Each activation runs a fast query to check whether there is a new
+    /// collection, and only follows up with the set of queries required to load
+    /// its contents if there's been a change. This period should be pretty
+    /// aggressive to ensure consumers are usually acting on the latest
+    /// collection.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_load: Duration,
+
+    /// period (in seconds) for periodic activations of the background task to
+    /// collect inventory
     ///
     /// Each activation fetches information about all hardware and software in
     /// the system and inserts it into the database.  This generates a moderate
     /// amount of data.
     #[serde_as(as = "DurationSeconds<u64>")]
-    pub period_secs: Duration,
+    pub period_secs_collect: Duration,
 
     /// maximum number of past collections to keep in the database
     ///
@@ -580,7 +592,7 @@ pub struct InventoryConfig {
     ///
     /// This is an emergency lever for support / operations.  It should never be
     /// necessary.
-    pub disable: bool,
+    pub disable_collect: bool,
 }
 
 #[serde_as]
@@ -868,6 +880,11 @@ pub struct PackageConfig {
     /// Authentication-related configuration
     pub authn: AuthnConfig,
     /// Timeseries database configuration.
+    /// Nexus-side support for `omdb`-based debugging.
+    ///
+    /// This is only meaningful on real, multi-sled systems where `omdb` is in
+    /// use from the switch zone.
+    pub omdb: OmdbConfig,
     #[serde(default)]
     pub timeseries_db: TimeseriesDbConfig,
     /// Describes how to handle and perform schema changes.
@@ -905,6 +922,7 @@ pub enum SchemeName {
     Spoof,
     SessionCookie,
     AccessToken,
+    ScimToken,
 }
 
 impl std::str::FromStr for SchemeName {
@@ -915,6 +933,7 @@ impl std::str::FromStr for SchemeName {
             "spoof" => Ok(SchemeName::Spoof),
             "session_cookie" => Ok(SchemeName::SessionCookie),
             "access_token" => Ok(SchemeName::AccessToken),
+            "scim_token" => Ok(SchemeName::ScimToken),
             _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }
@@ -926,6 +945,7 @@ impl std::fmt::Display for SchemeName {
             SchemeName::Spoof => "spoof",
             SchemeName::SessionCookie => "session_cookie",
             SchemeName::AccessToken => "access_token",
+            SchemeName::ScimToken => "scim",
         })
     }
 }
@@ -1109,9 +1129,10 @@ mod test {
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
             bfd_manager.period_secs = 30
-            inventory.period_secs = 10
-            inventory.nkeep = 11
-            inventory.disable = false
+            inventory.period_secs_load = 10
+            inventory.period_secs_collect = 11
+            inventory.nkeep = 12
+            inventory.disable_collect = false
             support_bundle_collector.period_secs = 30
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
@@ -1154,6 +1175,8 @@ mod test {
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .unwrap();
@@ -1223,6 +1246,9 @@ mod test {
                             0,
                         ))),
                     },
+                    omdb: OmdbConfig {
+                        bin_path: "/nonexistent/path/to/omdb".into(),
+                    },
                     schema: None,
                     tunables: Tunables {
                         max_vpc_ipv4_subnet_prefix: 27,
@@ -1274,9 +1300,10 @@ mod test {
                             period_secs: Duration::from_secs(30),
                         },
                         inventory: InventoryConfig {
-                            period_secs: Duration::from_secs(10),
-                            nkeep: 11,
-                            disable: false,
+                            period_secs_load: Duration::from_secs(10),
+                            period_secs_collect: Duration::from_secs(11),
+                            nkeep: 12,
+                            disable_collect: false,
                         },
                         support_bundle_collector:
                             SupportBundleCollectorConfig {
@@ -1448,9 +1475,10 @@ mod test {
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
             bfd_manager.period_secs = 30
-            inventory.period_secs = 10
+            inventory.period_secs_load = 10
+            inventory.period_secs_collect = 10
             inventory.nkeep = 3
-            inventory.disable = false
+            inventory.disable_collect = false
             support_bundle_collector.period_secs = 30
             physical_disk_adoption.period_secs = 30
             decommissioned_disk_cleaner.period_secs = 30
@@ -1489,6 +1517,9 @@ mod test {
 
             [default_region_allocation_strategy]
             type = "random"
+
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .unwrap();
@@ -1536,6 +1567,8 @@ mod test {
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .expect_err("expected failure");
@@ -1593,6 +1626,8 @@ mod test {
             subnet.net = "::/56"
             [deployment.database]
             type = "from_dns"
+            [omdb]
+            bin_path = "/nonexistent/path/to/omdb"
             "##,
         )
         .expect_err("Expected failure");
@@ -1701,4 +1736,21 @@ pub enum RegionAllocationStrategy {
 
     /// Like Random, but ensures that each region is allocated on its own sled.
     RandomWithDistinctSleds { seed: Option<u64> },
+}
+
+/// Configuration details relevant to supporting `omdb`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OmdbConfig {
+    /// Path to the `omdb` binary that is packaged alongside Nexus.
+    ///
+    /// `omdb` is not typically used from within a Nexus zone, but we ship it
+    /// alongside Nexus to ensure we always have a version of `omdb` on the
+    /// system that matches the active version of Nexus. (During an upgrade, the
+    /// `omdb` shipped in the switch zone will be updated much earlier in the
+    /// process than the running Nexus zones, which means there's a period where
+    /// the switch zone `omdb` is expecting the systems it pokes to be running
+    /// already-updated software; this is particularly problematic for `omdb db
+    /// ...` when the schema migration to the new version hasn't been applied
+    /// yet.)
+    pub bin_path: Utf8PathBuf,
 }

@@ -20,8 +20,8 @@ use crate::services::{self, ServiceManager, UnderlayInfo};
 use crate::support_bundle::logs::SupportBundleLogs;
 use crate::support_bundle::storage::SupportBundleManager;
 use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
+use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
-use crate::zone_bundle::{self, ZoneBundler};
 use anyhow::anyhow;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
@@ -67,7 +67,7 @@ use sled_agent_types::instance::{
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
-    PriorityOrder, StorageLimit, ZoneBundleCause, ZoneBundleMetadata,
+    PriorityOrder, StorageLimit, ZoneBundleMetadata,
 };
 use sled_agent_types::zone_images::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
@@ -78,7 +78,7 @@ use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -128,9 +128,6 @@ pub enum Error {
     #[error("Error managing instances: {0}")]
     Instance(#[from] crate::instance_manager::Error),
 
-    #[error("Error managing storage: {0}")]
-    Storage(#[from] sled_storage::error::Error),
-
     #[error("Error updating: {0}")]
     Download(#[from] crate::updates::Error),
 
@@ -179,7 +176,6 @@ impl From<Error> for omicron_common::api::external::Error {
         match err {
             // Some errors can convert themselves into the external error
             Error::Services(err) => err.into(),
-            Error::Storage(err) => err.into(),
             _ => omicron_common::api::external::Error::InternalError {
                 internal_message: err.to_string(),
             },
@@ -611,7 +607,6 @@ impl SledAgent {
                 etherstub_vnic,
                 service_manager: services.clone(),
                 metrics_queue: metrics_manager.request_queue(),
-                zone_bundler: long_running_task_handles.zone_bundler.clone(),
             },
             SledAgentArtifactStoreWrapper(Arc::clone(&artifact_store)),
             config_reconciler_spawn_token,
@@ -1192,7 +1187,7 @@ impl SledAgent {
     }
 }
 
-#[derive(From, thiserror::Error, Debug)]
+#[derive(From, thiserror::Error, Debug, SlogInlineError)]
 pub enum AddSledError {
     #[error("Failed to learn bootstrap ip for {sled_id}")]
     BootstrapAgentClient {
@@ -1207,6 +1202,7 @@ pub enum AddSledError {
     #[error("Failed to initialize {sled_id}: {err}")]
     BootstrapTcpClient {
         sled_id: Baseboard,
+        #[source]
         err: crate::bootstrap::client::Error,
     },
 }
@@ -1294,7 +1290,6 @@ struct ReconcilerFacilities {
     etherstub_vnic: EtherstubVnic,
     service_manager: ServiceManager,
     metrics_queue: MetricsRequestQueue,
-    zone_bundler: ZoneBundler,
 }
 
 impl SledAgentFacilities for ReconcilerFacilities {
@@ -1354,15 +1349,6 @@ impl SledAgentFacilities for ReconcilerFacilities {
         self.service_manager
             .ddm_reconciler()
             .remove_internal_dns_subnet(prefix);
-    }
-
-    async fn zone_bundle_create(
-        &self,
-        zone: &RunningZone,
-        cause: ZoneBundleCause,
-    ) -> anyhow::Result<()> {
-        self.zone_bundler.create(zone, cause).await?;
-        Ok(())
     }
 }
 

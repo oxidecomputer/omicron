@@ -35,7 +35,6 @@ use nexus_config::InternalDns;
 use nexus_config::MgdConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_config::NexusConfig;
-use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pub_test_utils::crdb;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -88,6 +87,7 @@ use omicron_common::zpool_name::ZpoolName;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use omicron_test_utils::dev::poll;
+use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -104,7 +104,6 @@ use sled_agent_client::types::EarlyNetworkConfig;
 use sled_agent_client::types::EarlyNetworkConfigBody;
 use sled_agent_client::types::RackNetworkConfigV2;
 use slog::{Logger, debug, error, o};
-use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -247,20 +246,18 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         &self,
         timeout: Duration,
     ) {
-        let datastore = self.server.datastore();
-        let opctx =
-            OpContext::for_tests(self.logctx.log.clone(), datastore.clone());
+        let mut inv_rx = self.server.inventory_load_rx();
 
-        match wait_for_condition(
-            || async {
-                match datastore.inventory_get_latest_collection(&opctx).await {
-                    Ok(Some(_)) => Ok(()),
-                    Ok(None) => Err(CondCheckError::NotYet),
-                    Err(err) => Err(CondCheckError::Failed(err)),
+        match wait_for_watch_channel_condition(
+            &mut inv_rx,
+            async |inv| {
+                if inv.is_some() {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
                 }
             },
-            &Duration::from_millis(500),
-            &timeout,
+            timeout,
         )
         .await
         {
@@ -268,13 +265,17 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
             Err(poll::Error::TimedOut(elapsed)) => {
                 panic!("no inventory collection found within {elapsed:?}");
             }
-            Err(poll::Error::PermanentError(err)) => {
-                panic!(
-                    "failed waiting for inventory collection: {}",
-                    InlineErrorChain::new(&err)
-                );
+            Err(poll::Error::PermanentError(())) => {
+                unreachable!("check can only fail via timeout")
             }
         }
+    }
+
+    pub fn internal_client(&self) -> nexus_client::Client {
+        nexus_client::Client::new(
+            &format!("http://{}", self.internal_client.bind_address),
+            self.internal_client.client_log.clone(),
+        )
     }
 
     pub async fn teardown(mut self) {
@@ -698,8 +699,19 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         sp_sim_config_file: Utf8PathBuf,
     ) {
         debug!(&self.logctx.log, "Starting Management Gateway");
-        let (mgs_config, sp_sim_config) =
+        let (mut mgs_config, sp_sim_config) =
             gateway_test_utils::setup::load_test_config(sp_sim_config_file);
+
+        // The sp_sim_config_file contains suitable configuration information for a MGS daemon running on
+        // switch0. For switch1, the port information needs to be flipped in order for MGS to correctly identify
+        // itself as the switch1 MGS daemon.
+        if switch_location == SwitchLocation::Switch1 {
+            for config in mgs_config.switch.location.determination.iter_mut() {
+                let swap = config.sp_port_1.clone();
+                config.sp_port_1 = config.sp_port_2.clone();
+                config.sp_port_2 = swap;
+            }
+        }
 
         let mgs_addr =
             port.map(|port| SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0));
@@ -717,9 +729,18 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub async fn start_dendrite(&mut self, switch_location: SwitchLocation) {
         let log = &self.logctx.log;
         debug!(log, "Starting Dendrite for {switch_location}");
+        let mgs = self.gateway.get(&switch_location).unwrap();
+        let mgs_addr =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
 
         // Set up a stub instance of dendrite
-        let dendrite = dev::dendrite::DendriteInstance::start(0).await.unwrap();
+        let dendrite = dev::dendrite::DendriteInstance::start(
+            0,
+            self.nexus_internal_addr,
+            Some(mgs_addr),
+        )
+        .await
+        .unwrap();
         let port = dendrite.port;
         self.dendrite.insert(switch_location, dendrite);
 
@@ -1781,6 +1802,49 @@ async fn setup_with_config_impl<N: NexusServer>(
         )
         .await;
 
+    // Usually our switch services rely on SMF updates to get information about
+    // DNS and Nexus, but we currently don't use SMF to manage the services used in
+    // the test context so we need to make the Nexus / DNS information available
+    // to get the switch services working.
+    builder
+        .init_with_steps(
+            vec![
+                (
+                    "start_internal_dns",
+                    Box::new(|builder| builder.start_internal_dns().boxed()),
+                ),
+                (
+                    "start_external_dns",
+                    Box::new(|builder| builder.start_external_dns().boxed()),
+                ),
+                (
+                    "start_nexus_internal",
+                    Box::new(|builder| {
+                        builder
+                            .start_nexus_internal()
+                            .map(|r| r.unwrap())
+                            .boxed()
+                    }),
+                ),
+            ],
+            STEP_TIMEOUT,
+        )
+        .await;
+
+    if second_nexus {
+        builder
+            .init_with_steps(
+                vec![(
+                    "configure_second_nexus",
+                    Box::new(|builder| {
+                        builder.configure_second_nexus().boxed()
+                    }),
+                )],
+                STEP_TIMEOUT,
+            )
+            .await;
+    }
+
     // By default there is only 1 sled agent, and this means only switch0 will
     // be configured. If extra sled agents are requested, then the second sled
     // agent will be for switch1.
@@ -1871,45 +1935,6 @@ async fn setup_with_config_impl<N: NexusServer>(
                         }),
                     ),
                 ],
-                STEP_TIMEOUT,
-            )
-            .await;
-    }
-
-    builder
-        .init_with_steps(
-            vec![
-                (
-                    "start_internal_dns",
-                    Box::new(|builder| builder.start_internal_dns().boxed()),
-                ),
-                (
-                    "start_external_dns",
-                    Box::new(|builder| builder.start_external_dns().boxed()),
-                ),
-                (
-                    "start_nexus_internal",
-                    Box::new(|builder| {
-                        builder
-                            .start_nexus_internal()
-                            .map(|r| r.unwrap())
-                            .boxed()
-                    }),
-                ),
-            ],
-            STEP_TIMEOUT,
-        )
-        .await;
-
-    if second_nexus {
-        builder
-            .init_with_steps(
-                vec![(
-                    "configure_second_nexus",
-                    Box::new(|builder| {
-                        builder.configure_second_nexus().boxed()
-                    }),
-                )],
                 STEP_TIMEOUT,
             )
             .await;

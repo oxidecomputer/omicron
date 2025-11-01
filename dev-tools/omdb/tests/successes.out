@@ -89,9 +89,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL        IP           ROLE      POLICY      STATE   ID                                   
- sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL                                    IP           ROLE      POLICY      STATE   ID                                   
+ sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -102,9 +102,9 @@ EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL        IP           ROLE      POLICY      STATE   ID                                   
- sim-039be560  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- sim-b6d65341  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL                                    IP           ROLE      POLICY      STATE   ID                                   
+ sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -349,6 +349,10 @@ task: "instance_watcher"
 
 task: "inventory_collection"
     collects hardware and software inventory data from the whole system
+
+
+task: "inventory_loader"
+    loads the latest inventory collection from the DB
 
 
 task: "lookup_region_port"
@@ -648,6 +652,13 @@ task: "inventory_collection"
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
+
+task: "inventory_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    loaded latest inventory collection as of <REDACTED_TIMESTAMP>:
+        collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
@@ -1176,6 +1187,13 @@ task: "inventory_collection"
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
+
+task: "inventory_loader"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    loaded latest inventory collection as of <REDACTED_TIMESTAMP>:
+        collection ..........<REDACTED_UUID>..........., taken at <REDACTED_TIMESTAMP>
 
 task: "lookup_region_port"
   configured period: every <REDACTED_DURATION>m
@@ -1741,6 +1759,74 @@ Reconfigurator config:
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
 =============================================
+EXECUTING COMMAND: omdb ["nexus", "update-status"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Count of each component type by system version:
+
+                  |install-dataset |unknown 
+------------------+----------------+--------
+RoT bootloader    |0               |4       
+RoT               |0               |4       
+SP                |0               |4       
+Host OS (phase 1) |0               |2       
+Host OS (phase 2) |0               |2       
+Zone              |7               |0       
+
+To see each individual component, rerun with `--details`.
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
+EXECUTING COMMAND: omdb ["nexus", "update-status", "--details"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Installed RoT Bootloader Software
+BASEBOARD_ID                                        STAGE0_VERSION STAGE0_NEXT_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0                        unknown        unknown             
+FAKE_SIM_SIDECAR:SimSidecar1                        unknown        unknown             
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown        unknown             
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown        unknown             
+
+Installed RoT Software
+BASEBOARD_ID                                        SLOT_A_VERSION   SLOT_B_VERSION                
+FAKE_SIM_SIDECAR:SimSidecar0                        unknown (active) unknown                       
+FAKE_SIM_SIDECAR:SimSidecar1                        unknown (active) unknown                       
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown          unknown (ACTIVE SLOT UNKNOWN) 
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown          unknown (ACTIVE SLOT UNKNOWN) 
+
+Installed SP Software
+BASEBOARD_ID                                        SLOT0_VERSION SLOT1_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0                        unknown       unknown       
+FAKE_SIM_SIDECAR:SimSidecar1                        unknown       unknown       
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown       unknown       
+sim-gimlet:sim-..........<REDACTED_UUID>........... unknown       unknown       
+
+Installed Host Phase 1 Software
+BASEBOARD_ID                                        SLED_ID                              SLOT_A_VERSION SLOT_B_VERSION                
+sim-gimlet:sim-..........<REDACTED_UUID>........... ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
+sim-gimlet:sim-..........<REDACTED_UUID>........... ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
+
+Installed Host Phase 2 Software
+SLED_ID                              SLOT_A_VERSION      SLOT_B_VERSION 
+..........<REDACTED_UUID>........... unknown (boot disk) unknown        
+..........<REDACTED_UUID>........... unknown (boot disk) unknown        
+
+Running Zones
+SLED_ID                              ZONE_TYPE       ZONE_ID                              VERSION         
+..........<REDACTED_UUID>........... ntp             ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... clickhouse      ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... cockroach       ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... crucible-pantry ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... external-dns    ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... internal-dns    ..........<REDACTED_UUID>........... install dataset 
+..........<REDACTED_UUID>........... nexus           ..........<REDACTED_UUID>........... install dataset 
+---------------------------------------------
+stderr:
+note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
+=============================================
 EXECUTING COMMAND: omdb ["-w", "nexus", "reconfigurator-config", "set", "--planner-enabled", "true"]
 termination: Exited(0)
 ---------------------------------------------
@@ -1788,7 +1874,7 @@ stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
 assembling reconfigurator state ... done
-wrote <TMP_PATH_REDACTED>
+saving to <TMP_PATH_REDACTED> ... done
 =============================================
 EXECUTING COMMAND: omdb ["--destructive", "db", "db-metadata", "force-mark-nexus-quiesced", "--skip-confirmation", "--skip-blueprint-validation", "..........<REDACTED_UUID>..........."]
 termination: Exited(0)

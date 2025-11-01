@@ -6,12 +6,14 @@ use super::Nexus;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::HttpAuthnScheme;
+use authn::external::scim::HttpAuthnScimToken;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
 use camino::Utf8PathBuf;
 use chrono::Duration;
 use nexus_config::NexusConfig;
+use nexus_config::OmdbConfig;
 use nexus_config::SchemeName;
 use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authn::ConsoleSessionWithSiloId;
@@ -107,6 +109,8 @@ pub struct ServerContext {
     pub(crate) external_tls_enabled: bool,
     /// tunable settings needed for the console at runtime
     pub(crate) console_config: ConsoleConfig,
+    /// config supporting `omdb` system introspection
+    pub(crate) omdb_config: OmdbConfig,
 }
 
 pub(crate) struct ConsoleConfig {
@@ -138,6 +142,7 @@ impl ServerContext {
                         Box::new(HttpAuthnSessionCookie)
                     }
                     SchemeName::AccessToken => Box::new(HttpAuthnToken),
+                    SchemeName::ScimToken => Box::new(HttpAuthnScimToken),
                 },
             )
             .collect();
@@ -324,6 +329,7 @@ impl ServerContext {
                 ),
                 static_dir,
             },
+            omdb_config: config.pkg.omdb.clone(),
         }))
     }
 }
@@ -489,5 +495,16 @@ impl SessionStore for ServerContext {
 
     fn session_absolute_timeout(&self) -> Duration {
         self.console_config.session_absolute_timeout
+    }
+}
+
+#[async_trait]
+impl authn::external::scim::ScimTokenContext for ServerContext {
+    async fn scim_token_actor(
+        &self,
+        token: String,
+    ) -> Result<authn::Actor, authn::Reason> {
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.scim_token_actor(opctx, token).await
     }
 }

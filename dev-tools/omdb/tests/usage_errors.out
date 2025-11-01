@@ -850,6 +850,7 @@ Commands:
   background-tasks       print information about background tasks
   blueprints             interact with blueprints
   clickhouse-policy      interact with clickhouse policy
+  fetch-omdb             fetch an omdb binary associated with an active Nexus
   mgs-updates            print information about pending MGS updates
   oximeter-read-policy   interact with oximeter read policy
   quiesce                view or modify the quiesce status

@@ -546,9 +546,12 @@ mod region_replacement {
             //
             // If `wait_for_request_state` has the same expected start and end
             // state (as it does above), it's possible to exit that function
-            // having not yet started the saga yet, and this requires an
-            // additional `wait_for_condition` to wait for the expected recorded
-            // step.
+            // having not yet started the saga yet. To check the saga has
+            // started, we'll wait for the replacement request step to be
+            // created by it. If the saga is still in progress, the step may be
+            // recorded while the saga is still `Driving`, so we wait for the
+            // saga to return to `Running` as evidence the step has been fully
+            // driven.
 
             let most_recent_step = wait_for_condition(
                 || {
@@ -565,12 +568,34 @@ mod region_replacement {
                             .await
                             .unwrap()
                         {
-                            Some(step) => Ok(step),
+                            Some(step) => {
+                                // The saga has either started or completed. To
+                                // tell if it's completed and we can move on,
+                                // check on the replacement state again. If
+                                // we're not `Running`, the saga is still in
+                                // progress.
+                                let state = datastore
+                                    .get_region_replacement_request_by_id(
+                                        &opctx,
+                                        replacement_request_id,
+                                    )
+                                    .await
+                                    .unwrap()
+                                    .replacement_state;
+
+                                if state == RegionReplacementState::Running {
+                                    Ok(step)
+                                } else {
+                                    // The replacement step is in progress, but
+                                    // not done yet. We're still waiting, but
+                                    // probably not for long.
+                                    Err(CondCheckError::<()>::NotYet)
+                                }
+                            }
 
                             None => {
-                                // The saga either has not started yet or is
-                                // still running - see the comment before this
-                                // check for more info.
+                                // The saga has not started, so we're not done
+                                // waiting.
                                 Err(CondCheckError::<()>::NotYet)
                             }
                         }
@@ -1289,7 +1314,7 @@ mod region_snapshot_replacement {
         datastore: Arc<DataStore>,
         disk_test: DiskTest<'a>,
         client: ClientTestContext,
-        internal_client: ClientTestContext,
+        internal_client: nexus_client::Client,
         lockstep_client: ClientTestContext,
         replacement_request_id: Uuid,
         snapshot_socket_addr: SocketAddr,
@@ -1309,7 +1334,7 @@ mod region_snapshot_replacement {
                 .await;
 
             let client = &cptestctx.external_client;
-            let internal_client = &cptestctx.internal_client;
+            let internal_client = cptestctx.internal_client();
             let lockstep_client = &cptestctx.lockstep_client;
             let datastore = nexus.datastore().clone();
 
@@ -1743,15 +1768,8 @@ mod region_snapshot_replacement {
 
             let disk_id = disk_from_snapshot.identity.id;
 
-            // Note: `make_request` needs a type here, otherwise rustc cannot
-            // figure out the type of the `request_body` parameter
             self.internal_client
-                .make_request::<u32>(
-                    http::Method::POST,
-                    &format!("/disk/{disk_id}/remove-read-only-parent"),
-                    None,
-                    http::StatusCode::NO_CONTENT,
-                )
+                .cpapi_disk_remove_read_only_parent(&disk_id)
                 .await
                 .unwrap();
         }

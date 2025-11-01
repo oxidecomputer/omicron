@@ -1,0 +1,737 @@
+using provided RNG seed: reconfigurator-cli-test
+> # Load example system
+> load-example --nsleds 2 --ndisks-per-sled 3
+loaded example system with:
+- collection: f45ba181-4b56-42cc-a762-874d90184a43
+- blueprint: dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+
+
+> # Create a TUF repository from a fake manifest. (The output TUF repo is
+> # written to a temporary directory that this invocation of `reconfigurator-cli`
+> # is running out of as its working directory.)
+> #
+> # This is used to simulate the initial version of the system.
+> tuf-assemble ../../update-common/manifests/fake-0.0.1.toml
+INFO assembling repository in <ASSEMBLING_REPOSITORY_IN_REDACTED>
+INFO artifacts assembled and archived to `repo-0.0.1.zip`, component: OmicronRepoAssembler
+created repo-0.0.1.zip for system version 0.0.1
+
+
+> # Load the target release from the assembled TUF repository.
+> set target-release repo-0.0.1.zip
+INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
+INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
+INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 0.0.1, hash: 716e29860eade5de4cf28d2c81f1c3fcaf3a3c07af52961c0e231e3dd0ba4db8, length: 734
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 0.0.1, hash: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985, length: 787
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 0.0.1, hash: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985, length: 787
+INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 0.0.1, hash: 5bfb2fef5a25100e7813636699bd365bbcd623980ae00e876ad705ef591feded, length: 794
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 0.0.1, hash: 143aa9751a0bb16ab3d2c8b56d2874eeab14e1ac3413aa0edf1dbf56900f3fcc, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 0.0.1, hash: 0c43c53453b1113d8ec83d0e3cb8139094b6f4594c304645a33248863141bac6, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 0.0.1, hash: 7cd830e1682d50620de0f5c24b8cca15937eb10d2a415ade6ad28c0d314408eb, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 0.0.1, hash: 040e9ffbd212b790da4fc3a6376c9ff102c852c4ac1f1a1bc84c7d8edc64029f, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 0.0.1, hash: bfc7d2bf0d2e5dde41b8ea85beca7f01262688297f438727fdeb8543c1ceb25e, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 0.0.1, hash: a05417d8d03400b9d556b63563c9958da983a0cdcc3259669966ad45e395c277, length: 1048576
+INFO added artifact, name: clickhouse, kind: zone, version: 0.0.1, hash: 0cc283162daad1dd9d63cd20a484f4e0157b6895c179defa8a99fd220323a6c5, length: 1687
+INFO added artifact, name: clickhouse_keeper, kind: zone, version: 0.0.1, hash: f27ef7d2ce10696c4583ea194cdf61c3907f2143f666af964b8ed3bee1346be0, length: 1691
+INFO added artifact, name: clickhouse_server, kind: zone, version: 0.0.1, hash: bc35f79e04956e284c230f324fe7475ad5cb2ede08e6b4a77addcd9e6f50d33b, length: 1691
+INFO added artifact, name: cockroachdb, kind: zone, version: 0.0.1, hash: a1dc64b896b4bb5d0d295f63b5edeb82b3f945e1f830b06c32f96f9de30b93d1, length: 1690
+INFO added artifact, name: crucible-zone, kind: zone, version: 0.0.1, hash: f3694b20fa1de79fb1f7c3a9f89f9f9eb5ebaaefc3caba7e1991e7e2b3191ed4, length: 1691
+INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 0.0.1, hash: 6055871bfa626d582162302bf027102d90a03a42866867df2582f8eba231fc6d, length: 1696
+INFO added artifact, name: external-dns, kind: zone, version: 0.0.1, hash: 584217eae459e4c2bd00621cf1910d06edb8258948a4832ab0329cf42067c0c7, length: 1690
+INFO added artifact, name: internal-dns, kind: zone, version: 0.0.1, hash: c29c262c79d8f3fa4e0bbec221a286ca6e02b64719b6d35f32cc5e92e36b9173, length: 1690
+INFO added artifact, name: ntp, kind: zone, version: 0.0.1, hash: b661b5d1370f5ac593b4c15b5fcd22c904991cf33b6db32f886374bc022a3531, length: 1682
+INFO added artifact, name: nexus, kind: zone, version: 0.0.1, hash: 5f0b97b090966bb754485c3d397d0918d54bf4ffdc6fa691b77f61686f2ac8cc, length: 1683
+INFO added artifact, name: oximeter, kind: zone, version: 0.0.1, hash: 7ea25be50cd4e98e2ba20916cb98fe8ea457372f5973eb6ac691b5bc90dbddc0, length: 1683
+INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 0.0.1, hash: 3a63db2465b433f7b2f2816f833dcce90e0aa7e7472b1735c63faf93a48bb2ab, length: 726
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 0.0.1, hash: 9bdc198ad072c74cfc1e145355eef307028067776b19f9e2a7830934176fe406, length: 770
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 0.0.1, hash: 9bdc198ad072c74cfc1e145355eef307028067776b19f9e2a7830934176fe406, length: 770
+INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 0.0.1, hash: a58c577f5c33e0a8176f078183a0c94b84ab1e1e7118c441f6b82551fba58f46, length: 794
+INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 0.0.1, hash: 9a559c6734981ec74fee73a56826f8a91beec39a59dea497f67d55c91ab74328, length: 736
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 0.0.1, hash: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c, length: 776
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 0.0.1, hash: 7776db817d1f1b1a2f578050742e33bd4e805a4c76f36bce84dcb509b900249c, length: 776
+INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 0.0.1, hash: 0686443d50db2247077dc70b6543cea9a90a9792de00e06c06cff4c91fa5a4a8, length: 792
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 0.0.1, hash: 657aaebc9c2f451446af0411a67a4bd057f39fa1b8a7fdc429ca4a2facd9344c, length: 367
+set target release based on repo-0.0.1.zip
+
+
+> # Update the install dataset on all sleds to the target release.
+> # This will cause zones to be noop converted over to Artifact,
+> # unblocking upgrades.
+> sled-update-install-dataset serial0 --to-target-release
+sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6: install dataset updated: to target release (system version 0.0.1)
+
+> sled-update-install-dataset serial1 --to-target-release
+sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c: install dataset updated: to target release (system version 0.0.1)
+
+
+> # Generate inventory, then do a planning run to ensure that all zones
+> # are set to Artifact.
+> inventory-generate
+generated inventory collection eb0796d5-ab8a-4f7b-a884-b4aeacb8ab51 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 13, num_already_artifact: 0, num_eligible: 13, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 0, num_eligible: 8, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO configuring MGS-driven update, artifact_version: 0.0.1, artifact_hash: 244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 based on parent blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+blueprint source: planner with report:
+planning report:
+* noop converting 13/13 install-dataset zones to artifact store on sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* noop converting 8/8 install-dataset zones to artifact store on sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+* 1 pending MGS update:
+  * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
+
+
+
+> blueprint-diff latest
+from: blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
+to:   blueprint 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
+
+ MODIFIED SLEDS:
+
+  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-727522a7-934f-494d-b5b3-160968e74463   in service 
+    fake-vendor   fake-model   serial-72c59873-31ff-4e36-8d76-ff834009349a   in service 
+    fake-vendor   fake-model   serial-b5fd5bc1-099e-4e77-8028-a9793c11f43b   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crucible                                                              feecfda1-9966-43d4-aaef-440b77f0b26d   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crucible                                                              956966b9-8201-437b-81ba-3c8ad2032080   in service    none      none          off        
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crucible                                                              4b0b09bf-94b7-45bf-a6b3-d46af53ae44a   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/clickhouse                                                      c31623de-c19b-4615-9f1d-5e1daa5d3bda   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/external_dns                                                    2f204c50-a327-479c-8852-f53ec7a19c1f   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/external_dns                                                    78f34ce7-42f1-41da-995f-318f32054ad2   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/internal_dns                                                    8c4fa711-1d5d-4e93-85f0-d17bff47b063   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/internal_dns                                                    49f8fbb6-5bac-4609-907f-6e3dfc206059   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone                                                            4829f422-aa31-41a8-ab73-95684ff1ef48   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone                                                            775f9207-c42d-4af2-9186-27ffef67735e   in service    none      none          off        
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/zone                                                            3b66453b-7148-4c1b-84a9-499e43290ab4   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_clickhouse_99e2f30b-3174-40bf-a78a-90da8abba8ca        841d5648-05f0-47b0-b446-92f6b60fe9a6   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_80510139-0fe1-4168-936d-672cdeef55bd          0582030b-aab6-4d0e-b1d2-64562ee712cd   in service    none      none          off        
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/zone/oxz_crucible_9abf0cfc-6c89-4caa-8aab-92c90661941f          6e218d0a-13fd-4f70-884e-47e960fa8bb8   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_a41824be-1ebb-4889-a631-f8dc7164cfab          9073fb6b-f973-4bbd-b7cc-ba1abf6cb238   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_crucible_pantry_86a22a56-0168-453d-9df1-cb2a7c64b5d3   3e0d6188-c503-49cf-a441-fa7df40ceb43   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_crucible_pantry_c49fabd6-b2ad-44c6-b760-90e614601b2b   1640adb6-70bf-44cf-b05c-bff6dd300cf3   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_external_dns_bd354eef-d8a6-4165-9124-283fb5e46d77      5ae11c7e-08fa-4d78-a4ea-14b4a9a10241   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_external_dns_e2fdefe7-95b2-4fd2-ae37-56929a06d58c      b8f2a09f-8bd2-4418-872b-a4457a3f958c   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_internal_dns_6c3ae381-04f7-41ea-b0ac-74db387dbc3a      2ad1875a-92ac-472f-8c26-593309f0e4da   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_internal_dns_ad6a3a03-8d0f-4504-99a4-cbf73d69b973      8e0bd2bd-23b7-4bc6-9e73-c4d4ebc0bc8c   in service    none      none          off        
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/zone/oxz_nexus_353b3b65-20f7-48c3-88f7-495bd5d31545             b46de15d-33e7-4cd0-aa7c-e7be2a61e71b   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_nexus_466a9f29-62bf-4e63-924a-b9efdb86afec             3560dd69-3b23-4c69-807d-d673104cfc68   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/zone/oxz_ntp_62620961-fc4a-481e-968b-f5acbac0dc63               09b9cc9b-3426-470b-a7bc-538f82dede03   in service    none      none          off        
+    oxp_727522a7-934f-494d-b5b3-160968e74463/crypt/debug                                                           93957ca0-9ed1-4e7b-8c34-2ce07a69541c   in service    100 GiB   none          gzip-9     
+    oxp_72c59873-31ff-4e36-8d76-ff834009349a/crypt/debug                                                           2db6b7c1-0f46-4ced-a3ad-48872793360e   in service    100 GiB   none          gzip-9     
+    oxp_b5fd5bc1-099e-4e77-8028-a9793c11f43b/crypt/debug                                                           318fae85-abcb-4259-b1b6-ac96d193f7b7   in service    100 GiB   none          gzip-9     
+
+
+    omicron zones:
+    -------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition   underlay IP           
+    -------------------------------------------------------------------------------------------------------------------------
+*   clickhouse        99e2f30b-3174-40bf-a78a-90da8abba8ca   - install dataset           in service    fd00:1122:3344:102::24
+     └─                                                      + artifact: version 0.0.1                                       
+*   crucible          80510139-0fe1-4168-936d-672cdeef55bd   - install dataset           in service    fd00:1122:3344:102::2a
+     └─                                                      + artifact: version 0.0.1                                       
+*   crucible          9abf0cfc-6c89-4caa-8aab-92c90661941f   - install dataset           in service    fd00:1122:3344:102::2b
+     └─                                                      + artifact: version 0.0.1                                       
+*   crucible          a41824be-1ebb-4889-a631-f8dc7164cfab   - install dataset           in service    fd00:1122:3344:102::29
+     └─                                                      + artifact: version 0.0.1                                       
+*   crucible_pantry   86a22a56-0168-453d-9df1-cb2a7c64b5d3   - install dataset           in service    fd00:1122:3344:102::27
+     └─                                                      + artifact: version 0.0.1                                       
+*   crucible_pantry   c49fabd6-b2ad-44c6-b760-90e614601b2b   - install dataset           in service    fd00:1122:3344:102::28
+     └─                                                      + artifact: version 0.0.1                                       
+*   external_dns      bd354eef-d8a6-4165-9124-283fb5e46d77   - install dataset           in service    fd00:1122:3344:102::25
+     └─                                                      + artifact: version 0.0.1                                       
+*   external_dns      e2fdefe7-95b2-4fd2-ae37-56929a06d58c   - install dataset           in service    fd00:1122:3344:102::26
+     └─                                                      + artifact: version 0.0.1                                       
+*   internal_dns      6c3ae381-04f7-41ea-b0ac-74db387dbc3a   - install dataset           in service    fd00:1122:3344:1::1   
+     └─                                                      + artifact: version 0.0.1                                       
+*   internal_dns      ad6a3a03-8d0f-4504-99a4-cbf73d69b973   - install dataset           in service    fd00:1122:3344:2::1   
+     └─                                                      + artifact: version 0.0.1                                       
+*   internal_ntp      62620961-fc4a-481e-968b-f5acbac0dc63   - install dataset           in service    fd00:1122:3344:102::21
+     └─                                                      + artifact: version 0.0.1                                       
+*   nexus             353b3b65-20f7-48c3-88f7-495bd5d31545   - install dataset           in service    fd00:1122:3344:102::23
+     └─                                                      + artifact: version 0.0.1                                       
+*   nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   - install dataset           in service    fd00:1122:3344:102::22
+     └─                                                      + artifact: version 0.0.1                                       
+
+
+  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2 -> 3):
+
+    host phase 2 contents:
+    ------------------------
+    slot   boot image source
+    ------------------------
+    A      current contents 
+    B      current contents 
+
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-073979dd-3248-44a5-9fa1-cc72a140d682   in service 
+    fake-vendor   fake-model   serial-c6d33b64-fb96-4129-bab1-7878a06a5f9b   in service 
+    fake-vendor   fake-model   serial-e4d937e1-6ddc-4eca-bb08-c1f73791e608   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crucible                                                              7b4ce6bf-95bb-42fe-a4a0-dff31211ab88   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crucible                                                              ea8a11bf-a884-4c4f-8df0-3ef9b7aacf43   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crucible                                                              50b029e3-96aa-41e5-bf39-023193a4355e   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/external_dns                                                    4847a96e-a267-4ae7-aa3d-805c1e77f81e   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/internal_dns                                                    ad41be71-6c15-4428-b510-20ceacde4fa6   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone                                                            4617d206-4330-4dfa-b9f3-f63a3db834f9   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone                                                            793ac181-1b01-403c-850d-7f5c54bda6c9   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/zone                                                            4f60b534-eaa3-40a1-b60f-bfdf147af478   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/zone/oxz_crucible_058fd5f9-60a8-4e11-9302-15172782e17d          02c56a30-7d97-406d-bd34-1eb437fd517d   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_5199c033-4cf9-4ab6-8ae7-566bd7606363          832fd140-d467-4bad-b5e9-63171634087c   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_dfac80b4-a887-430a-ae87-a4e065dba787          4d7e3e8e-06bd-414c-a468-779e056a9b75   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_pantry_ba4994a8-23f9-4b1a-a84f-a08d74591389   42430c80-7836-4191-a4f6-bcee749010fe   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_external_dns_803bfb63-c246-41db-b0da-d3b87ddfc63d      43931274-7fe8-4077-825d-dff2bc8efa58   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      1bca7f71-5e42-4749-91ec-fa40793a3a9a   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038             a4c3032e-21fa-4d4a-b040-a7e3c572cf3c   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c               3ac089c9-9dec-465b-863a-188e80d71fb4   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          gzip-9     
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           cdf3684f-a6cf-4449-b9ec-e696b2c663e2   in service    100 GiB   none          gzip-9     
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/debug                                                           686c19cf-a0d7-45f6-866f-c564612b2664   in service    100 GiB   none          gzip-9     
+
+
+    omicron zones:
+    -------------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source                disposition   underlay IP           
+    -------------------------------------------------------------------------------------------------------------------------
+*   crucible          058fd5f9-60a8-4e11-9302-15172782e17d   - install dataset           in service    fd00:1122:3344:101::27
+     └─                                                      + artifact: version 0.0.1                                       
+*   crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   - install dataset           in service    fd00:1122:3344:101::25
+     └─                                                      + artifact: version 0.0.1                                       
+*   crucible          dfac80b4-a887-430a-ae87-a4e065dba787   - install dataset           in service    fd00:1122:3344:101::26
+     └─                                                      + artifact: version 0.0.1                                       
+*   crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   - install dataset           in service    fd00:1122:3344:101::24
+     └─                                                      + artifact: version 0.0.1                                       
+*   external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   - install dataset           in service    fd00:1122:3344:101::23
+     └─                                                      + artifact: version 0.0.1                                       
+*   internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   - install dataset           in service    fd00:1122:3344:3::1   
+     └─                                                      + artifact: version 0.0.1                                       
+*   internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   - install dataset           in service    fd00:1122:3344:101::21
+     └─                                                      + artifact: version 0.0.1                                       
+*   nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   - install dataset           in service    fd00:1122:3344:101::22
+     └─                                                      + artifact: version 0.0.1                                       
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                       
+    ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++   sled      0      model0        serial0         244d553f832cf74043bbcc8a747c8d05384a0f89f7809dcab28c3f707b11f985   0.0.1              Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 44 (records: 58)
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
+
+
+
+> # The above blueprint includes a pending MGS update, which we should delete
+> # (we want to start from a fresh state).
+> blueprint-edit latest delete-sp-update serial0
+blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4 created from latest blueprint (8da82a8e-bf97-4fbd-8ddd-9f6462732cf1): deleted configured update for serial serial0
+
+> # Also set the Omicron config for all sleds to reflect the
+> # corresponding image sources.
+> sled-set serial0 omicron-config latest
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 omicron config from latest blueprint (58d5e830-0884-47d8-a7cd-b2b3751adeb4)
+
+> sled-set serial1 omicron-config latest
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c omicron config from latest blueprint (58d5e830-0884-47d8-a7cd-b2b3751adeb4)
+
+> # Generate inventory once more to reflect the omicron config changes.
+> inventory-generate
+generated inventory collection 61f451b3-2121-4ed6-91c7-a550054f6c21 from configured sleds
+
+
+> # Setup is now done -- create another TUF repository which will act as the
+> # target release being updated to.
+> tuf-assemble ../../update-common/manifests/fake.toml
+INFO assembling repository in <ASSEMBLING_REPOSITORY_IN_REDACTED>
+INFO artifacts assembled and archived to `repo-1.0.0.zip`, component: OmicronRepoAssembler
+created repo-1.0.0.zip for system version 1.0.0
+
+
+> # Load the target release from the assembled TUF repository.
+> set target-release repo-1.0.0.zip
+INFO extracting uploaded archive to <EXTRACTING_UPLOADED_ARCHIVE_TO_REDACTED>
+INFO created directory to store extracted artifacts, path: <CREATED_DIRECTORY_TO_STORE_EXTRACTED_ARTIFACTS_PATH_REDACTED>
+INFO added artifact, name: fake-gimlet-sp, kind: gimlet_sp, version: 1.0.0, hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, length: 732
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_a, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
+INFO added artifact, name: fake-rot, kind: gimlet_rot_image_b, version: 1.0.0, hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, length: 783
+INFO added artifact, name: fake-rot-bootloader, kind: gimlet_rot_bootloader, version: 1.0.0, hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, length: 797
+INFO added artifact, name: fake-host, kind: gimlet_host_phase_1, version: 1.0.0, hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, length: 524288
+INFO added artifact, name: fake-host, kind: cosmo_host_phase_1, version: 1.0.0, hash: 9525f567106549a3fc32df870a74803d77e51dcc44190b218e227a2c5d444f58, length: 524288
+INFO added artifact, name: fake-host, kind: host_phase_2, version: 1.0.0, hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, length: 1048576
+INFO added artifact, name: fake-trampoline, kind: gimlet_trampoline_phase_1, version: 1.0.0, hash: bcb27520ee5a56e19f6df9662c66d69ac681fbd873a97547be5f6a5ae3d250c4, length: 524288
+INFO added artifact, name: fake-trampoline, kind: cosmo_trampoline_phase_1, version: 1.0.0, hash: e235b8afb58ee69d966853bd5efe7c7e904da84b9035a332b3e691dc1d5cdbd0, length: 524288
+INFO added artifact, name: fake-trampoline, kind: trampoline_phase_2, version: 1.0.0, hash: a5dfcc4bc69b791f1c509df499e9e72cce844cb2b53a56d8bb357b264bdf13b6, length: 1048576
+INFO added artifact, name: clickhouse, kind: zone, version: 1.0.0, hash: 52b1eb4daff6f9140491d547b11248392920230db3db0eef5f5fa5333fe9e659, length: 1686
+INFO added artifact, name: clickhouse_keeper, kind: zone, version: 1.0.0, hash: cda702919449d86663be97295043aeca0ead69ae5db3bbdb20053972254a27a3, length: 1690
+INFO added artifact, name: clickhouse_server, kind: zone, version: 1.0.0, hash: 5f9ae6a9821bbe8ff0bf60feddf8b167902fe5f3e2c98bd21edd1ec9d969a001, length: 1690
+INFO added artifact, name: cockroachdb, kind: zone, version: 1.0.0, hash: f3a1a3c0b3469367b005ee78665d982059d5e14e93a479412426bf941c4ed291, length: 1689
+INFO added artifact, name: crucible-zone, kind: zone, version: 1.0.0, hash: 6f17cf65fb5a5bec5542dd07c03cd0acc01e59130f02c532c8d848ecae810047, length: 1690
+INFO added artifact, name: crucible-pantry-zone, kind: zone, version: 1.0.0, hash: 21f0ada306859c23917361f2e0b9235806c32607ec689c7e8cf16bb898bc5a02, length: 1695
+INFO added artifact, name: external-dns, kind: zone, version: 1.0.0, hash: ccca13ed19b8731f9adaf0d6203b02ea3b9ede4fa426b9fac0a07ce95440046d, length: 1689
+INFO added artifact, name: internal-dns, kind: zone, version: 1.0.0, hash: ffbf1373f7ee08dddd74c53ed2a94e7c4c572a982d3a9bc94000c6956b700c6a, length: 1689
+INFO added artifact, name: ntp, kind: zone, version: 1.0.0, hash: 67593d686ed04a1709f93972b71f4ebc148a9362120f65d239943e814a9a7439, length: 1681
+INFO added artifact, name: nexus, kind: zone, version: 1.0.0, hash: 0e32b4a3e5d3668bb1d6a16fb06b74dc60b973fa479dcee0aae3adbb52bf1388, length: 1682
+INFO added artifact, name: oximeter, kind: zone, version: 1.0.0, hash: 048d8fe8cdef5b175aad714d0f148aa80ce36c9114ac15ce9d02ed3d37877a77, length: 1682
+INFO added artifact, name: fake-psc-sp, kind: psc_sp, version: 1.0.0, hash: 89245fe2ac7e6a2ac8dfa4e7d6891a6e6df95e4141395c07c64026778f6d76d7, length: 721
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_a, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
+INFO added artifact, name: fake-psc-rot, kind: psc_rot_image_b, version: 1.0.0, hash: 5d8ea834dd6d42d386f1eb8a2c5f6e99b697c9958bb4ab8edf63e56003e25d8d, length: 775
+INFO added artifact, name: fake-psc-rot-bootloader, kind: psc_rot_bootloader, version: 1.0.0, hash: 18c9c774bfe4bb086e869509dcccacee8476fd87670692b765aee216f2c7f003, length: 805
+INFO added artifact, name: fake-switch-sp, kind: switch_sp, version: 1.0.0, hash: bf1bc1da5059f76182c3007c3049941f8898abede2f3765b106c6e7f7c42d44c, length: 740
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_a, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
+INFO added artifact, name: fake-switch-rot, kind: switch_rot_image_b, version: 1.0.0, hash: 32307d6d75c9707e8499ba4a4d379f99c0358237b6e190ff6a8024b470f62342, length: 774
+INFO added artifact, name: fake-switch-rot-bootloader, kind: switch_rot_bootloader, version: 1.0.0, hash: 70836d170abd5621f95bb4225987b27b3d3dd6168e73cd60e44309bdfeb94e98, length: 804
+INFO added artifact, name: installinator_document, kind: installinator_document, version: 1.0.0, hash: a6a636b5d57813578766b3f1c2559abf9af5d8c86187538167937c476beeefa3, length: 367
+set target release based on repo-1.0.0.zip
+
+
+> # First step: upgrade one RoT bootloader.
+> blueprint-plan latest latest
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 13, num_already_artifact: 13, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint af934083-59b5-4bf6-8966-6fb5292c29e1 based on parent blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+blueprint source: planner with report:
+planning report:
+* 1 pending MGS update:
+  * model0:serial0: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
+
+
+> blueprint-diff latest
+from: blueprint 58d5e830-0884-47d8-a7cd-b2b3751adeb4
+to:   blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
++   sled      0      model0        serial0         5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9   1.0.0              RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 44 (records: 58)
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
+
+
+
+
+> # One by one, update the RoT bootloader, RoT, SP, and host OS of the first sled.
+> sled-update-rot-bootloader serial0 --stage0 1.0.0
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT bootloader versions: stage0 -> 1.0.0
+
+> inventory-generate
+generated inventory collection b1bda47d-2c19-4fba-96e3-d9df28db7436 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 13, num_already_artifact: 13, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9, expected_stage0_next_version: NoValidVersion, expected_stage0_version: 0.0.1, component: rot_bootloader, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint df06bb57-ad42-4431-9206-abff322896c7 based on parent blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+blueprint source: planner with report:
+planning report:
+* 1 pending MGS update:
+  * model0:serial0: Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
+
+
+> blueprint-diff latest
+from: blueprint af934083-59b5-4bf6-8966-6fb5292c29e1
+to:   blueprint df06bb57-ad42-4431-9206-abff322896c7
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                         
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      0      model0        serial0         - 5b0f601b1fbb8674db9c751a02f8b14f8e6d4e8470f4f7b686fecb2c49ec11f9   1.0.0              - RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })                                                                                                                                                       
+     └─                                            + d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02                      + Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 44 (records: 58)
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
+
+
+
+
+> sled-update-rot serial0 --slot-b 1.0.0 --active-slot b --persistent-boot-preference b
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 RoT settings: slot b -> 1.0.0, active slot -> B, persistent boot preference -> B
+
+> inventory-generate
+generated inventory collection a71f7a73-35a6-45e8-acbe-f1c5925eed69 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 13, num_already_artifact: 13, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02, expected_transient_boot_preference: None, expected_pending_persistent_boot_preference: None, expected_persistent_boot_preference: A, expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, component: rot, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba based on parent blueprint df06bb57-ad42-4431-9206-abff322896c7
+blueprint source: planner with report:
+planning report:
+* 1 pending MGS update:
+  * model0:serial0: Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
+
+
+> blueprint-diff latest
+from: blueprint df06bb57-ad42-4431-9206-abff322896c7
+to:   blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                         
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      0      model0        serial0         - d11e65f934bf0de51df2e5b484f61ee72072417b43ac87f33e958008428e7b02   1.0.0              - Rot(PendingMgsUpdateRotDetails { expected_active_slot: ExpectedActiveRotSlot { slot: A, version: ArtifactVersion("0.0.2") }, expected_inactive_version: NoValidVersion, expected_persistent_boot_preference: A, expected_pending_persistent_boot_preference: None, expected_transient_boot_preference: None })
+     └─                                            + 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4                      + Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })                                                                                                                                                                                
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 44 (records: 58)
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
+
+
+
+
+> sled-update-sp serial0 --active 1.0.0
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 SP versions: active -> 1.0.0
+
+> inventory-generate
+generated inventory collection 0b5efbb3-0b1b-4bbf-b7d8-a2d6fca074c6 from configured sleds
+
+> blueprint-plan latest latest
+INFO performed noop zone image source checks on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, num_total: 13, num_already_artifact: 13, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: b, expected_hash: 0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4, expected_inactive_version: NoValidVersion, expected_active_version: 0.0.1, component: sp, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO configuring MGS-driven update, artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO reached maximum number of pending MGS-driven updates, max: 1
+generated blueprint 9034c710-3e57-45f3-99e5-4316145e87ac based on parent blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+blueprint source: planner with report:
+planning report:
+* 1 pending MGS update:
+  * model0:serial0: HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
+
+
+> blueprint-diff latest
+from: blueprint 7f976e0d-d2a5-4eeb-9e82-c82bc2824aba
+to:   blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+
+ MODIFIED SLEDS:
+
+  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 3 -> 4):
+
+    host phase 2 contents:
+    --------------------------------
+    slot   boot image source        
+    --------------------------------
+    A      current contents         
+*   B      - current contents       
+     └─    + artifact: version 1.0.0
+
+
+    physical disks:
+    ------------------------------------------------------------------------------------
+    vendor        model        serial                                        disposition
+    ------------------------------------------------------------------------------------
+    fake-vendor   fake-model   serial-073979dd-3248-44a5-9fa1-cc72a140d682   in service 
+    fake-vendor   fake-model   serial-c6d33b64-fb96-4129-bab1-7878a06a5f9b   in service 
+    fake-vendor   fake-model   serial-e4d937e1-6ddc-4eca-bb08-c1f73791e608   in service 
+
+
+    datasets:
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    dataset name                                                                                                   dataset id                             disposition   quota     reservation   compression
+    -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crucible                                                              7b4ce6bf-95bb-42fe-a4a0-dff31211ab88   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crucible                                                              ea8a11bf-a884-4c4f-8df0-3ef9b7aacf43   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crucible                                                              50b029e3-96aa-41e5-bf39-023193a4355e   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/external_dns                                                    4847a96e-a267-4ae7-aa3d-805c1e77f81e   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/internal_dns                                                    ad41be71-6c15-4428-b510-20ceacde4fa6   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone                                                            4617d206-4330-4dfa-b9f3-f63a3db834f9   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone                                                            793ac181-1b01-403c-850d-7f5c54bda6c9   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/zone                                                            4f60b534-eaa3-40a1-b60f-bfdf147af478   in service    none      none          off        
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/zone/oxz_crucible_058fd5f9-60a8-4e11-9302-15172782e17d          02c56a30-7d97-406d-bd34-1eb437fd517d   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_5199c033-4cf9-4ab6-8ae7-566bd7606363          832fd140-d467-4bad-b5e9-63171634087c   in service    none      none          off        
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/zone/oxz_crucible_dfac80b4-a887-430a-ae87-a4e065dba787          4d7e3e8e-06bd-414c-a468-779e056a9b75   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_crucible_pantry_ba4994a8-23f9-4b1a-a84f-a08d74591389   42430c80-7836-4191-a4f6-bcee749010fe   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_external_dns_803bfb63-c246-41db-b0da-d3b87ddfc63d      43931274-7fe8-4077-825d-dff2bc8efa58   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_internal_dns_427ec88f-f467-42fa-9bbb-66a91a36103c      1bca7f71-5e42-4749-91ec-fa40793a3a9a   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_nexus_0c71b3b2-6ceb-4e8f-b020-b08675e83038             a4c3032e-21fa-4d4a-b040-a7e3c572cf3c   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/zone/oxz_ntp_6444f8a5-6465-4f0b-a549-1993c113569c               3ac089c9-9dec-465b-863a-188e80d71fb4   in service    none      none          off        
+    oxp_073979dd-3248-44a5-9fa1-cc72a140d682/crypt/debug                                                           248c6c10-1ac6-45de-bb55-ede36ca56bbd   in service    100 GiB   none          gzip-9     
+    oxp_c6d33b64-fb96-4129-bab1-7878a06a5f9b/crypt/debug                                                           cdf3684f-a6cf-4449-b9ec-e696b2c663e2   in service    100 GiB   none          gzip-9     
+    oxp_e4d937e1-6ddc-4eca-bb08-c1f73791e608/crypt/debug                                                           686c19cf-a0d7-45f6-866f-c564612b2664   in service    100 GiB   none          gzip-9     
+
+
+    omicron zones:
+    -----------------------------------------------------------------------------------------------------------------------
+    zone type         zone id                                image source              disposition   underlay IP           
+    -----------------------------------------------------------------------------------------------------------------------
+    crucible          058fd5f9-60a8-4e11-9302-15172782e17d   artifact: version 0.0.1   in service    fd00:1122:3344:101::27
+    crucible          5199c033-4cf9-4ab6-8ae7-566bd7606363   artifact: version 0.0.1   in service    fd00:1122:3344:101::25
+    crucible          dfac80b4-a887-430a-ae87-a4e065dba787   artifact: version 0.0.1   in service    fd00:1122:3344:101::26
+    crucible_pantry   ba4994a8-23f9-4b1a-a84f-a08d74591389   artifact: version 0.0.1   in service    fd00:1122:3344:101::24
+    external_dns      803bfb63-c246-41db-b0da-d3b87ddfc63d   artifact: version 0.0.1   in service    fd00:1122:3344:101::23
+    internal_dns      427ec88f-f467-42fa-9bbb-66a91a36103c   artifact: version 0.0.1   in service    fd00:1122:3344:3::1   
+    internal_ntp      6444f8a5-6465-4f0b-a549-1993c113569c   artifact: version 0.0.1   in service    fd00:1122:3344:101::21
+    nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   artifact: version 0.0.1   in service    fd00:1122:3344:101::22
+
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                        artifact_version   details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
+    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+*   sled      0      model0        serial0         - 68465b8e3f808f475510b525cfd62086d37ddd57688bd854184fdafb2b2198a4   1.0.0              - Sp(PendingMgsUpdateSpDetails { expected_active_version: ArtifactVersion("0.0.1"), expected_inactive_version: NoValidVersion })                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
+     └─                                            + b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b                      + HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 44 (records: 58)
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
+
+
+
+
+> sled-update-host-phase2 serial0 --slot-b d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: B -> d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47
+
+> sled-update-host-phase1 serial0 --active B --slot-b b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 1 details: active -> B, B -> b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b
+
+> sled-update-host-phase2 serial0 --boot-disk B
+set sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 host phase 2 details: boot_disk -> B
+
+
+> # Before generating the inventory that completes all updates on sled serial0,
+> # mark sled serial1 as hidden in inventory. We should see a note in the planner
+> # report that we have a blocked MGS update for serial1, specifically because
+> # it's missing from inventory so we _don't know_ whether it needs an MGS-driven
+> # update.
+> sled-set serial1 inventory-hidden
+set sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c inventory visibility: visible -> hidden
+
+> inventory-generate
+generated inventory collection 78f72e8d-46a9-40a9-8618-602f54454d80 from configured sleds
+
+> blueprint-plan latest latest
+WARN skipping zones eligible for cleanup check (sled not present in latest inventory collection), sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+WARN no inventory found for in-service sled, phase: do_plan_mupdate_override, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+INFO skipped noop image source check on sled, sled_id: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c, reason: sled not found in inventory
+INFO performed noop zone image source checks on sled, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, num_total: 8, num_already_artifact: 8, num_eligible: 0, num_ineligible: 0
+INFO BootPartitionDetails inventory hash not found in TUF repo, ignoring for noop checks, sled_id: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6, slot: a, expected_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a
+INFO MGS-driven update completed (will remove it and re-evaluate board), artifact_version: 1.0.0, artifact_hash: b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b, sled_agent_address: [fd00:1122:3344:101::1]:12345, expected_inactive_phase_2_hash: d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47, expected_inactive_phase_1_hash: 0202020202020202020202020202020202020202020202020202020202020202, expected_active_phase_2_hash: 0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a, expected_active_phase_1_hash: 0101010101010101010101010101010101010101010101010101010101010101, expected_boot_disk: A, expected_active_phase_1_slot: A, component: host_phase_1, sp_slot: 0, sp_type: Sled, serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (no update necessary), serial_number: serial0, part_number: model0
+INFO skipping board for MGS-driven update (found issues), serial_number: serial1, part_number: model1
+INFO ran out of boards for MGS-driven update
+generated blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976 based on parent blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+blueprint source: planner with report:
+planning report:
+* 1 blocked MGS update:
+  * model1:serial1: failed to plan an RoT bootloader update: corresponding SP is not in inventory
+* waiting for NTP zones to appear in inventory on sleds: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+* zone updates waiting on blocked MGS updates (RoT bootloader / RoT / SP / Host OS)
+* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
+
+
+
+> blueprint-diff latest
+from: blueprint 9034c710-3e57-45f3-99e5-4316145e87ac
+to:   blueprint d60afc57-f15d-476c-bd0f-b1071e2bb976
+
+ COCKROACHDB SETTINGS:
+    state fingerprint:::::::::::::::::   (none) (unchanged)
+    cluster.preserve_downgrade_option:   (do not modify) (unchanged)
+
+ METADATA:
+    internal DNS version:::   1 (unchanged)
+    external DNS version:::   1 (unchanged)
+    target release min gen:   1 (unchanged)
+    nexus gen::::::::::::::   1 (unchanged)
+
+ OXIMETER SETTINGS:
+    generation:   1 (unchanged)
+    read from::   SingleNode (unchanged)
+
+ PENDING MGS UPDATES:
+
+    Pending MGS-managed updates (all baseboards):
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+    sp_type   slot   part_number   serial_number   artifact_hash                                                      artifact_version   details                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+    --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-   sled      0      model0        serial0         b99d5273ba1418bebb19d74b701d716896409566d41de76ada71bded4c9b166b   1.0.0              HostPhase1(PendingMgsUpdateHostPhase1Details { expected_active_phase_1_slot: A, expected_boot_disk: A, expected_active_phase_1_hash: ArtifactHash("0101010101010101010101010101010101010101010101010101010101010101"), expected_active_phase_2_hash: ArtifactHash("0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"), expected_inactive_phase_1_hash: ArtifactHash("0202020202020202020202020202020202020202020202020202020202020202"), expected_inactive_phase_2_hash: ArtifactHash("d944ae205b61ccf4322448f7d0311a819c53d9844769de066c5307c1682abb47"), sled_agent_address: [fd00:1122:3344:101::1]:12345 })
+
+
+internal DNS:
+  DNS zone: "control-plane.oxide.internal" (unchanged)
+    unchanged names: 43 (records: 56)
+
+external DNS:
+  DNS zone: "oxide.example" (unchanged)
+    unchanged names: 5 (records: 9)
+
+
+

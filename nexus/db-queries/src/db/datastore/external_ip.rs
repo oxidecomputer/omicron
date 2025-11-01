@@ -7,7 +7,6 @@
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
-use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
@@ -18,6 +17,7 @@ use crate::db::model::FloatingIp;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
+use crate::db::model::IpPoolType;
 use crate::db::model::Name;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -87,7 +87,9 @@ impl DataStore {
         probe_id: Uuid,
         pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
-        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
+        let authz_pool = self
+            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .await?;
         let data = IncompleteExternalIp::for_ephemeral_probe(
             ip_id,
             probe_id,
@@ -123,7 +125,9 @@ impl DataStore {
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
 
-        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
+        let authz_pool = self
+            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .await?;
         let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
         // We might not be able to acquire a new IP, but in the event of an
@@ -186,33 +190,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// If a pool is specified, make sure it's linked to this silo. If a pool is
-    /// not specified, fetch the default pool for this silo. Once the pool is
-    /// resolved (by either method) do an auth check. Then return the pool.
-    async fn resolve_pool_for_allocation(
-        &self,
-        opctx: &OpContext,
-        pool: Option<authz::IpPool>,
-    ) -> LookupResult<authz::IpPool> {
-        let authz_pool = match pool {
-            Some(authz_pool) => {
-                self.ip_pool_fetch_link(opctx, authz_pool.id())
-                    .await
-                    .map_err(|_| authz_pool.not_found())?;
-
-                authz_pool
-            }
-            // If no pool specified, use the default logic
-            None => {
-                let (authz_pool, ..) =
-                    self.ip_pools_fetch_default(opctx).await?;
-                authz_pool
-            }
-        };
-        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
-        Ok(authz_pool)
-    }
-
     /// Allocates a floating IP address for instance usage.
     pub async fn allocate_floating_ip(
         &self,
@@ -224,7 +201,9 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
+        let authz_pool = self
+            .resolve_pool_for_allocation(opctx, pool, IpPoolType::Unicast)
+            .await?;
 
         let data = if let Some(ip) = ip {
             IncompleteExternalIp::for_floating_explicit(

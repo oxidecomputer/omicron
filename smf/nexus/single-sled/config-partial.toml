@@ -9,7 +9,7 @@ session_idle_timeout_minutes = 480 # 8 hours
 session_absolute_timeout_minutes = 1440 # 24 hours
 
 [authn]
-schemes_external = ["session_cookie", "access_token"]
+schemes_external = ["session_cookie", "access_token", "scim_token"]
 
 [log]
 # Show log messages of this level and more severe
@@ -40,13 +40,16 @@ metrics_producer_gc.period_secs = 60
 external_endpoints.period_secs = 60
 nat_cleanup.period_secs = 30
 bfd_manager.period_secs = 30
+# How frequently to check for a new inventory collection (made by any Nexus).
+# This is cheap, so we should check frequently.
+inventory.period_secs_load = 15
 # How frequently to collect hardware/software inventory from the whole system
 # (even if we don't have reason to believe anything has changed).
-inventory.period_secs = 600
+inventory.period_secs_collect = 600
 # Maximum number of past collections to keep in the database
 inventory.nkeep = 3
 # Disable inventory collection altogether (for emergencies)
-inventory.disable = false
+inventory.disable_collect = false
 phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
 support_bundle_collector.period_secs = 30
@@ -91,12 +94,12 @@ read_only_region_replacement_start.period_secs = 30
 alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 sp_ereport_ingester.period_secs = 30
-# Disabled in R16, as the Hubris task that handles ereport ingestion requests
-# has not merged yet, and trying to ingest them will just result in Nexus
-# logging a bunch of errors.
-sp_ereport_ingester.disable = true
 
 [default_region_allocation_strategy]
 # by default, allocate without requirement for distinct sleds.
 # seed is omitted so a new seed will be chosen with every allocation.
 type = "random"
+
+[omdb]
+# Path to the omdb binary shipped in the Nexus zone.
+bin_path = "/opt/oxide/omdb/bin/omdb"

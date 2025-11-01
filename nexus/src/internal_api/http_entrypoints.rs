@@ -4,7 +4,7 @@
 
 //! Handler functions (entrypoints) for HTTP APIs internal to the control plane
 
-use super::params::{OximeterInfo, RackInitializationRequest};
+use super::params::OximeterInfo;
 use crate::context::ApiContext;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -88,48 +88,6 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
-    }
-
-    async fn sled_firewall_rules_request(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<SledAgentPathParam>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = &rqctx.context().context;
-        let nexus = &apictx.nexus;
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        let path = path_params.into_inner();
-        let sled_id = &path.sled_id;
-        let handler = async {
-            nexus.sled_request_firewall_rules(&opctx, *sled_id).await?;
-            Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .internal_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn rack_initialization_complete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<RackPathParam>,
-        info: TypedBody<RackInitializationRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = &rqctx.context().context;
-        let nexus = &apictx.nexus;
-        let path = path_params.into_inner();
-        let request = info.into_inner();
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-
-        nexus
-            .rack_initialize(
-                &opctx,
-                path.rack_id,
-                request,
-                true, // blueprint_execution_enabled
-            )
-            .await?;
-
-        Ok(HttpResponseUpdatedNoContent())
     }
 
     async fn switch_put(
@@ -452,25 +410,6 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .await
     }
 
-    async fn bgtask_activate(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<BackgroundTasksActivateRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = &rqctx.context().context;
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_internal_api(&rqctx).await;
-            let nexus = &apictx.nexus;
-            let body = body.into_inner();
-            nexus.bgtask_activate(&opctx, body.bgtask_names).await?;
-            Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .internal_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     // NAT RPW internal APIs
 
     async fn ipv4_nat_changeset(
@@ -516,6 +455,20 @@ impl NexusInternalApi for NexusInternalApiImpl {
                     .probe_list_for_sled(&opctx, &pagparams, path.sled)
                     .await?,
             ))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn refresh_vpc_routes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            apictx.nexus.refresh_vpc_routes();
+            Ok(HttpResponseUpdatedNoContent())
         };
         apictx
             .internal_latencies

@@ -41,9 +41,9 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
-use sled_storage::manager::NestedDatasetConfig;
-use sled_storage::manager::NestedDatasetListOptions;
-use sled_storage::manager::NestedDatasetLocation;
+use sled_storage::nested_dataset::NestedDatasetConfig;
+use sled_storage::nested_dataset::NestedDatasetListOptions;
+use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -1229,6 +1229,13 @@ impl Zpool {
 /// Represents a nested dataset
 pub struct NestedDatasetStorage {
     config: NestedDatasetConfig,
+    // In-memory flag for whether this dataset pretends to be mounted; defaults
+    // to true.
+    //
+    // Nothing in the simulated storage implementation acts on this value; it is
+    // merely a sticky bool that remembers the most recent value passed to
+    // `nested_dataset_set_mounted()`.
+    mounted: bool,
     // We intentionally store the children before the mountpoint,
     // so they are deleted first.
     children: BTreeMap<String, NestedDatasetStorage>,
@@ -1262,6 +1269,7 @@ impl NestedDatasetStorage {
 
         Self {
             config: NestedDatasetConfig { name, inner: shared_config },
+            mounted: true,
             children: BTreeMap::new(),
             mountpoint,
         }
@@ -1380,7 +1388,14 @@ impl StorageInner {
                 return Ok(DatasetProperties {
                     id: Some(*id),
                     name: dataset_name.to_string(),
-                    mounted: true,
+                    // We should have an entry in `self.nested_datasets` for
+                    // every entry in `config.datasets` (`datasets_ensure()`
+                    // keeps these in sync), but we only keeping track of a
+                    // `mounted` property on nested datasets. Look that up here.
+                    mounted: self
+                        .nested_datasets
+                        .get(&dataset.name)
+                        .map_or(true, |d| d.mounted),
                     avail: ByteCount::from_kibibytes_u32(1024),
                     used: ByteCount::from_kibibytes_u32(1024),
                     quota: dataset.inner.quota,
@@ -1399,7 +1414,7 @@ impl StorageInner {
                 return Ok(DatasetProperties {
                     id: None,
                     name: dataset_name.to_string(),
-                    mounted: true,
+                    mounted: nested_dataset_storage.mounted,
                     avail: ByteCount::from_kibibytes_u32(1024),
                     used: ByteCount::from_kibibytes_u32(1024),
                     quota: config.quota,
@@ -1515,6 +1530,64 @@ impl StorageInner {
                 return Ok(children);
             }
         }
+    }
+
+    #[cfg(test)]
+    pub fn nested_dataset_is_mounted(
+        &self,
+        dataset: &NestedDatasetLocation,
+    ) -> Result<bool, HttpError> {
+        let Some(mut nested_dataset) = self.nested_datasets.get(&dataset.root)
+        else {
+            return Err(HttpError::for_not_found(
+                None,
+                "Dataset not found".to_string(),
+            ));
+        };
+        for component in dataset.path.split('/') {
+            if component.is_empty() {
+                continue;
+            }
+            nested_dataset =
+                nested_dataset.children.get(component).ok_or_else(|| {
+                    HttpError::for_not_found(
+                        None,
+                        "Dataset not found".to_string(),
+                    )
+                })?;
+        }
+        Ok(nested_dataset.mounted)
+    }
+
+    pub fn nested_dataset_set_mounted(
+        &mut self,
+        dataset: &NestedDatasetLocation,
+        mounted: bool,
+    ) -> Result<(), HttpError> {
+        let Some(mut nested_dataset) =
+            self.nested_datasets.get_mut(&dataset.root)
+        else {
+            return Err(HttpError::for_not_found(
+                None,
+                "Dataset not found".to_string(),
+            ));
+        };
+        for component in dataset.path.split('/') {
+            if component.is_empty() {
+                continue;
+            }
+            nested_dataset = nested_dataset
+                .children
+                .get_mut(component)
+                .ok_or_else(|| {
+                    HttpError::for_not_found(
+                        None,
+                        "Dataset not found".to_string(),
+                    )
+                })?;
+        }
+        nested_dataset.mounted = mounted;
+        Ok(())
     }
 
     pub fn nested_dataset_ensure(
@@ -1732,20 +1805,20 @@ impl StorageInner {
 
     pub fn get_all_physical_disks(
         &self,
-    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+    ) -> Vec<nexus_lockstep_client::types::PhysicalDiskPutRequest> {
         self.physical_disks
             .iter()
             .map(|(id, disk)| {
                 let variant = match disk.variant {
                     DiskVariant::U2 => {
-                        nexus_client::types::PhysicalDiskKind::U2
+                        nexus_lockstep_client::types::PhysicalDiskKind::U2
                     }
                     DiskVariant::M2 => {
-                        nexus_client::types::PhysicalDiskKind::M2
+                        nexus_lockstep_client::types::PhysicalDiskKind::M2
                     }
                 };
 
-                nexus_client::types::PhysicalDiskPutRequest {
+                nexus_lockstep_client::types::PhysicalDiskPutRequest {
                     id: *id,
                     vendor: disk.identity.vendor.clone(),
                     serial: disk.identity.serial.clone(),
@@ -1757,10 +1830,12 @@ impl StorageInner {
             .collect()
     }
 
-    pub fn get_all_zpools(&self) -> Vec<nexus_client::types::ZpoolPutRequest> {
+    pub fn get_all_zpools(
+        &self,
+    ) -> Vec<nexus_lockstep_client::types::ZpoolPutRequest> {
         self.zpools
             .values()
-            .map(|pool| nexus_client::types::ZpoolPutRequest {
+            .map(|pool| nexus_lockstep_client::types::ZpoolPutRequest {
                 id: pool.id.into_untyped_uuid(),
                 sled_id: self.sled_id,
                 physical_disk_id: pool.physical_disk_id,

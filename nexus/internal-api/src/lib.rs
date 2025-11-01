@@ -9,6 +9,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, ResultsPage,
     TypedBody,
 };
+use dropshot_api_manager_types::api_versions;
 use nexus_types::{
     external_api::{
         shared::ProbeInfo,
@@ -16,8 +17,7 @@ use nexus_types::{
     },
     internal_api::{
         params::{
-            OximeterInfo, RackInitializationRequest, SledAgentInfo,
-            SwitchPutRequest, SwitchPutResponse,
+            OximeterInfo, SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
         },
         views::NatEntryView,
     },
@@ -35,7 +35,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const RACK_INITIALIZATION_REQUEST_MAX_BYTES: usize = 10 * 1024 * 1024;
+api_versions!([
+    // Do not create new versions of this client-side versioned API.
+    // https://github.com/oxidecomputer/omicron/issues/9290
+    (1, INITIAL),
+]);
 
 #[dropshot::api_description]
 pub trait NexusInternalApi {
@@ -73,34 +77,6 @@ pub trait NexusInternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SledAgentPathParam>,
         sled_info: TypedBody<SledAgentInfo>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Request a new set of firewall rules for a sled.
-    ///
-    /// This causes Nexus to read the latest set of rules for the sled,
-    /// and call a Sled endpoint which applies the rules to all OPTE ports
-    /// that happen to exist.
-    #[endpoint {
-        method = POST,
-        path = "/sled-agents/{sled_id}/firewall-rules-update",
-    }]
-    async fn sled_firewall_rules_request(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<SledAgentPathParam>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
-    /// Report that the Rack Setup Service initialization is complete
-    ///
-    /// See RFD 278 for more details.
-    #[endpoint {
-        method = PUT,
-        path = "/racks/{rack_id}/initialization-complete",
-        request_body_max_bytes = RACK_INITIALIZATION_REQUEST_MAX_BYTES,
-    }]
-    async fn rack_initialization_complete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<RackPathParam>,
-        info: TypedBody<RackInitializationRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -256,20 +232,6 @@ pub trait NexusInternalApi {
         downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
-    /// **Do not use in new code!**
-    ///
-    /// Callers to this API should either be capable of using the nexus-lockstep
-    /// API or should be rewritten to use a doorbell API to activate a specific
-    /// task. Task names are internal to Nexus.
-    #[endpoint {
-        method = POST,
-        path = "/bgtasks/activate",
-    }]
-    async fn bgtask_activate(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<BackgroundTasksActivateRequest>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-
     // NAT RPW internal APIs
 
     /// Fetch NAT ChangeSet
@@ -290,6 +252,9 @@ pub trait NexusInternalApi {
     ) -> Result<HttpResponseOk<Vec<NatEntryView>>, HttpError>;
 
     /// Get all the probes associated with a given sled.
+    ///
+    /// This should not be used in new code, and abandoned if a change is
+    /// required. See #9157.
     #[endpoint {
         method = GET,
         path = "/probes/{sled}"
@@ -299,6 +264,18 @@ pub trait NexusInternalApi {
         path_params: Path<ProbePathParam>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError>;
+
+    /// Request that Nexus refreshes VPC routes.
+    ///
+    /// This should not be used in new code, and abandoned if a change is
+    /// required. See #9157.
+    #[endpoint {
+        method = POST,
+        path = "/refresh-vpc-routes"
+    }]
+    async fn refresh_vpc_routes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
 /// Path parameters for Sled Agent requests (internal API)
@@ -317,12 +294,6 @@ pub struct DiskPathParam {
 #[derive(Deserialize, JsonSchema)]
 pub struct VolumePathParam {
     pub volume_id: VolumeUuid,
-}
-
-/// Path parameters for Rack requests.
-#[derive(Deserialize, JsonSchema)]
-pub struct RackPathParam {
-    pub rack_id: Uuid,
 }
 
 /// Path parameters for Switch requests.

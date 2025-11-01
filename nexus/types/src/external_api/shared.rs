@@ -208,6 +208,11 @@ pub enum SiloIdentityMode {
     // NOTE: authentication for these users is not supported yet at all.  It
     // will eventually be password-based.
     LocalOnly,
+
+    /// Users are authenticated with SAML using an external authentication
+    /// provider. Users and groups are managed with SCIM API calls, likely from
+    /// the same authentication provider.
+    SamlScim,
 }
 
 impl SiloIdentityMode {
@@ -215,6 +220,7 @@ impl SiloIdentityMode {
         match self {
             SiloIdentityMode::LocalOnly => AuthenticationMode::Local,
             SiloIdentityMode::SamlJit => AuthenticationMode::Saml,
+            SiloIdentityMode::SamlScim => AuthenticationMode::Saml,
         }
     }
 
@@ -222,6 +228,7 @@ impl SiloIdentityMode {
         match self {
             SiloIdentityMode::LocalOnly => UserProvisionType::ApiOnly,
             SiloIdentityMode::SamlJit => UserProvisionType::Jit,
+            SiloIdentityMode::SamlScim => UserProvisionType::Scim,
         }
     }
 }
@@ -249,6 +256,9 @@ pub enum UserProvisionType {
     /// Users and groups are created or updated during authentication using
     /// information provided by the authentication provider
     Jit,
+
+    /// Users and groups are managed by SCIM
+    Scim,
 }
 
 /// The service intended to use this certificate.
@@ -730,5 +740,23 @@ impl RelayState {
             .context("creating relay state string")?,
         )
         .context("json from relay state string")
+    }
+}
+
+/// Type of IP pool.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum IpPoolType {
+    /// Unicast IP pool for standard IP allocations.
+    Unicast,
+    /// Multicast IP pool for multicast group allocations.
+    ///
+    /// All ranges in a multicast pool must be either ASM or SSM (not mixed).
+    Multicast,
+}
+
+impl Default for IpPoolType {
+    fn default() -> Self {
+        Self::Unicast
     }
 }

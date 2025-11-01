@@ -138,10 +138,12 @@ members = [
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
+    "sled-storage/zfs-test-harness",
     "sp-sim",
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
     "typed-rng",
@@ -299,9 +301,11 @@ default-members = [
     "sled-hardware",
     "sled-hardware/types",
     "sled-storage",
+    "sled-storage/zfs-test-harness",
     "sp-sim",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
     "test-utils",
@@ -368,6 +372,7 @@ assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-trait = "0.1.89"
+attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -411,10 +416,10 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "65ca41e821ef53ec9c28909357f23e3348169e4f" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "75ea3408643664877aa603ffc65996ed6dc34c0a" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "75ea3408643664877aa603ffc65996ed6dc34c0a" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "75ea3408643664877aa603ffc65996ed6dc34c0a" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "75ea3408643664877aa603ffc65996ed6dc34c0a" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -434,10 +439,10 @@ digest = "0.10.7"
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
-dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "b3cdd095437f388069aa57be5efac4b4fadc7b4f" }
+dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
 dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.2.1"
-dropshot-api-manager-types = "0.2.1"
+dropshot-api-manager = "0.2.3"
+dropshot-api-manager-types = "0.2.3"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -469,6 +474,7 @@ gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 trust-quorum = { path = "trust-quorum" }
+trust-quorum-protocol = { path = "trust-quorum/protocol" }
 trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
 glob = "0.3.2"
 guppy = "0.17.20"
@@ -642,10 +648,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "827e6615bfebfd94d41504dcd1517a0f22e3166a" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "aaa51291b747928a1d69e4b6059a54163d4d2e6d" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "aaa51291b747928a1d69e4b6059a54163d4d2e6d" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "aaa51291b747928a1d69e4b6059a54163d4d2e6d" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "aaa51291b747928a1d69e4b6059a54163d4d2e6d" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -658,7 +664,7 @@ rand_distr = "0.5.1"
 rand_seeder = "0.4.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
-raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "0a8dbd2311263f6a59ea58089e33c8331436ff3a" }
+raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
@@ -722,7 +728,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "6d31fa63217c6a51061dc4afa1ebe175a0021981" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -783,6 +790,7 @@ wicketd-client = { path = "clients/wicketd-client" }
 xshell = "0.2.7"
 zerocopy = "0.8.26"
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
+zfs-test-harness = { path = "sled-storage/zfs-test-harness" }
 zip = { version = "4.2.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3.1", default-features = false, features = ["async"] }
 
@@ -794,6 +802,8 @@ zone = { version = "0.3.1", default-features = false, features = ["async"] }
 newtype-uuid = { version = "1.3.1", default-features = false }
 newtype-uuid-macros = "0.1.0"
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
+
+scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs" }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that

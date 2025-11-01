@@ -575,7 +575,11 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        // NOTE: This is the IPv4 address, despite the name. We kept the
+        // original name of `ip` because renaming columns is not idempotent in
+        // CRDB as of today.
+        ip -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
         transit_ips -> Array<Inet>,
@@ -594,7 +598,8 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
         transit_ips -> Array<Inet>,
@@ -614,7 +619,8 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
     }
@@ -630,6 +636,8 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         ip_version -> crate::enums::IpVersionEnum,
         rcgen -> Int8,
+        reservation_type -> crate::enums::IpPoolReservationTypeEnum,
+        pool_type -> crate::enums::IpPoolTypeEnum,
     }
 }
 
@@ -766,7 +774,10 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         silo_id -> Uuid,
-        external_id -> Text,
+        external_id -> Nullable<Text>,
+        user_provision_type -> crate::enums::UserProvisionTypeEnum,
+        user_name -> Nullable<Text>,
+        active -> Nullable<Bool>,
     }
 }
 
@@ -786,7 +797,10 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
 
         silo_id -> Uuid,
-        external_id -> Text,
+        external_id -> Nullable<Text>,
+        user_provision_type -> crate::enums::UserProvisionTypeEnum,
+        display_name -> Nullable<Text>,
+        active -> Nullable<Bool>,
     }
 }
 
@@ -803,6 +817,8 @@ allow_tables_to_appear_in_same_query!(
     silo_group_membership,
     silo_user,
 );
+allow_tables_to_appear_in_same_query!(silo_group, silo);
+allow_tables_to_appear_in_same_query!(silo_user, silo);
 allow_tables_to_appear_in_same_query!(role_assignment, silo_group_membership);
 
 table! {
@@ -2780,5 +2796,19 @@ table! {
         error_code -> Nullable<Text>,
         error_message -> Nullable<Text>,
         result_kind -> crate::enums::AuditLogResultKindEnum,
+    }
+}
+
+table! {
+    scim_client_bearer_token (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        time_expires -> Nullable<Timestamptz>,
+
+        silo_id -> Uuid,
+
+        bearer_token -> Text,
     }
 }

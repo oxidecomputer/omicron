@@ -5,10 +5,14 @@
 //! IP Pools, collections of external IP addresses for guest instances
 
 use crate::external_api::params;
-use crate::external_api::shared::IpRange;
+use crate::external_api::shared;
 use ipnetwork::IpNetwork;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::IpPool;
+use nexus_db_model::IpPoolReservationType;
+use nexus_db_model::IpPoolType;
+use nexus_db_model::IpPoolUpdate;
 use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
@@ -17,6 +21,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::IpPoolListFilters;
 use nexus_db_queries::db::model::Name;
 use nexus_types::identity::Resource;
+use omicron_common::address::{IPV4_SSM_SUBNET, IPV6_SSM_SUBNET};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -72,15 +77,32 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
-    ) -> CreateResult<db::model::IpPool> {
-        // https://github.com/oxidecomputer/omicron/issues/8966
+    ) -> CreateResult<IpPool> {
+        // https://github.com/oxidecomputer/omicron/issues/8881
         let ip_version = pool_params.ip_version.into();
-        if matches!(ip_version, IpVersion::V6) {
+
+        // IPv6 is not yet supported for unicast pools
+        if matches!(pool_params.pool_type, shared::IpPoolType::Unicast)
+            && matches!(ip_version, IpVersion::V6)
+        {
             return Err(Error::invalid_request(
-                "IPv6 pools are not yet supported",
+                "IPv6 pools are not yet supported for unicast pools",
             ));
         }
-        let pool = db::model::IpPool::new(&pool_params.identity, ip_version);
+
+        let pool = match pool_params.pool_type.clone() {
+            shared::IpPoolType::Unicast => IpPool::new(
+                &pool_params.identity,
+                ip_version,
+                IpPoolReservationType::ExternalSilos,
+            ),
+            shared::IpPoolType::Multicast => IpPool::new_multicast(
+                &pool_params.identity,
+                ip_version,
+                IpPoolReservationType::ExternalSilos,
+            ),
+        };
+
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
@@ -287,9 +309,9 @@ impl super::Nexus {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
-        self.db_datastore
-            .ip_pool_update(opctx, &authz_pool, updates.clone().into())
-            .await
+        let updates_db = IpPoolUpdate::from(updates.clone());
+
+        self.db_datastore.ip_pool_update(opctx, &authz_pool, updates_db).await
     }
 
     pub(crate) async fn ip_pool_list_ranges(
@@ -314,7 +336,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        range: &IpRange,
+        range: &shared::IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
@@ -332,10 +354,86 @@ impl super::Nexus {
         // pool utilization.
         //
         // See https://github.com/oxidecomputer/omicron/issues/8761.
-        if matches!(range, IpRange::V6(_)) {
+        if matches!(range, shared::IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
+        }
+
+        // Validate uniformity: ensure range doesn't span multicast/unicast boundary
+        let range_is_multicast = match range {
+            shared::IpRange::V4(v4_range) => {
+                let first = v4_range.first_address();
+                let last = v4_range.last_address();
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+                first_is_multicast
+            }
+            shared::IpRange::V6(v6_range) => {
+                let first = v6_range.first_address();
+                let last = v6_range.last_address();
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+                first_is_multicast
+            }
+        };
+
+        match db_pool.pool_type {
+            IpPoolType::Multicast => {
+                if !range_is_multicast {
+                    return Err(Error::invalid_request(
+                        "Cannot add unicast address range to multicast IP pool",
+                    ));
+                }
+
+                // For multicast pools, validate that the range doesn't span
+                // ASM/SSM boundaries
+                match range {
+                    shared::IpRange::V4(v4_range) => {
+                        let first = v4_range.first_address();
+                        let last = v4_range.last_address();
+                        let first_is_ssm = IPV4_SSM_SUBNET.contains(first);
+                        let last_is_ssm = IPV4_SSM_SUBNET.contains(last);
+
+                        if first_is_ssm != last_is_ssm {
+                            return Err(Error::invalid_request(
+                                "IP range cannot span ASM and SSM address spaces",
+                            ));
+                        }
+                    }
+                    shared::IpRange::V6(v6_range) => {
+                        let first = v6_range.first_address();
+                        let last = v6_range.last_address();
+                        let first_is_ssm = IPV6_SSM_SUBNET.contains(first);
+                        let last_is_ssm = IPV6_SSM_SUBNET.contains(last);
+
+                        if first_is_ssm != last_is_ssm {
+                            return Err(Error::invalid_request(
+                                "IP range cannot span ASM and SSM address spaces",
+                            ));
+                        }
+                    }
+                }
+            }
+            IpPoolType::Unicast => {
+                if range_is_multicast {
+                    return Err(Error::invalid_request(
+                        "Cannot add multicast address range to unicast IP pool",
+                    ));
+                }
+            }
         }
 
         self.db_datastore
@@ -347,7 +445,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        range: &IpRange,
+        range: &shared::IpRange,
     ) -> DeleteResult {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
@@ -397,8 +495,14 @@ impl super::Nexus {
     pub(crate) async fn ip_pool_service_add_range(
         &self,
         opctx: &OpContext,
-        range: &IpRange,
+        range: &shared::IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
+        let (authz_pool, db_pool) = self
+            .db_datastore
+            .ip_pools_service_lookup(opctx, range.version().into())
+            .await?;
+        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
+
         // Disallow V6 ranges until IPv6 is fully supported by the networking
         // subsystem. Instead of changing the API to reflect that (making this
         // endpoint inconsistent with the rest) and changing it back when we
@@ -408,16 +512,59 @@ impl super::Nexus {
         // pool utilization.
         //
         // See https://github.com/oxidecomputer/omicron/issues/8761.
-        if matches!(range, IpRange::V6(_)) {
+        if matches!(range, shared::IpRange::V6(_)) {
             return Err(Error::invalid_request(
                 "IPv6 ranges are not allowed yet",
             ));
         }
-        let (authz_pool, db_pool) = self
-            .db_datastore
-            .ip_pools_service_lookup(opctx, range.version().into())
-            .await?;
-        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
+
+        // Validate that the range matches the pool type and that they match uniformity
+        let range_is_multicast = match range {
+            shared::IpRange::V4(v4_range) => {
+                let first = v4_range.first_address();
+                let last = v4_range.last_address();
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+                first_is_multicast
+            }
+            shared::IpRange::V6(v6_range) => {
+                let first = v6_range.first_address();
+                let last = v6_range.last_address();
+                let first_is_multicast = first.is_multicast();
+                let last_is_multicast = last.is_multicast();
+
+                if first_is_multicast != last_is_multicast {
+                    return Err(Error::invalid_request(
+                        "IP range cannot span multicast and unicast address spaces",
+                    ));
+                }
+                first_is_multicast
+            }
+        };
+
+        match db_pool.pool_type {
+            IpPoolType::Multicast => {
+                if !range_is_multicast {
+                    return Err(Error::invalid_request(
+                        "Cannot add unicast address range to multicast IP pool",
+                    ));
+                }
+            }
+            IpPoolType::Unicast => {
+                if range_is_multicast {
+                    return Err(Error::invalid_request(
+                        "Cannot add multicast address range to unicast IP pool",
+                    ));
+                }
+            }
+        }
+
         self.db_datastore
             .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
             .await
@@ -426,7 +573,7 @@ impl super::Nexus {
     pub(crate) async fn ip_pool_service_delete_range(
         &self,
         opctx: &OpContext,
-        range: &IpRange,
+        range: &shared::IpRange,
     ) -> DeleteResult {
         let (authz_pool, ..) = self
             .db_datastore

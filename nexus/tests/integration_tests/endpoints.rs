@@ -928,12 +928,14 @@ pub const DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
 pub static DEMO_IP_POOL_NAME: LazyLock<Name> =
     LazyLock::new(|| "default".parse().unwrap());
 pub static DEMO_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
-    LazyLock::new(|| params::IpPoolCreate {
-        identity: IdentityMetadataCreateParams {
-            name: DEMO_IP_POOL_NAME.clone(),
-            description: String::from("an IP pool"),
-        },
-        ip_version: IpVersion::V4,
+    LazyLock::new(|| {
+        params::IpPoolCreate::new(
+            IdentityMetadataCreateParams {
+                name: DEMO_IP_POOL_NAME.clone(),
+                description: String::from("an IP pool"),
+            },
+            IpVersion::V4,
+        )
     });
 pub static DEMO_IP_POOL_PROJ_URL: LazyLock<String> = LazyLock::new(|| {
     format!(
@@ -1272,6 +1274,18 @@ pub static DEMO_UPDATE_TRUST_ROOT_CREATE: LazyLock<serde_json::Value> =
 
 pub static AUDIT_LOG_URL: LazyLock<String> = LazyLock::new(|| {
     String::from("/v1/system/audit-log?start_time=2025-01-01T00:00:00Z")
+});
+
+pub static SCIM_TOKENS_URL: LazyLock<String> = LazyLock::new(|| {
+    format!("/v1/system/scim/tokens?silo={}", DEFAULT_SILO.identity().name,)
+});
+
+pub static SCIM_TOKEN_URL: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "/v1/system/scim/tokens/{}?silo={}",
+        "7885144e-9c75-47f7-a97d-7dfc58e1186c",
+        DEFAULT_SILO.identity().name,
+    )
 });
 
 /// Describes an API endpoint to be verified by the "unauthorized" test
@@ -2535,16 +2549,21 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 ],
             },
             VerifyEndpoint {
-                url: "/v1/system/update/repository?file_name=demo-repo.zip",
+                url: "/v1/system/update/repositories?file_name=demo-repo.zip",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
-                allowed_methods: vec![AllowedMethod::Put(
-                    // In reality this is the contents of a zip file.
-                    serde_json::Value::Null,
-                )],
+                allowed_methods: vec![
+                    // the query param is only relevant to the put
+                    AllowedMethod::Put(
+                        // In reality this is the contents of a zip file.
+                        serde_json::Value::Null,
+                    ),
+                    // get doesn't use the query param but it doesn't break if it's there
+                    AllowedMethod::Get
+                ],
             },
             VerifyEndpoint {
-                url: "/v1/system/update/repository/1.0.0",
+                url: "/v1/system/update/repositories/1.0.0",
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
@@ -2554,10 +2573,17 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![
-                    AllowedMethod::Get,
                     AllowedMethod::Put(
                         serde_json::to_value(&*DEMO_TARGET_RELEASE).unwrap(),
                     ),
+                ],
+            },
+            VerifyEndpoint {
+                url: "/v1/system/update/status",
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
                 ],
             },
             /* Metrics */
@@ -3030,6 +3056,25 @@ pub static VERIFY_ENDPOINTS: LazyLock<Vec<VerifyEndpoint>> = LazyLock::new(
                 visibility: Visibility::Public,
                 unprivileged_access: UnprivilegedAccess::None,
                 allowed_methods: vec![AllowedMethod::Get],
+            },
+            // SCIM client tokens
+            VerifyEndpoint {
+                url: &SCIM_TOKENS_URL,
+                visibility: Visibility::Public,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Post(serde_json::Value::Null),
+                ],
+            },
+            VerifyEndpoint {
+                url: &SCIM_TOKEN_URL,
+                visibility: Visibility::Protected,
+                unprivileged_access: UnprivilegedAccess::None,
+                allowed_methods: vec![
+                    AllowedMethod::Get,
+                    AllowedMethod::Delete,
+                ],
             },
         ]
     },

@@ -96,6 +96,8 @@ pub mod region_snapshot_replacement;
 mod rendezvous_debug_dataset;
 mod role;
 mod saga;
+mod scim;
+mod scim_provider_store;
 mod silo;
 mod silo_auth_settings;
 mod silo_group;
@@ -111,7 +113,7 @@ mod switch_port;
 mod target_release;
 #[cfg(test)]
 pub(crate) mod test_utils;
-mod update;
+pub mod update;
 mod user_data_export;
 mod utilization;
 mod v2p_mapping;
@@ -126,6 +128,7 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
+pub use deployment::BlueprintLimitReachedOutput;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;
@@ -143,7 +146,17 @@ pub use region::RegionAllocationFor;
 pub use region::RegionAllocationParameters;
 pub use region_snapshot_replacement::NewRegionVolumeId;
 pub use region_snapshot_replacement::OldSnapshotVolumeId;
+pub use scim_provider_store::CrdbScimProviderStore;
 pub use silo::Discoverability;
+pub use silo_group::SiloGroup;
+pub use silo_group::SiloGroupApiOnly;
+pub use silo_group::SiloGroupJit;
+pub use silo_group::SiloGroupLookup;
+pub use silo_user::SiloUser;
+pub use silo_user::SiloUserApiOnly;
+pub use silo_user::SiloUserJit;
+pub use silo_user::SiloUserLookup;
+pub use silo_user::SiloUserScim;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
 pub use support_bundle::SupportBundleExpungementReport;
@@ -578,7 +591,7 @@ mod test {
     use crate::db::model::{
         BlockSize, ConsoleSession, CrucibleDataset, ExternalIp, PhysicalDisk,
         PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState, Project, Rack,
-        Region, SiloUser, SshKey, Zpool,
+        Region, SshKey, Zpool,
     };
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
@@ -717,11 +730,12 @@ mod test {
         datastore
             .silo_user_create(
                 &authz_silo,
-                SiloUser::new(
+                SiloUserApiOnly::new(
                     authz_silo.id(),
                     silo_user_id,
                     "external_id".into(),
-                ),
+                )
+                .into(),
             )
             .await
             .unwrap();
@@ -1857,11 +1871,12 @@ mod test {
         datastore
             .silo_user_create(
                 &authz_silo,
-                SiloUser::new(
+                SiloUserApiOnly::new(
                     authz_silo.id(),
                     silo_user_id,
                     "external@id".into(),
-                ),
+                )
+                .into(),
             )
             .await
             .unwrap();

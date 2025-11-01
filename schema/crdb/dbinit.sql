@@ -856,7 +856,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.authentication_mode AS ENUM (
 
 CREATE TYPE IF NOT EXISTS omicron.public.user_provision_type AS ENUM (
   'api_only',
-  'jit'
+  'jit',
+  'scim'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.silo (
@@ -895,15 +896,55 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_user (
     time_deleted TIMESTAMPTZ,
 
     silo_id UUID NOT NULL,
-    external_id TEXT NOT NULL
+
+    -- if the user provision type is 'api_only' or 'jit', then this field must
+    -- contain a value
+    external_id TEXT,
+
+    user_provision_type omicron.public.user_provision_type,
+
+    -- if the user provision type is 'scim' then this field must contain a value
+    user_name TEXT,
+
+    -- if user provision type is 'scim', this field _may_ contain a value: it
+    -- is not mandatory that the SCIM provisioning client support this field.
+    active BOOL,
+
+    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
+      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
+      OR (time_deleted IS NOT NULL)
+    ),
+
+    CONSTRAINT external_id_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'api_only' THEN external_id IS NOT NULL
+          WHEN 'jit' THEN external_id IS NOT NULL
+        END
+    ),
+
+    CONSTRAINT user_name_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'scim' THEN user_name IS NOT NULL
+        END
+    )
 );
 
-/* This index lets us quickly find users for a given silo. */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_user_by_silo ON omicron.public.silo_user (
-    silo_id,
-    external_id
-) WHERE
-    time_deleted IS NULL;
+/* These indexes let us quickly find users for a given silo, and prevents
+   multiple users from having the same provision specific unique identifier. */
+CREATE UNIQUE INDEX IF NOT EXISTS
+  lookup_silo_user_by_silo_and_external_id
+ON
+  omicron.public.silo_user (silo_id, external_id)
+WHERE
+  time_deleted IS NULL AND
+  (user_provision_type = 'api_only' OR user_provision_type = 'jit');
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+  lookup_silo_user_by_silo_and_user_name
+ON
+  omicron.public.silo_user (silo_id, user_name)
+WHERE
+  time_deleted IS NULL AND user_provision_type = 'scim';
 
 CREATE TABLE IF NOT EXISTS omicron.public.silo_user_password_hash (
     silo_user_id UUID NOT NULL,
@@ -924,14 +965,49 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_group (
     time_deleted TIMESTAMPTZ,
 
     silo_id UUID NOT NULL,
-    external_id TEXT NOT NULL
+
+    -- if the user provision type is 'api_only' or 'jit', then this field must
+    -- contain a value
+    external_id TEXT,
+
+    user_provision_type omicron.public.user_provision_type,
+
+    -- if the user provision type is 'scim' then this field must contain a value
+    display_name TEXT,
+
+    CONSTRAINT user_provision_type_required_for_non_deleted CHECK (
+      (user_provision_type IS NOT NULL AND time_deleted IS NULL)
+      OR (time_deleted IS NOT NULL)
+    ),
+
+    CONSTRAINT external_id_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'api_only' THEN external_id IS NOT NULL
+          WHEN 'jit' THEN external_id IS NOT NULL
+        END
+    ),
+
+    CONSTRAINT display_name_consistency CHECK (
+        CASE user_provision_type
+          WHEN 'scim' THEN display_name IS NOT NULL
+        END
+    )
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_group_by_silo ON omicron.public.silo_group (
-    silo_id,
-    external_id
-) WHERE
-    time_deleted IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS
+  lookup_silo_group_by_silo_and_external_id
+ON
+  omicron.public.silo_group (silo_id, external_id)
+WHERE
+  time_deleted IS NULL and
+  (user_provision_type = 'api_only' OR user_provision_type = 'jit');
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+  lookup_silo_group_by_silo_and_display_name
+ON
+  omicron.public.silo_group (silo_id, display_name)
+WHERE
+  time_deleted IS NULL AND user_provision_type = 'scim';
 
 /*
  * Silo group membership
@@ -1774,18 +1850,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      */
     mac INT8 NOT NULL,
 
-    /* The private VPC IP address of the interface. */
-    ip INET NOT NULL,
+    /* The private VPC IPv4 address of the interface.
+     *
+     * At least one of the IPv4 and IPv6 addresses must be specified.
+     *
+     * NOTE: Despite the name, this is in fact the IPv4 address. We've kept the
+     * original name `ip` since renaming columns idempotently is difficult in
+     * CRDB right now.
+     */
+    ip INET,
 
     /*
      * Limited to 8 NICs per instance. This value must be kept in sync with
-     * `crate::nexus::MAX_NICS_PER_INSTANCE`.
+     * `nexus_db_model::MAX_NICS_PER_INSTANCE`.
      */
     slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8),
 
     /* True if this interface is the primary interface.
      *
-     * The primary interface appears in DNS and its address is used for external
+     * The primary interface appears in DNS and its addresses are used for external
      * connectivity.
      */
     is_primary BOOL NOT NULL,
@@ -1795,7 +1878,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      * *allowed* to send/receive traffic on, in addition to its
      * assigned address.
      */
-    transit_ips INET[] NOT NULL DEFAULT ARRAY[]
+    transit_ips INET[] NOT NULL DEFAULT ARRAY[],
+
+    /* The private VPC IPv6 address of the interface.
+     *
+     * At least one of the IPv4 and IPv6 addresses must be specified.
+     */
+    ipv6 INET,
+
+    /* Constraint ensuring we have at least one IP address from either family.
+     * Both may be specified.
+     */
+    CONSTRAINT at_least_one_ip_address CHECK (
+        ip IS NOT NULL OR ipv6 IS NOT NULL
+    )
 );
 
 CREATE INDEX IF NOT EXISTS instance_network_interface_mac
@@ -1814,7 +1910,8 @@ SELECT
     vpc_id,
     subnet_id,
     mac,
-    ip,
+    ip AS ipv4,
+    ipv6,
     slot,
     is_primary,
     transit_ips
@@ -1836,7 +1933,8 @@ SELECT
     vpc_id,
     subnet_id,
     mac,
-    ip,
+    ip AS ipv4,
+    ipv6,
     slot,
     is_primary
 FROM
@@ -1852,12 +1950,17 @@ WHERE
  * as moving IPs between NICs on different instances, etc.
  */
 
-/* Ensure we do not assign the same address twice within a subnet */
-CREATE UNIQUE INDEX IF NOT EXISTS network_interface_subnet_id_ip_key ON omicron.public.network_interface (
+/* Ensure we do not assign the same addresses twice within a subnet */
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_subnet_id_ipv4_key ON omicron.public.network_interface (
     subnet_id,
     ip
 ) WHERE
-    time_deleted IS NULL;
+    time_deleted IS NULL AND ip IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_subnet_id_ipv6_key ON omicron.public.network_interface (
+    subnet_id,
+    ipv6
+) WHERE
+    time_deleted IS NULL AND ipv6 IS NOT NULL;
 
 /* Ensure we do not assign the same MAC twice within a VPC
  * See RFD174's discussion on the scope of virtual MACs
@@ -1896,6 +1999,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_slot_key ON omicro
 )
 WHERE
     time_deleted IS NULL;
+
+/*
+ * Index used to look up NIC details by its parent ID.
+ */
+CREATE INDEX IF NOT EXISTS network_interface_by_parent
+ON omicron.public.network_interface (parent_id)
+STORING (name, kind, vpc_id, subnet_id, mac, ip, ipv6, slot);
+
+/*
+ * Index used to select details needed to build the
+ * virtual-to-physical mappings quickly.
+ */
+CREATE INDEX IF NOT EXISTS v2p_mapping_details
+ON omicron.public.network_interface (
+  time_deleted, kind, subnet_id, vpc_id, parent_id
+) STORING (mac, ip, ipv6);
 
 CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_status AS ENUM (
     'disabled',
@@ -2086,6 +2205,20 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
     'v6'
 );
 
+/* Indicates what an IP Pool is reserved for. */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
+    'external_silos',
+    'oxide_internal'
+);
+
+/*
+ * IP pool types for unicast vs multicast pools
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_type AS ENUM (
+    'unicast',
+    'multicast'
+);
+
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
  */
@@ -2102,7 +2235,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     rcgen INT8 NOT NULL,
 
     /* The IP version of the ranges contained in this pool. */
-    ip_version omicron.public.ip_version NOT NULL
+    ip_version omicron.public.ip_version NOT NULL,
+
+    /* Indicates what the IP Pool is reserved for. */
+    reservation_type omicron.public.ip_pool_reservation_type NOT NULL,
+
+    /* Pool type for unicast (default) vs multicast pools. */
+    pool_type omicron.public.ip_pool_type NOT NULL DEFAULT 'unicast'
 );
 
 /*
@@ -2110,6 +2249,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
  */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_by_name ON omicron.public.ip_pool (
     name
+) WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index on pool type for efficient filtering of unicast vs multicast pools.
+ */
+CREATE INDEX IF NOT EXISTS lookup_ip_pool_by_type ON omicron.public.ip_pool (
+    pool_type
 ) WHERE
     time_deleted IS NULL;
 
@@ -2131,17 +2278,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
 
     -- resource_type is redundant because resource IDs are globally unique, but
     -- logically it belongs here
-    PRIMARY KEY (ip_pool_id, resource_type, resource_id),
-
-    -- Check that there are no default pools for the internal silo
-    CONSTRAINT internal_silo_has_no_default_pool CHECK (
-        NOT (
-            resource_type = 'silo' AND
-            resource_id = '001de000-5110-4000-8000-000000000001' AND
-            is_default
-        )
-    )
-
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
 );
 
 -- a given resource can only have one default ip pool
@@ -2175,7 +2312,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_range (
     /* FK into the `ip_pool` table. */
     ip_pool_id UUID NOT NULL,
     /* Tracks child resources, IP addresses allocated out of this range. */
-    rcgen INT8 NOT NULL
+    rcgen INT8 NOT NULL,
+
+    /* Ensure first address is not greater than last address */
+    CONSTRAINT check_address_order CHECK (first_address <= last_address)
 );
 
 /*
@@ -5565,20 +5705,11 @@ ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_loca
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
-CREATE INDEX IF NOT EXISTS network_interface_by_parent
-ON omicron.public.network_interface (parent_id)
-STORING (name, kind, vpc_id, subnet_id, mac, ip, slot);
-
 CREATE INDEX IF NOT EXISTS sled_by_policy_and_state
 ON omicron.public.sled (sled_policy, sled_state, id) STORING (ip);
 
 CREATE INDEX IF NOT EXISTS active_vmm
 ON omicron.public.vmm (time_deleted, sled_id, instance_id);
-
-CREATE INDEX IF NOT EXISTS v2p_mapping_details
-ON omicron.public.network_interface (
-  time_deleted, kind, subnet_id, vpc_id, parent_id
-) STORING (mac, ip);
 
 CREATE INDEX IF NOT EXISTS sled_by_policy
 ON omicron.public.sled (sled_policy) STORING (ip, sled_state);
@@ -5919,7 +6050,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_actor_kind AS ENUM (
     'user_builtin',
     'silo_user',
-    'unauthenticated'
+    'unauthenticated',
+    'scim'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
@@ -6686,6 +6818,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_db_metadata_nexus_by_state on omicron.p
     nexus_id
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.scim_client_bearer_token (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    time_expires TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+
+    bearer_token TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+    lookup_scim_client_by_silo_id
+ON
+    omicron.public.scim_client_bearer_token (silo_id, id)
+WHERE
+    time_deleted IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+    bearer_token_unique_for_scim_client
+ON
+    omicron.public.scim_client_bearer_token (bearer_token)
+WHERE
+    time_deleted IS NULL;
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -6695,7 +6854,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '195.0.0', NULL)
+    (TRUE, NOW(), NOW(), '201.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -15,9 +15,9 @@ use omicron_common::disk::DatasetName;
 use sled_agent_api::ArtifactConfig;
 use sled_storage::config::MountConfig;
 use sled_storage::disk::Disk;
-use sled_storage::manager::NestedDatasetConfig;
-use sled_storage::manager::NestedDatasetListOptions;
-use sled_storage::manager::NestedDatasetLocation;
+use sled_storage::nested_dataset::NestedDatasetConfig;
+use sled_storage::nested_dataset::NestedDatasetListOptions;
+use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -49,6 +49,7 @@ use crate::TimeSyncStatus;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::NestedDatasetMountError;
 use crate::dump_setup_task;
+use crate::dump_setup_task::FormerZoneRootArchiver;
 use crate::internal_disks::InternalDisksReceiver;
 use crate::ledger::CurrentSledConfig;
 use crate::ledger::LedgerTaskHandle;
@@ -85,6 +86,7 @@ pub struct ConfigReconcilerSpawnToken {
     reconciler_result_tx: watch::Sender<ReconcilerResult>,
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
     external_disks_tx: watch::Sender<HashSet<Disk>>,
+    former_zone_root_archiver: FormerZoneRootArchiver,
     raw_disks_rx: RawDisksReceiver,
     ledger_task_log: Logger,
     reconciler_task_log: Logger,
@@ -132,7 +134,7 @@ impl ConfigReconcilerHandle {
         // Spawn the task that manages dump devices.
         let (external_disks_tx, external_disks_rx) =
             watch::channel(HashSet::new());
-        dump_setup_task::spawn(
+        let former_zone_root_archiver = dump_setup_task::spawn(
             internal_disks_rx.clone(),
             external_disks_rx,
             Arc::clone(&mount_config),
@@ -170,6 +172,7 @@ impl ConfigReconcilerHandle {
                 reconciler_result_tx,
                 currently_managed_zpools_tx,
                 external_disks_tx,
+                former_zone_root_archiver,
                 raw_disks_rx,
                 ledger_task_log: base_log
                     .new(slog::o!("component" => "SledConfigLedgerTask")),
@@ -203,6 +206,7 @@ impl ConfigReconcilerHandle {
             reconciler_result_tx,
             currently_managed_zpools_tx,
             external_disks_tx,
+            former_zone_root_archiver,
             raw_disks_rx,
             ledger_task_log,
             reconciler_task_log,
@@ -237,6 +241,7 @@ impl ConfigReconcilerHandle {
             currently_managed_zpools_tx,
             self.internal_disks_rx.clone(),
             external_disks_tx,
+            former_zone_root_archiver,
             raw_disks_rx,
             sled_agent_facilities,
             sled_agent_artifact_store,

@@ -19,6 +19,7 @@ use crate::db::model::CrucibleDataset;
 use crate::db::model::IncompleteExternalIp;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::Rack;
+use crate::db::model::UserProvisionType;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -39,6 +40,7 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::IpConfig;
 use nexus_db_model::IpVersion;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
@@ -57,7 +59,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
-use nexus_types::silo::INTERNAL_SILO_ID;
+use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -73,6 +75,8 @@ use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog_error_chain::InlineErrorChain;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
@@ -442,6 +446,15 @@ impl DataStore {
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
     ) -> Result<(), RackInitError> {
+        if !matches!(
+            &recovery_silo.identity_mode,
+            shared::SiloIdentityMode::LocalOnly
+        ) {
+            return Err(RackInitError::Silo(Error::invalid_request(
+                "recovery silo should only use identity mode LocalOnly",
+            )));
+        }
+
         let db_silo = self
             .silo_create_conn(
                 conn,
@@ -460,11 +473,19 @@ impl DataStore {
 
         // Create the first user in the initial Recovery Silo
         let silo_user_id = SiloUserUuid::new_v4();
-        let silo_user = SiloUser::new(
-            db_silo.id(),
-            silo_user_id,
-            recovery_user_id.as_ref().to_owned(),
-        );
+
+        let silo_user = match &db_silo.user_provision_type {
+            UserProvisionType::ApiOnly => SiloUser::new_api_only(
+                db_silo.id(),
+                silo_user_id,
+                recovery_user_id.as_ref().to_owned(),
+            ),
+
+            UserProvisionType::Jit | UserProvisionType::Scim => {
+                unreachable!("match at start of function should prevent this");
+            }
+        };
+
         {
             use nexus_db_schema::schema::silo_user::dsl;
             diesel::insert_into(dsl::silo_user)
@@ -529,12 +550,27 @@ impl DataStore {
         // explicit IP allocation and create a service NIC as well.
         let zone_type = &zone_config.zone_type;
         let zone_report_str = zone_type.kind().report_str();
+
+        // Extract an IPv4 address from the `shared::NetworkInterface` object.
+        //
+        // TODO-completeness: Handle IPv6 interface addresses. See
+        // https://github.com/oxidecomputer/omicron/issues/9246.
+        let extract_ipv4 = |nic: &NetworkInterface| -> Result<Ipv4Addr, Error> {
+            let IpAddr::V4(ipv4) = nic.ip else {
+                return Err(Error::invalid_request(
+                    "IPv6 addresses are not yet supported",
+                ));
+            };
+            Ok(ipv4)
+        };
+
         let service_ip_nic = match zone_type {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { nic, dns_address, .. },
             ) => {
                 let external_ip =
                     OmicronZoneExternalIp::Floating(dns_address.into_ip());
+                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -546,7 +582,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    nic.ip,
+                    IpConfig::from_ipv4(ip),
                     nic.mac,
                     nic.slot,
                 )
@@ -559,6 +595,7 @@ impl DataStore {
                 ..
             }) => {
                 let external_ip = OmicronZoneExternalIp::Floating(*external_ip);
+                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -570,7 +607,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    nic.ip,
+                    IpConfig::from_ipv4(ip),
                     nic.mac,
                     nic.slot,
                 )
@@ -581,6 +618,7 @@ impl DataStore {
                 blueprint_zone_type::BoundaryNtp { external_ip, nic, .. },
             ) => {
                 let external_ip = OmicronZoneExternalIp::Snat(*external_ip);
+                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -592,7 +630,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    nic.ip,
+                    IpConfig::from_ipv4(ip),
                     nic.mac,
                     nic.slot,
                 )
@@ -675,8 +713,12 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        // We may need to populate external IP records for both IPv4 and IPv6
-        // service pools, so fetch both now.
+        // The `RackInit` request will eventually be modified to include the
+        // full details of the IP Pool(s) delegated to Oxide at RSS time. For
+        // now, we still rely on the pre-populated IP Pools. There's one for
+        // IPv4 and one for IPv6.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/8946.
         let service_ip_pools =
             self.ip_pools_service_lookup_both_versions(&opctx).await?;
 
@@ -983,7 +1025,8 @@ impl DataStore {
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        // Insert and link the services IP Pool for both IP versions.
+        // Insert an IP Pool for both IP versions, reserved for Oxide internal
+        // use.
         for (version, name) in [
             (IpVersion::V4, SERVICE_IPV4_POOL_NAME),
             (IpVersion::V6, SERVICE_IPV6_POOL_NAME),
@@ -996,29 +1039,11 @@ impl DataStore {
                     ),
                 },
                 version,
+                nexus_db_model::IpPoolReservationType::OxideInternal,
             );
-            // Create the pool, and link it to the internal silo if needed. But
-            // we cannot set a default.
-            let internal_pool_id = internal_pool.id();
-            let internal_created = self
-                .ip_pool_create(opctx, internal_pool)
-                .await
-                .map(|_| true)
-                .or_else(|e| match e {
-                    Error::ObjectAlreadyExists { .. } => Ok(false),
-                    _ => Err(e),
-                })?;
-            if internal_created {
-                self.ip_pool_link_silo(
-                    opctx,
-                    db::model::IpPoolResource {
-                        ip_pool_id: internal_pool_id,
-                        resource_type: db::model::IpPoolResourceType::Silo,
-                        resource_id: INTERNAL_SILO_ID,
-                        is_default: false,
-                    },
-                )
-                .await?;
+            match self.ip_pool_create(opctx, internal_pool).await {
+                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => {}
+                Err(e) => return Err(e),
             }
         }
 
@@ -1248,16 +1273,21 @@ mod test {
             )
             .await
             .expect("failed to list users");
+
         assert_eq!(silo_users.len(), 1);
-        assert_eq!(
-            silo_users[0].external_id,
-            rack_init.recovery_user_id.as_ref()
-        );
+
+        let db::datastore::SiloUser::ApiOnly(silo_user) = &silo_users[0] else {
+            panic!("wrong user type {:?}", silo_users[0].user_provision_type());
+        };
+
+        assert_eq!(silo_user.external_id, rack_init.recovery_user_id.as_ref());
+
         let authz_silo_user = authz::SiloUser::new(
             authz_silo,
             silo_users[0].id(),
             LookupType::by_id(silo_users[0].id()),
         );
+
         let hash = datastore
             .silo_user_password_hash_fetch(&opctx, &authz_silo_user)
             .await
@@ -2143,8 +2173,27 @@ mod test {
                     ..Default::default()
                 },
             )
-            .await
-            .expect("Failed to initialize rack");
+            .await;
+
+        // IPv6 addresses aren't fully supported right now. See
+        // https://github.com/oxidecomputer/omicron/issues/1716. When that is
+        // fully-addressed, this will start to fail and we can remove this
+        // block to restore the previous test coverage.
+        let Err(Error::InvalidRequest { message }) = &rack else {
+            panic!(
+                "Expected an error initializing a rack with an IPv6 address, \
+                until they are fully-supported. Found {rack:#?}"
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            "IPv6 addresses are not yet supported"
+        );
+        let Ok(rack) = rack else {
+            db.terminate().await;
+            logctx.cleanup_successful();
+            return;
+        };
 
         assert_eq!(rack.id(), rack_id());
         assert!(rack.initialized);

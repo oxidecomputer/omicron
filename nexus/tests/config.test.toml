@@ -10,7 +10,7 @@ session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
 [authn]
-schemes_external = ["spoof", "session_cookie", "access_token"]
+schemes_external = ["spoof", "session_cookie", "access_token", "scim_token"]
 
 #
 # NOTE: for the test suite, if mode = "file", the file path MUST be the sentinel
@@ -97,13 +97,16 @@ metrics_producer_gc.period_secs = 60
 external_endpoints.period_secs = 60
 nat_cleanup.period_secs = 30
 bfd_manager.period_secs = 30
+# How frequently to check for a new inventory collection (made by any Nexus).
+# This is cheap, so we should check frequently.
+inventory.period_secs_load = 15
 # How frequently to collect hardware/software inventory from the whole system
 # (even if we don't have reason to believe anything has changed).
-inventory.period_secs = 600
+inventory.period_secs_collect = 600
 # Maximum number of past collections to keep in the database
 inventory.nkeep = 3
 # Disable inventory collection altogether (for emergencies)
-inventory.disable = false
+inventory.disable_collect = false
 phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
 # Disable automatic disk adoption to avoid interfering with tests.
@@ -194,3 +197,8 @@ sp_ereport_ingester.period_secs = 30
 # we only have one sled in the test environment, so we need to use the
 # `Random` strategy, instead of `RandomWithDistinctSleds`
 type = "random"
+
+[omdb]
+# In production omdb is shipped alongside Nexus in its zone; this doesn't happen
+# (and isn't needed) in tests.
+bin_path = "/cannot/fetch/omdb/in/test/suite"
