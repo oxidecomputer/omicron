@@ -11,6 +11,7 @@
 use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::datastore::RunnableQuery;
 use crate::db::model;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::pg::Pg;
@@ -29,6 +30,7 @@ use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use uuid::Uuid;
@@ -193,6 +195,61 @@ impl DataStore {
             .await
             .map_err(|e| query.decode_error(e))
             .map(|_| ())
+    }
+
+    pub async fn fm_sitrep_list_orphaned(
+        &self,
+        opctx: &OpContext,
+        version: &fm::SitrepVersion,
+    ) -> ListResultVec<fm::SitrepMetadata> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // First, fetch the sitrep metadata for the selected version. We must do
+        // this in order to determine the parent of that sitrep, so that we can
+        // select all other sitreps with that parent.
+        let meta = self
+            .fm_sitrep_metadata_read_on_conn(version.id, &*conn)
+            .await
+            .map_err(|e| {
+                e.internal_context("fetching metadata for committed sitrep")
+            })?;
+
+        // Okay, now actually list all the sitreps with the same parent as that
+        // version
+        let sitreps = if let Some(parent_id) = meta.parent_sitrep_id {
+            Self::list_orphaned_query(
+                meta.id.into_untyped_uuid(),
+                parent_id.into_untyped_uuid(),
+            )
+            .load_async(&*conn)
+            .await
+        } else {
+            sitrep_dsl::fm_sitrep
+                .filter(sitrep_dsl::parent_sitrep_id.is_null())
+                .filter(sitrep_dsl::id.ne(meta.id))
+                .select(model::SitrepMetadata::as_select())
+                .load_async(&*conn)
+                .await
+        }
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+        .into_iter()
+        .map(fm::SitrepMetadata::from)
+        .collect();
+
+        Ok(sitreps)
+    }
+
+    fn list_orphaned_query(
+        committed_id: Uuid,
+        parent_id: Uuid,
+    ) -> impl RunnableQuery<model::SitrepMetadata> {
+        sitrep_dsl::fm_sitrep
+            .filter(sitrep_dsl::parent_sitrep_id.eq(parent_id))
+            .filter(sitrep_dsl::id.ne(committed_id))
+            .select(model::SitrepMetadata::as_select())
     }
 }
 
@@ -521,6 +578,29 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         let query = InsertSitrepVersionQuery { sitrep_id: SitrepUuid::nil() };
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_sitrep_list_orphaned_query() {
+        let logctx = dev::test_setup_log("explain_sitrep_list_orphaned_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = DataStore::list_orphaned_query(Uuid::nil(), Uuid::nil());
         let explanation = query
             .explain_async(&conn)
             .await
