@@ -759,7 +759,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -8361,6 +8361,7 @@ dependencies = [
  "samael",
  "schemars 0.8.22",
  "scim2-rs",
+ "scim2-test-client",
  "semver 1.0.27",
  "serde",
  "serde_json",
@@ -8955,7 +8956,6 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "itertools 0.13.0",
  "lalrpop-util",
  "lazy_static",
@@ -11539,9 +11539,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.22"
+version = "0.12.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbc931937e6ca3a06e3b6c0aa7841849b160a90351d6ab467a8b9b9959767531"
+checksum = "9d0946410b9f7b082a427e4ef5c8ff541a88b357bc6c637c40db3a68ac70a36f"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -12187,10 +12187,9 @@ dependencies = [
 [[package]]
 name = "scim2-rs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs#dbe1cb7e42f7322f5cd532015e7ab430d04113b7"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=c78005db837a71f94c3b8efac9a64cfbdb2d527f#c78005db837a71f94c3b8efac9a64cfbdb2d527f"
 dependencies = [
  "anyhow",
- "async-trait",
  "chrono",
  "dropshot",
  "http",
@@ -12199,6 +12198,23 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "trait-variant",
+ "unicase",
+ "uuid",
+]
+
+[[package]]
+name = "scim2-test-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=c78005db837a71f94c3b8efac9a64cfbdb2d527f#c78005db837a71f94c3b8efac9a64cfbdb2d527f"
+dependencies = [
+ "anyhow",
+ "clap",
+ "reqwest",
+ "scim2-rs",
+ "serde",
+ "serde_json",
+ "tokio",
  "unicase",
  "uuid",
 ]
@@ -14707,6 +14723,17 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "trait-variant"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70977707304198400eb4835a78f6a9f928bf41bba420deb8fdb175cd965d77a7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]

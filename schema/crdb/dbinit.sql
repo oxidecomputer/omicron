@@ -940,9 +940,9 @@ WHERE
   (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 CREATE UNIQUE INDEX IF NOT EXISTS
-  lookup_silo_user_by_silo_and_user_name
+  lookup_silo_user_by_silo_and_user_name_lower
 ON
-  omicron.public.silo_user (silo_id, user_name)
+  omicron.public.silo_user (silo_id, LOWER(user_name))
 WHERE
   time_deleted IS NULL AND user_provision_type = 'scim';
 
@@ -1003,9 +1003,9 @@ WHERE
   (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 CREATE UNIQUE INDEX IF NOT EXISTS
-  lookup_silo_group_by_silo_and_display_name
+  lookup_silo_group_by_silo_and_display_name_lower
 ON
-  omicron.public.silo_group (silo_id, display_name)
+  omicron.public.silo_group (silo_id, LOWER(display_name))
 WHERE
   time_deleted IS NULL AND user_provision_type = 'scim';
 
@@ -3149,6 +3149,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.role_assignment (
         identity_type
      )
 );
+
+/*
+ * When SCIM IdPs delete users and groups we want to be able to cleanup all role
+ * assignments associated with them.
+ */
+CREATE INDEX IF NOT EXISTS lookup_role_assignment_by_identity_id
+    ON omicron.public.role_assignment ( identity_id );
 
 /*******************************************************************/
 
@@ -6132,6 +6139,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
         -- For silo_user: must have both actor_id and actor_silo_id
         (actor_kind = 'silo_user' AND actor_id IS NOT NULL AND actor_silo_id IS NOT NULL)
         OR
+        -- For a scim actor: must have a actor_silo_id
+        (actor_kind = 'scim' AND actor_id IS NULL AND actor_silo_id IS NOT NULL)
+        OR
         -- For unauthenticated: must not have actor_id or actor_silo_id
         (actor_kind = 'unauthenticated' AND actor_id IS NULL AND actor_silo_id IS NULL)
     )
@@ -6857,7 +6867,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '202.0.0', NULL)
+    (TRUE, NOW(), NOW(), '203.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

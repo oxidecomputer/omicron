@@ -110,7 +110,7 @@ rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", def
 regex = { version = "1.11.3" }
 regex-automata = { version = "0.4.11", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.5" }
-reqwest = { version = "0.12.22", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.19", features = ["ring"] }
@@ -251,7 +251,7 @@ rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", def
 regex = { version = "1.11.3" }
 regex-automata = { version = "0.4.11", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.5" }
-reqwest = { version = "0.12.22", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.19", features = ["ring"] }
@@ -382,7 +382,6 @@ dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = 
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
-itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
@@ -401,7 +400,6 @@ dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = 
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
-itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
