@@ -7624,7 +7624,10 @@ async fn test_instance_create_with_cross_project_subnet(
     };
 
     let instances_url_a = format!("/v1/instances?project={}", project_a_name);
-    let error: HttpErrorResponseBody = NexusRequest::new(
+
+    // Should get 404 Not Found because the limited user can't see project B's
+    // VPC/subnet
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &instances_url_a)
             .body(Some(&instance_params))
             .expect_status(Some(StatusCode::NOT_FOUND)),
@@ -7632,17 +7635,7 @@ async fn test_instance_create_with_cross_project_subnet(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-
-    // Should get 404 Not Found because the limited user can't see project B's
-    // VPC/subnet
-    assert!(
-        error.message.contains("not found") || error.message.contains("vpc"),
-        "Expected 'not found' error, got: {}",
-        error.message
-    );
+    .expect("request should fail with 404");
 }
 
 /// Test that silo-level limited-collaborators (who have access to all projects
@@ -7824,7 +7817,10 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
         anti_affinity_groups: Vec::new(),
     };
 
-    let error: HttpErrorResponseBody = NexusRequest::new(
+    // Should get 404 Not Found because VPC/subnet lookups are scoped to the
+    // project context (project A), and project B's VPC/subnet aren't visible
+    // in that context
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &instances_url_a)
             .body(Some(&instance_cross_project))
             .expect_status(Some(StatusCode::NOT_FOUND)),
@@ -7832,18 +7828,7 @@ async fn test_silo_limited_collaborator_cross_project_subnet(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-
-    // Should get 404 Not Found because VPC/subnet lookups are scoped to the
-    // project context (project A), and project B's VPC/subnet aren't visible
-    // in that context
-    assert!(
-        error.message.contains("not found") || error.message.contains("vpc"),
-        "Expected 'not found' error, got: {}",
-        error.message
-    );
+    .expect("request should fail with 404");
 }
 
 /// Test that appropriate OPTE V2P mappings are created and deleted.

@@ -369,7 +369,7 @@ async fn test_vpc_limited_collaborator_role(
 
     // Test 4: User with silo.limited-collaborator role CANNOT create a VPC
     // (inherits project.limited-collaborator, which cannot modify networking)
-    let error: HttpErrorResponseBody = NexusRequest::new(
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &vpcs_url)
             .body(Some(&params::VpcCreate {
                 identity: IdentityMetadataCreateParams {
@@ -384,10 +384,7 @@ async fn test_vpc_limited_collaborator_role(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-    assert_eq!(error.message, "Forbidden");
+    .expect("silo limited-collaborator should not be able to create VPC");
 }
 
 #[nexus_test]
@@ -528,7 +525,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
 
     // Test 0: Cannot create VPC
     let vpcs_url = format!("/v1/vpcs?project={}", project_name);
-    let error: HttpErrorResponseBody = NexusRequest::new(
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &vpcs_url)
             .body(Some(&params::VpcCreate {
                 identity: IdentityMetadataCreateParams {
@@ -543,15 +540,12 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-    assert_eq!(error.message, "Forbidden");
+    .expect("limited collaborator should not be able to create VPC");
 
     // Test 1: Cannot create VPC subnet
     let subnets_url =
         format!("/v1/vpc-subnets?project={}&vpc=default", project_name);
-    let error: HttpErrorResponseBody = NexusRequest::new(
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &subnets_url)
             .body(Some(&params::VpcSubnetCreate {
                 identity: IdentityMetadataCreateParams {
@@ -567,15 +561,12 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-    assert_eq!(error.message, "Forbidden");
+    .expect("limited collaborator should not be able to create VPC subnet");
 
     // Test 2: Cannot create VPC router
     let routers_url =
         format!("/v1/vpc-routers?project={}&vpc=default", project_name);
-    let error: HttpErrorResponseBody = NexusRequest::new(
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &routers_url)
             .body(Some(&params::VpcRouterCreate {
                 identity: IdentityMetadataCreateParams {
@@ -588,15 +579,12 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-    assert_eq!(error.message, "Forbidden");
+    .expect("limited collaborator should not be able to create VPC router");
 
     // Test 3: Cannot create internet gateway
     let igw_url =
         format!("/v1/internet-gateways?project={}&vpc=default", project_name);
-    let error: HttpErrorResponseBody = NexusRequest::new(
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &igw_url)
             .body(Some(&params::InternetGatewayCreate {
                 identity: IdentityMetadataCreateParams {
@@ -609,10 +597,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-    assert_eq!(error.message, "Forbidden");
+    .expect("limited collaborator should not be able to create internet gateway");
 
     // Setup for remaining tests: Create IGW and router as privileged user
     let igw_name = "test-gateway";
@@ -656,7 +641,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
         "/v1/vpc-router-routes?project={}&vpc=default&router={}",
         project_name, router_name
     );
-    let error: HttpErrorResponseBody = NexusRequest::new(
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &routes_url)
             .body(Some(&params::RouterRouteCreate {
                 identity: IdentityMetadataCreateParams {
@@ -671,17 +656,14 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-    assert_eq!(error.message, "Forbidden");
+    .expect("limited collaborator should not be able to create router route");
 
     // Test 5: Cannot attach IP pool to internet gateway
     let pool_attach_url = format!(
         "/v1/internet-gateway-ip-pools?project={}&vpc=default&gateway={}",
         project_name, igw_name
     );
-    let error: HttpErrorResponseBody = NexusRequest::new(
+    NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &pool_attach_url)
             .body(Some(&params::InternetGatewayIpPoolCreate {
                 identity: IdentityMetadataCreateParams {
@@ -695,10 +677,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-    assert_eq!(error.message, "Forbidden");
+    .expect("limited collaborator should not be able to attach IP pool to internet gateway");
 
     // Test 6: Cannot modify VPC firewall rules
     let firewall_url =
@@ -721,7 +700,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
             priority: VpcFirewallRulePriority(100),
         }],
     };
-    let error: HttpErrorResponseBody = NexusRequest::new(
+    NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &firewall_url)
             .body(Some(&new_rules))
             .expect_status(Some(StatusCode::FORBIDDEN)),
@@ -729,10 +708,7 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("request should complete")
-    .parsed_body()
-    .unwrap();
-    assert_eq!(error.message, "Forbidden");
+    .expect("limited collaborator should not be able to modify VPC firewall rules");
 }
 
 #[nexus_test]
