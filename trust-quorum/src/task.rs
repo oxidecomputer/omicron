@@ -234,9 +234,6 @@ impl NodeTaskHandle {
     }
 
     /// Load the rack secret for the given epoch
-    ///
-    /// This can block for an indefinite period of time before returning
-    /// and depends on availability of the trust quorum.
     pub async fn load_rack_secret(
         &self,
         epoch: Epoch,
@@ -247,12 +244,7 @@ impl NodeTaskHandle {
         Ok(rs)
     }
 
-    /// Return `Ok(true)` if the configuration has committed, `Ok(false)` if
-    /// it hasn't committed yet, or an error otherwise.
-    ///
-    /// Nexus will retry this operation and so we should only try once here.
-    /// This is in contrast to operations like `load_rack_secret` that are
-    /// called directly from sled agent.
+    /// Attempt to prepare and commit the given configuration
     pub async fn prepare_and_commit(
         &self,
         config: Configuration,
@@ -263,12 +255,7 @@ impl NodeTaskHandle {
         Ok(res)
     }
 
-    /// Return `Ok(true)` if the configuration has committed, `Ok(false)` if
-    /// it hasn't committed yet, or an error otherwise.
-    ///
-    /// Nexus will retry this operation and so we should only try once here.
-    /// This is in contrast to operations like `load_rack_secret` that are
-    /// called directly from sled agent.
+    /// Attempt to commit the configuration at epoch `epoch`
     pub async fn commit(
         &self,
         rack_id: RackUuid,
@@ -1607,7 +1594,10 @@ mod tests {
             async || {
                 let mut acked = 0;
                 for h in &setup.node_handles {
-                    if h.commit(rack_id, Epoch(1)).await.unwrap() {
+                    if matches!(
+                        h.commit(rack_id, Epoch(1)).await.unwrap(),
+                        CommitStatus::Committed
+                    ) {
                         acked += 1;
                     }
                 }
@@ -1657,14 +1647,13 @@ mod tests {
         }
 
         // Now load the rack secret at all nodes
-        let mut secret = None;
-        for h in &setup.node_handles {
-            let rs = h.load_rack_secret(Epoch(1)).await.unwrap();
-            if secret.is_none() {
-                secret = Some(rs.clone());
-            }
-            assert_eq!(&rs, secret.as_ref().unwrap());
-        }
+        setup
+            .wait_for_rack_secrets_and_assert_equality(
+                (0..num_nodes).collect(),
+                Epoch(1),
+            )
+            .await
+            .unwrap();
 
         setup.cleanup_successful();
     }
