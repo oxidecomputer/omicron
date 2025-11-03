@@ -1265,11 +1265,13 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             }
         };
 
+        let authz_silo_user = authz::SiloUser::new(
+            self.authz_silo.clone(),
+            user_id,
+            LookupType::by_id(user_id),
+        );
         self.opctx
-            .authorize(
-                authz::Action::ListChildren,
-                &SiloUserList::new(self.authz_silo.clone()),
-            )
+            .authorize(authz::Action::Read, &authz_silo_user)
             .await
             .map_err(external_error_to_provider_error)?;
         let conn = self
@@ -1529,11 +1531,13 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             }
         };
 
+        let authz_silo_group = authz::SiloGroup::new(
+            self.authz_silo.clone(),
+            group_id,
+            LookupType::by_id(group_id),
+        );
         self.opctx
-            .authorize(
-                authz::Action::ListChildren,
-                &SiloGroupList::new(self.authz_silo.clone()),
-            )
+            .authorize(authz::Action::Read, &authz_silo_group)
             .await
             .map_err(external_error_to_provider_error)?;
         let conn = self
