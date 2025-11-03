@@ -509,11 +509,6 @@ impl<'a> CrdbScimProviderStore<'a> {
             use nexus_db_schema::schema::role_assignment::dsl;
 
             diesel::delete(dsl::role_assignment)
-                .filter(
-                    dsl::resource_type
-                        .eq(self.authz_silo.resource_type().to_string()),
-                )
-                .filter(dsl::resource_id.eq(self.authz_silo.resource_id()))
                 .filter(dsl::identity_type.eq(IdentityType::SiloUser))
                 .filter(dsl::identity_id.eq(to_db_typed_uuid(user_id)))
                 .execute_async(conn)
@@ -1205,11 +1200,6 @@ impl<'a> CrdbScimProviderStore<'a> {
             use nexus_db_schema::schema::role_assignment::dsl;
 
             diesel::delete(dsl::role_assignment)
-                .filter(
-                    dsl::resource_type
-                        .eq(self.authz_silo.resource_type().to_string()),
-                )
-                .filter(dsl::resource_id.eq(self.authz_silo.resource_id()))
                 .filter(dsl::identity_id.eq(to_db_typed_uuid(group_id)))
                 .filter(dsl::identity_type.eq(IdentityType::SiloGroup))
                 .execute_async(conn)

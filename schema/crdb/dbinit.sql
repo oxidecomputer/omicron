@@ -3147,6 +3147,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.role_assignment (
      )
 );
 
+/*
+ * When SCIM IdPs delete users and groups we want to be able to cleanup all role
+ * assignments associated with them.
+ */
+CREATE INDEX IF NOT EXISTS lookup_role_assignment_by_identity_id
+    ON omicron.public.role_assignment ( identity_id );
+
 /*******************************************************************/
 
 /*
