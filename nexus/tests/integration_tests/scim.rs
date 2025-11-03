@@ -507,10 +507,7 @@ async fn test_scim_client_no_auth_with_expired_token(
     // This should 401
 
     RequestBuilder::new(client, Method::GET, "/scim/v2/Users")
-        .header(
-            http::header::AUTHORIZATION,
-            String::from("Bearer oxide-scim-testpost"),
-        )
+        .header(http::header::AUTHORIZATION, String::from("Bearer testpost"))
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
@@ -555,7 +552,7 @@ async fn test_scim2_crate_self_test(cptestctx: &ControlPlaneTestContext) {
 
     let tester = Tester::new(
         client.url("/scim/v2").to_string(),
-        Some(format!("oxide-scim-{}", created_token.bearer_token)),
+        Some(created_token.bearer_token),
     )
     .unwrap();
 
@@ -672,7 +669,7 @@ async fn test_disabling_scim_user(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -742,7 +739,7 @@ async fn test_disabling_scim_user(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .raw_body(Some(
@@ -849,7 +846,7 @@ async fn test_scim_user_search(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -874,7 +871,7 @@ async fn test_scim_user_search(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -906,7 +903,7 @@ async fn test_scim_user_search(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::OK)),
@@ -940,7 +937,7 @@ async fn test_scim_user_search(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::OK)),
@@ -970,7 +967,7 @@ async fn test_scim_user_search(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::OK)),
@@ -1027,7 +1024,7 @@ async fn test_scim_group_search(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1052,7 +1049,7 @@ async fn test_scim_group_search(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1087,7 +1084,7 @@ async fn test_scim_group_search(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::OK)),
@@ -1124,7 +1121,7 @@ async fn test_scim_group_search(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::OK)),
@@ -1157,7 +1154,7 @@ async fn test_scim_group_search(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .expect_status(Some(StatusCode::OK)),
@@ -1214,7 +1211,7 @@ async fn test_scim_user_unique(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1239,7 +1236,7 @@ async fn test_scim_user_unique(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1265,7 +1262,7 @@ async fn test_scim_user_unique(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1294,7 +1291,7 @@ async fn test_scim_user_unique(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .raw_body(Some(
@@ -1356,7 +1353,7 @@ async fn test_scim_group_unique(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1381,7 +1378,7 @@ async fn test_scim_group_unique(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1407,7 +1404,7 @@ async fn test_scim_group_unique(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1436,7 +1433,7 @@ async fn test_scim_group_unique(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .raw_body(Some(
@@ -1545,7 +1542,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1617,7 +1614,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1663,7 +1660,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .raw_body(Some(
@@ -1718,7 +1715,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .raw_body(Some(
@@ -1771,7 +1768,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .raw_body(Some(
@@ -1823,7 +1820,7 @@ async fn test_scim_user_admin_group_priv(cptestctx: &ControlPlaneTestContext) {
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .raw_body(Some(
@@ -1920,7 +1917,7 @@ async fn test_scim_user_admin_group_priv_conflict(
             .header(http::header::CONTENT_TYPE, "application/scim+json")
             .header(
                 http::header::AUTHORIZATION,
-                format!("Bearer oxide-scim-{}", created_token.bearer_token),
+                format!("Bearer {}", created_token.bearer_token),
             )
             .allow_non_dropshot_errors()
             .raw_body(Some(
@@ -1964,7 +1961,7 @@ async fn test_scim_user_admin_group_priv_conflict(
         .header(http::header::CONTENT_TYPE, "application/scim+json")
         .header(
             http::header::AUTHORIZATION,
-            format!("Bearer oxide-scim-{}", created_token.bearer_token),
+            format!("Bearer {}", created_token.bearer_token),
         )
         .allow_non_dropshot_errors()
         .raw_body(Some(
