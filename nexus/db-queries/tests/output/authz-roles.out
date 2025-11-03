@@ -296,7 +296,22 @@ resource: Silo "silo1": user list
   silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
-  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  scim                             ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+
+resource: Silo "silo1": group list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  silo1-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
 
 resource: SiloUser "silo1-user"
 
@@ -311,7 +326,7 @@ resource: SiloUser "silo1-user"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
-  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  scim                             ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
 
 resource: SshKey "silo1-user-ssh-key"
 
@@ -326,7 +341,7 @@ resource: SshKey "silo1-user-ssh-key"
   silo1-proj1-collaborator         ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
-  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  scim                             ✘  ✔  ✘  ✔  ✘  ✘  ✘  ✘
 
 resource: SiloGroup "silo1-group"
 
@@ -341,7 +356,7 @@ resource: SiloGroup "silo1-group"
   silo1-proj1-collaborator         ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-viewer               ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
-  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  scim                             ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
 
 resource: SiloImage "silo1-silo-image"
 
@@ -944,6 +959,21 @@ resource: SamlIdentityProvider "silo2-saml-identity-provider"
   scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
 resource: Silo "silo2": user list
+
+  USER                             Q  R LC RP  M MP CC  D
+  fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  fleet-collaborator               ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                     ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                     ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator         ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                  !  !  !  !  !  !  !  !
+  scim                             ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: Silo "silo2": group list
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘

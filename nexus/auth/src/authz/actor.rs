@@ -134,6 +134,18 @@ impl oso::PolarClass for AuthenticatedActor {
                     authn::Actor::Scim { .. } => false,
                 }
             })
+            // Like the "is_user" guard above but reversed, this guard is used
+            // in the Polar file to grant permissions to a SCIM IdP actor
+            // without the need for a role.
+            .add_attribute_getter("is_scim_idp", |a: &AuthenticatedActor| {
+                match a.actor {
+                    authn::Actor::SiloUser { .. } => false,
+
+                    authn::Actor::UserBuiltin { .. } => false,
+
+                    authn::Actor::Scim { .. } => true,
+                }
+            })
             .add_attribute_getter("silo", |a: &AuthenticatedActor| {
                 match a.actor {
                     authn::Actor::SiloUser { silo_id, .. }

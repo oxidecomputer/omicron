@@ -3,7 +3,7 @@
 #
 # The required version should be bumped up if we need new features, performance
 # improvements or bugfixes that are present in newer versions of nextest.
-nextest-version = { required = "0.9.98", recommended = "0.9.108" }
+nextest-version = { required = "0.9.98", recommended = "0.9.110" }
 
 experimental = ["setup-scripts"]
 
