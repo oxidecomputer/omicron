@@ -38,6 +38,22 @@ impl PersistentStateLedger {
     /// number.
     ///
     /// Panics if the ledger cannot be saved.
+    ///
+    ///   The trust quorum protocol relies on persisting state to disk, such
+    ///   as whether a node has prepared or committed a configuration, before
+    ///   responding to a coordinator node or Nexus. This is necessary in order
+    ///   to ensure that enough nodes actually have performed an operation and
+    ///   not have the overall state of the protocol go backward in the case of
+    ///   a crash and restart of a node. In this manner, trust quorum is similar
+    ///   to consensus protocols like Raft and Paxos.
+    ///
+    ///   If for any reason we cannot persist trust quorum state to the ledger,
+    ///   we must panic to ensure that the node does not take any further
+    ///   action incorrectly, like acknowledging a `Prepare` to a coordinator.
+    ///   Panicking is the simplest mechanism to ensure that a given node will
+    ///   not violate the invariants of the trust quorum protocol in the case
+    ///   of internal disk failures. It also ensures a very obvious failure that
+    ///   will allow support to get involved and replace internal disks.
     pub async fn save(
         log: &Logger,
         paths: Vec<Utf8PathBuf>,
