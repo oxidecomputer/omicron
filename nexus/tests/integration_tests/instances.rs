@@ -97,10 +97,10 @@ use dropshot::{HttpErrorResponseBody, ResultsPage};
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
     create_instance, create_instance_with, create_instance_with_error,
-    create_project,
+    create_project, create_vpc, create_vpc_subnet,
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::shared::SiloRole;
+use nexus_types::external_api::shared::{ProjectRole, SiloRole};
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::poll::CondCheckError;
 
@@ -7506,6 +7506,344 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("Failed to delete the instance");
+}
+
+/// Test that limited-collaborators cannot create instances with NICs
+/// referencing subnets in a different project (where they don't have access).
+/// This validates cross-project isolation and protects against regressions.
+#[nexus_test]
+async fn test_instance_create_with_cross_project_subnet(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Setup: Create IP pool and two projects
+    create_default_ip_pool(client).await;
+    let project_a_name = "project-a";
+    let project_b_name = "project-b";
+    create_project(&client, project_a_name).await;
+    create_project(&client, project_b_name).await;
+
+    // Create VPC and subnet in project A
+    let vpc_a_name = "vpc-a";
+    let subnet_a_name = "subnet-a";
+    create_vpc(&client, project_a_name, vpc_a_name).await;
+    create_vpc_subnet(
+        &client,
+        project_a_name,
+        vpc_a_name,
+        subnet_a_name,
+        "10.1.0.0/24".parse().unwrap(),
+        None,
+        None,
+    )
+    .await;
+
+    // Create VPC and subnet in project B
+    let vpc_b_name = "vpc-b";
+    let subnet_b_name = "subnet-b";
+    create_vpc(&client, project_b_name, vpc_b_name).await;
+    create_vpc_subnet(
+        &client,
+        project_b_name,
+        vpc_b_name,
+        subnet_b_name,
+        "10.2.0.0/24".parse().unwrap(),
+        None,
+        None,
+    )
+    .await;
+
+    // Get the default silo
+    let silo: views::Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Create a limited collaborator who only has access to Project A
+    let limited_user = create_local_user(
+        client,
+        &silo,
+        &"limited-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // Grant limited collaborator role on Project A only
+    let project_a_url = format!("/v1/projects/{}", project_a_name);
+    grant_iam(
+        client,
+        &project_a_url,
+        ProjectRole::LimitedCollaborator,
+        limited_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Test: Limited collaborator CANNOT create an instance in project A
+    // with a NIC that references a subnet from project B (where they have no access)
+    let if0_params = params::InstanceNetworkInterfaceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("cross-project-nic")).unwrap(),
+            description: String::from(
+                "NIC attempting to use project B's subnet",
+            ),
+        },
+        vpc_name: vpc_b_name.parse().unwrap(),
+        subnet_name: subnet_b_name.parse().unwrap(),
+        ip: None,
+        transit_ips: vec![],
+    };
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("cross-project-instance"))
+                .unwrap(),
+            description: String::from(
+                "instance with cross-project subnet reference",
+            ),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "inst-cross".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Create(
+            vec![if0_params],
+        ),
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: false,
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+    };
+
+    let instances_url_a = format!("/v1/instances?project={}", project_a_name);
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instances_url_a)
+            .body(Some(&instance_params))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+
+    // Should get 404 Not Found because the limited user can't see project B's
+    // VPC/subnet
+    assert!(
+        error.message.contains("not found") || error.message.contains("vpc"),
+        "Expected 'not found' error, got: {}",
+        error.message
+    );
+}
+
+/// Test that silo-level limited-collaborators (who have access to all projects
+/// in a silo) can create instances with NICs in their own project using that
+/// project's subnets, but CANNOT create NICs that reference subnets from a
+/// different project. This validates that project networking boundaries are
+/// enforced even when users have access to multiple projects.
+#[nexus_test]
+async fn test_silo_limited_collaborator_cross_project_subnet(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Setup: Create IP pool and two projects
+    create_default_ip_pool(client).await;
+    let project_a_name = "project-a";
+    let project_b_name = "project-b";
+    create_project(&client, project_a_name).await;
+    create_project(&client, project_b_name).await;
+
+    // Create VPC and subnet in project A
+    let vpc_a_name = "vpc-a";
+    let subnet_a_name = "subnet-a";
+    create_vpc(&client, project_a_name, vpc_a_name).await;
+    create_vpc_subnet(
+        &client,
+        project_a_name,
+        vpc_a_name,
+        subnet_a_name,
+        "10.1.0.0/24".parse().unwrap(),
+        None,
+        None,
+    )
+    .await;
+
+    // Create VPC and subnet in project B
+    let vpc_b_name = "vpc-b";
+    let subnet_b_name = "subnet-b";
+    create_vpc(&client, project_b_name, vpc_b_name).await;
+    create_vpc_subnet(
+        &client,
+        project_b_name,
+        vpc_b_name,
+        subnet_b_name,
+        "10.2.0.0/24".parse().unwrap(),
+        None,
+        None,
+    )
+    .await;
+
+    // Get the default silo
+    let silo: views::Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Create a silo-level limited collaborator (has access to all projects)
+    let limited_user = create_local_user(
+        client,
+        &silo,
+        &"silo-limited-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // Grant silo-level limited collaborator role (inherits to all projects)
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::LimitedCollaborator,
+        limited_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Test 1: Silo limited collaborator CAN create an instance in project A
+    // with a NIC using project A's own subnet (success case)
+    let if_same_project = params::InstanceNetworkInterfaceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("nic-a")).unwrap(),
+            description: String::from("NIC using same project's subnet"),
+        },
+        vpc_name: vpc_a_name.parse().unwrap(),
+        subnet_name: subnet_a_name.parse().unwrap(),
+        ip: None,
+        transit_ips: vec![],
+    };
+
+    let instance_same_project = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("instance-same-project"))
+                .unwrap(),
+            description: String::from("instance with same-project subnet"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "inst-same".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Create(
+            vec![if_same_project],
+        ),
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: false,
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+    };
+
+    let instances_url_a = format!("/v1/instances?project={}", project_a_name);
+    let instance: Instance = NexusRequest::objects_post(
+        client,
+        &instances_url_a,
+        &instance_same_project,
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("silo limited collaborator should be able to create instance with same-project subnet")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(instance.identity.name, "instance-same-project");
+
+    // Clean up before next test
+    let instance_url = format!(
+        "/v1/instances/instance-same-project?project={}",
+        project_a_name
+    );
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::SiloUser(limited_user.id))
+        .execute()
+        .await
+        .expect("Failed to delete instance");
+
+    // Test 2: Silo limited collaborator CANNOT create an instance in project A
+    // with a NIC that references a subnet from project B (failure case)
+    let if_cross_project = params::InstanceNetworkInterfaceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("cross-project-nic")).unwrap(),
+            description: String::from(
+                "NIC attempting to use different project's subnet",
+            ),
+        },
+        vpc_name: vpc_b_name.parse().unwrap(),
+        subnet_name: subnet_b_name.parse().unwrap(),
+        ip: None,
+        transit_ips: vec![],
+    };
+
+    let instance_cross_project = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: Name::try_from(String::from("instance-cross-project"))
+                .unwrap(),
+            description: String::from(
+                "instance with cross-project subnet reference",
+            ),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "inst-cross".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Create(
+            vec![if_cross_project],
+        ),
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        cpu_platform: None,
+        start: false,
+        auto_restart_policy: None,
+        anti_affinity_groups: Vec::new(),
+    };
+
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &instances_url_a)
+            .body(Some(&instance_cross_project))
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+
+    // Should get 404 Not Found because VPC/subnet lookups are scoped to the
+    // project context (project A), and project B's VPC/subnet aren't visible
+    // in that context
+    assert!(
+        error.message.contains("not found") || error.message.contains("vpc"),
+        "Expected 'not found' error, got: {}",
+        error.message
+    );
 }
 
 /// Test that appropriate OPTE V2P mappings are created and deleted.
