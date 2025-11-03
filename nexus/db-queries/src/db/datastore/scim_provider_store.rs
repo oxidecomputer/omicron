@@ -815,7 +815,7 @@ impl<'a> CrdbScimProviderStore<'a> {
                 .await?;
 
             if let Some(admin_group_name) = silo.admin_group_name {
-                if admin_group_name == display_name {
+                if admin_group_name.eq_ignore_ascii_case(&display_name) {
                     // XXX code copied from silo create
 
                     use nexus_db_schema::schema::role_assignment::dsl;
@@ -1086,8 +1086,14 @@ impl<'a> CrdbScimProviderStore<'a> {
 
                 // Did the group's name match the admin group name, and was it
                 // changed?
-                if existing_group.display_name == admin_group_name {
-                    if group.display_name != admin_group_name {
+                if existing_group
+                    .display_name
+                    .eq_ignore_ascii_case(&admin_group_name)
+                {
+                    if !group
+                        .display_name
+                        .eq_ignore_ascii_case(&admin_group_name)
+                    {
                         // Scan for the matching role assignment, and delete
                         // that.
 
@@ -1113,7 +1119,10 @@ impl<'a> CrdbScimProviderStore<'a> {
                     }
                 } else {
                     // Did the group's name change _to_ the admin group name?
-                    if group.display_name == admin_group_name {
+                    if group
+                        .display_name
+                        .eq_ignore_ascii_case(&admin_group_name)
+                    {
                         // If so, insert a new assignment.
 
                         let new_assignment = model::RoleAssignment::new(
