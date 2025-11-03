@@ -597,7 +597,9 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("limited collaborator should not be able to create internet gateway");
+    .expect(
+        "limited collaborator should not be able to create internet gateway",
+    );
 
     // Setup for remaining tests: Create IGW and router as privileged user
     let igw_name = "test-gateway";
@@ -708,7 +710,9 @@ async fn test_limited_collaborator_blocked_from_networking_resources(
     .authn_as(AuthnMode::SiloUser(limited_user.id))
     .execute()
     .await
-    .expect("limited collaborator should not be able to modify VPC firewall rules");
+    .expect(
+        "limited collaborator should not be able to modify VPC firewall rules",
+    );
 }
 
 #[nexus_test]
