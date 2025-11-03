@@ -48,6 +48,8 @@ dropshot.workspace = true
 omicron-test-utils.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
+sled-hardware-types.workspace = true
 test-strategy.workspace = true
+trust-quorum-protocol = { workspace = true, features = ["testing"] }
 trust-quorum-test-utils.workspace = true
 sprockets-tls-test-utils.workspace = true

@@ -37,13 +37,14 @@ pub use coordinator_state::{
 };
 pub use rack_secret_loader::{LoadRackSecretError, RackSecretLoaderDiff};
 pub use validators::{
-    ValidatedLrtqUpgradeMsgDiff, ValidatedReconfigureMsgDiff,
+    LrtqUpgradeError, ReconfigurationError, ValidatedLrtqUpgradeMsgDiff,
+    ValidatedReconfigureMsgDiff,
 };
 
 pub use alarm::Alarm;
-pub use crypto::RackSecret;
+pub use crypto::{RackSecret, ReconstructedRackSecret};
 pub use messages::*;
-pub use node::{Node, NodeDiff};
+pub use node::{CommitError, Node, NodeDiff, PrepareAndCommitError};
 // public only for docs.
 pub use node_ctx::NodeHandlerCtx;
 pub use node_ctx::{NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff};
