@@ -259,6 +259,7 @@ async fn make_silo(
     ));
 
     builder.new_resource(authz::SiloUserList::new(silo.clone()));
+    builder.new_resource(authz::SiloGroupList::new(silo.clone()));
     let silo_user_id = SiloUserUuid::new_v4();
     let silo_user = authz::SiloUser::new(
         silo.clone(),

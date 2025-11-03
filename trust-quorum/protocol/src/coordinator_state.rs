@@ -236,6 +236,10 @@ impl CoordinatorState {
         &self.op
     }
 
+    pub fn config(&self) -> &Configuration {
+        &self.configuration
+    }
+
     /// Send any required messages as a reconfiguration coordinator
     ///
     /// This varies depending upon the current `CoordinatorState`.

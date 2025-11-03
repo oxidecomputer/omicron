@@ -770,6 +770,55 @@ impl AuthorizedResource for SiloUserList {
     }
 }
 
+/// Synthetic resource describing the list of Groups in a Silo
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloGroupList(Silo);
+
+impl SiloGroupList {
+    pub fn new(silo: Silo) -> Self {
+        SiloGroupList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for SiloGroupList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &SiloGroupList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for SiloGroupList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Note the session list and the token list have exactly the same behavior
 
 /// Synthetic resource for managing a user's sessions

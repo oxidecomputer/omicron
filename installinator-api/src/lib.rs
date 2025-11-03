@@ -14,12 +14,19 @@ use dropshot::{
     HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
     RequestContext, TypedBody,
 };
+use dropshot_api_manager_types::api_versions;
 use hyper::header;
 use omicron_uuid_kinds::MupdateUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tufaceous_artifact::ArtifactHashId;
 use update_engine::{NestedSpec, events::EventReport};
+
+api_versions!([
+    // Do not create new versions of this client-side versioned API.
+    // https://github.com/oxidecomputer/omicron/issues/9290
+    (1, INITIAL),
+]);
 
 const PROGRESS_REPORT_MAX_BYTES: usize = 4 * 1024 * 1024;
 
