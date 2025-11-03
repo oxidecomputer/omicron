@@ -1,1 +1,0 @@
-DROP INDEX IF EXISTS lookup_silo_user_by_silo_and_user_name
