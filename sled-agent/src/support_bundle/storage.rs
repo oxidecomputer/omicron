@@ -14,6 +14,8 @@ use dropshot::HttpError;
 use futures::Stream;
 use futures::StreamExt;
 use illumos_utils::zfs::DatasetProperties;
+use illumos_utils::zfs::DestroyDatasetError;
+use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
@@ -98,6 +100,9 @@ pub enum Error {
     #[error("Could not access ledgered sled config")]
     LedgeredSledConfig(#[source] InventoryError),
 
+    #[error("root dataset {dataset_id} not found on pool {zpool_id}")]
+    NestedDatasetRootMissing { zpool_id: ZpoolUuid, dataset_id: DatasetUuid },
+
     #[error(transparent)]
     NestedDatasetMountError(#[from] NestedDatasetMountError),
 
@@ -125,6 +130,22 @@ impl From<Error> for HttpError {
             Error::DatasetNotFound => {
                 HttpError::for_not_found(None, "Dataset not found".to_string())
             }
+            Error::NestedDatasetRootMissing { .. } => {
+                // Note that although this could be interpreted as "not found",
+                // we're explicitly treating it differently to help
+                // callers distinguish between "root dataset not found" vs
+                // "nested dataset not found".
+                HttpError::for_internal_error(err.to_string())
+            }
+            Error::NestedDatasetDestroyError(
+                NestedDatasetDestroyError::DestroyFailed(DestroyDatasetError {
+                    err: DestroyDatasetErrorVariant::NotFound,
+                    ..
+                }),
+            ) => HttpError::for_not_found(
+                None,
+                "Nested dataset not found".to_string(),
+            ),
             Error::NotAFile => {
                 HttpError::for_bad_request(None, "Not a file".to_string())
             }
@@ -867,8 +888,36 @@ impl<'a> SupportBundleManager<'a> {
             "bundle_id" => support_bundle_id.to_string(),
         ));
         info!(log, "Destroying support bundle");
-        let root =
-            self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
+
+        // Access the root dataset within which support bundles are stored. If
+        // this returns a "not found" error because e.g. the disk is temporarily
+        // unavailable, this is propagated back to the caller as an error.
+        let root = self
+            .get_mounted_dataset_config(zpool_id, dataset_id)
+            .await
+            .map_err(|err| {
+                // It's important that we distinguish between:
+                //
+                // "404: The bundle was already deleted"
+                // and
+                // "404: The disk on which the bundle should be stored was not
+                // found"
+                //
+                // To cope: We avoid using a 404 for the latter case -- missing
+                // dataset roots are treated as internal errors, which are
+                // interpreted by Nexus as "the bundle was not necessarily
+                // deleted".
+                let http_error = HttpError::from(err);
+                if http_error.status_code == http::StatusCode::NOT_FOUND {
+                    Error::NestedDatasetRootMissing { zpool_id, dataset_id }
+                } else {
+                    Error::HttpError(http_error)
+                }
+            })?
+            .name;
+
+        // If we get a "not found" error destroying this dataset, it may have
+        // already been deleted.
         self.storage
             .dyn_nested_dataset_destroy(NestedDatasetLocation {
                 path: support_bundle_id.to_string(),
