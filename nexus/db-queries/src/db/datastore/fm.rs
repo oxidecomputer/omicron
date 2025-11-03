@@ -197,6 +197,17 @@ impl DataStore {
             .map(|_| ())
     }
 
+    /// Lists all orphaned alternative sitreps for the provided
+    /// [`fm::SitrepVersion`].
+    ///
+    /// Orphaned sitreps at a given version are those which descend from the
+    /// same parent sitrep as the current sitrep at that version, but which were
+    /// not committed successfully to the sitrep history.
+    ///
+    /// Note that this operation is only performed relative to a committed
+    /// sitrep version. This is in order to prevent the returned list of sitreps
+    /// from including sitreps which are in the process of being prepared, by
+    /// only performing it on versions earlier than the current version.
     pub async fn fm_sitrep_list_orphaned(
         &self,
         opctx: &OpContext,
@@ -566,9 +577,11 @@ mod tests {
     use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
     use chrono::Utc;
+    use nexus_types::fm;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use std::collections::BTreeSet;
 
     #[tokio::test]
     async fn explain_insert_sitrep_version_query() {
@@ -833,5 +846,144 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_sitrep_list_orphaned() {
+        let logctx = dev::test_setup_log("test_sitrep_list_orphaned");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // First, insert an initial sitrep. This should succeed.
+        let sitrep1 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep v1".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+        };
+        datastore
+            .fm_sitrep_insert(&opctx, &sitrep1)
+            .await
+            .expect("inserting initial sitrep should succeed");
+
+        // Now, create some orphaned sitreps which also have no parent.
+        let mut orphans_v1 = BTreeSet::new();
+        for i in 1..5 {
+            insert_orphan(&datastore, &opctx, &mut orphans_v1, None, 1, i)
+                .await;
+        }
+
+        // List orphans at the current version.
+        let v1 = datastore
+            .fm_current_sitrep_version(&opctx)
+            .await
+            .unwrap()
+            .expect("should have a version");
+        assert_eq!(dbg!(&v1).id, sitrep1.metadata.id);
+        let listed_orphans = datastore
+            .fm_sitrep_list_orphaned(&opctx, &v1)
+            .await
+            .expect("listing orphans should succeed")
+            .iter()
+            .map(|sitrep| sitrep.id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(dbg!(&listed_orphans), &orphans_v1);
+
+        // Next, create a new sitrep which descends from sitrep 0.
+        let sitrep2 = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "test sitrep v2".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: Some(sitrep1.metadata.id),
+            },
+        };
+        datastore
+            .fm_sitrep_insert(&opctx, &sitrep2)
+            .await
+            .expect("inserting child sitrep should succeed");
+
+        // Now, create some orphaned sitreps which also descend from sitreo 0.
+        let mut orphans_v2 = BTreeSet::new();
+        for i in 1..5 {
+            insert_orphan(
+                &datastore,
+                &opctx,
+                &mut orphans_v2,
+                Some(sitrep1.metadata.id),
+                2,
+                i,
+            )
+            .await;
+        }
+
+        // List orphans at the current version.
+        let v2 = datastore
+            .fm_current_sitrep_version(&opctx)
+            .await
+            .unwrap()
+            .expect("should have a version");
+        assert_eq!(dbg!(&v2).id, sitrep2.metadata.id);
+        let listed_orphans_v2 = datastore
+            .fm_sitrep_list_orphaned(&opctx, &v2)
+            .await
+            .expect("listing orphans at v2 should succeed")
+            .iter()
+            .map(|sitrep| sitrep.id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(dbg!(&listed_orphans_v2), &orphans_v2);
+        // Orphans at the prior version should also be listable, and it should
+        // not include the committed sitrep at that version.
+        let listed_orphans_v1 = datastore
+            .fm_sitrep_list_orphaned(&opctx, &v1)
+            .await
+            .expect("listing orphans at v1 should succeed")
+            .iter()
+            .map(|sitrep| sitrep.id)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(dbg!(&listed_orphans_v1), &orphans_v1);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    async fn insert_orphan(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        orphans: &mut BTreeSet<SitrepUuid>,
+        parent_sitrep_id: Option<SitrepUuid>,
+        v: usize,
+        i: usize,
+    ) {
+        let sitrep = fm::Sitrep {
+            metadata: fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: format!("test sitrep v{i}; orphan {i}"),
+                time_created: Utc::now(),
+                parent_sitrep_id,
+            },
+        };
+        match datastore.fm_sitrep_insert(&opctx, &sitrep).await {
+            Ok(_) => {
+                panic!("inserting sitrep v{v} orphan {i} should not succeed")
+            }
+            Err(InsertSitrepError::ParentNotCurrent(id)) => {
+                orphans.insert(id);
+            }
+            Err(InsertSitrepError::Other(e)) => {
+                panic!(
+                    "expected inserting sitrep v{v} orphan {i} to fail because \
+                     its parent is out of date, but saw an unexpected error: {e}"
+                );
+            }
+        }
     }
 }
