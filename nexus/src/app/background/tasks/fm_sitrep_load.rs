@@ -124,6 +124,20 @@ impl SitrepLoader {
                 debug!(log, "current sitrep has not changed");
                 return Status::Loaded { version, time_loaded };
             }
+            Some(old) if current_version.version < old.version => {
+                warn!(
+                    log,
+                    "current sitrep version v{} is less than the previously \
+                     loaded version v{}; ignoring it",
+                    current_version.version,
+                    old.version,
+                );
+                return Status::Error(format!(
+                    "current sitrep version v{} is less than the previously \
+                     loaded version v{}; ignoring it",
+                    current_version.version, old.version,
+                ));
+            }
             Some(SitrepVersion { version, id, .. })
                 if version == current_version.version
                     && id != current_version.id =>
