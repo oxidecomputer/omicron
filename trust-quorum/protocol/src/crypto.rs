@@ -130,7 +130,7 @@ impl Clone for ReconstructedRackSecret {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl PartialEq for ReconstructedRackSecret {
     fn eq(&self, other: &Self) -> bool {
         self.expose_secret().ct_eq(other.expose_secret()).into()

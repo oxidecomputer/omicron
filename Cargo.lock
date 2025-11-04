@@ -537,6 +537,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "attest-data"
+version = "0.5.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
+dependencies = [
+ "const-oid",
+ "der",
+ "getrandom 0.3.4",
+ "hex",
+ "hubpack",
+ "rats-corim",
+ "salty",
+ "serde",
+ "serde_with",
+ "sha3",
+ "static_assertions",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "attest-mock"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=10952e8d9599b735b85d480af3560a11700e5b64#10952e8d9599b735b85d480af3560a11700e5b64"
+dependencies = [
+ "anyhow",
+ "attest-data 0.5.0",
+ "clap",
+ "hex",
+ "hubpack",
+ "knuffel",
+ "miette",
+ "rats-corim",
+ "serde_json",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -622,6 +657,15 @@ dependencies = [
  "object 0.36.5",
  "rustc-demangle",
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "backtrace-ext"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "537beee3be4a18fb023b570f80e3ae28003db9167a751266b259926e25539d50"
+dependencies = [
+ "backtrace",
 ]
 
 [[package]]
@@ -715,7 +759,7 @@ dependencies = [
  "bitflags 2.9.4",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -1345,6 +1389,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "chumsky"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eebd66744a15ded14960ab4ccdbfb51ad3b81f51f3f04a80adac98c985396c9"
+dependencies = [
+ "hashbrown 0.14.5",
+]
+
+[[package]]
 name = "ciborium"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1413,7 +1466,7 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim",
- "terminal_size",
+ "terminal_size 0.4.0",
 ]
 
 [[package]]
@@ -2643,7 +2696,7 @@ name = "dice-verifier"
 version = "0.3.0-pre0"
 source = "git+https://github.com/oxidecomputer/dice-util?rev=4b408edc1d00f108ddf635415d783e6f12fe9641#4b408edc1d00f108ddf635415d783e6f12fe9641"
 dependencies = [
- "attest-data",
+ "attest-data 0.4.0",
  "const-oid",
  "ed25519-dalek",
  "env_logger",
@@ -3037,14 +3090,14 @@ dependencies = [
  "indent_write",
  "newtype_derive",
  "openapiv3",
- "owo-colors",
+ "owo-colors 4.2.2",
  "paste",
  "semver 1.0.27",
  "serde_json",
  "sha2",
  "similar",
- "supports-color",
- "textwrap",
+ "supports-color 3.0.2",
+ "textwrap 0.16.2",
  "thiserror 2.0.17",
 ]
 
@@ -4212,6 +4265,16 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
+dependencies = [
+ "ahash",
+ "allocator-api2",
+]
+
+[[package]]
+name = "hashbrown"
 version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5971ac85611da7067dbfcabef3c70ebb5606018acd9e2a3903a0da507521e0d5"
@@ -4291,6 +4354,9 @@ name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
+dependencies = [
+ "unicode-segmentation",
+]
 
 [[package]]
 name = "heck"
@@ -5620,6 +5686,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "knuffel"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04bee6ddc6071011314b1ce4f7705fef6c009401dba4fd22cb0009db6a177413"
+dependencies = [
+ "base64 0.21.7",
+ "chumsky",
+ "knuffel-derive",
+ "miette",
+ "thiserror 1.0.69",
+ "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "knuffel-derive"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91977f56c49cfb961e3d840e2e7c6e4a56bde7283898cf606861f1421348283d"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "kstat-macro"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/opte?rev=795a1e0aeefb7a2c6fe4139779fdf66930d09b80#795a1e0aeefb7a2c6fe4139779fdf66930d09b80"
@@ -6233,6 +6326,38 @@ dependencies = [
  "oxide-tokio-rt",
  "signal-hook-tokio",
  "tokio",
+]
+
+[[package]]
+name = "miette"
+version = "5.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59bb584eaeeab6bd0226ccf3509a69d7936d148cf3d036ad350abe35e8c6856e"
+dependencies = [
+ "backtrace",
+ "backtrace-ext",
+ "is-terminal",
+ "miette-derive",
+ "once_cell",
+ "owo-colors 3.5.0",
+ "supports-color 2.1.0",
+ "supports-hyperlinks",
+ "supports-unicode",
+ "terminal_size 0.1.17",
+ "textwrap 0.15.2",
+ "thiserror 1.0.69",
+ "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "miette-derive"
+version = "5.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49e7bc1560b95a3c4a25d03de42fe76ca718ab92d1a22a55b9b4cf67b3ae635c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -7371,7 +7496,7 @@ dependencies = [
  "swrite",
  "tabled 0.15.0",
  "test-strategy",
- "textwrap",
+ "textwrap 0.16.2",
  "thiserror 2.0.17",
  "tokio",
  "tough",
@@ -8078,7 +8203,7 @@ dependencies = [
  "serde",
  "slog",
  "slog-error-chain",
- "textwrap",
+ "textwrap 0.16.2",
  "tokio",
  "uuid",
 ]
@@ -8236,6 +8361,7 @@ dependencies = [
  "samael",
  "schemars 0.8.22",
  "scim2-rs",
+ "scim2-test-client",
  "semver 1.0.27",
  "serde",
  "serde_json",
@@ -8369,7 +8495,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "owo-colors",
+ "owo-colors 4.2.2",
  "oxide-tokio-rt",
  "oximeter-client",
  "oximeter-db",
@@ -8389,9 +8515,9 @@ dependencies = [
  "strum 0.27.2",
  "subprocess",
  "support-bundle-viewer",
- "supports-color",
+ "supports-color 3.0.2",
  "tabled 0.15.0",
- "textwrap",
+ "textwrap 0.16.2",
  "tokio",
  "tufaceous-artifact",
  "unicode-width 0.1.14",
@@ -8496,7 +8622,7 @@ dependencies = [
  "repo-depot-client",
  "serde_json",
  "slog",
- "supports-color",
+ "supports-color 3.0.2",
  "tokio",
  "update-engine",
  "uuid",
@@ -8782,6 +8908,7 @@ dependencies = [
  "clang-sys",
  "clap",
  "clap_builder",
+ "const-oid",
  "cookie",
  "crossbeam-epoch",
  "crossbeam-utils",
@@ -8790,6 +8917,7 @@ dependencies = [
  "curve25519-dalek",
  "daft",
  "data-encoding",
+ "der",
  "digest",
  "dof 0.3.0",
  "dof 0.4.0",
@@ -8815,6 +8943,7 @@ dependencies = [
  "getrandom 0.3.4",
  "group",
  "hashbrown 0.16.0",
+ "heck 0.4.1",
  "hickory-proto 0.25.2",
  "hmac",
  "hyper",
@@ -8827,7 +8956,6 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.10.5",
- "itertools 0.12.1",
  "itertools 0.13.0",
  "lalrpop-util",
  "lazy_static",
@@ -8836,6 +8964,7 @@ dependencies = [
  "log",
  "managed",
  "memchr",
+ "miniz_oxide",
  "mio",
  "newtype-uuid",
  "nix 0.29.0",
@@ -9127,6 +9256,12 @@ name = "overload"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
+
+[[package]]
+name = "owo-colors"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 
 [[package]]
 name = "owo-colors"
@@ -10140,6 +10275,36 @@ name = "pkg-config"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "953ec861398dccce10c670dfeaf3ec4911ca479e9c02154b3a215178c5f566f2"
+
+[[package]]
+name = "pki-playground"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/pki-playground?rev=7600756029ce046a02c6234aa84ce230cc5eaa04#7600756029ce046a02c6234aa84ce230cc5eaa04"
+dependencies = [
+ "camino",
+ "clap",
+ "const-oid",
+ "der",
+ "digest",
+ "ed25519-dalek",
+ "flagset",
+ "hex",
+ "ipnet",
+ "knuffel",
+ "miette",
+ "p384",
+ "pem-rfc7468",
+ "pkcs8",
+ "rand 0.8.5",
+ "rsa",
+ "sha1",
+ "sha2",
+ "sha3",
+ "signature",
+ "spki",
+ "x509-cert",
+ "zeroize",
+]
 
 [[package]]
 name = "plain"
@@ -11374,9 +11539,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.12.22"
+version = "0.12.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbc931937e6ca3a06e3b6c0aa7841849b160a90351d6ab467a8b9b9959767531"
+checksum = "9d0946410b9f7b082a427e4ef5c8ff541a88b357bc6c637c40db3a68ac70a36f"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -11492,9 +11657,9 @@ dependencies = [
 
 [[package]]
 name = "rsa"
-version = "0.9.6"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d0e5124fcb30e76a7e79bfee683a2746db83784b86289f6251b54b7950a0dfc"
+checksum = "78928ac1ed176a5ca1d17e578a1825f3d81ca54cf41053a592584b020cfd691b"
 dependencies = [
  "const-oid",
  "digest",
@@ -12022,10 +12187,9 @@ dependencies = [
 [[package]]
 name = "scim2-rs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/scim2-rs#dbe1cb7e42f7322f5cd532015e7ab430d04113b7"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=c78005db837a71f94c3b8efac9a64cfbdb2d527f#c78005db837a71f94c3b8efac9a64cfbdb2d527f"
 dependencies = [
  "anyhow",
- "async-trait",
  "chrono",
  "dropshot",
  "http",
@@ -12034,6 +12198,23 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "trait-variant",
+ "unicase",
+ "uuid",
+]
+
+[[package]]
+name = "scim2-test-client"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/scim2-rs?rev=c78005db837a71f94c3b8efac9a64cfbdb2d527f#c78005db837a71f94c3b8efac9a64cfbdb2d527f"
+dependencies = [
+ "anyhow",
+ "clap",
+ "reqwest",
+ "scim2-rs",
+ "serde",
+ "serde_json",
+ "tokio",
  "unicase",
  "uuid",
 ]
@@ -13203,10 +13384,10 @@ dependencies = [
 [[package]]
 name = "sprockets-tls"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/sprockets.git?rev=7da1f0b5dcd3d631da18b43ba78a84b1a2b425ee#7da1f0b5dcd3d631da18b43ba78a84b1a2b425ee"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210#dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210"
 dependencies = [
  "anyhow",
- "attest-data",
+ "attest-data 0.4.0",
  "camino",
  "cfg-if",
  "clap",
@@ -13231,6 +13412,15 @@ dependencies = [
  "toml 0.8.23",
  "x509-cert",
  "zeroize",
+]
+
+[[package]]
+name = "sprockets-tls-test-utils"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210#dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210"
+dependencies = [
+ "camino",
+ "pki-playground",
 ]
 
 [[package]]
@@ -13507,11 +13697,39 @@ dependencies = [
 
 [[package]]
 name = "supports-color"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6398cde53adc3c4557306a96ce67b302968513830a77a95b2b17305d9719a89"
+dependencies = [
+ "is-terminal",
+ "is_ci",
+]
+
+[[package]]
+name = "supports-color"
 version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c64fc7232dd8d2e4ac5ce4ef302b1d81e0b80d055b9d77c7c4f51f6aa4c867d6"
 dependencies = [
  "is_ci",
+]
+
+[[package]]
+name = "supports-hyperlinks"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f84231692eb0d4d41e4cdd0cabfdd2e6cd9e255e65f80c9aa7c98dd502b4233d"
+dependencies = [
+ "is-terminal",
+]
+
+[[package]]
+name = "supports-unicode"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f850c19edd184a205e883199a261ed44471c81e39bd95b1357f5febbef00e77a"
+dependencies = [
+ "is-terminal",
 ]
 
 [[package]]
@@ -13765,6 +13983,16 @@ dependencies = [
 
 [[package]]
 name = "terminal_size"
+version = "0.1.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "633c1a546cee861a1a6d0dc69ebeca693bf4296661ba7852b9d21d159e0506df"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
+name = "terminal_size"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f599bd7ca042cfdf8f4512b277c02ba102247820f9d9d4a9f521f496751a6ef"
@@ -13812,12 +14040,23 @@ dependencies = [
 
 [[package]]
 name = "textwrap"
+version = "0.15.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7b3e525a49ec206798b40326a44121291b530c963cfb01018f63e135bac543d"
+dependencies = [
+ "smawk",
+ "unicode-linebreak",
+ "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "textwrap"
 version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c13547615a44dc9c452a8a534638acdf07120d4b6847c8178705da06306a3057"
 dependencies = [
  "smawk",
- "terminal_size",
+ "terminal_size 0.4.0",
  "unicode-linebreak",
  "unicode-width 0.2.0",
 ]
@@ -14420,7 +14659,7 @@ dependencies = [
  "serde_json",
  "slog",
  "tabled 0.15.0",
- "trust-quorum",
+ "trust-quorum-protocol",
  "trust-quorum-test-utils",
 ]
 
@@ -14484,6 +14723,17 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "trait-variant"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "70977707304198400eb4835a78f6a9f928bf41bba420deb8fdb175cd965d77a7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.106",
 ]
 
 [[package]]
@@ -14590,10 +14840,59 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
- "bcs",
+ "attest-mock",
  "bootstore",
+ "bytes",
  "camino",
  "chacha20poly1305",
+ "ciborium",
+ "daft",
+ "derive_more 0.99.20",
+ "dropshot",
+ "futures",
+ "gfss",
+ "hex",
+ "hkdf",
+ "iddqd",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "proptest",
+ "rand 0.9.2",
+ "secrecy 0.10.3",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "sha3",
+ "sled-agent-types",
+ "sled-hardware-types",
+ "slog",
+ "slog-error-chain",
+ "sprockets-tls",
+ "sprockets-tls-test-utils",
+ "static_assertions",
+ "subtle",
+ "test-strategy",
+ "thiserror 2.0.17",
+ "tokio",
+ "trust-quorum-protocol",
+ "trust-quorum-test-utils",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "trust-quorum-protocol"
+version = "0.1.0"
+dependencies = [
+ "assert_matches",
+ "attest-mock",
+ "bootstore",
+ "bytes",
+ "camino",
+ "chacha20poly1305",
+ "ciborium",
  "daft",
  "derive_more 0.99.20",
  "dropshot",
@@ -14618,7 +14917,6 @@ dependencies = [
  "subtle",
  "test-strategy",
  "thiserror 2.0.17",
- "tokio",
  "trust-quorum-test-utils",
  "uuid",
  "zeroize",
@@ -14641,7 +14939,7 @@ dependencies = [
  "serde_json",
  "sled-hardware-types",
  "slog",
- "trust-quorum",
+ "trust-quorum-protocol",
 ]
 
 [[package]]
@@ -15123,14 +15421,14 @@ dependencies = [
  "linear-map",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "owo-colors",
+ "owo-colors 4.2.2",
  "petgraph 0.8.2",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "serde_with",
  "slog",
- "supports-color",
+ "supports-color 3.0.2",
  "swrite",
  "tokio",
  "tokio-stream",
@@ -15660,7 +15958,7 @@ dependencies = [
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
- "owo-colors",
+ "owo-colors 4.2.2",
  "proptest",
  "ratatui",
  "reqwest",
@@ -15674,9 +15972,9 @@ dependencies = [
  "slog-async",
  "slog-envlogger",
  "slog-term",
- "supports-color",
+ "supports-color 3.0.2",
  "tempfile",
- "textwrap",
+ "textwrap 0.16.2",
  "tokio",
  "tokio-util",
  "toml 0.8.23",
@@ -15703,7 +16001,7 @@ dependencies = [
  "maplit",
  "omicron-common",
  "omicron-workspace-hack",
- "owo-colors",
+ "owo-colors 4.2.2",
  "oxnet",
  "schemars 0.8.22",
  "serde",
@@ -16373,7 +16671,7 @@ dependencies = [
  "serde",
  "swrite",
  "tabled 0.15.0",
- "textwrap",
+ "textwrap 0.16.2",
  "toml 0.8.23",
  "usdt 0.5.0",
 ]

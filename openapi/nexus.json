@@ -23056,6 +23056,7 @@
         "enum": [
           "admin",
           "collaborator",
+          "limited_collaborator",
           "viewer"
         ]
       },
@@ -24299,6 +24300,7 @@
         "enum": [
           "admin",
           "collaborator",
+          "limited_collaborator",
           "viewer"
         ]
       },
