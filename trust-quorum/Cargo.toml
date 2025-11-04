@@ -22,6 +22,7 @@ gfss.workspace = true
 hex.workspace = true
 hkdf.workspace = true
 iddqd.workspace = true
+omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 rand = { workspace = true, features = ["os_rng"] }
 secrecy.workspace = true
