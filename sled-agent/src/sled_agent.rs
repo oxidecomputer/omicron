@@ -64,6 +64,7 @@ use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
     VmmStateRequested, VmmUnregisterResponse,
 };
+use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -643,18 +644,16 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
+        let currently_managed_zpools_rx =
+            config_reconciler.currently_managed_zpools_rx().clone();
         let probes = ProbeManager::new(
-            request.body.id.into_untyped_uuid(),
-            nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
             metrics_manager.request_queue(),
             config_reconciler.available_datasets_rx(),
             log.new(o!("component" => "ProbeManager")),
+            currently_managed_zpools_rx,
         );
-
-        let currently_managed_zpools_rx =
-            config_reconciler.currently_managed_zpools_rx().clone();
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -680,8 +679,6 @@ impl SledAgent {
             log: log.clone(),
             sprockets: config.sprockets.clone(),
         };
-
-        sled_agent.inner.probes.run(currently_managed_zpools_rx).await;
 
         // We immediately add a notification to the request queue about our
         // existence. If inspection of the hardware later informs us that we're
@@ -1184,6 +1181,24 @@ impl SledAgent {
         &self,
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
         sled_diagnostics::health_check().await
+    }
+
+    /// Add a single probe to this sled.
+    pub(crate) fn add_probe(
+        &self,
+        params: ProbeCreate,
+    ) -> Result<(), crate::probe_manager::Error> {
+        self.inner.probes.add_probe(params)
+    }
+
+    /// Delete a probe by ID from this sled.
+    pub(crate) fn delete_probe(&self, id: Uuid) {
+        self.inner.probes.remove_probe(id);
+    }
+
+    /// Completely replace the set of probes managed by this sled.
+    pub(crate) fn set_probes(&self, probes: Vec<ProbeCreate>) {
+        self.inner.probes.set_probes(probes);
     }
 }
 

@@ -1,12 +1,18 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Object managing "probe" zones, used to test networking configuration without
+//! running a full VM.
+
 use crate::metrics::MetricsRequestQueue;
-use crate::nexus::NexusClient;
 use anyhow::{Result, anyhow};
+use dropshot::HttpError;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::zpool::ZpoolOrRamdisk;
-use nexus_client::types::{ProbeExternalIp, ProbeInfo};
 use omicron_common::api::external::{
     VpcFirewallRuleAction, VpcFirewallRuleDirection, VpcFirewallRulePriority,
     VpcFirewallRuleStatus,
@@ -21,89 +27,135 @@ use sled_agent_config_reconciler::{
     AvailableDatasetsReceiver, CurrentlyManagedZpools,
     CurrentlyManagedZpoolsReceiver,
 };
+use sled_agent_types::probes::ExternalIp;
+use sled_agent_types::probes::ProbeCreate;
 use sled_agent_zone_images::ramdisk_file_source;
 use slog::{Logger, error, warn};
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tokio::time::sleep;
 use uuid::Uuid;
 use zone::Zone;
 
 /// Prefix used for probe zone names
 const PROBE_ZONE_PREFIX: &str = "oxz_probe";
 
-/// How long to wait between check-ins with nexus
-const RECONCILIATION_INTERVAL: Duration = Duration::from_secs(1);
-
 /// The scope to use when allocating VNICs
 const VNIC_ALLOCATOR_SCOPE: &str = "probe";
 
-/// The probe manager periodically asks nexus what probes it should be running.
-/// It checks the probes it should be running versus the probes it's actually
-/// running and reconciles any differences.
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Probe with ID {0} already exists")]
+    ProbeAlreadyExists(Uuid),
+}
+
+impl From<Error> for HttpError {
+    fn from(value: Error) -> Self {
+        let msg = value.to_string();
+        let code = Some(msg.clone());
+        match value {
+            Error::ProbeAlreadyExists(_) => {
+                HttpError::for_bad_request(code, msg)
+            }
+        }
+    }
+}
+
+/// Manages a set of "probe" zones, used to validate networking configuration.
+///
+/// This type spawns and manages a set of zones on a sled. In the Oxide product,
+/// Nexus periodically sends the manager the zones it expects, and this ensures
+/// that they're running.
 pub(crate) struct ProbeManager {
-    inner: Arc<ProbeManagerInner>,
+    _join_handle: JoinHandle<()>,
+    // The set of probes we have been told to run.
+    expected_probes_tx: watch::Sender<HashMap<Uuid, ProbeState>>,
 }
 
-struct RunningProbes {
-    zones: HashMap<Uuid, RunningZone>,
-}
-
+/// Worker object that actually reconciles the desired and actual probe zones.
 pub(crate) struct ProbeManagerInner {
-    join_handle: Mutex<Option<JoinHandle<()>>>,
-    nexus_client: NexusClient,
     log: Logger,
-    sled_id: Uuid,
     vnic_allocator: VnicAllocator<Etherstub>,
     port_manager: PortManager,
     metrics_queue: MetricsRequestQueue,
-    running_probes: Mutex<RunningProbes>,
+    // The set of probe zones we are actually running on this sled.
+    running_probes: HashMap<Uuid, RunningZone>,
     available_datasets_rx: AvailableDatasetsReceiver,
-
     zones_api: Arc<dyn illumos_utils::zone::Api>,
 }
 
 impl ProbeManager {
     pub(crate) fn new(
-        sled_id: Uuid,
-        nexus_client: NexusClient,
         etherstub: Etherstub,
         port_manager: PortManager,
         metrics_queue: MetricsRequestQueue,
         available_datasets_rx: AvailableDatasetsReceiver,
         log: Logger,
+        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
     ) -> Self {
+        let (expected_probes_tx, expected_probes_rx) =
+            watch::channel(HashMap::new());
+        let inner = ProbeManagerInner {
+            vnic_allocator: VnicAllocator::new(
+                VNIC_ALLOCATOR_SCOPE,
+                etherstub,
+                Arc::new(illumos_utils::dladm::Dladm::real_api()),
+            ),
+            running_probes: HashMap::new(),
+            log,
+            port_manager,
+            metrics_queue,
+            available_datasets_rx,
+            zones_api: Arc::new(illumos_utils::zone::Zones::real_api()),
+        };
         Self {
-            inner: Arc::new(ProbeManagerInner {
-                join_handle: Mutex::new(None),
-                vnic_allocator: VnicAllocator::new(
-                    VNIC_ALLOCATOR_SCOPE,
-                    etherstub,
-                    Arc::new(illumos_utils::dladm::Dladm::real_api()),
-                ),
-                running_probes: Mutex::new(RunningProbes {
-                    zones: HashMap::new(),
-                }),
-                nexus_client,
-                log,
-                sled_id,
-                port_manager,
-                metrics_queue,
-                available_datasets_rx,
-                zones_api: Arc::new(illumos_utils::zone::Zones::real_api()),
-            }),
+            expected_probes_tx,
+            _join_handle: inner
+                .reconciler(expected_probes_rx, currently_managed_zpools_rx),
         }
     }
 
-    pub(crate) async fn run(
-        &self,
-        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
-    ) {
-        self.inner.run(currently_managed_zpools_rx).await;
+    /// Add a probe to the manager.
+    ///
+    /// This will ensure that a corresponding zone is created, asynchronously.
+    /// An error is returned if the probe already exists.
+    pub(crate) fn add_probe(&self, params: ProbeCreate) -> Result<(), Error> {
+        let id = params.id;
+        if self.expected_probes_tx.send_if_modified(|expected| {
+            match expected.entry(id) {
+                Entry::Occupied(_) => false,
+                Entry::Vacant(entry) => {
+                    entry.insert(ProbeState::from(params));
+                    true
+                }
+            }
+        }) {
+            Ok(())
+        } else {
+            Err(Error::ProbeAlreadyExists(id))
+        }
+    }
+
+    /// Remove a probe from the manager.
+    ///
+    /// This will ensure that the requested zone will be removed,
+    /// asynchronously. Note that this is infallible, and doesn't fail if the
+    /// probe was already gone.
+    pub(crate) fn remove_probe(&self, id: Uuid) {
+        self.expected_probes_tx
+            .send_if_modified(|expected| expected.remove(&id).is_some());
+    }
+
+    /// Completely replace the set of managed probes.
+    pub(crate) fn set_probes(&self, probes: Vec<ProbeCreate>) {
+        let probes = probes
+            .into_iter()
+            .map(|probe| (probe.id, ProbeState::from(probe)))
+            .collect();
+        let _old = self.expected_probes_tx.send_replace(probes);
     }
 }
 
@@ -117,9 +169,29 @@ struct ProbeState {
     /// Runtime state on this sled
     status: zone::State,
     /// The external IP addresses the probe has been assigned.
-    external_ips: Vec<ProbeExternalIp>,
+    external_ips: Vec<ExternalIp>,
     /// The probes networking interface.
+    ///
+    /// This is only `None` when we reconstruct the existing state from the
+    /// current set of zones on the sled. The `Zone` type we build this from
+    /// doesn't have information about the network devices in that case. Note
+    /// that we _could_ fetch it by asking `dladm` and `opteadm` for all the
+    /// relevant details, but we haven't needed that so far.
+    ///
+    /// If we've built this object from a request through the sled-agent API,
+    /// then we always have this.
     interface: Option<NetworkInterface>,
+}
+
+impl From<ProbeCreate> for ProbeState {
+    fn from(params: ProbeCreate) -> Self {
+        Self {
+            id: params.id,
+            status: zone::State::Running,
+            external_ips: params.external_ips,
+            interface: Some(params.interface),
+        }
+    }
 }
 
 impl PartialEq for ProbeState {
@@ -133,18 +205,6 @@ impl Eq for ProbeState {}
 impl Hash for ProbeState {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.id.hash(state)
-    }
-}
-
-/// Translate from the nexus API `ProbeInfo` into a `ProbeState`
-impl From<ProbeInfo> for ProbeState {
-    fn from(value: ProbeInfo) -> Self {
-        Self {
-            id: value.id,
-            status: zone::State::Running,
-            external_ips: value.external_ips,
-            interface: Some(value.interface),
-        }
     }
 }
 
@@ -167,100 +227,80 @@ impl TryFrom<Zone> for ProbeState {
 }
 
 impl ProbeManagerInner {
-    /// Run the probe manager. If it's already running this is a no-op.
-    async fn run(
-        self: &Arc<Self>,
-        currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
-    ) {
-        let mut join_handle = self.join_handle.lock().await;
-        if join_handle.is_none() {
-            *join_handle =
-                Some(self.clone().reconciler(currently_managed_zpools_rx))
-        }
-    }
-
-    /// Run the reconciler loop on a background thread.
+    /// Run the reconciler loop.
     fn reconciler(
-        self: Arc<Self>,
+        mut self,
+        mut expected_probes_rx: watch::Receiver<HashMap<Uuid, ProbeState>>,
         mut currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
             loop {
-                let sleep_fut = sleep(RECONCILIATION_INTERVAL);
-                tokio::pin!(sleep_fut);
-
-                // Wait until the next reconciliation tick, but handle any
-                // changes to the set of disks in the meantime.
-                loop {
-                    tokio::select! {
-                        _ = &mut sleep_fut => break,
-
-                        // Cancel-safe per docs on `changed()`
-                        result = currently_managed_zpools_rx.changed() => {
-                            match result {
-                                Ok(()) => {
-                                    self.use_only_these_disks(
-                                        &currently_managed_zpools_rx
-                                            .current_and_update()
-                                    ).await;
-                                    continue;
-                                }
-                                Err(_) => {
-                                    warn!(
-                                        self.log,
-                                        "ProbeManager's 'current zpools' \
-                                         channel closed; shutting down",
-                                    );
-                                    return;
-                                }
-                            }
+                tokio::select! {
+                    // Wait for changes to the set of expected probes.
+                    //
+                    // This is cancel-safe, according to
+                    // https://docs.rs/tokio/latest/tokio/sync/watch/struct.Receiver.html#method.changed.
+                    res = expected_probes_rx.changed() => {
+                        if res.is_err() {
+                            warn!(
+                                self.log,
+                                "Watch channel with expected probes \
+                                is closed and all values have been seen, \
+                                exiting now."
+                            );
+                            return;
                         }
+                        let expected_probes = expected_probes_rx
+                            .borrow_and_update()
+                            .values()
+                            .cloned()
+                            .collect();
+                        self.do_reconcile(expected_probes).await;
                     }
-                }
 
-                // Collect the target and current state. Use set operations
-                // to determine what probes need to be added, removed and/or
-                // modified.
-
-                let target = match self.target_state().await {
-                    Ok(state) => state,
-                    Err(e) => {
-                        error!(self.log, "get target probe state: {e}");
-                        continue;
-                    }
-                };
-
-                let current = match self.current_state().await {
-                    Ok(state) => state,
-                    Err(e) => {
-                        error!(self.log, "get current probe state: {e}");
-                        continue;
-                    }
-                };
-
-                let n_added = self.add(target.difference(&current)).await;
-                self.remove(current.difference(&target)).await;
-                self.check(current.intersection(&target)).await;
-
-                // If we have created some new probes, we may need the control plane
-                // to provide us with valid routes for the VPC the probe belongs to.
-                if n_added > 0 {
-                    if let Err(e) = self.nexus_client.refresh_vpc_routes().await
-                    {
-                        error!(self.log, "get routes for probe: {e}");
+                    // Wait for changes to the set of managed zpools.
+                    //
+                    // Cancel-safe per docs on `changed()`
+                    result = currently_managed_zpools_rx.changed() => {
+                        if result.is_ok() {
+                            self.use_only_these_disks(
+                                &currently_managed_zpools_rx
+                                    .current_and_update()
+                            ).await;
+                        } else {
+                            warn!(
+                                self.log,
+                                "ProbeManager's 'current zpools' \
+                                 channel closed; shutting down",
+                            );
+                            return;
+                        }
                     }
                 }
             }
         })
     }
 
+    /// Reconcile the target set of zones with the actual current set.
+    async fn do_reconcile(&mut self, target: HashSet<ProbeState>) {
+        let current = match self.current_state().await {
+            Ok(state) => state,
+            Err(e) => {
+                error!(self.log, "get current probe state: {e}");
+                return;
+            }
+        };
+
+        self.add(target.difference(&current)).await;
+        self.remove(current.difference(&target)).await;
+        self.check(current.intersection(&target));
+    }
+
     /// Removes any probes using filesystem roots on zpools that are not
     /// contained in the set of "disks".
-    async fn use_only_these_disks(&self, disks: &CurrentlyManagedZpools) {
-        let mut probes = self.running_probes.lock().await;
-
-        let to_remove = probes
-            .zones
+    async fn use_only_these_disks(&mut self, disks: &CurrentlyManagedZpools) {
+        let to_remove = self
+            .running_probes
             .iter()
             .filter_map(|(id, probe)| {
                 let probe_pool = match probe.root_zpool() {
@@ -281,32 +321,27 @@ impl ProbeManagerInner {
 
         for probe_id in to_remove {
             info!(self.log, "use_only_these_disks: Removing probe"; "probe_id" => ?probe_id);
-            self.remove_probe_locked(&mut probes, probe_id).await;
+            self.remove_probe(probe_id).await;
         }
     }
 
     /// Add a set of probes to this sled.
-    ///
-    /// Returns the number of inserted probes.
-    async fn add<'a, I>(self: &Arc<Self>, probes: I) -> usize
+    async fn add<'a, I>(&mut self, probes: I)
     where
         I: Iterator<Item = &'a ProbeState>,
     {
-        let mut i = 0;
         for probe in probes {
             info!(self.log, "adding probe {}", probe.id);
             if let Err(e) = self.add_probe(probe).await {
                 error!(self.log, "add probe: {e}");
             }
-            i += 1;
         }
-        i
     }
 
     /// Add a probe to this sled. This sets up resources for the probe zone
     /// such as storage and networking. Then it configures, installs and
     /// boots the probe zone.
-    async fn add_probe(self: &Arc<Self>, probe: &ProbeState) -> Result<()> {
+    async fn add_probe(&mut self, probe: &ProbeState) -> Result<()> {
         let mut rng = rand::rngs::StdRng::from_os_rng();
         let zone_root_path = self
             .available_datasets_rx
@@ -386,13 +421,13 @@ impl ProbeManagerInner {
             ),
         }
 
-        self.running_probes.lock().await.zones.insert(probe.id, rz);
+        self.running_probes.insert(probe.id, rz);
 
         Ok(())
     }
 
     /// Remove a set of probes from this sled.
-    async fn remove<'a, I>(&self, probes: I)
+    async fn remove<'a, I>(&mut self, probes: I)
     where
         I: Iterator<Item = &'a ProbeState>,
     {
@@ -402,19 +437,10 @@ impl ProbeManagerInner {
         }
     }
 
-    /// Remove a probe from this sled. This tears down the zone and it's
+    /// Remove a probe from this sled. This tears down the zone and its
     /// network resources.
-    async fn remove_probe(&self, id: Uuid) {
-        let mut probes = self.running_probes.lock().await;
-        self.remove_probe_locked(&mut probes, id).await
-    }
-
-    async fn remove_probe_locked(
-        &self,
-        probes: &mut MutexGuard<'_, RunningProbes>,
-        id: Uuid,
-    ) {
-        match probes.zones.remove(&id) {
+    async fn remove_probe(&mut self, id: Uuid) {
+        match self.running_probes.remove(&id) {
             Some(mut running_zone) => {
                 // TODO-correctness: There are no physical links in the zone, is
                 // this intended to delete the control VNIC?
@@ -456,7 +482,7 @@ impl ProbeManagerInner {
 
     /// Check that probes that should be running are running, and with the
     /// correct configuration.
-    async fn check<'a, I>(self: &Arc<Self>, probes: I)
+    fn check<'a, I>(&self, probes: I)
     where
         I: Iterator<Item = &'a ProbeState>,
     {
@@ -474,25 +500,8 @@ impl ProbeManagerInner {
         }
     }
 
-    /// Collect target probe state from the nexus internal API.
-    async fn target_state(self: &Arc<Self>) -> Result<HashSet<ProbeState>> {
-        Ok(self
-            .nexus_client
-            .probes_get(
-                &self.sled_id,
-                None, //limit
-                None, //page token
-                None, //sort by
-            )
-            .await?
-            .into_inner()
-            .into_iter()
-            .map(Into::into)
-            .collect())
-    }
-
     /// Collect the current probe state from the running zones on this sled.
-    async fn current_state(self: &Arc<Self>) -> Result<HashSet<ProbeState>> {
+    async fn current_state(&self) -> Result<HashSet<ProbeState>> {
         Ok(self
             .zones_api
             .get()

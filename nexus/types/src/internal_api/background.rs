@@ -23,7 +23,9 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
@@ -755,6 +757,24 @@ pub struct EreporterStatus {
     /// total number of HTTP requests sent.
     pub requests: usize,
     pub errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeError {
+    /// ID of the sled we failed to send a probe to.
+    pub sled_id: Uuid,
+    /// IP address of the sled we failed to send a probe to.
+    pub sled_ip: Ipv6Addr,
+    /// Error message describing the failure.
+    pub error: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeDistributorStatus {
+    /// Count of successfully sent probes to each sled.
+    pub probes_by_sled: HashMap<Uuid, usize>,
+    /// Errors when sending a probe.
+    pub errors: Vec<ProbeError>,
 }
 
 #[cfg(test)]

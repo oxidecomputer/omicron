@@ -58,6 +58,7 @@ use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionReplacementStatus;
@@ -1189,6 +1190,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
+        "probe_distributor" => {
+            print_task_probe_distributor(details);
+        }
         "read_only_region_replacement_start" => {
             print_task_read_only_region_replacement_start(details);
         }
@@ -2106,6 +2110,35 @@ fn print_task_phantom_disks(details: &serde_json::Value) {
                 "    number of phantom disk delete errors: {}",
                 success.phantom_disk_deleted_err
             );
+        }
+    };
+}
+
+fn print_task_probe_distributor(details: &serde_json::Value) {
+    match serde_json::from_value::<ProbeDistributorStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(status) => {
+            let n_total_probes: usize = status.probes_by_sled.values().sum();
+            println!("    succesfully-pushed probes: {} total", n_total_probes);
+            for (sled_id, count) in status.probes_by_sled {
+                if count == 0 {
+                    continue;
+                }
+                println!("      sled_id={} n_probes={}", sled_id, count);
+            }
+            println!(
+                "    errors while pushing probes: {} total",
+                status.errors.len()
+            );
+            for err in status.errors {
+                println!(
+                    "      sled_id={} sled_ip={} error={}",
+                    err.sled_id, err.sled_ip, err.error,
+                );
+            }
         }
     };
 }

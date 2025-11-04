@@ -113,6 +113,7 @@ use super::tasks::metrics_producer_gc;
 use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
+use super::tasks::probe_distributor;
 use super::tasks::read_only_region_replacement_start::*;
 use super::tasks::reconfigurator_config::ReconfiguratorConfigLoader;
 use super::tasks::region_replacement;
@@ -254,6 +255,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator: Activator::new(),
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
+            task_probe_distributor: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -334,6 +336,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator,
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
+            task_probe_distributor,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1045,7 +1048,7 @@ impl BackgroundTasksInitializer {
             description: "collects error reports from service processors",
             period: config.sp_ereport_ingester.period_secs,
             task_impl: Box::new(ereport_ingester::SpEreportIngester::new(
-                datastore,
+                datastore.clone(),
                 resolver,
                 nexus_id,
                 config.sp_ereport_ingester.disable,
@@ -1053,6 +1056,18 @@ impl BackgroundTasksInitializer {
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_sp_ereport_ingester,
+        });
+
+        driver.register(TaskDefinition {
+            name: "probe_distributor",
+            description: "distributes networking probe zones to sleds",
+            period: config.probe_distributor.period_secs,
+            task_impl: Box::new(probe_distributor::ProbeDistributor::new(
+                datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_probe_distributor,
         });
 
         driver

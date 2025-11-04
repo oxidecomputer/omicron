@@ -46,6 +46,9 @@ use sled_agent_types::instance::InstanceExternalIpBody;
 use sled_agent_types::instance::VmmPutStateBody;
 use sled_agent_types::instance::VmmPutStateResponse;
 use sled_agent_types::instance::VmmUnregisterResponse;
+use sled_agent_types::probes::ProbeCreate;
+use sled_agent_types::probes::ProbePath;
+use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::zone_bundle::BundleUtilization;
 use sled_agent_types::zone_bundle::CleanupContext;
@@ -803,6 +806,27 @@ impl SledAgentApi for SledAgentSimImpl {
         _body: TypedBody<OperatorSwitchZonePolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
+    }
+
+    async fn probe_post(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProbeCreate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn probe_delete(
+        _request_context: RequestContext<Self::Context>,
+        _path: Path<ProbePath>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        Ok(HttpResponseDeleted())
+    }
+
+    async fn probes_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Ok(HttpResponseUpdatedNoContent())
     }
 }
 
