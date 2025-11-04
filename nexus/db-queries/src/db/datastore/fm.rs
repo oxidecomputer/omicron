@@ -990,7 +990,7 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(dbg!(&listed_orphans), &orphans_v1);
 
-        // Next, create a new sitrep which descends from sitrep 0.
+        // Next, create a new sitrep which descends from sitrep 1.
         let sitrep2 = fm::Sitrep {
             metadata: fm::SitrepMetadata {
                 id: SitrepUuid::new_v4(),
@@ -1006,7 +1006,7 @@ mod tests {
             .await
             .expect("inserting child sitrep should succeed");
 
-        // Now, create some orphaned sitreps which also descend from sitreo 0.
+        // Now, create some orphaned sitreps which also descend from sitrep 1.
         let mut orphans_v2 = BTreeSet::new();
         for i in 1..5 {
             insert_orphan(
