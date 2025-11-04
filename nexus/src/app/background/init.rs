@@ -103,6 +103,7 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
+use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
 use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
@@ -257,6 +258,7 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
+            task_fm_sitrep_gc: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -338,6 +340,7 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
             task_fm_sitrep_loader,
+            task_fm_sitrep_gc,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -1059,19 +1062,31 @@ impl BackgroundTasksInitializer {
             activator: task_sp_ereport_ingester,
         });
 
+        let sitrep_loader = fm_sitrep_load::SitrepLoader::new(
+            datastore.clone(),
+            args.sitrep_load_tx,
+        );
+        let sitrep_watcher = sitrep_loader.watcher();
         driver.register(TaskDefinition {
             name: "fm_sitrep_loader",
             description:
                 "loads the current fault management situation report from \
                  the database",
             period: config.fm.sitrep_load_period_secs,
-            task_impl: Box::new(fm_sitrep_load::SitrepLoader::new(
-                datastore,
-                args.sitrep_load_tx,
-            )),
+            task_impl: Box::new(sitrep_loader),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_fm_sitrep_loader,
+        });
+
+        driver.register(TaskDefinition {
+            name: "fm_sitrep_gc",
+            description: "garbage collects fault management situation reports",
+            period: config.fm.sitrep_load_period_secs,
+            task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(datastore)),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(sitrep_watcher)],
+            activator: task_fm_sitrep_gc,
         });
 
         driver

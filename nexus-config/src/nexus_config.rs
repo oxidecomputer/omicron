@@ -879,11 +879,21 @@ pub struct FmTasksConfig {
     /// reads the latest fault management sitrep from the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_load_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// garbage collects unneeded fault management sitreps in the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_gc_period_secs: Duration,
 }
 
 impl Default for FmTasksConfig {
     fn default() -> Self {
-        Self { sitrep_load_period_secs: Duration::from_secs(15) }
+        Self {
+            sitrep_load_period_secs: Duration::from_secs(15),
+            // This need not be activated very frequently, as it's triggered any
+            // time the current sitrep changes, and activating it more
+            // frequently won't make things more responsive.
+            sitrep_gc_period_secs: Duration::from_secs(600),
+        }
     }
 }
 
@@ -1190,6 +1200,7 @@ mod test {
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
+            fm.sitrep_gc_period_secs = 49
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1436,6 +1447,7 @@ mod test {
                         },
                         fm: FmTasksConfig {
                             sitrep_load_period_secs: Duration::from_secs(48),
+                            sitrep_gc_period_secs: Duration::from_secs(49),
                         }
                     },
                     default_region_allocation_strategy:
@@ -1536,6 +1548,7 @@ mod test {
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
             fm.sitrep_load_period_secs = 45
+            fm.sitrep_gc_period_secs = 46
 
             [default_region_allocation_strategy]
             type = "random"

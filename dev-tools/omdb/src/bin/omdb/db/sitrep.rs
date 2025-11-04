@@ -7,7 +7,8 @@
 use crate::db::DbFetchOptions;
 use crate::db::check_limit;
 use crate::helpers::const_max_len;
-use crate::helpers::datetime_rfc3339_concise;
+use crate::helpers::datetime_opt_rfc3339_concise;
+use crate::helpers::display_option_blank;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
@@ -17,7 +18,6 @@ use diesel::prelude::*;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::model;
-use nexus_db_queries::db::pagination::paginated;
 use nexus_types::fm;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::PaginationOrder;
@@ -26,7 +26,6 @@ use omicron_uuid_kinds::SitrepUuid;
 use tabled::Tabled;
 use uuid::Uuid;
 
-use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_db_schema::schema::inv_collection::dsl as inv_collection_dsl;
 
@@ -100,7 +99,7 @@ pub(super) async fn cmd_db_sitrep(
 ) -> anyhow::Result<()> {
     match args.command {
         Commands::History(ref args) => {
-            cmd_db_sitrep_history(datastore, fetch_opts, args).await
+            cmd_db_sitrep_history(opctx, datastore, fetch_opts, args).await
         }
         Commands::Info { sitrep, ref args } => {
             cmd_db_sitrep_show(opctx, datastore, fetch_opts, args, sitrep).await
@@ -119,6 +118,7 @@ pub(super) async fn cmd_db_sitrep(
 }
 
 pub(super) async fn cmd_db_sitrep_history(
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     args: &SitrepHistoryArgs,
@@ -138,53 +138,58 @@ pub(super) async fn cmd_db_sitrep_history(
     struct SitrepRow {
         v: u32,
         id: Uuid,
-        #[tabled(display_with = "datetime_rfc3339_concise")]
-        created_at: DateTime<Utc>,
+        #[tabled(display_with = "display_option_blank")]
+        orphans: Option<usize>,
+        #[tabled(display_with = "datetime_opt_rfc3339_concise")]
+        created_at: Option<DateTime<Utc>>,
         comment: String,
     }
 
-    let conn = datastore.pool_connection_for_tests().await?;
     let marker = args.from.map(model::SqlU32::new);
     let pagparams = DataPageParams {
         marker: marker.as_ref(),
         direction: PaginationOrder::Descending,
         limit: fetch_opts.fetch_limit,
     };
-    let sitreps: Vec<(model::SitrepVersion, model::SitrepMetadata)> =
-        paginated(
-            history_dsl::fm_sitrep_history,
-            history_dsl::version,
-            &pagparams,
-        )
-        .inner_join(
-            sitrep_dsl::fm_sitrep.on(history_dsl::sitrep_id.eq(sitrep_dsl::id)),
-        )
-        .select((
-            model::SitrepVersion::as_select(),
-            model::SitrepMetadata::as_select(),
-        ))
-        .load_async(&*conn)
+    let versions = datastore
+        .fm_sitrep_version_list(&opctx, &pagparams)
         .await
         .with_context(ctx)?;
 
-    check_limit(&sitreps, fetch_opts.fetch_limit, ctx);
+    check_limit(&versions, fetch_opts.fetch_limit, ctx);
 
-    let rows = sitreps.into_iter().map(|(version, metadata)| {
-        let model::SitrepMetadata {
-            id,
-            time_created,
-            comment,
-            creator_id: _,
-            parent_sitrep_id: _,
-            inv_collection_id: _,
-        } = metadata;
-        SitrepRow {
-            v: version.version.into(),
-            id: id.into_untyped_uuid(),
+    let mut rows = Vec::with_capacity(versions.len());
+    for v in versions {
+        let orphans = match datastore.fm_sitrep_list_orphaned(&opctx, &v).await
+        {
+            Ok(o) => Some(o.len()),
+            Err(e) => {
+                eprintln!(
+                    "failed to list orphaned sitreps at v{}: {e}",
+                    v.version
+                );
+                None
+            }
+        };
+        let (comment, time_created) =
+            match datastore.fm_sitrep_metadata_read(&opctx, v.id).await {
+                Ok(s) => (s.comment, Some(s.time_created)),
+                Err(e) => {
+                    eprintln!(
+                        "failed to get fetch metadata for sitrep {} (v{}): {e}",
+                        v.id, v.version
+                    );
+                    ("<ERROR>".to_string(), None)
+                }
+            };
+        rows.push(SitrepRow {
+            v: v.version,
+            id: v.id.into_untyped_uuid(),
+            orphans,
             created_at: time_created,
             comment,
-        }
-    });
+        });
+    }
 
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())

@@ -60,6 +60,7 @@ use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::OrphanedSitreps;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionReplacementStatus;
@@ -67,6 +68,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
@@ -1239,6 +1241,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
+        }
+        "fm_sitrep_gc" => {
+            print_task_fm_sitrep_gc(details);
         }
         _ => {
             println!(
@@ -3140,6 +3145,75 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
+    let SitrepGcStatus { versions_scanned, orphaned_sitreps, errors } =
+        match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details
+                );
+                return;
+            }
+            Ok(status) => status,
+        };
+
+    pub const TOTAL_VERSIONS_SCANNED: &str = "total versions scanned:";
+    pub const VERSIONS_WITH_ORPHANS: &str = "versions with orphans:";
+    pub const ORPHANS_FOUND: &str = "total orphaned sitreps found:";
+    pub const ORPHANS_DELETED: &str = "total orphaned sitreps deleted:";
+    pub const ERRORS: &str = "errors:";
+    pub const WIDTH: usize = const_max_len(&[
+        TOTAL_VERSIONS_SCANNED,
+        VERSIONS_WITH_ORPHANS,
+        ERRORS,
+        ORPHANS_FOUND,
+        ORPHANS_DELETED,
+    ]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+
+    #[derive(tabled::Tabled)]
+    struct OrphanedSitrepsRow {
+        version: u32,
+        found: usize,
+        deleted: usize,
+    }
+    let mut total_found = 0;
+    let mut total_deleted = 0;
+    let rows: Vec<_> = orphaned_sitreps
+        .iter()
+        .map(|(&version, &OrphanedSitreps { found, deleted })| {
+            total_found += found;
+            total_deleted += deleted;
+            OrphanedSitrepsRow { version, found, deleted }
+        })
+        .collect();
+
+    if !errors.is_empty() {
+        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        for error in errors {
+            println!("      > {error}")
+        }
+    }
+    println!(
+        "    {TOTAL_VERSIONS_SCANNED:<WIDTH$}{versions_scanned:>NUM_WIDTH$}"
+    );
+    println!(
+        "    {VERSIONS_WITH_ORPHANS:<WIDTH$}{:>NUM_WIDTH$}",
+        orphaned_sitreps.len()
+    );
+    println!("    {ORPHANS_FOUND:<WIDTH$}{total_found:>NUM_WIDTH$}");
+    println!("    {ORPHANS_DELETED:<WIDTH$}{total_deleted:>NUM_WIDTH$}");
+
+    // Don't print the table listing the number of GC'd sitreps per version
+    // if it's empty, 'cause it looks kinda weird.
+    if !rows.is_empty() {
+        let mut table = tabled::Table::new(rows);
+        bgtask_apply_kv_style(&mut table);
+        println!("{table}");
+    }
 }
 
 const ERRICON: &str = "/!\\";

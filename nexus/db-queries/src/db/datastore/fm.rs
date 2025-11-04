@@ -13,6 +13,8 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
 use crate::db::model;
+use crate::db::model::SqlU32;
+use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -29,6 +31,7 @@ use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_types::fm;
 use nexus_types::fm::Sitrep;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_uuid_kinds::GenericUuid;
@@ -207,7 +210,8 @@ impl DataStore {
     /// Note that this operation is only performed relative to a committed
     /// sitrep version. This is in order to prevent the returned list of sitreps
     /// from including sitreps which are in the process of being prepared, by
-    /// only performing it on versions earlier than the current version.
+    /// only performing it on committed versions and selecting sitreps with the
+    /// same parent.
     pub async fn fm_sitrep_list_orphaned(
         &self,
         opctx: &OpContext,
@@ -261,6 +265,71 @@ impl DataStore {
             .filter(sitrep_dsl::parent_sitrep_id.eq(parent_id))
             .filter(sitrep_dsl::id.ne(committed_id))
             .select(model::SitrepMetadata::as_select())
+    }
+
+    /// Deletes all sitreps with the provided IDs.
+    pub async fn fm_sitrep_delete_all(
+        &self,
+        opctx: &OpContext,
+        ids: impl IntoIterator<Item = SitrepUuid>,
+    ) -> Result<usize, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let ids = ids
+            .into_iter()
+            .map(|id| id.into_untyped_uuid())
+            .collect::<Vec<_>>();
+
+        // TODO(eliza): when other tables are added to store data that is part
+        // of the sitrep, we'll need to delete any records with matching IDs in
+        // those tables, too!
+
+        // Delete the sitrep metadata entries *last*. This is necessary because
+        // the rest of the delete operation is unsynchronized, and it is
+        // possible for a Nexus to die before it has "fully deleted" a sitrep,
+        // but deleted some of its records. The `fm_sitrep` (metadata) table is
+        // the one that is used to determine whether a sitrep "exists" so that
+        // the sitrep GC task can determine if it needs to be deleted, so don't
+        // touch it until all the other records are gone.
+        diesel::delete(sitrep_dsl::fm_sitrep.filter(sitrep_dsl::id.eq_any(ids)))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn fm_sitrep_version_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, SqlU32>,
+    ) -> ListResultVec<fm::SitrepVersion> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let sitreps = Self::sitrep_version_list_query(pagparams)
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>();
+
+        Ok(sitreps)
+    }
+
+    fn sitrep_version_list_query(
+        pagparams: &DataPageParams<'_, SqlU32>,
+    ) -> impl RunnableQuery<model::SitrepVersion> {
+        paginated(
+            history_dsl::fm_sitrep_history,
+            history_dsl::version,
+            &pagparams,
+        )
+        .select(model::SitrepVersion::as_select())
     }
 }
 
@@ -614,6 +683,34 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         let query = DataStore::list_orphaned_query(Uuid::nil(), Uuid::nil());
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_sitrep_version_list_query() {
+        let logctx = dev::test_setup_log("explain_sitrep_version_list_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let pagparams = DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(420).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        };
+        let query = DataStore::sitrep_version_list_query(&pagparams);
         let explanation = query
             .explain_async(&conn)
             .await
