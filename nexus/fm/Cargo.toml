@@ -1,0 +1,12 @@
+[package]
+name = "nexus-fm"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+nexus-types.workspace = true
+
+omicron-workspace-hack.workspace = true
