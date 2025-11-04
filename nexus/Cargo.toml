@@ -178,6 +178,7 @@ pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
+scim2-test-client.workspace = true
 similar-asserts.workspace = true
 sp-sim.workspace = true
 strum.workspace = true

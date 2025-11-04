@@ -664,14 +664,9 @@ async fn test_multicast_group_persistence_through_stop_start(
     .await
     .expect("Should stop instance");
 
-    // Simulate the transition and wait for stopped state
+    // Simulate the stop transition
     let nexus = &cptestctx.server.server_context().nexus;
-    let info = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("Running instance should be on a sled");
-    info.sled_client.vmm_finish_transition(info.propolis_id).await;
+    instance_simulate(nexus, &instance_id).await;
 
     // Wait for instance to be stopped
     instance_wait_for_state(
@@ -1323,12 +1318,7 @@ async fn test_multicast_group_membership_during_migration(
     .expect("Should stop instance");
 
     // Simulate stop and wait for stopped state
-    let final_info = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("Instance should still be active for stop");
-    final_info.sled_client.vmm_finish_transition(final_info.propolis_id).await;
+    instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Delete instance and cleanup

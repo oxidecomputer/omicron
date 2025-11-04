@@ -640,10 +640,10 @@ impl MulticastDataplaneClient {
 
         // Get the last response (all switches should return equivalent responses)
         let results_len = results.len();
-        let (_, underlay_last, external_last) =
-            results.into_iter().last().ok_or_else(|| {
-                Error::internal_error("no switches were updated")
-            })?;
+        let (_, underlay_last, external_last) = results
+            .into_iter()
+            .last()
+            .ok_or_else(|| Error::internal_error("no switches were updated"))?;
 
         debug!(
             self.log,
