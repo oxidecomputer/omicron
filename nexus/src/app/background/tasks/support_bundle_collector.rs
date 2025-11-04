@@ -178,12 +178,15 @@ impl SupportBundleCollector {
             }
             Err(progenitor_client::Error::ErrorResponse(err))
                 if err.status() == http::StatusCode::NOT_FOUND
-                    && err.message.contains(NESTED_DATASET_NOT_FOUND) =>
+                    && err.error_code.as_ref().is_some_and(|code| {
+                        code.contains(NESTED_DATASET_NOT_FOUND)
+                    }) =>
             {
                 warn!(
                     &opctx.log,
                     "SupportBundleCollector could not delete bundle (not found)";
-                    "id" => %bundle.id
+                    "id" => %bundle.id,
+                    "err" => ?err
                 );
 
                 return Ok(SledAgentBundleCleanupResult::NotFound);

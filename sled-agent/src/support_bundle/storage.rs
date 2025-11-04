@@ -134,7 +134,7 @@ impl From<Error> for HttpError {
                     ..
                 }),
             ) => HttpError::for_not_found(
-                None,
+                Some(NESTED_DATASET_NOT_FOUND.to_string()),
                 NESTED_DATASET_NOT_FOUND.to_string(),
             ),
             Error::NotAFile => {
