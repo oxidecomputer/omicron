@@ -94,26 +94,11 @@ pub struct ConnToMainMsg {
 
 #[derive(Debug)]
 pub enum ConnToMainMsgInner {
-    Accepted {
-        addr: SocketAddrV6,
-        peer_id: BaseboardId,
-    },
-    Connected {
-        addr: SocketAddrV6,
-        peer_id: BaseboardId,
-    },
-    Received {
-        from: BaseboardId,
-        msg: PeerMsg,
-    },
-    #[expect(unused)]
-    ReceivedNetworkConfig {
-        from: BaseboardId,
-        config: NetworkConfig,
-    },
-    Disconnected {
-        peer_id: BaseboardId,
-    },
+    Accepted { addr: SocketAddrV6, peer_id: BaseboardId },
+    Connected { addr: SocketAddrV6, peer_id: BaseboardId },
+    Received { from: BaseboardId, msg: PeerMsg },
+    ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
+    Disconnected { peer_id: BaseboardId },
 }
 
 pub struct TaskHandle {
@@ -137,6 +122,13 @@ impl TaskHandle {
 
     pub async fn send(&self, msg: PeerMsg) {
         let _ = self.tx.send(MainToConnMsg::Msg(WireMsg::Tq(msg))).await;
+    }
+
+    pub async fn send_network_config(&self, config: NetworkConfig) {
+        let _ = self
+            .tx
+            .send(MainToConnMsg::Msg(WireMsg::NetworkConfig(config)))
+            .await;
     }
 }
 
@@ -385,6 +377,45 @@ impl ConnMgr {
         info!(self.log, "Sending {msg:?}"; "peer_id" => %to);
         if let Some(handle) = self.established.get1(&to) {
             handle.send(msg).await;
+        }
+    }
+
+    // After we have updated our network config, we should send it out to all
+    // peers with established connections, with the exception of the peer we
+    // received it from if this was not a local update.
+    pub async fn broadcast_network_config(
+        &mut self,
+        network_config: &NetworkConfig,
+        excluded_peer: Option<&BaseboardId>,
+    ) {
+        for h in self
+            .established
+            .iter()
+            .filter(|&h| Some(&h.baseboard_id) != excluded_peer)
+        {
+            info!(
+                self.log,
+                "Sending network config";
+                "peer_id" => %h.baseboard_id,
+                "generation" => network_config.generation
+            );
+            h.task_handle.send_network_config(network_config.clone()).await;
+        }
+    }
+
+    pub async fn send_network_config(
+        &mut self,
+        peer_id: &BaseboardId,
+        network_config: &NetworkConfig,
+    ) {
+        if let Some(h) = self.established.get1(peer_id) {
+            info!(
+                self.log,
+                "Sending network config";
+                "peer_id" => %h.baseboard_id,
+                "generation" => network_config.generation
+            );
+            h.task_handle.send_network_config(network_config.clone()).await;
         }
     }
 
