@@ -210,8 +210,13 @@ async fn cmd_db_sitrep_show(
             format!("looking up fault management sitrep {id:?}")
         }
     };
-    let conn = datastore.pool_connection_for_tests().await?;
 
+    let current_version = datastore
+        .fm_current_sitrep_version(&opctx)
+        .await
+        .context("failed to look up the current sitrep version")?;
+
+    let conn = datastore.pool_connection_for_tests().await?;
     let (maybe_version, sitrep) = match sitrep {
         SitrepIdOrCurrent::Id(id) => {
             let sitrep =
@@ -227,11 +232,14 @@ async fn cmd_db_sitrep_show(
             (version, sitrep)
         }
         SitrepIdOrCurrent::Current => {
-            let Some((version, sitrep)) =
-                datastore.fm_sitrep_read_current(opctx).await?
-            else {
+            let Some(version) = current_version.clone() else {
                 anyhow::bail!("no current sitrep exists at this time");
             };
+
+            let sitrep = datastore
+                .fm_sitrep_read(opctx, version.id)
+                .await
+                .with_context(ctx)?;
             (Some(version), sitrep)
         }
     };
@@ -289,9 +297,7 @@ async fn cmd_db_sitrep_show(
             "    {STATUS:>WIDTH$}: not committed to the sitrep history"
         ),
         Some(fm::SitrepVersion { version, time_made_current, .. }) => {
-            let current_version =
-                datastore.fm_current_sitrep_version(&opctx).await;
-            if matches!(current_version, Ok(Some(ref v)) if v.id == id) {
+            if matches!(current_version, Some(ref v) if v.id == id) {
                 println!("    {STATUS:>WIDTH$}: this is the current sitrep!",);
             } else {
                 println!("    {STATUS:>WIDTH$}: in the sitrep history");
@@ -299,24 +305,18 @@ async fn cmd_db_sitrep_show(
             println!("    {VERSION:>WIDTH$}: v{version}");
             println!("    {MADE_CURRENT_AT:>WIDTH$}: {time_made_current}");
             match current_version {
-                Ok(Some(v)) if v.id == id => {}
-                Ok(Some(fm::SitrepVersion { version, id, .. })) => {
+                Some(v) if v.id == id => {}
+                Some(fm::SitrepVersion { version, id, .. }) => {
                     println!(
                         "(i)   note: the current sitrep is {id:?} \
                         (at v{version})",
                     );
                 }
-                Ok(None) => {
+                None => {
                     eprintln!(
                         "/!\\ WEIRD: this sitrep is in the sitrep history, \
                          but there is no current sitrep. this should not \
                          happen!"
-                    );
-                }
-                Err(err) => {
-                    eprintln!(
-                        "/!\\ failed to determine the current sitrep \
-                         version: {err}"
                     );
                 }
             };
