@@ -119,7 +119,8 @@ mod test {
         // want some expunged zones and some non-expunged zones in each of two
         // different generations.
 
-        // Frst, create a basic blueprint with several Nexus zones in generation 1.
+        // First, create a basic blueprint with several Nexus zones in
+        // generation 1.
         let (example, blueprint1) =
             ExampleSystemBuilder::new(log, TEST_NAME).nexus_count(4).build();
         let g1 = Generation::new();
