@@ -226,7 +226,7 @@ impl DataStore {
         // this in order to determine the parent of that sitrep, so that we can
         // select all other sitreps with that parent.
         let meta = self
-            .fm_sitrep_metadata_read_on_conn(version.id, &*conn)
+            .fm_sitrep_metadata_read_on_conn(version.id, &conn)
             .await
             .map_err(|e| {
                 e.internal_context("fetching metadata for committed sitrep")
