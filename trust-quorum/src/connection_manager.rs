@@ -404,7 +404,7 @@ impl ConnMgr {
                         self.on_task_exit(task_id).await;
                     }
                     Err(err) => {
-                        error!(self.log, "Connection task panic: {err}");
+                        warn!(self.log, "Connection task panic: {err}");
                         self.on_task_exit(err.id()).await;
                     }
 
@@ -482,7 +482,19 @@ impl ConnMgr {
             tx,
             conn_type: ConnectionType::Accepted(addr),
         };
-        assert!(self.accepting.insert_unique(task_handle).is_ok());
+        let replaced = self.accepting.insert_overwrite(task_handle);
+        for h in replaced {
+            // We accepted a connection from the same `SocketAddrV6` before the
+            // old one was torn down. This should be rare, if not impossible.
+            warn!(
+                self.log,
+                "Accepted connection replaced. Aborting old task.";
+                "task_id" => ?h.task_id(),
+                "peer_addr" => %h.addr(),
+            );
+            h.abort();
+        }
+
         Ok(())
     }
 
@@ -501,12 +513,38 @@ impl ConnMgr {
                 "peer_id" => %peer_id
             );
 
-            let already_established = self.established.insert_unique(
+            let replaced = self.established.insert_overwrite(
                 EstablishedTaskHandle::new(peer_id, task_handle),
             );
-            assert!(already_established.is_ok());
+
+            // The only reason for for established connections to be replaced
+            // like this is when the IP address for a peer changes, but the
+            // previous connection has not yet been torn down.
+            //
+            // Tear down usually happens quickly due to TCP reset or missed
+            // pings. However if the new ip address is fed into the task via
+            // `load_peer_addresses` and the peer at that address connects
+            // before the old connection is torn down, you end up in this
+            // situation.
+            //
+            // This isn't really possible, except in tests where we change port
+            // numbers when simulating crash and restart of nodes, and do this
+            // very quickly. We change port numbers because `NodeTask`s listen
+            // on port 0 and use ephemeral ports to prevent collisions in tests
+            // where the IP address is localhost.
+            for h in replaced {
+                warn!(
+                    self.log,
+                    "Established connection replaced. Aborting old task.";
+                    "task_id" => ?h.task_id(),
+                    "peer_addr" => %h.addr(),
+                    "peer_id" => %h.baseboard_id
+                );
+                h.abort();
+            }
         } else {
-            error!(self.log, "Server handshake completed, but no server addr in map";
+            warn!(self.log,
+                "Server handshake completed, but no server addr in map";
                 "task_id" => ?task_id,
                 "peer_addr" => %addr,
                 "peer_id" => %peer_id
@@ -528,12 +566,38 @@ impl ConnMgr {
                 "peer_addr" => %addr,
                 "peer_id" => %peer_id
             );
-            let already_established = self.established.insert_unique(
+            let replaced = self.established.insert_overwrite(
                 EstablishedTaskHandle::new(peer_id, task_handle),
             );
-            assert!(already_established.is_ok());
+
+            // The only reason for for established connections to be replaced
+            // like this is when the IP address for a peer changes, but the
+            // previous connection has not yet been torn down.
+            //
+            // Tear down usually happens quickly due to TCP reset or missed
+            // pings. However if the new ip address is fed into the task via
+            // `load_peer_addresses` and the peer at that address connects
+            // before the old connection is torn down, you end up in this
+            // situation.
+            //
+            // This isn't really possible, except in tests where we change port
+            // numbers when simulating crash and restart of nodes, and do this
+            // very quickly. We change port numbers because `NodeTask`s listen
+            // on port 0 and use ephemeral ports to prevent collisions in tests
+            // where the IP address is localhost.
+            for h in replaced {
+                warn!(
+                    self.log,
+                    "Established connection replaced. Aborting old task.";
+                    "task_id" => ?h.task_id(),
+                    "peer_addr" => %h.addr(),
+                    "peer_id" => %h.baseboard_id
+                );
+                h.abort();
+            }
         } else {
-            error!(self.log, "Client handshake completed, but no client addr in map";
+            warn!(self.log,
+                "Client handshake completed, but no client addr in map";
                 "task_id" => ?task_id,
                 "peer_addr" => %addr,
                 "peer_id" => %peer_id
@@ -634,7 +698,7 @@ impl ConnMgr {
         disconnected_peers
     }
 
-    /// Spawn a task to estalbish a sprockets connection for the given address
+    /// Spawn a task to establish a sprockets connection for the given address
     async fn connect_client(
         &mut self,
         corpus: Vec<Utf8PathBuf>,
