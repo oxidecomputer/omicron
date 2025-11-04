@@ -691,7 +691,7 @@ impl MulticastGroupReconciler {
             }
 
             // Valid instance with sled, sled unchanged -> verify configuration
-            (true, Some(_sled_id)) => {
+            (true, Some(_)) => {
                 self.verify_members(opctx, group, member, dataplane_client)
                     .await?;
                 trace!(
@@ -875,7 +875,8 @@ impl MulticastGroupReconciler {
                     "error" => %e
                 );
 
-                // TODO: Cross-validate inventory sled→port mapping via DDM operational state
+                // TODO: Cross-validate inventory sled→port mapping via DDM
+                // operational state.
                 //
                 // We currently trust inventory (MGS/SP topology) for sled→port
                 // mapping.
@@ -1368,6 +1369,20 @@ impl MulticastGroupReconciler {
             );
         }
 
+        // TODO: Add uplink (front port) members for egress traffic through to
+        // Dendrite.
+        //
+        // When this is the first instance joining the group, we should also add
+        // uplink members with `Direction::External` for multicast egress
+        // traffic out of the rack.
+        // These uplink members follow a different lifecycle:
+        // - Added when first instance joins (check group member count)
+        // - Removed when last instance leaves (would be handled in
+        //   `remove_member_from_dataplane`)
+        //
+        // Uplink ports are probably going to be a group-level configuration
+        // added by external params.
+
         info!(
             opctx.log,
             "multicast member configuration applied to switch forwarding tables";
@@ -1799,7 +1814,7 @@ impl MulticastGroupReconciler {
         sled: &Sled,
     ) -> Option<&'a nexus_types::inventory::ServiceProcessor> {
         // Try exact match first (serial + part)
-        if let Some((_bb, sp)) = inventory.sps.iter().find(|(bb, _sp)| {
+        if let Some((_, sp)) = inventory.sps.iter().find(|(bb, _)| {
             bb.serial_number == sled.serial_number()
                 && bb.part_number == sled.part_number()
         }) {
@@ -1810,8 +1825,8 @@ impl MulticastGroupReconciler {
         inventory
             .sps
             .iter()
-            .find(|(bb, _sp)| bb.serial_number == sled.serial_number())
-            .map(|(_bb, sp)| sp)
+            .find(|(bb, _)| bb.serial_number == sled.serial_number())
+            .map(|(_, sp)| sp)
     }
 
     /// Map a single sled to switch port(s), validating against backplane map.

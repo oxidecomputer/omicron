@@ -409,7 +409,6 @@ impl MulticastGroupReconciler {
         // Create dataplane client (across switches) once for the entire
         // reconciliation pass (in case anything has changed)
         let dataplane_client = match MulticastDataplaneClient::new(
-            self.datastore.clone(),
             self.resolver.clone(),
             opctx.log.clone(),
         )

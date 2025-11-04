@@ -439,6 +439,16 @@ impl MulticastGroupReconciler {
             "underlay_linked" => group.underlay_group_id.is_some()
         );
 
+        // TODO: Add front port selection for egress traffic (instances →
+        // external). When transitioning groups to Active, we need to identify
+        // and validate front ports against DPD's QSFP topology (similar to
+        // `backplane_map` validation for rear ports). These uplink members use
+        // `Direction::External` and follow a different lifecycle - added when
+        // first instance joins, removed when last instance leaves.
+        // Should integrate with `switch_ports_with_uplinks()` or
+        // equivalent front port discovery mechanism, which would be
+        // configurable, and later learned (i.e., via `mcastd`/IGMP).
+
         // Handle underlay group creation/linking (same logic as before)
         self.process_creating_group_inner(opctx, group).await?;
 

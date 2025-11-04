@@ -148,7 +148,6 @@ async fn mgu_update_dataplane(
 
     // Use MulticastDataplaneClient for consistent DPD operations
     let dataplane = MulticastDataplaneClient::new(
-        osagactx.nexus().datastore().clone(),
         osagactx.nexus().resolver().clone(),
         osagactx.log().clone(),
     )
@@ -197,13 +196,12 @@ async fn mgu_rollback_dataplane(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let (external_group, _underlay_group) = sagactx
+    let (external_group, _) = sagactx
         .lookup::<(MulticastGroup, UnderlayMulticastGroup)>("group_data")?;
 
     let multicast_tag = external_group.name().to_string();
 
     let dataplane = MulticastDataplaneClient::new(
-        osagactx.nexus().datastore().clone(),
         osagactx.nexus().resolver().clone(),
         osagactx.log().clone(),
     )

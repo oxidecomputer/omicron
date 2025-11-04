@@ -23,7 +23,6 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
 
 use futures::future::try_join_all;
 use ipnetwork::IpNetwork;
@@ -42,7 +41,6 @@ use dpd_client::types::{
 use internal_dns_resolver::Resolver;
 
 use nexus_db_model::{ExternalMulticastGroup, UnderlayMulticastGroup};
-use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{Error, SwitchLocation};
 use omicron_common::vlan::VlanID;
@@ -110,12 +108,17 @@ pub(crate) type MulticastDataplaneResult<T> = Result<T, Error>;
 /// This handles multicast group and member operations across all switches
 /// in the rack, with automatic error handling and rollback.
 ///
-/// TODO: Add `switch_port_uplinks` configuration to multicast groups to specify
-/// which rack switch ports (e.g., `<switch>.<port>`) should carry multicast traffic
-/// out of the rack to external groups.
+/// TODO: Add `switch_port_uplinks` configuration to multicast groups for egress
+/// multicast traffic (instances → switches → external hosts).
+///
+/// Current implementation handles ingress (external → switches → instances)
+/// using rear ports with [`dpd_client::types::Direction::Underlay`]. For egress,
+/// we need:
+/// - Group-level uplink configuration (which front ports to use)
+/// - Uplink members with [`dpd_client::types::Direction::External`] added to
+///   underlay groups
+/// - Integration with existing `switch_ports_with_uplinks()` for port discovery
 pub(crate) struct MulticastDataplaneClient {
-    // Will be used to fetch mvlan from multicast_group table in follow-up commit
-    _datastore: Arc<DataStore>,
     dpd_clients: HashMap<SwitchLocation, dpd_client::Client>,
     log: Logger,
 }
@@ -133,7 +136,6 @@ impl MulticastDataplaneClient {
     /// Create a new client - builds fresh DPD clients for current switch
     /// topology.
     pub(crate) async fn new(
-        datastore: Arc<DataStore>,
         resolver: Resolver,
         log: Logger,
     ) -> MulticastDataplaneResult<Self> {
@@ -145,7 +147,7 @@ impl MulticastDataplaneClient {
             );
             Error::internal_error("failed to build DPD clients")
         })?;
-        Ok(Self { _datastore: datastore, dpd_clients, log })
+        Ok(Self { dpd_clients, log })
     }
 
     async fn dpd_ensure_underlay_created(
@@ -443,7 +445,7 @@ impl MulticastDataplaneClient {
         // Collect results
         let programmed_switches: Vec<SwitchLocation> =
             results.iter().map(|(loc, _, _)| **loc).collect();
-        let (_loc, underlay_last, external_last) =
+        let (_, underlay_last, external_last) =
             results.into_iter().last().ok_or_else(|| {
                 Error::internal_error("no switches were configured")
             })?;
@@ -638,7 +640,7 @@ impl MulticastDataplaneClient {
 
         // Get the last response (all switches should return equivalent responses)
         let results_len = results.len();
-        let (_loc, underlay_last, external_last) =
+        let (_, underlay_last, external_last) =
             results.into_iter().last().ok_or_else(|| {
                 Error::internal_error("no switches were updated")
             })?;
