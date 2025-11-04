@@ -382,6 +382,7 @@ dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = 
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
+itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
@@ -400,6 +401,7 @@ dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = 
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
+itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
