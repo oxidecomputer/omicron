@@ -142,7 +142,12 @@ impl DataStore {
         // TODO(eliza): this is where we would read all the other sitrep data,
         // if there was any.
 
-        Ok(Sitrep { metadata })
+        Ok(Sitrep {
+            metadata,
+            // TODO(eliza) read these
+            alerts_requested: Default::default(),
+            cases: Default::default(),
+        })
     }
 
     /// Insert the provided [`Sitrep`] into the database, and attempt to mark it

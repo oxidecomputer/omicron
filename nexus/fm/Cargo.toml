@@ -7,8 +7,11 @@ edition = "2021"
 workspace = true
 
 [dependencies]
-nexus-types.workspace = true
+anyhow.workspace = true
 chrono.workspace = true
+iddqd.workspace = true
+nexus-types.workspace = true
 omicron-uuid-kinds.workspace = true
+slog.workspace = true
 
 omicron-workspace-hack.workspace = true
