@@ -30,6 +30,8 @@ impl_enum_type!(
     TestFooBaz => b"test.foo.baz"
     TestQuuxBar => b"test.quux.bar"
     TestQuuxBarBaz => b"test.quux.bar.baz"
+    PsuInserted => b"hw.insert.power.power_shelf.psu"
+    PsuRemoved => b"hw.remove.power.power_shelf.psu"
 );
 
 impl AlertClass {
@@ -44,6 +46,8 @@ impl AlertClass {
             Self::TestFooBaz => "test.foo.baz",
             Self::TestQuuxBar => "test.quux.bar",
             Self::TestQuuxBarBaz => "test.quux.bar.baz",
+            Self::PsuInserted => "hw.insert.power.power_shelf.psu",
+            Self::PsuRemoved => "hw.remove.power.power_shelf.psu",
         }
     }
 
@@ -76,12 +80,28 @@ impl AlertClass {
             | Self::TestQuuxBarBaz => {
                 "This is a test of the emergency alert system"
             }
+            Self::PsuInserted => {
+                "A power supply unit (PSU) has been inserted into the power shelf"
+            }
+            Self::PsuRemoved => {
+                "A power supply unit (PSU) has been removed from the power shelf"
+            }
         }
     }
 
     /// All webhook event classes.
     pub const ALL_CLASSES: &'static [Self] =
         <Self as strum::VariantArray>::VARIANTS;
+}
+
+impl From<nexus_types::fm::AlertClass> for AlertClass {
+    fn from(input: nexus_types::fm::AlertClass) -> Self {
+        use nexus_types::fm::AlertClass as In;
+        match input {
+            In::PsuRemoved => Self::PsuRemoved,
+            In::PsuInserted => Self::PsuInserted,
+        }
+    }
 }
 
 impl fmt::Display for AlertClass {
