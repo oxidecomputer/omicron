@@ -21,9 +21,9 @@ transactions, we actually require that there are no writes of any kind. In
 practice, this means `oximeter` **must not** be running when this is called.
 Similarly, there must be only a single instance of this program at a time.
 
-_NB: Schema changes for the `oximeter` database are currently disabled due to_
-_ongoing self-service update work. More information about this restriction can_
-_be found in [#8862](https://github.com/oxidecomputer/omicron/issues/8862)_
+_NB: Schema changes for the `oximeter` database are currently disabled due to
+ongoing self-service update work. More information about this restriction can
+be found in [#8862](https://github.com/oxidecomputer/omicron/issues/8862)_
 
 To run this program:
 
