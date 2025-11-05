@@ -527,7 +527,7 @@ async fn ssc_regions_ensure(
             block_size,
             blocks_per_extent,
             extent_count,
-            gen: 1,
+            r#gen: 1,
             opts: CrucibleOpts {
                 id: *destination_volume_id.as_untyped_uuid(),
                 target: datasets_and_regions
@@ -679,7 +679,7 @@ async fn ssc_create_snapshot_record(
         volume_id: volume_id.into(),
         destination_volume_id: destination_volume_id.into(),
 
-        gen: db::model::Generation::new(),
+        generation: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: disk.block_size,
         size: disk.size,
@@ -1034,7 +1034,7 @@ async fn ssc_attach_disk_to_pantry(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(db_disk.runtime().gen)
+    Ok(db_disk.runtime().generation)
 }
 
 async fn ssc_attach_disk_to_pantry_undo(
@@ -1327,7 +1327,7 @@ async fn ssc_detach_disk_from_pantry(
             // this saga's execution.
             let expected_disk_generation_number =
                 sagactx.lookup::<Generation>("disk_generation_number")?;
-            if expected_disk_generation_number == db_disk.runtime().gen {
+            if expected_disk_generation_number == db_disk.runtime().generation {
                 info!(
                     log,
                     "setting disk {} state from maintenance to detached",
@@ -1348,7 +1348,7 @@ async fn ssc_detach_disk_from_pantry(
                     log,
                     "disk {} has generation number {:?}, which doesn't match the expected {:?}: skip setting to detach",
                     params.disk_id,
-                    db_disk.runtime().gen,
+                    db_disk.runtime().generation,
                     expected_disk_generation_number,
                 );
             }
@@ -1626,7 +1626,7 @@ async fn ssc_finalize_snapshot_record(
         .project_snapshot_update_state(
             &opctx,
             &authz_snapshot,
-            db_snapshot.gen,
+            db_snapshot.generation,
             db::model::SnapshotState::Ready,
         )
         .await
@@ -1813,7 +1813,7 @@ mod test {
                             block_size: 512,
                             blocks_per_extent: 10,
                             extent_count: 20,
-                            gen: 1,
+                            r#gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 key: Some("tkBksPOA519q11jvLCCX5P8t8+kCX4ZNzr+QP8M+TSg=".into()),
@@ -1839,7 +1839,7 @@ mod test {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 80,
-                    gen: 100,
+                    r#gen: 100,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         key: Some("jVex5Zfm+avnFMyezI6nCVPRPs53EWwYMN844XETDBM=".into()),

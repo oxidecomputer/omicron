@@ -876,7 +876,7 @@ async fn rsrss_new_region_volume_create(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            r#gen: 0,
             opts: CrucibleOpts {
                 id: new_region_volume_id.into_untyped_uuid(),
                 target: vec![new_region_address],
@@ -967,7 +967,7 @@ async fn rsrss_create_fake_volume(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            r#gen: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
                 // Do not put the new region ID here: it will be deleted during

@@ -209,7 +209,7 @@ impl ClickhouseAllocator {
                 .parent_config
                 .keepers
                 .iter()
-                .find(|(_, &keeper_id)| keeper_id == added_keeper_id)
+                .find(|&(_, &keeper_id)| keeper_id == added_keeper_id)
                 .unwrap();
 
             // Let's ensure that this zone has not been expunged yet. If it has that means
@@ -664,7 +664,7 @@ pub mod test {
             .parent_config
             .keepers
             .iter()
-            .find(|(_, &keeper_id)| keeper_id == keeper_to_expunge)
+            .find(|&(_, &keeper_id)| keeper_id == keeper_to_expunge)
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
         active_clickhouse_zones.keepers.remove(&zone_to_expunge);
@@ -757,7 +757,7 @@ pub mod test {
         let zone_to_expunge = new_config
             .keepers
             .iter()
-            .find(|(_, &keeper_id)| keeper_id == 5.into())
+            .find(|&(_, &keeper_id)| keeper_id == 5.into())
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
         allocator.parent_config = new_config;

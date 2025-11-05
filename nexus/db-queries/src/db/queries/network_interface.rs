@@ -2061,7 +2061,7 @@ mod tests {
         let new_runtime = model::InstanceRuntimeState {
             nexus_state: state,
             propolis_id,
-            r#gen: instance.runtime_state.gen.next().into(),
+            generation: instance.runtime_state.generation.next().into(),
             ..instance.runtime_state.clone()
         };
         let res = db_datastore

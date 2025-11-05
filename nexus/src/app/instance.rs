@@ -956,7 +956,11 @@ impl super::Nexus {
                         InstanceStateChangeRequestAction::UpdateRuntime(
                             db::model::InstanceRuntimeState {
                                 time_updated: chrono::Utc::now(),
-                                r#gen: prev_runtime.r#gen.0.next().into(),
+                                generation: prev_runtime
+                                    .generation
+                                    .0
+                                    .next()
+                                    .into(),
                                 nexus_state: db::model::InstanceState::NoVmm,
                                 ..prev_runtime.clone()
                             },
@@ -1305,7 +1309,7 @@ impl super::Nexus {
         // state.
         let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            r#gen: initial_vmm.runtime.gen.next(),
+            r#gen: initial_vmm.runtime.generation.next(),
             state: match operation {
                 InstanceRegisterReason::Migrate { .. } => {
                     sled_agent_client::types::VmmState::Migrating
@@ -1393,7 +1397,7 @@ impl super::Nexus {
         let new_runtime = VmmRuntimeState {
             state: db::model::VmmState::Failed,
             time_state_updated: chrono::Utc::now(),
-            r#gen: db::model::Generation(vmm.runtime.r#gen.next()),
+            generation: db::model::Generation(vmm.runtime.generation.next()),
         };
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
@@ -2080,7 +2084,7 @@ impl super::Nexus {
         log: &slog::Logger,
         saga: steno::SagaDag,
         instance_id: InstanceUuid,
-    ) -> impl std::future::Future<Output = ()> + Send {
+    ) -> impl std::future::Future<Output = ()> + Send + use<> {
         let sagas = self.sagas.clone();
         let task_instance_updater =
             self.background_tasks.task_instance_updater.clone();

@@ -268,7 +268,7 @@ pub async fn create_stopped_instance_record(
                 propolis_id: None,
                 migration_id: None,
                 dst_propolis_id: None,
-                gen: Generation::from(Generation::new().0.next()),
+                generation: Generation::from(Generation::new().0.next()),
                 time_last_auto_restarted: None,
             },
         )
@@ -452,7 +452,7 @@ pub async fn create_project_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: Generation::new(),
+                generation: Generation::new(),
                 state: SnapshotState::Creating,
                 block_size: BlockSize::AdvancedFormat,
 
@@ -552,7 +552,9 @@ pub async fn attach_instance_to_vmm(
                 propolis_id: Some(vmm_id.into_untyped_uuid()),
                 dst_propolis_id: None,
                 migration_id: None,
-                gen: Generation::from(instance.runtime().gen.next()),
+                generation: Generation::from(
+                    instance.runtime().generation.next(),
+                ),
                 time_updated: Utc::now(),
                 time_last_auto_restarted: None,
             },

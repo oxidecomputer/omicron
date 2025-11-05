@@ -821,19 +821,17 @@ impl ConnMgr {
             );
             handle.abort();
             None
+        } else if let Some(handle) = self.established.remove3(&addr) {
+            info!(
+                self.log,
+                "Deleting established connection";
+                "peer_addr" => %addr,
+                "peer_id" => %handle.baseboard_id
+            );
+            handle.abort();
+            Some(handle.baseboard_id)
         } else {
-            if let Some(handle) = self.established.remove3(&addr) {
-                info!(
-                    self.log,
-                    "Deleting established connection";
-                    "peer_addr" => %addr,
-                    "peer_id" => %handle.baseboard_id
-                );
-                handle.abort();
-                Some(handle.baseboard_id)
-            } else {
-                None
-            }
+            None
         }
     }
 

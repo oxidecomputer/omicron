@@ -352,7 +352,8 @@ pub struct NatEntryView {
     pub sled_address: Ipv6Addr,
     pub vni: Vni,
     pub mac: MacAddr,
-    pub gen: i64,
+    #[serde(rename = "gen")]
+    pub generation: i64,
     pub deleted: bool,
 }
 

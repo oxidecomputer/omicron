@@ -1547,7 +1547,7 @@ impl fmt::Display for PlanningNexusGenerationBumpReport {
                     why.as_str()
                 )?;
             }
-            Self::BumpingGeneration(gen) => {
+            Self::BumpingGeneration(r#gen) => {
                 writeln!(f, "* updating top-level nexus_generation to: {gen}")?;
             }
             // Nothing to report

@@ -679,6 +679,7 @@ fn clear_omdb_env() {
     for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_"))
     {
         eprintln!("removing {:?} from environment", env_var);
-        std::env::remove_var(env_var);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var(env_var) };
     }
 }

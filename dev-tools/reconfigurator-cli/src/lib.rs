@@ -1258,7 +1258,7 @@ enum SetArgs {
     NumNexus { num_nexus: u16 },
     /// specify the generation of Nexus zones that are considered active when
     /// running the blueprint planner
-    ActiveNexusGen { gen: Generation },
+    ActiveNexusGen { r#gen: Generation },
     /// Control the set of Nexus zones seen as input to the planner
     NexusZones {
         #[clap(long, conflicts_with = "active")]
@@ -2955,10 +2955,10 @@ fn cmd_set(
                 .set_target_nexus_zone_count(usize::from(num_nexus));
             rv
         }
-        SetArgs::ActiveNexusGen { gen } => {
+        SetArgs::ActiveNexusGen { r#gen } => {
             let rv =
                 format!("will use active Nexus zones from generation {gen}");
-            state.config_mut().set_active_nexus_zone_generation(gen);
+            state.config_mut().set_active_nexus_zone_generation(r#gen);
             rv
         }
         SetArgs::NexusZones {

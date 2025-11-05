@@ -670,7 +670,7 @@ impl PrometheusMetrics {
                                     mut entry,
                                 ) => {
                                     if let MetricValue::Histogram(
-                                        ref mut buckets,
+                                        buckets,
                                     ) = entry.get_mut()
                                     {
                                         buckets.push(bucket);
@@ -704,7 +704,7 @@ impl PrometheusMetrics {
 
         // Sort histogram buckets by their upper bound for consistent ordering
         for (_, metric_value) in metrics.iter_mut() {
-            if let MetricValue::Histogram(ref mut buckets) = metric_value {
+            if let MetricValue::Histogram(buckets) = metric_value {
                 buckets.sort_by(|a, b| {
                     a.le.partial_cmp(&b.le).unwrap_or(std::cmp::Ordering::Equal)
                 });

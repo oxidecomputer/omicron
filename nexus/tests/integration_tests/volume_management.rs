@@ -2217,7 +2217,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -2337,7 +2337,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -2568,14 +2568,14 @@ async fn test_snapshot_create_saga_unwinds_correctly(
 // and UUID you passed in.
 fn create_region(
     block_size: u64,
-    gen: u64,
+    r#gen: u64,
     id: Uuid,
 ) -> VolumeConstructionRequest {
     VolumeConstructionRequest::Region {
         block_size,
         blocks_per_extent: 1,
         extent_count: 1,
-        gen,
+        r#gen,
         opts: CrucibleOpts {
             id,
             target: Vec::new(),
@@ -2618,10 +2618,10 @@ fn volume_match_gen(
                         block_size: _,
                         blocks_per_extent: _,
                         extent_count: _,
-                        gen,
+                        r#gen,
                         opts: _,
                     } => {
-                        assert_eq!(*gen, expected_gen[index].unwrap());
+                        assert_eq!(*r#gen, expected_gen[index].unwrap());
                     }
                     _ => {
                         assert!(expected_gen[index].is_none());
@@ -3465,7 +3465,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         block_size: 512,
                         blocks_per_extent: self.region.blocks_per_extent(),
                         extent_count: self.region.extent_count() as u32,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![self.region_address.into()],
@@ -3603,7 +3603,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             block_size: 512,
                             blocks_per_extent: self.region.blocks_per_extent(),
                             extent_count: self.region.extent_count() as u32,
-                            gen: 1,
+                            r#gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![self.region_address.into()],
@@ -3635,7 +3635,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         block_size: 512,
                         blocks_per_extent: self.region.blocks_per_extent(),
                         extent_count: self.region.extent_count() as u32,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![self.region_address.into()],
@@ -3669,7 +3669,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             block_size: 512,
                             blocks_per_extent: self.region.blocks_per_extent(),
                             extent_count: self.region.extent_count() as u32,
-                            gen: 1,
+                            r#gen: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![self.region_address.into()],
@@ -5299,7 +5299,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -5336,7 +5336,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        r#gen: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -5910,7 +5910,7 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
@@ -6095,7 +6095,7 @@ async fn test_no_zombie_read_write_regions(
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    r#gen: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
