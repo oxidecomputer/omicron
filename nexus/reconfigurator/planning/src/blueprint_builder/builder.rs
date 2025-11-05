@@ -751,7 +751,7 @@ impl<'a> BlueprintBuilder<'a> {
 
             let allocator = BlueprintResourceAllocator::new(
                 self.sled_editors.values(),
-                self.input.service_ip_pool_ranges().to_vec(),
+                self.input.external_ip_policy(),
             )?;
 
             Ok::<_, Error>(allocator)
@@ -2273,20 +2273,6 @@ impl<'a> BlueprintBuilder<'a> {
         });
     }
 
-    /// Allow a test to manually add an external DNS address, which could
-    /// ordinarily only come from RSS.
-    ///
-    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    // This can't be `#[cfg(test)]` because it's used by the `ExampleSystem`
-    // helper (which itself is used by reconfigurator-cli and friends). We give
-    // it a scary name instead.
-    pub(crate) fn inject_untracked_external_dns_ip(
-        &mut self,
-        addr: IpAddr,
-    ) -> Result<(), Error> {
-        Ok(self.resource_allocator()?.inject_untracked_external_dns_ip(addr)?)
-    }
-
     pub fn pending_mgs_updates_replace_all(
         &mut self,
         updates: nexus_types::deployment::PendingMgsUpdates,
@@ -2803,6 +2789,7 @@ pub mod test {
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintDatasetDisposition;
+    use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
@@ -3541,7 +3528,13 @@ pub mod test {
             assert!(!used_ip_ranges.is_empty());
             let input = {
                 let mut builder = input.into_builder();
-                builder.policy_mut().service_ip_pool_ranges = used_ip_ranges;
+                builder.policy_mut().external_ips = {
+                    let mut ip_policy = ExternalIpPolicy::builder();
+                    for r in used_ip_ranges {
+                        ip_policy.push_service_pool_range(r).unwrap();
+                    }
+                    ip_policy.build()
+                };
                 builder.build()
             };
 
