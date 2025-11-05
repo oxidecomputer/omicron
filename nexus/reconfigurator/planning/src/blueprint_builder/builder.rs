@@ -11,7 +11,6 @@ use crate::blueprint_editor::EditedSled;
 use crate::blueprint_editor::ExternalNetworkingChoice;
 use crate::blueprint_editor::ExternalNetworkingError;
 use crate::blueprint_editor::ExternalSnatNetworkingChoice;
-use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
 use crate::mgs_updates::PendingHostPhase2Changes;
@@ -65,6 +64,7 @@ use nexus_types::inventory::Collection;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
+use omicron_common::address::DnsSubnet;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::api::external::Generation;
@@ -137,8 +137,10 @@ pub enum Error {
     },
     #[error("error constructing resource allocator")]
     AllocatorInput(#[from] BlueprintResourceAllocatorInputError),
-    #[error("error allocating internal DNS subnet")]
-    AllocateInternalDnsSubnet(#[from] NoAvailableDnsSubnets),
+    #[error("no commissioned sleds - rack subnet is unknown")]
+    RackSubnetUnknownNoSleds,
+    #[error("no reserved subnets available for internal DNS")]
+    NoAvailableDnsSubnets,
     #[error("error allocating external networking resources")]
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
     #[error("zone is already up-to-date and should not be updated")]
@@ -691,6 +693,40 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn new_blueprint_id(&self) -> BlueprintUuid {
         self.new_blueprint_id
+    }
+
+    pub fn available_internal_dns_subnets(
+        &self,
+    ) -> Result<impl Iterator<Item = DnsSubnet>, Error> {
+        // TODO-multirack We need the rack subnet to know what the reserved
+        // internal DNS subnets are. Pick any sled; this isn't right in
+        // multirack (either DNS will be on a wider subnet or we need to pick a
+        // particular rack subnet here?).
+        let any_sled_subnet = self
+            .input
+            .all_sled_resources(SledFilter::Commissioned)
+            .map(|(_sled_id, resources)| resources.subnet)
+            .next()
+            .ok_or(Error::RackSubnetUnknownNoSleds)?;
+        let rack_subnet = ReservedRackSubnet::from_subnet(any_sled_subnet);
+
+        // Compute the "in use" subnets; this includes all in-service internal
+        // DNS zones _and_ any "expunged but not yet confirmed to be gone"
+        // zones, so we use the somewhat unusual `could_be_running` filter
+        // instead of the more typical `is_in_service`.
+        let internal_dns_subnets_in_use = self
+            .current_zones(BlueprintZoneDisposition::could_be_running)
+            .filter_map(|(_sled_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::InternalDns(internal_dns) => {
+                    Some(DnsSubnet::from_addr(*internal_dns.dns_address.ip()))
+                }
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+
+        Ok(rack_subnet.get_dns_subnets().into_iter().filter(move |subnet| {
+            !internal_dns_subnets_in_use.contains(&subnet)
+        }))
     }
 
     pub fn planning_input(&self) -> &PlanningInput {
@@ -1381,12 +1417,9 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        dns_subnet: DnsSubnet,
     ) -> Result<(), Error> {
         let gz_address_index = self.next_internal_dns_gz_address_index(sled_id);
-        let sled_subnet = self.sled_resources(sled_id)?.subnet;
-        let rack_subnet = ReservedRackSubnet::from_subnet(sled_subnet);
-        let dns_subnet =
-            self.resource_allocator()?.next_internal_dns_subnet(rack_subnet)?;
         let address = dns_subnet.dns_address();
         let zpool = self.sled_select_zpool(sled_id, ZoneKind::InternalDns)?;
         let zone_type =

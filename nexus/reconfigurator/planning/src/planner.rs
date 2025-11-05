@@ -22,6 +22,7 @@ use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
+use itertools::Either;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -65,6 +66,7 @@ use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::iter;
 use std::str::FromStr;
 use std::sync::Arc;
 use swrite::SWrite;
@@ -1240,6 +1242,18 @@ impl<'a> Planner<'a> {
         image_source: BlueprintZoneImageSource,
         report: &mut PlanningAddStepReport,
     ) -> Result<(), Error> {
+        // If `kind` is "internal DNS", we'll need to pick subnets, but
+        // computing the available subnets isn't free. We could do something
+        // fancy with lazy construction, but that gets a little messy. Instead,
+        // always construct an iterator, and create an empty iterator for any
+        // `kind` that isn't "internal DNS".
+        let mut available_internal_dns_subnets = match kind {
+            DiscretionaryOmicronZone::InternalDns => {
+                Either::Left(self.blueprint.available_internal_dns_subnets()?)
+            }
+            _ => Either::Right(iter::empty()),
+        };
+
         for i in 0..num_zones_to_add {
             let sled_id = match zone_placement.place_zone(kind) {
                 Ok(sled_id) => sled_id,
@@ -1280,7 +1294,12 @@ impl<'a> Planner<'a> {
                     .blueprint
                     .sled_add_zone_crucible_pantry(sled_id, image)?,
                 DiscretionaryOmicronZone::InternalDns => {
-                    self.blueprint.sled_add_zone_internal_dns(sled_id, image)?
+                    let dns_subnet = available_internal_dns_subnets
+                        .next()
+                        .ok_or(Error::NoAvailableDnsSubnets)?;
+                    self.blueprint.sled_add_zone_internal_dns(
+                        sled_id, image, dns_subnet,
+                    )?
                 }
                 DiscretionaryOmicronZone::ExternalDns => {
                     self.blueprint.sled_add_zone_external_dns(sled_id, image)?
@@ -3003,7 +3022,9 @@ pub(crate) mod test {
                 Err(err) => {
                     let err = InlineErrorChain::new(&err).to_string();
                     assert!(
-                        err.contains("error allocating internal DNS"),
+                        err.contains(
+                            "no reserved subnets available for internal DNS"
+                        ),
                         "unexpected error: {err}"
                     );
                 }
