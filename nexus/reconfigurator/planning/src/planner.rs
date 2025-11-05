@@ -1133,23 +1133,21 @@ impl<'a> Planner<'a> {
                 // ...and our external networking allocator. (We can't use
                 // `get_or_insert_with()` because we can't bubble out the error,
                 // so effectively recreate that manually.
-                let external_networking_alloc =
-                    match external_networking_alloc.as_mut() {
-                        Some(allocator) => allocator,
-                        None => {
-                            let allocator = ExternalNetworkingAllocator::new(
-                                self.blueprint
-                                    .current_zones(
-                                        BlueprintZoneDisposition::is_in_service,
-                                    )
-                                    .map(|(_sled_id, zone)| zone),
+                let external_networking_alloc = match external_networking_alloc
+                    .as_mut()
+                {
+                    Some(allocator) => allocator,
+                    None => {
+                        let allocator =
+                            ExternalNetworkingAllocator::from_current_zones(
+                                &self.blueprint,
                                 self.input.external_ip_policy(),
                             )
                             .map_err(Error::ExternalNetworkingAllocator)?;
-                            external_networking_alloc = Some(allocator);
-                            external_networking_alloc.as_mut().unwrap()
-                        }
-                    };
+                        external_networking_alloc = Some(allocator);
+                        external_networking_alloc.as_mut().unwrap()
+                    }
+                };
 
                 self.add_discretionary_zones(
                     zone_placement,
@@ -3296,13 +3294,12 @@ pub(crate) mod test {
         // because we haven't give it any addresses (which currently
         // come only from RSS). This is not an error, though.
         assert!(input.external_ip_policy().external_dns_ips().is_empty());
-        let mut external_networking_alloc = ExternalNetworkingAllocator::new(
-            blueprint1
-                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-                .map(|(_, zone)| zone),
-            input.external_ip_policy(),
-        )
-        .expect("constructed allocator");
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_blueprint(
+                &blueprint1,
+                input.external_ip_policy(),
+            )
+            .expect("constructed allocator");
         external_networking_alloc
             .for_new_external_dns()
             .expect_err("should not have available IPs for external DNS");
@@ -3342,13 +3339,12 @@ pub(crate) mod test {
             PlannerRng::from_entropy(),
         )
         .expect("failed to build blueprint builder");
-        let mut external_networking_alloc = ExternalNetworkingAllocator::new(
-            blueprint_builder
-                .current_zones(BlueprintZoneDisposition::is_in_service)
-                .map(|(_, zone)| zone),
-            input.external_ip_policy(),
-        )
-        .expect("constructed allocator");
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &blueprint_builder,
+                input.external_ip_policy(),
+            )
+            .expect("constructed allocator");
 
         // Now we can add external DNS zones. We'll add two to the first
         // sled and one to the second.

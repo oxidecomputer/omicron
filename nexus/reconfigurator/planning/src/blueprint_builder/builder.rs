@@ -3365,13 +3365,12 @@ pub mod test {
         )
         .expect("failed to create builder");
 
-        let mut external_networking_alloc = ExternalNetworkingAllocator::new(
-            builder
-                .current_zones(BlueprintZoneDisposition::is_in_service)
-                .map(|(_, zone)| zone),
-            input.external_ip_policy(),
-        )
-        .expect("created external networking allocator");
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                input.external_ip_policy(),
+            )
+            .expect("created external networking allocator");
 
         let err = builder
             .sled_add_zone_nexus(
@@ -3485,10 +3484,8 @@ pub mod test {
             )
             .expect("failed to create builder");
             let mut external_networking_alloc =
-                ExternalNetworkingAllocator::new(
-                    builder
-                        .current_zones(BlueprintZoneDisposition::is_in_service)
-                        .map(|(_, zone)| zone),
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
                     input.external_ip_policy(),
                 )
                 .expect("created external networking allocator");
@@ -3518,10 +3515,8 @@ pub mod test {
             )
             .expect("failed to create builder");
             let mut external_networking_alloc =
-                ExternalNetworkingAllocator::new(
-                    builder
-                        .current_zones(BlueprintZoneDisposition::is_in_service)
-                        .map(|(_, zone)| zone),
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
                     input.external_ip_policy(),
                 )
                 .expect("created external networking allocator");
@@ -3576,10 +3571,8 @@ pub mod test {
             )
             .expect("failed to create builder");
             let mut external_networking_alloc =
-                ExternalNetworkingAllocator::new(
-                    builder
-                        .current_zones(BlueprintZoneDisposition::is_in_service)
-                        .map(|(_, zone)| zone),
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
                     input.external_ip_policy(),
                 )
                 .expect("created external networking allocator");

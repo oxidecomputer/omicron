@@ -561,11 +561,12 @@ impl ExampleSystemBuilder {
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();
-        let mut external_networking_alloc = ExternalNetworkingAllocator::new(
-            std::iter::empty(), // no zones yet! we're about to add them
-            base_input.external_ip_policy(),
-        )
-        .expect("constructed ExternalNetworkingAllocator");
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                base_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator");
 
         // * Create disks and non-discretionary zones on all sleds.
         // * Only create discretionary zones on discretionary sleds.

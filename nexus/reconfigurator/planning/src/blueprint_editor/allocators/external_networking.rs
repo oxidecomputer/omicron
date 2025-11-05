@@ -6,7 +6,9 @@ use anyhow::bail;
 use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
@@ -30,6 +32,8 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use strum::IntoEnumIterator as _;
+
+use crate::blueprint_builder::BlueprintBuilder;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExternalNetworkingError {
@@ -67,7 +71,38 @@ pub struct ExternalNetworkingAllocator {
 }
 
 impl ExternalNetworkingAllocator {
-    pub(crate) fn new<'b>(
+    /// Construct an `ExternalNetworkingAllocator` that hands out IPs based on
+    /// `external_ip_policy`, treating any IPs used by in-service zones
+    /// in `blueprint` as already-in-use.
+    #[cfg(test)]
+    pub(crate) fn from_blueprint(
+        blueprint: &Blueprint,
+        external_ip_policy: &ExternalIpPolicy,
+    ) -> anyhow::Result<Self> {
+        Self::new(
+            blueprint
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .map(|(_sled_id, zone)| zone),
+            external_ip_policy,
+        )
+    }
+
+    /// Construct an `ExternalNetworkingAllocator` that hands out IPs based on
+    /// `external_ip_policy`, treating any IPs used by in-service zones
+    /// described by `builder` as already-in-use.
+    pub(crate) fn from_current_zones(
+        builder: &BlueprintBuilder<'_>,
+        external_ip_policy: &ExternalIpPolicy,
+    ) -> anyhow::Result<Self> {
+        Self::new(
+            builder
+                .current_zones(BlueprintZoneDisposition::is_in_service)
+                .map(|(_sled_id, zone)| zone),
+            external_ip_policy,
+        )
+    }
+
+    fn new<'b>(
         running_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
         external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {
