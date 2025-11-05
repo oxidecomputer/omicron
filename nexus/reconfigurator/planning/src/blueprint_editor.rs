@@ -11,7 +11,6 @@ mod sled_editor;
 
 pub use allocators::BlueprintResourceAllocatorInputError;
 pub use allocators::ExternalNetworkingError;
-pub use allocators::NoAvailableDnsSubnets;
 pub use sled_editor::DatasetsEditError;
 pub use sled_editor::DisksEditError;
 pub use sled_editor::MultipleDatasetsOfKind;

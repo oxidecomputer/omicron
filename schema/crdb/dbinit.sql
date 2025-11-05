@@ -940,9 +940,9 @@ WHERE
   (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 CREATE UNIQUE INDEX IF NOT EXISTS
-  lookup_silo_user_by_silo_and_user_name
+  lookup_silo_user_by_silo_and_user_name_lower
 ON
-  omicron.public.silo_user (silo_id, user_name)
+  omicron.public.silo_user (silo_id, LOWER(user_name))
 WHERE
   time_deleted IS NULL AND user_provision_type = 'scim';
 
@@ -1003,9 +1003,9 @@ WHERE
   (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 CREATE UNIQUE INDEX IF NOT EXISTS
-  lookup_silo_group_by_silo_and_display_name
+  lookup_silo_group_by_silo_and_display_name_lower
 ON
-  omicron.public.silo_group (silo_id, display_name)
+  omicron.public.silo_group (silo_id, LOWER(display_name))
 WHERE
   time_deleted IS NULL AND user_provision_type = 'scim';
 
@@ -1850,18 +1850,25 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      */
     mac INT8 NOT NULL,
 
-    /* The private VPC IP address of the interface. */
-    ip INET NOT NULL,
+    /* The private VPC IPv4 address of the interface.
+     *
+     * At least one of the IPv4 and IPv6 addresses must be specified.
+     *
+     * NOTE: Despite the name, this is in fact the IPv4 address. We've kept the
+     * original name `ip` since renaming columns idempotently is difficult in
+     * CRDB right now.
+     */
+    ip INET,
 
     /*
      * Limited to 8 NICs per instance. This value must be kept in sync with
-     * `crate::nexus::MAX_NICS_PER_INSTANCE`.
+     * `nexus_db_model::MAX_NICS_PER_INSTANCE`.
      */
     slot INT2 NOT NULL CHECK (slot >= 0 AND slot < 8),
 
     /* True if this interface is the primary interface.
      *
-     * The primary interface appears in DNS and its address is used for external
+     * The primary interface appears in DNS and its addresses are used for external
      * connectivity.
      */
     is_primary BOOL NOT NULL,
@@ -1871,7 +1878,20 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
      * *allowed* to send/receive traffic on, in addition to its
      * assigned address.
      */
-    transit_ips INET[] NOT NULL DEFAULT ARRAY[]
+    transit_ips INET[] NOT NULL DEFAULT ARRAY[],
+
+    /* The private VPC IPv6 address of the interface.
+     *
+     * At least one of the IPv4 and IPv6 addresses must be specified.
+     */
+    ipv6 INET,
+
+    /* Constraint ensuring we have at least one IP address from either family.
+     * Both may be specified.
+     */
+    CONSTRAINT at_least_one_ip_address CHECK (
+        ip IS NOT NULL OR ipv6 IS NOT NULL
+    )
 );
 
 CREATE INDEX IF NOT EXISTS instance_network_interface_mac
@@ -1890,7 +1910,8 @@ SELECT
     vpc_id,
     subnet_id,
     mac,
-    ip,
+    ip AS ipv4,
+    ipv6,
     slot,
     is_primary,
     transit_ips
@@ -1912,7 +1933,8 @@ SELECT
     vpc_id,
     subnet_id,
     mac,
-    ip,
+    ip AS ipv4,
+    ipv6,
     slot,
     is_primary
 FROM
@@ -1928,12 +1950,17 @@ WHERE
  * as moving IPs between NICs on different instances, etc.
  */
 
-/* Ensure we do not assign the same address twice within a subnet */
-CREATE UNIQUE INDEX IF NOT EXISTS network_interface_subnet_id_ip_key ON omicron.public.network_interface (
+/* Ensure we do not assign the same addresses twice within a subnet */
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_subnet_id_ipv4_key ON omicron.public.network_interface (
     subnet_id,
     ip
 ) WHERE
-    time_deleted IS NULL;
+    time_deleted IS NULL AND ip IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_subnet_id_ipv6_key ON omicron.public.network_interface (
+    subnet_id,
+    ipv6
+) WHERE
+    time_deleted IS NULL AND ipv6 IS NOT NULL;
 
 /* Ensure we do not assign the same MAC twice within a VPC
  * See RFD174's discussion on the scope of virtual MACs
@@ -1972,6 +1999,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_slot_key ON omicro
 )
 WHERE
     time_deleted IS NULL;
+
+/*
+ * Index used to look up NIC details by its parent ID.
+ */
+CREATE INDEX IF NOT EXISTS network_interface_by_parent
+ON omicron.public.network_interface (parent_id)
+STORING (name, kind, vpc_id, subnet_id, mac, ip, ipv6, slot);
+
+/*
+ * Index used to select details needed to build the
+ * virtual-to-physical mappings quickly.
+ */
+CREATE INDEX IF NOT EXISTS v2p_mapping_details
+ON omicron.public.network_interface (
+  time_deleted, kind, subnet_id, vpc_id, parent_id
+) STORING (mac, ip, ipv6);
 
 CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_status AS ENUM (
     'disabled',
@@ -2421,11 +2464,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
 /*
  * Index used to support quickly looking up children of the IP Pool range table,
- * when checking for allocated addresses during deletion.
+ * when checking for allocated addresses during deletion. Note that this cannot
+ * be unique, because SNAT addresses can share different port ranges of the same
+ * IP address.
  */
 CREATE INDEX IF NOT EXISTS external_ip_by_pool ON omicron.public.external_ip (
     ip_pool_id,
-    ip_pool_range_id
+    ip_pool_range_id,
+    ip
 )
     WHERE time_deleted IS NULL;
 
@@ -3103,6 +3149,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.role_assignment (
         identity_type
      )
 );
+
+/*
+ * When SCIM IdPs delete users and groups we want to be able to cleanup all role
+ * assignments associated with them.
+ */
+CREATE INDEX IF NOT EXISTS lookup_role_assignment_by_identity_id
+    ON omicron.public.role_assignment ( identity_id );
 
 /*******************************************************************/
 
@@ -5662,20 +5715,11 @@ ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_loca
 
 CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
-CREATE INDEX IF NOT EXISTS network_interface_by_parent
-ON omicron.public.network_interface (parent_id)
-STORING (name, kind, vpc_id, subnet_id, mac, ip, slot);
-
 CREATE INDEX IF NOT EXISTS sled_by_policy_and_state
 ON omicron.public.sled (sled_policy, sled_state, id) STORING (ip);
 
 CREATE INDEX IF NOT EXISTS active_vmm
 ON omicron.public.vmm (time_deleted, sled_id, instance_id);
-
-CREATE INDEX IF NOT EXISTS v2p_mapping_details
-ON omicron.public.network_interface (
-  time_deleted, kind, subnet_id, vpc_id, parent_id
-) STORING (mac, ip);
 
 CREATE INDEX IF NOT EXISTS sled_by_policy
 ON omicron.public.sled (sled_policy) STORING (ip, sled_state);
@@ -6016,7 +6060,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicro
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_actor_kind AS ENUM (
     'user_builtin',
     'silo_user',
-    'unauthenticated'
+    'unauthenticated',
+    'scim'
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.audit_log_result_kind AS ENUM (
@@ -6093,6 +6138,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.audit_log (
         OR
         -- For silo_user: must have both actor_id and actor_silo_id
         (actor_kind = 'silo_user' AND actor_id IS NOT NULL AND actor_silo_id IS NOT NULL)
+        OR
+        -- For a scim actor: must have a actor_silo_id
+        (actor_kind = 'scim' AND actor_id IS NULL AND actor_silo_id IS NOT NULL)
         OR
         -- For unauthenticated: must not have actor_id or actor_silo_id
         (actor_kind = 'unauthenticated' AND actor_id IS NULL AND actor_silo_id IS NULL)
@@ -6783,6 +6831,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_db_metadata_nexus_by_state on omicron.p
     nexus_id
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.scim_client_bearer_token (
+    /* Identity metadata */
+    id UUID PRIMARY KEY,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    time_expires TIMESTAMPTZ,
+
+    silo_id UUID NOT NULL,
+
+    bearer_token TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+    lookup_scim_client_by_silo_id
+ON
+    omicron.public.scim_client_bearer_token (silo_id, id)
+WHERE
+    time_deleted IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+    bearer_token_unique_for_scim_client
+ON
+    omicron.public.scim_client_bearer_token (bearer_token)
+WHERE
+    time_deleted IS NULL;
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -6792,7 +6867,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '199.0.0', NULL)
+    (TRUE, NOW(), NOW(), '203.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -22,6 +22,7 @@ use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
+use itertools::Either;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -58,7 +59,6 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::SpType;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::M2Slot;
-use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -66,6 +66,7 @@ use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::iter;
 use std::str::FromStr;
 use std::sync::Arc;
 use swrite::SWrite;
@@ -114,9 +115,6 @@ mod zone_safety;
 /// multiple sleds as long as they don't have overlapping control plane
 /// services, etc.).
 const NUM_CONCURRENT_MGS_UPDATES: usize = 1;
-
-/// A receipt that `check_input_validity` has been run prior to planning.
-struct InputChecked;
 
 // Details of how a zone's status differs between the blueprint and the sled
 // inventory
@@ -192,23 +190,11 @@ impl<'a> Planner<'a> {
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
-        let checked = self.check_input_validity()?;
-        let report = self.do_plan(checked)?;
+        let report = self.do_plan()?;
         Ok(self.blueprint.build(BlueprintSource::Planner(Arc::new(report))))
     }
 
-    fn check_input_validity(&self) -> Result<InputChecked, Error> {
-        if self.input.target_internal_dns_zone_count() > INTERNAL_DNS_REDUNDANCY
-        {
-            return Err(Error::PolicySpecifiesTooManyInternalDnsServers);
-        }
-        Ok(InputChecked)
-    }
-
-    fn do_plan(
-        &mut self,
-        _checked: InputChecked,
-    ) -> Result<PlanningReport, Error> {
+    fn do_plan(&mut self) -> Result<PlanningReport, Error> {
         // Run the planning steps, recording their step reports as we go.
         let expunge = self.do_plan_expunge()?;
         let decommission = self.do_plan_decommission()?;
@@ -1256,6 +1242,18 @@ impl<'a> Planner<'a> {
         image_source: BlueprintZoneImageSource,
         report: &mut PlanningAddStepReport,
     ) -> Result<(), Error> {
+        // If `kind` is "internal DNS", we'll need to pick subnets, but
+        // computing the available subnets isn't free. We could do something
+        // fancy with lazy construction, but that gets a little messy. Instead,
+        // always construct an iterator, and create an empty iterator for any
+        // `kind` that isn't "internal DNS".
+        let mut available_internal_dns_subnets = match kind {
+            DiscretionaryOmicronZone::InternalDns => {
+                Either::Left(self.blueprint.available_internal_dns_subnets()?)
+            }
+            _ => Either::Right(iter::empty()),
+        };
+
         for i in 0..num_zones_to_add {
             let sled_id = match zone_placement.place_zone(kind) {
                 Ok(sled_id) => sled_id,
@@ -1296,7 +1294,12 @@ impl<'a> Planner<'a> {
                     .blueprint
                     .sled_add_zone_crucible_pantry(sled_id, image)?,
                 DiscretionaryOmicronZone::InternalDns => {
-                    self.blueprint.sled_add_zone_internal_dns(sled_id, image)?
+                    let dns_subnet = available_internal_dns_subnets
+                        .next()
+                        .ok_or(Error::NoAvailableDnsSubnets)?;
+                    self.blueprint.sled_add_zone_internal_dns(
+                        sled_id, image, dns_subnet,
+                    )?
                 }
                 DiscretionaryOmicronZone::ExternalDns => {
                     self.blueprint.sled_add_zone_external_dns(sled_id, image)?
@@ -2479,6 +2482,7 @@ pub(crate) mod test {
     use nexus_types::inventory::CockroachStatus;
     use nexus_types::inventory::InternalDnsGenerationStatus;
     use nexus_types::inventory::TimeSync;
+    use omicron_common::address::Ipv4Range;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::TufArtifactMeta;
@@ -2493,6 +2497,7 @@ pub(crate) mod test {
     use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
     use omicron_common::policy::COCKROACHDB_REDUNDANCY;
     use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
+    use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::update::ArtifactId;
     use omicron_test_utils::dev::test_setup_log;
@@ -2504,6 +2509,7 @@ pub(crate) mod test {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::net::IpAddr;
+    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactKind;
@@ -2995,7 +3001,7 @@ pub(crate) mod test {
         }
 
         // Try to run the planner with a high number of internal DNS zones;
-        // it will fail because the target is > MAX_DNS_REDUNDANCY.
+        // it will fail because the target is > INTERNAL_DNS_REDUNDANCY.
         {
             let mut builder = example
                 .system
@@ -3018,8 +3024,9 @@ pub(crate) mod test {
                 Err(err) => {
                     let err = InlineErrorChain::new(&err).to_string();
                     assert!(
-                        err.contains("can only have ")
-                            && err.contains(" internal DNS servers"),
+                        err.contains(
+                            "no reserved subnets available for internal DNS"
+                        ),
                         "unexpected error: {err}"
                     );
                 }
@@ -3169,12 +3176,14 @@ pub(crate) mod test {
         // the service IP pool. This will force reuse of the IP that was
         // allocated to the expunged Nexus zone.
         let mut builder = input.into_builder();
-        assert_eq!(builder.policy_mut().service_ip_pool_ranges.len(), 1);
+        let num_available_external_ips = builder
+            .policy_mut()
+            .external_ips
+            .clone()
+            .into_non_external_dns_ips()
+            .count();
         builder.policy_mut().target_nexus_zone_count =
-            builder.policy_mut().service_ip_pool_ranges[0]
-                .len()
-                .try_into()
-                .unwrap();
+            num_available_external_ips;
         let input = builder.build();
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
@@ -3244,6 +3253,7 @@ pub(crate) mod test {
         // We should not be able to add any external DNS zones yet,
         // because we haven't give it any addresses (which currently
         // come only from RSS). This is not an error, though.
+        assert!(input.external_ip_policy().external_dns_ips().is_empty());
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3261,8 +3271,32 @@ pub(crate) mod test {
             )
             .expect_err("can't add external DNS zones");
 
-        // Build a builder for a modfied blueprint that will include
-        // some external DNS addresses.
+        // Change the policy: add some external DNS IPs.
+        let external_dns_ips =
+            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
+                addr.parse::<Ipv4Addr>()
+                    .expect("can't parse external DNS IP address")
+            });
+        let input = {
+            let mut builder = input.into_builder();
+            let mut ip_policy =
+                builder.policy_mut().external_ips.clone().into_builder();
+            // Add a "service IP pool" covering our external DNS IP range.
+            ip_policy
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(external_dns_ips[0], external_dns_ips[2])
+                        .unwrap(),
+                )
+                .unwrap();
+            // Set these IPs as "for external DNS".
+            for ip in external_dns_ips {
+                ip_policy.add_external_dns_ip(ip.into()).unwrap();
+            }
+            builder.policy_mut().external_ips = ip_policy.build();
+            builder.build()
+        };
+
+        // Build a builder for a modfied blueprint based on the new policy.
         let mut blueprint_builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3272,18 +3306,6 @@ pub(crate) mod test {
             PlannerRng::from_entropy(),
         )
         .expect("failed to build blueprint builder");
-
-        // Manually reach into the external networking allocator and "find"
-        // some external IP addresses (maybe they fell off a truck).
-        // TODO-cleanup: Remove when external DNS addresses are in the policy.
-        let external_dns_ips =
-            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
-                addr.parse::<IpAddr>()
-                    .expect("can't parse external DNS IP address")
-            });
-        for addr in external_dns_ips {
-            blueprint_builder.inject_untracked_external_dns_ip(addr).unwrap();
-        }
 
         // Now we can add external DNS zones. We'll add two to the first
         // sled and one to the second.
@@ -6606,10 +6628,20 @@ pub(crate) mod test {
         //
         // Ask for COCKROACHDB_REDUNDANCY cockroach nodes
 
+        // If this assertion breaks - which would be okay - we should delete all
+        // these planning steps explicitly including a base set of CRDB zones.
+        assert_eq!(
+            example.system.target_cockroachdb_zone_count(),
+            0,
+            "We expect the system is initialized without cockroach zones"
+        );
         let mut input_builder = example.input.clone().into_builder();
         input_builder.policy_mut().target_cockroachdb_zone_count =
             COCKROACHDB_REDUNDANCY;
         example.input = input_builder.build();
+        example
+            .system
+            .set_target_cockroachdb_zone_count(COCKROACHDB_REDUNDANCY);
 
         let blueprint_name = "blueprint_with_cockroach";
         let new_blueprint = Planner::new_based_on(
@@ -6996,7 +7028,9 @@ pub(crate) mod test {
         );
 
         // Use that boundary NTP zone to promote others.
-        example.system.target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
+        example
+            .system
+            .set_target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
         example.input = example
             .system
             .to_planning_input_builder()

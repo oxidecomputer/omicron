@@ -108,6 +108,7 @@ use slog::info;
 use slog::o;
 use slog::trace;
 use slog::warn;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -186,6 +187,11 @@ trait GetMountpoint: AsRef<ZpoolName> {
 
 #[derive(Debug)]
 enum DumpSetupCmd {
+    ArchiveFormerZoneRoot {
+        zone_root: Utf8PathBuf,
+        zone_name: String,
+        completion_tx: oneshot::Sender<()>,
+    },
     UpdateDumpdevSetup {
         dump_slices: Vec<DumpSlicePath>,
         debug_datasets: Vec<DebugZpool>,
@@ -254,19 +260,21 @@ impl DumpSetup {
         let mut m2_core_datasets = Vec::new();
         let mount_config = self.mount_config.clone();
         for disk in disks {
-            if disk.is_synthetic() {
-                // We only setup dump devices on real disks
-                continue;
-            }
             match disk.variant() {
                 DiskVariant::M2 => {
-                    match disk.dump_device_devfs_path(false) {
-                        Ok(path) => m2_dump_slices.push(DumpSlicePath(path)),
-                        Err(err) => {
-                            warn!(
-                                log,
-                                "Error getting dump device devfs path: {err:?}"
-                            );
+                    // We only setup dump devices on real disks
+                    if !disk.is_synthetic() {
+                        match disk.dump_device_devfs_path(false) {
+                            Ok(path) => {
+                                m2_dump_slices.push(DumpSlicePath(path))
+                            }
+                            Err(err) => {
+                                warn!(
+                                    log,
+                                    "Error getting dump device devfs path: \
+                                     {err:?}"
+                                );
+                            }
                         }
                     }
                     let name = disk.zpool_name();
@@ -325,6 +333,65 @@ impl DumpSetup {
 
         if let Err(err) = rx.await {
             error!(log, "DumpSetup failed to await update"; "err" => ?err);
+        }
+    }
+
+    /// Request archive of logs from the specified directory, which is assumed
+    /// to correspond to the root filesystem of a zone that is no longer
+    /// running.
+    ///
+    /// Unlike typical log file archival, this includes non-rotated log files.
+    ///
+    /// This makes a best-effort and logs failures rather than reporting them to
+    /// the caller.
+    ///
+    /// When this future completes, the request has only been enqueued.  To know
+    /// when archival has completed, you must wait on the receive side of
+    /// `completion_tx`.
+    pub async fn archive_former_zone_root(
+        &self,
+        zone_root: &Utf8Path,
+        completion_tx: oneshot::Sender<()>,
+    ) {
+        let log = self.log.new(o!("zone_root" => zone_root.to_string()));
+
+        // Validate the path that we were given.  We're only ever given zone
+        // root filesystems, whose basename is always a zonename, and we always
+        // prefix our zone names with `oxz_`.  If that's not what we find here,
+        // log an error and bail out.  These error cases should be impossible to
+        // hit in practice.
+        let Some(file_name) = zone_root.file_name() else {
+            error!(
+                log,
+                "cannot archive former zone root";
+                "error" => "path has no filename part",
+            );
+            return;
+        };
+
+        if !file_name.starts_with("oxz_") {
+            error!(
+                log,
+                "cannot archive former zone root";
+                "error" => "filename does not start with \"oxz_\"",
+            );
+            return;
+        }
+
+        info!(log, "requesting archive of former zone root");
+        let zone_root = zone_root.to_owned();
+        let zone_name = file_name.to_string();
+        let cmd = DumpSetupCmd::ArchiveFormerZoneRoot {
+            zone_root,
+            zone_name,
+            completion_tx,
+        };
+        if let Err(_) = self.tx.send(cmd).await {
+            error!(
+                log,
+                "failed to request archive of former zone root";
+                "error" => "DumpSetup channel closed"
+            );
         }
     }
 }
@@ -585,6 +652,36 @@ impl DumpSetupWorker {
                         debug_datasets,
                         core_datasets,
                     );
+                }
+                Ok(Some(DumpSetupCmd::ArchiveFormerZoneRoot {
+                    zone_root,
+                    zone_name,
+                    completion_tx,
+                })) => {
+                    match self
+                        .do_archive_former_zone_root(
+                            &zone_root,
+                            &zone_name,
+                            completion_tx,
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            info!(
+                                self.log,
+                                "Archived logs from former zone root";
+                                "zone_root" => %zone_root
+                            );
+                        }
+                        Err(error) => {
+                            error!(
+                                self.log,
+                                "Failed to archive former zone root";
+                                "zone_root" => %zone_root,
+                                InlineErrorChain::new(&error),
+                            );
+                        }
+                    }
                 }
                 Ok(None) => {
                     warn!(
@@ -962,7 +1059,7 @@ impl DumpSetupWorker {
             );
         }
 
-        if let Err(err) = self.archive_logs().await {
+        if let Err(err) = self.archive_logs_from_running_zones().await {
             if !matches!(err, ArchiveLogsError::NoDebugDirYet) {
                 error!(
                     self.log,
@@ -994,7 +1091,9 @@ impl DumpSetupWorker {
         Ok(())
     }
 
-    async fn archive_logs(&self) -> Result<(), ArchiveLogsError> {
+    async fn archive_logs_from_running_zones(
+        &self,
+    ) -> Result<(), ArchiveLogsError> {
         let debug_dir = self
             .chosen_debug_dir
             .as_ref()
@@ -1007,27 +1106,74 @@ impl DumpSetupWorker {
                 zone.path().join("root/var/svc/log")
             };
             let zone_name = zone.name();
-            self.archive_logs_inner(debug_dir, logdir, zone_name).await?;
+            self.archive_logs_from_zone_path(
+                debug_dir, logdir, zone_name, false,
+            )
+            .await?;
         }
         Ok(())
     }
 
-    async fn archive_logs_inner(
+    async fn do_archive_former_zone_root(
+        &self,
+        zone_root: &Utf8Path,
+        zone_name: &str,
+        completion_tx: oneshot::Sender<()>,
+    ) -> Result<(), ArchiveLogsError> {
+        let debug_dir = self
+            .chosen_debug_dir
+            .as_ref()
+            .ok_or(ArchiveLogsError::NoDebugDirYet)?;
+        let logdir = zone_root.join("root/var/svc/log");
+        let rv = self
+            .archive_logs_from_zone_path(
+                debug_dir,
+                logdir.into(),
+                zone_name,
+                true,
+            )
+            .await;
+        if let Err(()) = completion_tx.send(()) {
+            // In practice, it would be surprising for our caller to have
+            // dropped this channel.  Make a note.
+            warn!(
+                self.log,
+                "Failed to report completion of former zone root archival";
+                "error" => "completion channel closed",
+            );
+        }
+        rv
+    }
+
+    async fn archive_logs_from_zone_path(
         &self,
         debug_dir: &DebugDataset,
         logdir: PathBuf,
         zone_name: &str,
+        include_live: bool,
     ) -> Result<(), ArchiveLogsError> {
         let mut rotated_log_files = Vec::new();
-        // patterns matching archived logs, e.g. foo.log.3
-        // keep checking for greater numbers of digits until we don't find any
-        for n in 1..9 {
+        if include_live {
             let pattern = logdir
-                .join(format!("*.log.{}", "[0-9]".repeat(n)))
+                .join("*.log*")
                 .to_str()
                 .ok_or_else(|| ArchiveLogsError::Utf8(zone_name.to_string()))?
                 .to_string();
             rotated_log_files.extend(glob::glob(&pattern)?.flatten());
+        } else {
+            // patterns matching archived logs, e.g. foo.log.3
+            // keep checking for greater numbers of digits until we don't find
+            // any
+            for n in 1..9 {
+                let pattern = logdir
+                    .join(format!("*.log.{}", "[0-9]".repeat(n)))
+                    .to_str()
+                    .ok_or_else(|| {
+                        ArchiveLogsError::Utf8(zone_name.to_string())
+                    })?
+                    .to_string();
+                rotated_log_files.extend(glob::glob(&pattern)?.flatten());
+            }
         }
         let dest_dir = debug_dir.as_ref().join(zone_name).into_std_path_buf();
         if !rotated_log_files.is_empty() {
@@ -1036,6 +1182,12 @@ impl DumpSetupWorker {
             info!(
                 self.log,
                 "Archiving {count} log files from {zone_name} zone"
+            );
+        } else if include_live {
+            warn!(
+                self.log,
+                "Found no log files from {zone_name} zone, including live \
+                 log files"
             );
         }
         for entry in rotated_log_files {

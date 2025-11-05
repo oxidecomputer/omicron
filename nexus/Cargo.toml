@@ -160,6 +160,7 @@ httpmock.workspace = true
 httptest.workspace = true
 hubtools.workspace = true
 hyper-rustls.workspace = true
+nexus-client.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-lockstep-client.workspace = true
 nexus-test-utils.workspace = true
@@ -176,6 +177,7 @@ pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
+scim2-test-client.workspace = true
 similar-asserts.workspace = true
 sp-sim.workspace = true
 strum.workspace = true

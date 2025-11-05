@@ -8,7 +8,6 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-installinator-common.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 progenitor.workspace = true

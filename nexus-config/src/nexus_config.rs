@@ -922,6 +922,7 @@ pub enum SchemeName {
     Spoof,
     SessionCookie,
     AccessToken,
+    ScimToken,
 }
 
 impl std::str::FromStr for SchemeName {
@@ -932,6 +933,7 @@ impl std::str::FromStr for SchemeName {
             "spoof" => Ok(SchemeName::Spoof),
             "session_cookie" => Ok(SchemeName::SessionCookie),
             "access_token" => Ok(SchemeName::AccessToken),
+            "scim_token" => Ok(SchemeName::ScimToken),
             _ => Err(anyhow!("unsupported authn scheme: {:?}", s)),
         }
     }
@@ -943,6 +945,7 @@ impl std::fmt::Display for SchemeName {
             SchemeName::Spoof => "spoof",
             SchemeName::SessionCookie => "session_cookie",
             SchemeName::AccessToken => "access_token",
+            SchemeName::ScimToken => "scim",
         })
     }
 }

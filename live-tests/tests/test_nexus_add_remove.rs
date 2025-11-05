@@ -25,7 +25,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::blueprint_zone_type;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
+use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use slog::{debug, info};
@@ -133,7 +133,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     assert_eq!(new_zone.kind(), ZoneKind::Nexus);
     let new_zone_addr = new_zone.underlay_ip();
     let new_zone_sockaddr =
-        SocketAddrV6::new(new_zone_addr, NEXUS_INTERNAL_PORT, 0, 0);
+        SocketAddrV6::new(new_zone_addr, NEXUS_LOCKSTEP_PORT, 0, 0);
     let new_zone_client = lc.specific_internal_nexus_client(new_zone_sockaddr);
 
     // Wait for the new Nexus zone to show up and be usable.

@@ -36,6 +36,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
+use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -309,7 +310,7 @@ impl ExampleSystemBuilder {
     /// anywhere between 0 and 30, inclusive, is permitted. (The limit of 30 is
     /// primarily to simplify the implementation.)
     ///
-    /// Each DNS server is assigned an address in the 10.x.x.x range.
+    /// Each DNS server is assigned an address in the 198.51.100.x range.
     pub fn external_dns_count(
         mut self,
         external_dns_count: usize,
@@ -450,9 +451,11 @@ impl ExampleSystemBuilder {
         // Update the system's target counts with the counts. (Note that
         // there's no external DNS count.)
         system
-            .target_nexus_zone_count(nexus_count.0)
-            .target_internal_dns_zone_count(self.internal_dns_count.0)
-            .target_crucible_pantry_zone_count(self.crucible_pantry_count.0);
+            .set_target_nexus_zone_count(nexus_count.0)
+            .set_target_internal_dns_zone_count(self.internal_dns_count.0)
+            .set_target_crucible_pantry_zone_count(
+                self.crucible_pantry_count.0,
+            );
 
         // Set the target release if one is available. We don't do this
         // unconditionally because we don't want the target release generation
@@ -498,9 +501,37 @@ impl ExampleSystemBuilder {
                 .unwrap();
         }
 
+        // Add as many external IPs as is necessary for external DNS zones. We
+        // pick addresses in the TEST-NET-2 (RFC 5737) range.
+        if self.external_dns_count.0 > 0 {
+            let mut builder =
+                system.external_ip_policy().clone().into_builder();
+            builder
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(
+                        "198.51.100.1".parse::<Ipv4Addr>().unwrap(),
+                        "198.51.100.30".parse::<Ipv4Addr>().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            for i in 0..self.external_dns_count.0 {
+                let lo = (i + 1)
+                    .try_into()
+                    .expect("external_dns_count is always <= 30");
+                builder
+                    .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
+                        198, 51, 100, lo,
+                    )))
+                    .expect("test IPs are valid service IPs");
+            }
+            system.set_external_ip_policy(builder.build());
+        }
+
         let mut input_builder = system
             .to_planning_input_builder()
             .expect("failed to make planning input builder");
+
         let base_input = input_builder.clone().build();
 
         // Start with an empty blueprint containing only our sleds, no zones.
@@ -526,24 +557,6 @@ impl ExampleSystemBuilder {
             rng.blueprint2_rng,
         )
         .unwrap();
-
-        // Add as many external IPs as is necessary for external DNS zones. We
-        // pick addresses in the TEST-NET-2 (RFC 5737) range.
-        for i in 0..self.external_dns_count.0 {
-            builder
-                .inject_untracked_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
-                    198,
-                    51,
-                    100,
-                    (i + 1)
-                        .try_into()
-                        .expect("external_dns_count is always <= 30"),
-                )))
-                .expect(
-                    "this shouldn't error because provided external IPs \
-                 are all unique",
-                );
-        }
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();
@@ -596,6 +609,8 @@ impl ExampleSystemBuilder {
                             )
                             .unwrap();
                     }
+                    let mut internal_dns_subnets =
+                        builder.available_internal_dns_subnets().unwrap();
                     for _ in 0..self
                         .internal_dns_count
                         .on(discretionary_ix, discretionary_sled_count)
@@ -608,6 +623,9 @@ impl ExampleSystemBuilder {
                                     .expect(
                                         "obtained InternalDNS image source",
                                     ),
+                                internal_dns_subnets.next().expect(
+                                    "sufficient available internal DNS subnets",
+                                ),
                             )
                             .unwrap();
                     }
@@ -1029,9 +1047,9 @@ mod tests {
         );
 
         // Check that the system's target counts are set correctly.
-        assert_eq!(example.system.get_target_nexus_zone_count(), 6);
-        assert_eq!(example.system.get_target_internal_dns_zone_count(), 2);
-        assert_eq!(example.system.get_target_crucible_pantry_zone_count(), 5);
+        assert_eq!(example.system.target_nexus_zone_count(), 6);
+        assert_eq!(example.system.target_internal_dns_zone_count(), 2);
+        assert_eq!(example.system.target_crucible_pantry_zone_count(), 5);
 
         // Check that the right number of zones are present in both the
         // blueprint and in the collection.
@@ -1359,6 +1377,10 @@ mod tests {
                     out.insert(service, Ok(()));
                 }
                 // Services that are not currently part of the example system.
+                // 
+                // TODO: They really should be part of the example system (at
+                // least in an optional mode). See
+                // https://github.com/oxidecomputer/omicron/issues/9349. 
                 ServiceName::ClickhouseAdminKeeper
                 | ServiceName::ClickhouseAdminServer
                 | ServiceName::ClickhouseClusterNative

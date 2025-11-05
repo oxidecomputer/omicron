@@ -1287,7 +1287,7 @@ impl Zfs {
     /// Calls "zfs get" to acquire multiple values
     ///
     /// - `names`: The properties being acquired
-    /// - `source`: The optioanl property source (origin of the property)
+    /// - `source`: The optional property source (origin of the property)
     /// Defaults to "all sources" when unspecified.
     pub async fn get_values<const N: usize>(
         filesystem_name: &str,
