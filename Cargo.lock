@@ -8861,6 +8861,7 @@ dependencies = [
  "ring",
  "rustls 0.22.4",
  "serde",
+ "sha2",
  "slog",
  "subprocess",
  "tar",
