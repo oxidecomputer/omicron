@@ -1130,7 +1130,7 @@ mod tests {
             res.unwrap_err(),
             Error::insufficient_capacity(
                 "No external IP addresses available",
-                "NextExternalIp::new tried to insert NULL ip",
+                "NextExternalIp::new returned NotFound",
             ),
         );
         context.success().await;
