@@ -1377,10 +1377,10 @@ mod tests {
                     out.insert(service, Ok(()));
                 }
                 // Services that are not currently part of the example system.
-                // 
+                //
                 // TODO: They really should be part of the example system (at
                 // least in an optional mode). See
-                // https://github.com/oxidecomputer/omicron/issues/9349. 
+                // https://github.com/oxidecomputer/omicron/issues/9349.
                 ServiceName::ClickhouseAdminKeeper
                 | ServiceName::ClickhouseAdminServer
                 | ServiceName::ClickhouseClusterNative
