@@ -6875,10 +6875,13 @@ dependencies = [
 name = "nexus-fm"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
+ "iddqd",
  "nexus-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "slog",
 ]
 
 [[package]]
