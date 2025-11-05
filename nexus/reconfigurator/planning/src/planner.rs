@@ -1132,7 +1132,7 @@ impl<'a> Planner<'a> {
                 });
                 // ...and our external networking allocator. (We can't use
                 // `get_or_insert_with()` because we can't bubble out the error,
-                // so effectively recreate that manually.
+                // so recreate the same effect manually.)
                 let external_networking_alloc =
                     match external_networking_alloc.as_mut() {
                         Some(allocator) => allocator,
