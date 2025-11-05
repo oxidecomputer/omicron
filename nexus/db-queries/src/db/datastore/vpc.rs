@@ -375,7 +375,8 @@ impl DataStore {
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Vpc> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        let authz_vpc_list = authz::VpcList::new(authz_project.clone());
+        opctx.authorize(authz::Action::ListChildren, &authz_vpc_list).await?;
 
         use nexus_db_schema::schema::vpc::dsl;
         match pagparams {

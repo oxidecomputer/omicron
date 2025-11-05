@@ -11184,7 +11184,7 @@
         "tags": [
           "system/update"
         ],
-        "summary": "Fetch system release repository description by version",
+        "summary": "Fetch system release repository by version",
         "operationId": "system_update_repository_view",
         "parameters": [
           {
@@ -23056,6 +23056,7 @@
         "enum": [
           "admin",
           "collaborator",
+          "limited_collaborator",
           "viewer"
         ]
       },
@@ -24299,6 +24300,7 @@
         "enum": [
           "admin",
           "collaborator",
+          "limited_collaborator",
           "viewer"
         ]
       },

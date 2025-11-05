@@ -131,7 +131,9 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         .map(|(id, current)| {
             (
                 id,
-                lc.specific_internal_nexus_client(current.cfg.internal_address),
+                lc.specific_internal_nexus_client(
+                    current.cfg.lockstep_address(),
+                ),
             )
         })
         .collect();
@@ -193,18 +195,15 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 
     // Find the new Nexus zones and make clients for them.
     let new_nexus_clients = blueprint_new_nexus
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        .filter_map(|(_sled_id, z)| {
-            let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                nexus_generation,
-                internal_address,
-                ..
-            }) = &z.zone_type
-            else {
-                return None;
-            };
-            (*nexus_generation == next_generation).then(|| {
-                (z.id, lc.specific_internal_nexus_client(*internal_address))
+        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .filter_map(|(_sled_id, zone_cfg, nexus_config)| {
+            (nexus_config.nexus_generation == next_generation).then(|| {
+                (
+                    zone_cfg.id,
+                    lc.specific_internal_nexus_client(
+                        nexus_config.lockstep_address(),
+                    ),
+                )
             })
         })
         .collect::<BTreeMap<_, _>>();

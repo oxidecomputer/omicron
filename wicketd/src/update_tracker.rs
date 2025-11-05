@@ -34,7 +34,6 @@ use gateway_messages::ROT_PAGE_SIZE;
 use gateway_messages::SpComponent;
 use hubtools::RawHubrisArchive;
 use installinator_common::InstallinatorCompletionMetadata;
-use installinator_common::InstallinatorSpec;
 use installinator_common::WriteOutput;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::MupdateUuid;
@@ -66,10 +65,10 @@ use tufaceous_artifact::ArtifactVersion;
 use update_common::artifacts::ArtifactIdData;
 use update_common::artifacts::ArtifactsWithPlan;
 use update_common::artifacts::ControlPlaneZonesMode;
-
 use update_common::artifacts::UpdatePlan;
 use update_common::artifacts::VerificationMode;
 use update_engine::AbortHandle;
+use update_engine::NestedSpec;
 use update_engine::StepSpec;
 use update_engine::events::ProgressUnits;
 use uuid::Uuid;
@@ -1835,7 +1834,7 @@ impl UpdateContext {
     async fn process_installinator_reports(
         &self,
         cx: &StepContext,
-        mut ipr_receiver: watch::Receiver<EventReport<InstallinatorSpec>>,
+        mut ipr_receiver: watch::Receiver<EventReport<NestedSpec>>,
     ) -> anyhow::Result<WriteOutput> {
         let mut write_output = None;
 
@@ -1862,6 +1861,14 @@ impl UpdateContext {
                     let Some(metadata) = outcome.completion_metadata() else {
                         continue;
                     };
+
+                    let metadata = serde_json::from_value::<
+                        InstallinatorCompletionMetadata,
+                    >(metadata.clone())
+                    .context(
+                        "failed to deserialize completion metadata \
+                         even though there's an #[unknown] variant",
+                    )?;
 
                     match metadata {
                         InstallinatorCompletionMetadata::Write { output } => {
@@ -2395,7 +2402,7 @@ impl UpdateContext {
         cx: &StepContext,
         mut ipr_start_receiver: IprStartReceiver,
         image_id: HostPhase2RecoveryImageId,
-    ) -> anyhow::Result<watch::Receiver<EventReport<InstallinatorSpec>>> {
+    ) -> anyhow::Result<watch::Receiver<EventReport<NestedSpec>>> {
         const MGS_PROGRESS_POLL_INTERVAL: Duration = Duration::from_secs(3);
 
         // Waiting for the installinator to start is a little strange. It can't
