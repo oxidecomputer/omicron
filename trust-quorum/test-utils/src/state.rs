@@ -17,7 +17,7 @@ use sled_hardware_types::Baseboard;
 use slog::{Logger, info};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
-use trust_quorum::{
+use trust_quorum_protocol::{
     BaseboardId, Configuration, CoordinatingMsg, CoordinatorOperation,
     CoordinatorStateDiff, Envelope, Epoch, LoadRackSecretError, Node,
     NodeCallerCtx, NodeCommonCtx, NodeCtx, NodeCtxDiff, NodeDiff, PeerMsgKind,

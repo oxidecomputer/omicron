@@ -164,7 +164,7 @@ This _noop conversion_ is always performed whenever zone image hashes match, as 
 
 When all zone and host phase 2 images across all sleds have their image sources set to `Artifact`, the Reconfigurator planner considers the system to have fully recovered from the MUPdate. From this point onwards, zone adds and updates are allowed.
 
-[NOTE] 
+[NOTE]
 ====
 Zone adds (but not updates) are also allowed when either of the following conditions are met:
 
@@ -185,7 +185,7 @@ While reconciling the mupdate override field within Sled Agent, errors during re
 (This is the most common case, and also the most interesting.)
 
 * Before ledgering a config, we check that if the `remove_mupdate_override` field is set, all zones' image sources are set to `InstallDataset`.
-* As a result, while reconciling against a configuration that initially removing the mupdate override, the reconciler will attempt to start zones exclusively from the install dataset.
+* As a result, while reconciling against a configuration that initially removes the mupdate override, the reconciler will attempt to start zones exclusively from the install dataset.
 * Once removing the mupdate override succeeds, the next inventory collection for the sled will contain this fact.
 * Based on this, the planner will clear the `remove_mupdate_override` field in the blueprint. (In the future, clearing the `remove_mupdate_override` field will be gated on success doing no-op image source conversions, as mentioned in the next step below.)
 * For sleds that don't have a `remove_mupdate_override` field set in the blueprint, including this one, the planner will perform no-op image source updates from InstallDataset to Artifact, if the hash of the zone manifest matches the one in the target release.
@@ -198,7 +198,7 @@ While reconciling the mupdate override field within Sled Agent, errors during re
 
 (The control plane is expected to handle this case gracefully.)
 
-* The config reconciler continues to honor the mupdate override below.
+* The config reconciler continues to honor the mupdate override.
 * Inventory will report the latest mupdate override ID.
 * The Reconfigurator planner will update the blueprint's mupdate override field with the new value.
 * The next configuration will have the new value, and reconcilation should hopefully succeed at that point.
@@ -207,7 +207,7 @@ While reconciling the mupdate override field within Sled Agent, errors during re
 
 (The control plane should handle this case reasonably as well.)
 
-* The config reconciler continues to honor the mupdate override below.
+* The config reconciler continues to honor the mupdate override.
 * Inventory will continue to report the current mupdate override ID.
 * The Reconfigurator planner will not update the blueprint's mupdate override field.
 * The next configuration will have the new value, and reconcilation should hopefully succeed at that point.

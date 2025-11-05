@@ -156,6 +156,7 @@ pub enum FleetRole {
 pub enum SiloRole {
     Admin,
     Collaborator,
+    LimitedCollaborator,
     Viewer,
 }
 
@@ -175,6 +176,7 @@ pub enum SiloRole {
 pub enum ProjectRole {
     Admin,
     Collaborator,
+    LimitedCollaborator,
     Viewer,
 }
 
