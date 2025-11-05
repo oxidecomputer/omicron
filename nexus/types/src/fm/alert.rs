@@ -25,5 +25,6 @@ impl iddqd::IdOrdItem for AlertRequest {
 
 #[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AlertClass {
-    // TODO
+    PsuInserted,
+    PsuRemoved,
 }
