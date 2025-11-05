@@ -13,6 +13,7 @@ use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
+use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::MgsUpdatePlanner;
@@ -1010,6 +1011,11 @@ impl<'a> Planner<'a> {
         // discretionary zones, so defer its creation until it's needed.
         let mut zone_placement = None;
 
+        // Likewise, we usually don't need to create an
+        // `ExternalNetworkingAllocator` to add discretionary zones, so defer
+        // its creation until it's needed.
+        let mut external_networking_alloc = None;
+
         for zone_kind in [
             DiscretionaryOmicronZone::BoundaryNtp,
             DiscretionaryOmicronZone::Clickhouse,
@@ -1087,9 +1093,9 @@ impl<'a> Planner<'a> {
                 if num_zones_to_add == 0 {
                     continue;
                 }
-                // We need to add at least one zone; construct our `zone_placement`
-                // (or reuse the existing one if a previous loop iteration already
-                // created it).
+                // We need to add at least one zone; construct our
+                // `zone_placement` (or reuse the existing one if a previous
+                // loop iteration already created it)...
                 let zone_placement = zone_placement.get_or_insert_with(|| {
                     // This constructs a picture of the sleds as we currently
                     // understand them, as far as which sleds have discretionary
@@ -1124,8 +1130,30 @@ impl<'a> Planner<'a> {
                         });
                     OmicronZonePlacement::new(current_discretionary_zones)
                 });
+                // ...and our external networking allocator. (We can't use
+                // `get_or_insert_with()` because we can't bubble out the error,
+                // so effectively recreate that manually.
+                let external_networking_alloc =
+                    match external_networking_alloc.as_mut() {
+                        Some(allocator) => allocator,
+                        None => {
+                            let allocator = ExternalNetworkingAllocator::new(
+                                self.blueprint
+                                    .current_zones(
+                                        BlueprintZoneDisposition::is_in_service,
+                                    )
+                                    .map(|(_sled_id, zone)| zone),
+                                self.input.external_ip_policy(),
+                            )
+                            .map_err(Error::ExternalNetworkingAllocator)?;
+                            external_networking_alloc = Some(allocator);
+                            external_networking_alloc.as_mut().unwrap()
+                        }
+                    };
+
                 self.add_discretionary_zones(
                     zone_placement,
+                    external_networking_alloc,
                     zone_kind,
                     num_zones_to_add,
                     image_source,
@@ -1237,6 +1265,7 @@ impl<'a> Planner<'a> {
     fn add_discretionary_zones(
         &mut self,
         zone_placement: &mut OmicronZonePlacement,
+        external_networking_alloc: &mut ExternalNetworkingAllocator,
         kind: DiscretionaryOmicronZone,
         num_zones_to_add: usize,
         image_source: BlueprintZoneImageSource,
@@ -1274,8 +1303,12 @@ impl<'a> Planner<'a> {
             let image = image_source.clone();
             match kind {
                 DiscretionaryOmicronZone::BoundaryNtp => {
+                    let external_ip =
+                        external_networking_alloc.for_new_boundary_ntp()?;
                     self.blueprint.sled_promote_internal_ntp_to_boundary_ntp(
-                        sled_id, image,
+                        sled_id,
+                        image,
+                        external_ip,
                     )?
                 }
                 DiscretionaryOmicronZone::Clickhouse => {

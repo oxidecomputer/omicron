@@ -137,6 +137,8 @@ pub enum Error {
     },
     #[error("error constructing resource allocator")]
     AllocatorInput(#[from] BlueprintResourceAllocatorInputError),
+    #[error("error constructing external networking allocator")]
+    ExternalNetworkingAllocator(#[source] anyhow::Error),
     #[error("no commissioned sleds - rack subnet is unknown")]
     RackSubnetUnknownNoSleds,
     #[error("no reserved subnets available for internal DNS")]
@@ -1872,6 +1874,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        external_ip: ExternalSnatNetworkingChoice,
     ) -> Result<(), Error> {
         // The upstream NTP/DNS servers and domain _should_ come from Nexus and
         // be modifiable by the operator, but currently can only be set at RSS.
@@ -1896,6 +1899,7 @@ impl<'a> BlueprintBuilder<'a> {
             dns_servers,
             domain,
             image_source,
+            external_ip,
         )
     }
 
@@ -1906,6 +1910,7 @@ impl<'a> BlueprintBuilder<'a> {
         dns_servers: Vec<IpAddr>,
         domain: Option<String>,
         image_source: BlueprintZoneImageSource,
+        external_ip: ExternalSnatNetworkingChoice,
     ) -> Result<(), Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
@@ -1953,7 +1958,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic_ip,
             nic_subnet,
             nic_mac,
-        } = self.resource_allocator()?.next_external_ip_boundary_ntp()?;
+        } = external_ip;
         let external_ip = OmicronZoneExternalSnatIp {
             id: self.rng.sled_rng(sled_id).next_external_ip(),
             snat_cfg,

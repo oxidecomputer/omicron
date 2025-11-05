@@ -10,12 +10,10 @@ use nexus_types::deployment::ExternalIpPolicy;
 
 mod external_networking;
 
+pub use self::external_networking::ExternalNetworkingAllocator;
+pub use self::external_networking::ExternalNetworkingChoice;
 pub use self::external_networking::ExternalNetworkingError;
-
-pub(crate) use self::external_networking::ExternalNetworkingChoice;
-pub(crate) use self::external_networking::ExternalSnatNetworkingChoice;
-
-use self::external_networking::ExternalNetworkingAllocator;
+pub use self::external_networking::ExternalSnatNetworkingChoice;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BlueprintResourceAllocatorInputError {
@@ -57,11 +55,5 @@ impl BlueprintResourceAllocator {
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
         self.external_networking.for_new_external_dns()
-    }
-
-    pub(crate) fn next_external_ip_boundary_ntp(
-        &mut self,
-    ) -> Result<ExternalSnatNetworkingChoice, ExternalNetworkingError> {
-        self.external_networking.for_new_boundary_ntp()
     }
 }

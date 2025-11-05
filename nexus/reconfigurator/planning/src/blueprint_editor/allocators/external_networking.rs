@@ -46,7 +46,7 @@ pub enum ExternalNetworkingError {
 }
 
 #[derive(Debug)]
-pub(super) struct ExternalNetworkingAllocator {
+pub struct ExternalNetworkingAllocator {
     // These fields mirror how RSS chooses addresses for zone NICs.
     boundary_ntp_v4_ips: AvailableIterator<'static, Ipv4Addr>,
     boundary_ntp_v6_ips: AvailableIterator<'static, Ipv6Addr>,
@@ -67,7 +67,7 @@ pub(super) struct ExternalNetworkingAllocator {
 }
 
 impl ExternalNetworkingAllocator {
-    pub(super) fn new<'b>(
+    pub(crate) fn new<'b>(
         running_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
         external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {
@@ -264,7 +264,7 @@ impl ExternalNetworkingAllocator {
         })
     }
 
-    pub(super) fn for_new_nexus(
+    pub(crate) fn for_new_nexus(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
         let external_ip = self.external_ip_alloc.claim_next_exclusive_ip()?;
@@ -301,7 +301,7 @@ impl ExternalNetworkingAllocator {
         })
     }
 
-    pub(super) fn for_new_boundary_ntp(
+    pub(crate) fn for_new_boundary_ntp(
         &mut self,
     ) -> Result<ExternalSnatNetworkingChoice, ExternalNetworkingError> {
         let snat_cfg = self.external_ip_alloc.claim_next_snat_ip()?;
@@ -338,7 +338,7 @@ impl ExternalNetworkingAllocator {
         })
     }
 
-    pub(super) fn for_new_external_dns(
+    pub(crate) fn for_new_external_dns(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
         let external_ip = self
@@ -381,19 +381,19 @@ impl ExternalNetworkingAllocator {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ExternalNetworkingChoice {
-    pub(crate) external_ip: IpAddr,
-    pub(crate) nic_ip: IpAddr,
-    pub(crate) nic_subnet: IpNet,
-    pub(crate) nic_mac: MacAddr,
+pub struct ExternalNetworkingChoice {
+    pub external_ip: IpAddr,
+    pub nic_ip: IpAddr,
+    pub nic_subnet: IpNet,
+    pub nic_mac: MacAddr,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ExternalSnatNetworkingChoice {
-    pub(crate) snat_cfg: SourceNatConfig,
-    pub(crate) nic_ip: IpAddr,
-    pub(crate) nic_subnet: IpNet,
-    pub(crate) nic_mac: MacAddr,
+pub struct ExternalSnatNetworkingChoice {
+    pub snat_cfg: SourceNatConfig,
+    pub nic_ip: IpAddr,
+    pub nic_subnet: IpNet,
+    pub nic_mac: MacAddr,
 }
 
 /// Combines a base iterator with an `in_use` set, filtering out any elements
