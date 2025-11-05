@@ -1344,11 +1344,14 @@ impl<'a> Planner<'a> {
                     )?
                 }
                 DiscretionaryOmicronZone::Nexus => {
+                    let external_ip =
+                        external_networking_alloc.for_new_nexus()?;
                     let nexus_generation =
                         self.determine_nexus_generation(&image)?;
                     self.blueprint.sled_add_zone_nexus(
                         sled_id,
                         image,
+                        external_ip,
                         nexus_generation,
                     )?
                 }

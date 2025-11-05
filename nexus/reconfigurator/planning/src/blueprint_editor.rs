@@ -9,7 +9,6 @@
 mod allocators;
 mod sled_editor;
 
-pub use allocators::BlueprintResourceAllocatorInputError;
 pub use allocators::ExternalNetworkingAllocator;
 pub use allocators::ExternalNetworkingChoice;
 pub use allocators::ExternalNetworkingError;
@@ -21,7 +20,6 @@ pub use sled_editor::SledEditError;
 pub use sled_editor::SledInputError;
 pub use sled_editor::ZonesEditError;
 
-pub(crate) use allocators::BlueprintResourceAllocator;
 pub(crate) use sled_editor::DiskExpungeDetails;
 pub(crate) use sled_editor::EditedSled;
 pub(crate) use sled_editor::SledEditor;

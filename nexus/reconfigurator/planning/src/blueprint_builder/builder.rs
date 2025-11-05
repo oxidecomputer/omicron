@@ -4,8 +4,6 @@
 
 //! Low-level facility for generating Blueprints
 
-use crate::blueprint_editor::BlueprintResourceAllocator;
-use crate::blueprint_editor::BlueprintResourceAllocatorInputError;
 use crate::blueprint_editor::DiskExpungeDetails;
 use crate::blueprint_editor::EditedSled;
 use crate::blueprint_editor::ExternalNetworkingChoice;
@@ -79,7 +77,6 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use once_cell::unsync::OnceCell;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -135,8 +132,6 @@ pub enum Error {
         #[source]
         err: SledEditError,
     },
-    #[error("error constructing resource allocator")]
-    AllocatorInput(#[from] BlueprintResourceAllocatorInputError),
     #[error("error constructing external networking allocator")]
     ExternalNetworkingAllocator(#[source] anyhow::Error),
     #[error("no commissioned sleds - rack subnet is unknown")]
@@ -514,17 +509,6 @@ pub struct BlueprintBuilder<'a> {
     // These fields are used to allocate resources for sleds.
     input: &'a PlanningInput,
 
-    // `allocators` contains logic for choosing new underlay IPs, external IPs,
-    // internal DNS subnets, etc. It's held in a `OnceCell` to delay its
-    // creation until it's first needed; the planner expunges zones before
-    // adding zones, so this delay allows us to reuse resources that just came
-    // free. (This is implicit and awkward; as we rework the builder we should
-    // rework this to make it more explicit.)
-    //
-    // Note: this is currently still a `once_cell` `OnceCell` rather than a std
-    // `OnceCell`, because `get_or_try_init` isn't stable yet.
-    resource_allocator: OnceCell<BlueprintResourceAllocator>,
-
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
     sled_editors: BTreeMap<SledUuid, SledEditor>,
@@ -674,7 +658,6 @@ impl<'a> BlueprintBuilder<'a> {
             collection: inventory,
             new_blueprint_id: rng.next_blueprint(),
             input,
-            resource_allocator: OnceCell::new(),
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
@@ -735,6 +718,7 @@ impl<'a> BlueprintBuilder<'a> {
         &self.input
     }
 
+    /*
     fn resource_allocator(
         &mut self,
     ) -> Result<&mut BlueprintResourceAllocator, Error> {
@@ -760,6 +744,7 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
         Ok(self.resource_allocator.get_mut().expect("get_or_init succeeded"))
     }
+    */
 
     /// Iterates over the list of sled IDs for which we have zones.
     ///
@@ -1606,6 +1591,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        external_ip: ExternalNetworkingChoice,
         nexus_generation: Generation,
     ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
@@ -1636,6 +1622,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_tls,
             external_dns_servers,
             image_source,
+            external_ip,
             nexus_generation,
         )
     }
@@ -1646,6 +1633,7 @@ impl<'a> BlueprintBuilder<'a> {
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
         image_source: BlueprintZoneImageSource,
+        external_ip: ExternalNetworkingChoice,
         nexus_generation: Generation,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
@@ -1654,7 +1642,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic_ip,
             nic_subnet,
             nic_mac,
-        } = self.resource_allocator()?.next_external_ip_nexus()?;
+        } = external_ip;
         let external_ip = OmicronZoneExternalFloatingIp {
             id: self.rng.sled_rng(sled_id).next_external_ip(),
             ip: external_ip,
@@ -2785,6 +2773,7 @@ impl fmt::Display for BpMupdateOverrideNotClearedReason {
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use crate::blueprint_editor::ExternalNetworkingAllocator;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
     use crate::example::example;
@@ -3376,6 +3365,14 @@ pub mod test {
         )
         .expect("failed to create builder");
 
+        let mut external_networking_alloc = ExternalNetworkingAllocator::new(
+            builder
+                .current_zones(BlueprintZoneDisposition::is_in_service)
+                .map(|(_, zone)| zone),
+            input.external_ip_policy(),
+        )
+        .expect("created external networking allocator");
+
         let err = builder
             .sled_add_zone_nexus(
                 collection
@@ -3385,6 +3382,9 @@ pub mod test {
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_nexus()
+                    .expect("have IP for Nexus"),
                 parent.nexus_generation,
             )
             .unwrap_err();
@@ -3484,10 +3484,21 @@ pub mod test {
                 rng.next_planner_rng(),
             )
             .expect("failed to create builder");
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::new(
+                    builder
+                        .current_zones(BlueprintZoneDisposition::is_in_service)
+                        .map(|(_, zone)| zone),
+                    input.external_ip_policy(),
+                )
+                .expect("created external networking allocator");
             builder
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    external_networking_alloc
+                        .for_new_nexus()
+                        .expect("have IP for Nexus"),
                     parent.nexus_generation,
                 )
                 .expect("added nexus zone");
@@ -3506,11 +3517,22 @@ pub mod test {
                 rng.next_planner_rng(),
             )
             .expect("failed to create builder");
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::new(
+                    builder
+                        .current_zones(BlueprintZoneDisposition::is_in_service)
+                        .map(|(_, zone)| zone),
+                    input.external_ip_policy(),
+                )
+                .expect("created external networking allocator");
             for _ in 0..3 {
                 builder
                     .sled_add_zone_nexus(
                         sled_id,
                         BlueprintZoneImageSource::InstallDataset,
+                        external_networking_alloc
+                            .for_new_nexus()
+                            .expect("have IP for Nexus"),
                         parent.nexus_generation,
                     )
                     .expect("added nexus zone");
@@ -3544,7 +3566,7 @@ pub mod test {
                 builder.build()
             };
 
-            let mut builder = BlueprintBuilder::new_based_on(
+            let builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
                 &input,
@@ -3553,20 +3575,20 @@ pub mod test {
                 rng.next_planner_rng(),
             )
             .expect("failed to create builder");
-            let err = builder
-                .sled_add_zone_nexus(
-                    sled_id,
-                    BlueprintZoneImageSource::InstallDataset,
-                    parent.nexus_generation,
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::new(
+                    builder
+                        .current_zones(BlueprintZoneDisposition::is_in_service)
+                        .map(|(_, zone)| zone),
+                    input.external_ip_policy(),
                 )
-                .unwrap_err();
+                .expect("created external networking allocator");
+            let err = external_networking_alloc.for_new_nexus().unwrap_err();
 
             assert!(
                 matches!(
                     err,
-                    Error::AllocateExternalNetworking(
-                        ExternalNetworkingError::NoExternalServiceIpAvailable
-                    )
+                    ExternalNetworkingError::NoExternalServiceIpAvailable
                 ),
                 "unexpected error {err}"
             );

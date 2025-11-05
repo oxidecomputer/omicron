@@ -593,6 +593,9 @@ impl ExampleSystemBuilder {
                     for _ in 0..nexus_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
+                        let external_ip = external_networking_alloc
+                            .for_new_nexus()
+                            .expect("should have an external IP for Nexus");
                         builder
                             .sled_add_zone_nexus_with_config(
                                 sled_id,
@@ -601,6 +604,7 @@ impl ExampleSystemBuilder {
                                 self.target_release
                                     .zone_image_source(ZoneKind::Nexus)
                                     .expect("obtained Nexus image source"),
+                                external_ip,
                                 initial_blueprint.nexus_generation,
                             )
                             .unwrap();
