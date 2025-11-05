@@ -1133,21 +1133,20 @@ impl<'a> Planner<'a> {
                 // ...and our external networking allocator. (We can't use
                 // `get_or_insert_with()` because we can't bubble out the error,
                 // so effectively recreate that manually.
-                let external_networking_alloc = match external_networking_alloc
-                    .as_mut()
-                {
-                    Some(allocator) => allocator,
-                    None => {
-                        let allocator =
+                let external_networking_alloc =
+                    match external_networking_alloc.as_mut() {
+                        Some(allocator) => allocator,
+                        None => {
+                            let allocator =
                             ExternalNetworkingAllocator::from_current_zones(
                                 &self.blueprint,
                                 self.input.external_ip_policy(),
                             )
                             .map_err(Error::ExternalNetworkingAllocator)?;
-                        external_networking_alloc = Some(allocator);
-                        external_networking_alloc.as_mut().unwrap()
-                    }
-                };
+                            external_networking_alloc = Some(allocator);
+                            external_networking_alloc.as_mut().unwrap()
+                        }
+                    };
 
                 self.add_discretionary_zones(
                     zone_placement,
