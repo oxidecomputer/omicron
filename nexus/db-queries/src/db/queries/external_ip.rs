@@ -458,10 +458,12 @@ impl NextExternalIp {
                 UNION ALL ",
         );
         self.push_automatic_full_ip_subquery_body(out.reborrow())?;
-        out.push_sql(") AS all_candidates \
+        out.push_sql(
+            ") AS all_candidates \
             WHERE candidate_ip IS NOT NULL \
             ORDER BY candidate_ip \
-            LIMIT 1 ");
+            LIMIT 1 ",
+        );
         Ok(())
     }
 
@@ -870,7 +872,8 @@ mod tests {
                 IpPoolReservationType::ExternalSilos,
             );
 
-            let db_pool = self.db
+            let db_pool = self
+                .db
                 .datastore()
                 .ip_pool_create(self.db.opctx(), pool.clone())
                 .await
@@ -891,12 +894,13 @@ mod tests {
 
             self.initialize_ip_pool(name, range).await;
 
-            let authz_pool = LookupPath::new(self.db.opctx(), self.db.datastore())
-                .ip_pool_id(pool.id())
-                .lookup_for(authz::Action::Read)
-                .await
-                .unwrap()
-                .0;
+            let authz_pool =
+                LookupPath::new(self.db.opctx(), self.db.datastore())
+                    .ip_pool_id(pool.id())
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .unwrap()
+                    .0;
             (authz_pool, db_pool)
         }
 
@@ -2090,13 +2094,11 @@ mod tests {
 
         // Create two ranges in the same pool. Each range will have one address
         // for simplicity.
-        let addrs = [
-            Ipv4Addr::new(10, 0, 0, 1),
-            Ipv4Addr::new(10, 0, 0, 2),
-        ];
+        let addrs = [Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 2)];
         let range1 = IpRange::try_from((addrs[0], addrs[0])).unwrap();
         let range2 = IpRange::try_from((addrs[1], addrs[1])).unwrap();
-        let (authz_pool, db_pool) = context.create_ip_pool("default", range1, true).await;
+        let (authz_pool, db_pool) =
+            context.create_ip_pool("default", range1, true).await;
         let _ = context
             .db
             .datastore()
@@ -2104,7 +2106,7 @@ mod tests {
                 context.db.opctx(),
                 &authz_pool,
                 &db_pool,
-                &range2
+                &range2,
             )
             .await
             .expect("able to add a second range to the pool");
@@ -2158,20 +2160,17 @@ mod tests {
 
     #[tokio::test]
     async fn can_allocate_snat_ips_from_all_ranges_in_a_pool() {
-        let context = TestContext::new(
-            "can_allocate_snat_ips_from_all_ranges_in_a_pool",
-        )
-        .await;
+        let context =
+            TestContext::new("can_allocate_snat_ips_from_all_ranges_in_a_pool")
+                .await;
 
         // Create two ranges in the same pool. Each range will have one address
         // for simplicity.
-        let addrs = [
-            Ipv4Addr::new(10, 0, 0, 1),
-            Ipv4Addr::new(10, 0, 0, 2),
-        ];
+        let addrs = [Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 2)];
         let range1 = IpRange::try_from((addrs[0], addrs[0])).unwrap();
         let range2 = IpRange::try_from((addrs[1], addrs[1])).unwrap();
-        let (authz_pool, db_pool) = context.create_ip_pool("default", range1, true).await;
+        let (authz_pool, db_pool) =
+            context.create_ip_pool("default", range1, true).await;
         let _ = context
             .db
             .datastore()
@@ -2179,7 +2178,7 @@ mod tests {
                 context.db.opctx(),
                 &authz_pool,
                 &db_pool,
-                &range2
+                &range2,
             )
             .await
             .expect("able to add a second range to the pool");
