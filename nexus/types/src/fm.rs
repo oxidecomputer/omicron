@@ -8,12 +8,18 @@
 //! structure containing fault management state.
 
 pub mod ereport;
-pub use ereport::Ereport;
+pub use ereport::{Ereport, EreportId};
+
+mod alert;
+pub use alert::*;
 
 use chrono::{DateTime, Utc};
-use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid, SitrepUuid};
-use schemars::JsonSchema;
+use iddqd::{IdOrdItem, IdOrdMap};
+use omicron_uuid_kinds::{
+    CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
+};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// A fault management situation report, or _sitrep_.
 ///
@@ -30,12 +36,12 @@ use serde::{Deserialize, Serialize};
 /// The sitrep, how it is represented in the database, and how the fault
 /// management subsystem creates and interacts with sitreps, is described in
 /// detail in [RFD 603](https://rfd.shared.oxide.computer/rfd/0603).
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct Sitrep {
     /// Metadata describing this sitrep, when it was created, its parent sitrep
     /// ID, and which Nexus produced it.
     pub metadata: SitrepMetadata,
-    // TODO(eliza): draw the rest of the sitrep
+    pub cases: IdOrdMap<Case>,
 }
 
 impl Sitrep {
@@ -46,12 +52,22 @@ impl Sitrep {
     pub fn parent_id(&self) -> Option<SitrepUuid> {
         self.metadata.parent_sitrep_id
     }
+
+    /// Iterate over all alerts requested by cases in this sitrep.
+    pub fn alerts_requested(
+        &self,
+    ) -> impl Iterator<Item = (CaseUuid, &'_ AlertRequest)> + '_ {
+        self.cases.iter().flat_map(|case| {
+            let case_id = case.id;
+            case.alerts_requested.iter().map(move |alert| (case_id, alert))
+        })
+    }
 }
 
 /// Metadata describing a sitrep.
 ///
 /// This corresponds to the records stored in the `fm_sitrep` database table.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepMetadata {
     /// The ID of this sitrep.
     pub id: SitrepUuid,
@@ -91,9 +107,28 @@ pub struct SitrepMetadata {
 }
 
 /// An entry in the sitrep version history.
-#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct SitrepVersion {
     pub id: SitrepUuid,
     pub version: u32,
     pub time_made_current: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct Case {
+    pub id: CaseUuid,
+    pub created_sitrep_id: SitrepUuid,
+    pub de: String,
+    pub ereports: BTreeSet<EreportId>,
+    // TODO(eliza) what else?
+    pub alerts_requested: IdOrdMap<AlertRequest>, // TODO(eliza): draw the rest of the sitrep
+}
+
+impl IdOrdItem for Case {
+    type Key<'a> = &'a CaseUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    iddqd::id_upcast!();
 }

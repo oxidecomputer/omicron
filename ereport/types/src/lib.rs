@@ -102,7 +102,9 @@ impl TryFrom<i64> for Ena {
 }
 
 /// Unique identifier for an ereport.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord,
+)]
 pub struct EreportId {
     pub restart_id: EreporterRestartUuid,
     pub ena: Ena,
