@@ -1335,7 +1335,13 @@ impl<'a> Planner<'a> {
                     )?
                 }
                 DiscretionaryOmicronZone::ExternalDns => {
-                    self.blueprint.sled_add_zone_external_dns(sled_id, image)?
+                    let external_ip =
+                        external_networking_alloc.for_new_external_dns()?;
+                    self.blueprint.sled_add_zone_external_dns(
+                        sled_id,
+                        image,
+                        external_ip,
+                    )?
                 }
                 DiscretionaryOmicronZone::Nexus => {
                     let nexus_generation =
@@ -3287,22 +3293,16 @@ pub(crate) mod test {
         // because we haven't give it any addresses (which currently
         // come only from RSS). This is not an error, though.
         assert!(input.external_ip_policy().external_dns_ips().is_empty());
-        let mut builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint1,
-            &input,
-            &collection,
-            TEST_NAME,
-            PlannerRng::from_entropy(),
+        let mut external_networking_alloc = ExternalNetworkingAllocator::new(
+            blueprint1
+                .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+                .map(|(_, zone)| zone),
+            input.external_ip_policy(),
         )
-        .expect("failed to build blueprint builder");
-        let sled_id = builder.sled_ids_with_zones().next().expect("no sleds");
-        builder
-            .sled_add_zone_external_dns(
-                sled_id,
-                BlueprintZoneImageSource::InstallDataset,
-            )
-            .expect_err("can't add external DNS zones");
+        .expect("constructed allocator");
+        external_networking_alloc
+            .for_new_external_dns()
+            .expect_err("should not have available IPs for external DNS");
 
         // Change the policy: add some external DNS IPs.
         let external_dns_ips =
@@ -3339,32 +3339,48 @@ pub(crate) mod test {
             PlannerRng::from_entropy(),
         )
         .expect("failed to build blueprint builder");
+        let mut external_networking_alloc = ExternalNetworkingAllocator::new(
+            blueprint_builder
+                .current_zones(BlueprintZoneDisposition::is_in_service)
+                .map(|(_, zone)| zone),
+            input.external_ip_policy(),
+        )
+        .expect("constructed allocator");
 
         // Now we can add external DNS zones. We'll add two to the first
         // sled and one to the second.
         let (sled_1, sled_2) = {
             let mut sleds = blueprint_builder.sled_ids_with_zones();
             (
-                sleds.next().expect("no first sled"),
-                sleds.next().expect("no second sled"),
+                sleds.next().expect("at least one sled"),
+                sleds.next().expect("at least two sleds"),
             )
         };
         blueprint_builder
             .sled_add_zone_external_dns(
                 sled_1,
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_external_dns()
+                    .expect("got IP for external DNS"),
             )
             .expect("added external DNS zone");
         blueprint_builder
             .sled_add_zone_external_dns(
                 sled_1,
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_external_dns()
+                    .expect("got IP for external DNS"),
             )
             .expect("added external DNS zone");
         blueprint_builder
             .sled_add_zone_external_dns(
                 sled_2,
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_external_dns()
+                    .expect("got IP for external DNS"),
             )
             .expect("added external DNS zone");
 
@@ -3427,13 +3443,13 @@ pub(crate) mod test {
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!("2 -> 3 (expunged sled):\n{}", diff.display());
         assert_eq!(
-            blueprint3.sleds[&sled_id]
+            blueprint3.sleds[&sled_1]
                 .zones
                 .iter()
                 .filter(|zone| {
                     zone.disposition
                         == BlueprintZoneDisposition::Expunged {
-                            as_of_generation: blueprint3.sleds[&sled_id]
+                            as_of_generation: blueprint3.sleds[&sled_1]
                                 .sled_agent_generation,
                             ready_for_cleanup: true,
                         }

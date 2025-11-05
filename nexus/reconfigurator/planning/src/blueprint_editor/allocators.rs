@@ -50,10 +50,4 @@ impl BlueprintResourceAllocator {
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
         self.external_networking.for_new_nexus()
     }
-
-    pub(crate) fn next_external_ip_external_dns(
-        &mut self,
-    ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
-        self.external_networking.for_new_external_dns()
-    }
 }
