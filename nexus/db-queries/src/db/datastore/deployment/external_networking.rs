@@ -48,7 +48,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<BTreeSet<IpAddr>, Error> {
-        // We can _implicitly_ determine the set of external DNS IPs provied
+        // We can _implicitly_ determine the set of external DNS IPs provided
         // during rack setup by examining the current target blueprint and
         // looking at the IPs of all of its external DNS zones. We _must_
         // include expunged zones as well as in-service zones: during an update,
