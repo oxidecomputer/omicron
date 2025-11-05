@@ -99,6 +99,8 @@ WITH
               r.ip_pool_id = $19 AND r.time_deleted IS NULL
         )
           AS all_candidates
+      WHERE
+        candidate_ip IS NOT NULL
       ORDER BY
         candidate_ip
       LIMIT
