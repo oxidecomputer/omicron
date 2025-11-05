@@ -8,5 +8,7 @@ workspace = true
 
 [dependencies]
 nexus-types.workspace = true
+chrono.workspace = true
+omicron-uuid-kinds.workspace = true
 
 omicron-workspace-hack.workspace = true

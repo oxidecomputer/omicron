@@ -6884,6 +6884,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-fm"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "nexus-types",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+]
+
+[[package]]
 name = "nexus-internal-api"
 version = "0.1.0"
 dependencies = [
