@@ -152,6 +152,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
             },
+            cases: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, &sitrep1)
@@ -174,6 +175,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.metadata.id),
             },
+            cases: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, &sitrep2)
@@ -264,7 +266,10 @@ mod tests {
                 comment: format!("test sitrep v{i}; orphan {i}"),
                 time_created: Utc::now(),
                 parent_sitrep_id,
+                // TODO(eliza): we should populate cases and assert they get
+                // cleaned up...
             },
+            cases: Default::default(),
         };
         match datastore.fm_sitrep_insert(&opctx, &sitrep).await {
             Ok(_) => {
