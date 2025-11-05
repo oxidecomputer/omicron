@@ -145,7 +145,6 @@ impl DataStore {
         Ok(Sitrep {
             metadata,
             // TODO(eliza) read these
-            alerts_requested: Default::default(),
             cases: Default::default(),
         })
     }
@@ -760,6 +759,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
             },
+            cases: Default::default(),
         };
 
         datastore.fm_sitrep_insert(&opctx, &sitrep).await.unwrap();
@@ -806,6 +806,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
             },
+            cases: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, &sitrep1).await.unwrap();
 
@@ -819,6 +820,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
             },
+            cases: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, &sitrep2).await.expect(
             "inserting a sitrep whose parent is current should succeed",
@@ -859,6 +861,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
             },
+            cases: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, &sitrep1).await.unwrap();
 
@@ -873,6 +876,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(nonexistent_id),
             },
+            cases: Default::default(),
         };
 
         let result = datastore.fm_sitrep_insert(&opctx, &sitrep2).await;
@@ -907,6 +911,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
             },
+            cases: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, &sitrep1).await.unwrap();
 
@@ -920,6 +925,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
             },
+            cases: Default::default(),
         };
         datastore.fm_sitrep_insert(&opctx, &sitrep2).await.unwrap();
 
@@ -934,6 +940,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.id()),
             },
+            cases: Default::default(),
         };
         let result = datastore.fm_sitrep_insert(&opctx, &sitrep3).await;
 
@@ -974,6 +981,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
             },
+            cases: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, &sitrep1)
@@ -1014,6 +1022,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.metadata.id),
             },
+            cases: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, &sitrep2)
@@ -1077,6 +1086,7 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id,
             },
+            cases: Default::default(),
         };
         match datastore.fm_sitrep_insert(&opctx, &sitrep).await {
             Ok(_) => {

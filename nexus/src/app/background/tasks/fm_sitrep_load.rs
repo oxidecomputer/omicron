@@ -224,6 +224,7 @@ mod test {
                 comment: "test sitrep 1".to_string(),
                 time_created: Utc::now(),
             },
+            cases: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, &sitrep1)
@@ -288,6 +289,7 @@ mod test {
                 comment: "test sitrep 2".to_string(),
                 time_created: Utc::now(),
             },
+            cases: Default::default(),
         };
         datastore
             .fm_sitrep_insert(&opctx, &sitrep2)
