@@ -333,6 +333,7 @@ mod test {
     use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -1584,13 +1585,22 @@ mod test {
         // * 127.0.0.1 (Nexus)
         // * ::1 (external DNS)
         //
-        // However, when the builder compiles its list of "IPs already in use",
-        // it _ignores_ loopback addresses, meaning we still have two external
-        // IPs available for new zones (127.0.0.1 and ::1).
+        // However, when the allocator compiles its list of "IPs already in
+        // use", it _ignores_ loopback addresses, meaning we still have two
+        // external IPs available for new zones (127.0.0.1 and ::1).
+        let new_nexus_external_ip =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator")
+            .for_new_nexus()
+            .expect("found external IP for Nexus");
         builder
             .sled_add_zone_nexus(
                 sled_id,
                 BlueprintZoneImageSource::InstallDataset,
+                new_nexus_external_ip,
                 blueprint.nexus_generation,
             )
             .unwrap();

@@ -15,6 +15,7 @@ use live_tests_macros::live_test;
 use nexus_db_model::DbMetadataNexusState;
 use nexus_lockstep_client::types::QuiesceState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -173,11 +174,21 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
             &collection,
             &nexus,
             &|builder: &mut BlueprintBuilder| {
+                let mut external_networking_alloc =
+                    ExternalNetworkingAllocator::from_current_zones(
+                        builder,
+                        planning_input.external_ip_policy(),
+                    )
+                    .context("constructing ExternalNetworkingAllocator")?;
                 for current_nexus in current_nexus_zones.values() {
+                    let external_ip = external_networking_alloc
+                        .for_new_nexus()
+                        .context("choosing external IP for new Nexus")?;
                     builder
                         .sled_add_zone_nexus(
                             current_nexus.sled_id,
                             current_nexus.image_source.clone(),
+                            external_ip,
                             next_generation,
                         )
                         .context("adding Nexus zone")?;

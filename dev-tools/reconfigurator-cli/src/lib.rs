@@ -2246,15 +2246,13 @@ fn cmd_blueprint_edit(
                 &planning_input,
                 ZoneKind::Nexus,
             )?;
-            let mut external_networking_alloc =
-                ExternalNetworkingAllocator::from_current_zones(
-                    &builder,
-                    planning_input.external_ip_policy(),
-                )
-                .context("failed to construct external networking allocator")?;
-            let external_ip = external_networking_alloc
-                .for_new_nexus()
-                .context("failed to pick an external IP for Nexus")?;
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .context("failed to construct external networking allocator")?
+            .for_new_nexus()
+            .context("failed to pick an external IP for Nexus")?;
             builder
                 .sled_add_zone_nexus(
                     sled_id,
