@@ -6,7 +6,6 @@ use anyhow::bail;
 use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -76,7 +75,7 @@ impl ExternalNetworkingAllocator {
     /// in `blueprint` as already-in-use.
     #[cfg(test)]
     pub(crate) fn from_blueprint(
-        blueprint: &Blueprint,
+        blueprint: &nexus_types::deployment::Blueprint,
         external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {
         Self::new(
@@ -90,7 +89,7 @@ impl ExternalNetworkingAllocator {
     /// Construct an `ExternalNetworkingAllocator` that hands out IPs based on
     /// `external_ip_policy`, treating any IPs used by in-service zones
     /// described by `builder` as already-in-use.
-    pub(crate) fn from_current_zones(
+    pub fn from_current_zones(
         builder: &BlueprintBuilder<'_>,
         external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {
@@ -299,7 +298,7 @@ impl ExternalNetworkingAllocator {
         })
     }
 
-    pub(crate) fn for_new_nexus(
+    pub fn for_new_nexus(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
         let external_ip = self.external_ip_alloc.claim_next_exclusive_ip()?;
@@ -336,7 +335,7 @@ impl ExternalNetworkingAllocator {
         })
     }
 
-    pub(crate) fn for_new_boundary_ntp(
+    pub fn for_new_boundary_ntp(
         &mut self,
     ) -> Result<ExternalSnatNetworkingChoice, ExternalNetworkingError> {
         let snat_cfg = self.external_ip_alloc.claim_next_snat_ip()?;
@@ -373,7 +372,7 @@ impl ExternalNetworkingAllocator {
         })
     }
 
-    pub(crate) fn for_new_external_dns(
+    pub fn for_new_external_dns(
         &mut self,
     ) -> Result<ExternalNetworkingChoice, ExternalNetworkingError> {
         let external_ip = self
