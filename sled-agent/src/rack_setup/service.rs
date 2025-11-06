@@ -272,12 +272,14 @@ impl RackSetupService {
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
     /// - `bootstore` - A handle to call bootstore APIs
+    /// - `trust_quorum` - A handle to the trust qurom task
     pub(crate) fn new(
         log: Logger,
         request: RackInitializeRequestParams,
         internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
+        trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
@@ -288,6 +290,7 @@ impl RackSetupService {
                     &internal_disks_rx,
                     local_bootstrap_agent,
                     bootstore,
+                    trust_quorum,
                     step_tx,
                 )
                 .await
@@ -1179,6 +1182,7 @@ impl ServiceInner {
         internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
+        trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", request);
