@@ -13,6 +13,7 @@ use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, error, info, o, warn};
+use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
@@ -28,7 +29,7 @@ use trust_quorum_protocol::{
 };
 
 // TODO: Move to this crate
-// https://github.com/oxidecomputer/omicron/issues/9311
+// https://github.com/oxidecomputer/omicron/issues/9311;
 use bootstore::schemes::v0::NetworkConfig;
 
 /// Whether or not a configuration has committed or is still underway.
@@ -163,7 +164,7 @@ pub enum NodeApiRequest {
 }
 
 /// An error response from a `NodeApiRequest`
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, SlogInlineError)]
 pub enum NodeApiError {
     #[error("failed to send request to node task")]
     Send,

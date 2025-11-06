@@ -12,4 +12,4 @@ mod task;
 pub(crate) use connection_manager::{
     ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg,
 };
-pub use task::NodeTask;
+pub use task::{Config, NodeTask, NodeTaskHandle};
