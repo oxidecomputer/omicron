@@ -3,9 +3,6 @@
 :toc: left
 
 // XXX-dap
-// - what you can't do
-//   - Set the target release in the middle of an update
-//   - Set the target release backwards
 // - things you could see
 //   - failure to plan because something is missing from inventory
 //   - failure to PUT sled config due to missing artifact
@@ -20,12 +17,6 @@
 //   - what if instances don't come back online
 //   - why the planner might get stuck
 //   - what if you want to roll back
-// - how to verify that everything is working okay
-// - customer view
-//   - time last step planned
-//   - suspended
-//   - progress
-// - safeties
 
 = Reconfigurator Debugging Guide
 
@@ -77,7 +68,7 @@ For more, see:
 
 === Customer view
 
-// XXX-dap link to docs
+NOTE: See the https://docs.oxide.computer/guides/operator/system-update[end user documentation] for more on the customer view of software update.
 
 Customers start a software update by:
 
@@ -142,9 +133,32 @@ Generally, the system only takes one step a time (e.g., updating one zone).  By 
 * executes that blueprint
 * waits for inventory to reflect the change
 
-You can thus observe these steps by looking at the blueprint history.
+You can thus observe these steps by looking at the blueprint history.  See <<task-check-reconfigurator-history>>.
 
-// XXX-dap link
+=== Verifying that everything is working okay during the update
+
+During an update, we expect:
+
+* new blueprints to be created and made the target every few minutes (at most)
+* the number of components at the new version should be increasing
+* the number of components at the old version should be decreasing
+
+These are observable in the web console ("time last step planned" and progress) and external API.
+
+With `omdb`, you can watch <<task-check-reconfigurator-history,`omdb reconfigurator history`>> for blueprint creation and <<task-check-progress>> to see the counts of components at each version.
+
+It's possible to observe transient errors internally (including with `omdb`) while the upgrade is ongoing.  These will generally show up as connection errors, request timeouts, or HTTP 503 ("Service Unavailable") errors.
+
+=== Verifying that everything is working okay after the update
+
+After the update:
+
+* no new blueprints should be created
+* all components should be at the new version
+
+See the previous section for how to observe these.
+
+We rely on the health check script that support uses to verify that the system is fully healthy.
 
 === Types of update steps
 
@@ -286,6 +300,8 @@ There are some other impacts to the API during the whole upgrade process:
 
 Most of the data collection for Reconfigurator involves using `omdb` from the switch zone of one of the Scrimlets.  This involves connecting over ssh via the technician port.  This part is outside the scope of this document.
 
+NOTE: It's possible to observe transient errors with `omdb` while Reconfigurator activity is ongoing.  These will generally show up as connection errors, request timeouts, or HTTP 503 ("Service Unavailable") errors as components disappear and come back.  You can often work around them by providing `omdb` with the URL for the specific component you want to talk to rather than having it choose one arbitrarily from DNS (which is what it does by default).
+
 ==== Which version of `omdb`?
 
 Each `omdb` binary is built for a specific release of the system.  It uses the internal API versions and database schema version that are shipped in that release.  During an update, some components in the system will be on the old release while some are on the new release.  A given `omdb` binary may only be able to talk to one set or the other.
@@ -359,7 +375,7 @@ Safety Options:
 
 |===
 
-[#check-reconfigurator-history]
+[#task-check-reconfigurator-history]
 === Task: Checking recent Reconfigurator activity
 
 Prerequisite: see <<using-omdb>>.
@@ -616,7 +632,7 @@ Of particular note are:
 
 1. Although the planner ran 4s ago, it did _not_ save the resulting blueprint or change the system's target because the new blueprint was identical to the current target blueprint, `d4d61df2-93fd-404d-b775-a6142da7b4e6`.
 2. There are currently 419 blueprints in the database.  The maximum is 5000.  If the maximum number is reached (i.e., if there are 5000 blueprints in the database), the planner will not create a new one for fear that something is very wrong and filling the database will make it worse.
-3. As the name suggests, the planning report describes what's important about the most recently generated blueprint.  (In this case, that's the blueprint that was thrown away because it was identical to its parent.)
+3. As the name suggests, the planning report describes what's important about the most recently generated blueprint.  (In this case, that's the blueprint that was thrown away because it was identical to its parent.)  See <<task-understand-planner-report>>.
 
 If the blueprint limit has been reached, you'd see something like this:
 
@@ -635,30 +651,6 @@ task: "blueprint_planner" configured
 planning report:
 ...
 ```
-
-==== Planning reports
-
-The planning report is extremely valuable for understanding either the step that the system just decided to take (if the blueprint _was_ inserted) or why it's currently stuck (if the blueprint wasn't inserted because it's identical to its parent).  In the example above, there's just nothing to do.
-
-During the phase of the upgrade where the system is updating SPs, you might see this:
-
-```
-planning report:
-* 1 pending MGS update:
-  * model0:BRM42220051: RotBootloader(PendingMgsUpdateRotBootloaderDetails { expected_stage0_version: ArtifactVersion("0.0.1"), expected_stage0_next_version: NoValidVersion })
-* zone updates waiting on pending MGS updates (RoT bootloader / RoT / SP / Host OS)
-* waiting to update top-level nexus_generation: some non-Nexus zone are not yet updated
-```
-
-This shows that:
-
-- the system has configured an update to the RoT bootloader for sled `BRM42220051`.
-- the system is not updating any zones because there are some MGS-driven updates not yet done
-- the system is not starting Nexus handoff because there are zones not updated
-
-This is a totally normal thing to see during an update for a few minutes.  If the system got stuck here, though, you'd want to investigate why the RoT bootloader update wasn't completing.
-// XXX-dap link
-// XXX-dap separate section on planning reports?
 
 [#check-blueprint-executor]
 === Task: Checking the status of the blueprint executor
