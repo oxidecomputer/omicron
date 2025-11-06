@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 dropshot.workspace = true
+dropshot-api-manager-types.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true

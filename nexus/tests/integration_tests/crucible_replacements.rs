@@ -1306,7 +1306,7 @@ mod region_snapshot_replacement {
         datastore: Arc<DataStore>,
         disk_test: DiskTest<'a>,
         client: ClientTestContext,
-        internal_client: ClientTestContext,
+        internal_client: nexus_client::Client,
         lockstep_client: ClientTestContext,
         replacement_request_id: Uuid,
         snapshot_socket_addr: SocketAddr,
@@ -1326,7 +1326,7 @@ mod region_snapshot_replacement {
                 .await;
 
             let client = &cptestctx.external_client;
-            let internal_client = &cptestctx.internal_client;
+            let internal_client = cptestctx.internal_client();
             let lockstep_client = &cptestctx.lockstep_client;
             let datastore = nexus.datastore().clone();
 
@@ -1754,15 +1754,8 @@ mod region_snapshot_replacement {
 
             let disk_id = disk_from_snapshot.identity.id;
 
-            // Note: `make_request` needs a type here, otherwise rustc cannot
-            // figure out the type of the `request_body` parameter
             self.internal_client
-                .make_request::<u32>(
-                    http::Method::POST,
-                    &format!("/disk/{disk_id}/remove-read-only-parent"),
-                    None,
-                    http::StatusCode::NO_CONTENT,
-                )
+                .cpapi_disk_remove_read_only_parent(&disk_id)
                 .await
                 .unwrap();
         }

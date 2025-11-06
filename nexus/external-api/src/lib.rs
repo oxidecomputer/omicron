@@ -30,7 +30,7 @@ use omicron_common::api::external::{
 };
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20251008.0.0";
+pub const API_VERSION: &str = "20251208.0.0";
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;
@@ -3189,7 +3189,7 @@ pub trait NexusExternalApi {
         body: StreamingBody,
     ) -> Result<HttpResponseOk<views::TufRepoUpload>, HttpError>;
 
-    /// Fetch system release repository description by version
+    /// Fetch system release repository by version
     #[endpoint {
         method = GET,
         path = "/v1/system/update/repositories/{system_version}",

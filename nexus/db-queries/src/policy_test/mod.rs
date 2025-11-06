@@ -316,7 +316,7 @@ async fn authorize_one_resource(
         let mut out = Cursor::new(&mut buffer);
         write!(out, "resource: {}\n\n", resource.resource_name())?;
 
-        write!(out, "  {:31}", "USER")?;
+        write!(out, "  {:32}", "USER")?;
         for action in authz::Action::iter() {
             write!(out, " {:>2}", action_abbreviation(action))?;
         }
@@ -324,7 +324,7 @@ async fn authorize_one_resource(
 
         for ctx_tuple in user_contexts.iter() {
             let (ref username, ref opctx) = **ctx_tuple;
-            write!(out, "  {:31}", &username)?;
+            write!(out, "  {:32}", &username)?;
             for action in authz::Action::iter() {
                 let result = resource.do_authorize(opctx, action).await;
                 trace!(

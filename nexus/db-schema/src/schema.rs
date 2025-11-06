@@ -2826,3 +2826,27 @@ table! {
         bearer_token -> Text,
     }
 }
+
+table! {
+    rendezvous_local_storage_dataset (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_tombstoned -> Nullable<Timestamptz>,
+
+        blueprint_id_when_created -> Uuid,
+        blueprint_id_when_tombstoned -> Nullable<Uuid>,
+
+        pool_id -> Uuid,
+
+        size_used -> Int8,
+
+        no_provision -> Bool,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(zpool, rendezvous_local_storage_dataset);
+allow_tables_to_appear_in_same_query!(
+    physical_disk,
+    rendezvous_local_storage_dataset
+);
