@@ -111,6 +111,16 @@ impl PartialDatasetConfig {
             compression: CompressionAlgorithm::Off,
         }
     }
+
+    pub fn for_local_storage_root(zpool: ZpoolName) -> Self {
+        Self {
+            name: DatasetName::new(zpool, DatasetKind::LocalStorage),
+            address: None,
+            quota: None,
+            reservation: None,
+            compression: CompressionAlgorithm::Off,
+        }
+    }
 }
 
 #[derive(Debug)]
