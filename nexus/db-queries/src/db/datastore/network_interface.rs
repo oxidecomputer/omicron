@@ -145,8 +145,13 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
             .map_err(network_interface::InsertError::External)?;
+        // Creating a NIC doesn't create a child resource of the subnet itself;
+        // it creates a child of the Instance. We only need Read permission on
+        // the subnet to reference it. This allows limited-collaborators to
+        // create instances while still blocking them from modifying networking
+        // infrastructure.
         opctx
-            .authorize(authz::Action::CreateChild, authz_subnet)
+            .authorize(authz::Action::Read, authz_subnet)
             .await
             .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await

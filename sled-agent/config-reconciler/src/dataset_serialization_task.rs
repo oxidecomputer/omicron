@@ -300,6 +300,7 @@ impl DatasetTaskHandle {
         .await
     }
 
+    // Returns a "not found" error if the dataset does not exist
     pub async fn nested_dataset_destroy(
         &self,
         name: NestedDatasetLocation,
@@ -1014,6 +1015,7 @@ impl DatasetTask {
         }
     }
 
+    // Returns a "not found" error if the dataset does not exist
     async fn nested_dataset_destroy<T: ZfsImpl>(
         &self,
         name: NestedDatasetLocation,

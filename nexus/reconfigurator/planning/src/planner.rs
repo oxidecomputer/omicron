@@ -22,6 +22,7 @@ use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
+use itertools::Either;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -65,6 +66,7 @@ use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::iter;
 use std::str::FromStr;
 use std::sync::Arc;
 use swrite::SWrite;
@@ -1240,6 +1242,18 @@ impl<'a> Planner<'a> {
         image_source: BlueprintZoneImageSource,
         report: &mut PlanningAddStepReport,
     ) -> Result<(), Error> {
+        // If `kind` is "internal DNS", we'll need to pick subnets, but
+        // computing the available subnets isn't free. We could do something
+        // fancy with lazy construction, but that gets a little messy. Instead,
+        // always construct an iterator, and create an empty iterator for any
+        // `kind` that isn't "internal DNS".
+        let mut available_internal_dns_subnets = match kind {
+            DiscretionaryOmicronZone::InternalDns => {
+                Either::Left(self.blueprint.available_internal_dns_subnets()?)
+            }
+            _ => Either::Right(iter::empty()),
+        };
+
         for i in 0..num_zones_to_add {
             let sled_id = match zone_placement.place_zone(kind) {
                 Ok(sled_id) => sled_id,
@@ -1280,7 +1294,12 @@ impl<'a> Planner<'a> {
                     .blueprint
                     .sled_add_zone_crucible_pantry(sled_id, image)?,
                 DiscretionaryOmicronZone::InternalDns => {
-                    self.blueprint.sled_add_zone_internal_dns(sled_id, image)?
+                    let dns_subnet = available_internal_dns_subnets
+                        .next()
+                        .ok_or(Error::NoAvailableDnsSubnets)?;
+                    self.blueprint.sled_add_zone_internal_dns(
+                        sled_id, image, dns_subnet,
+                    )?
                 }
                 DiscretionaryOmicronZone::ExternalDns => {
                     self.blueprint.sled_add_zone_external_dns(sled_id, image)?
@@ -2463,6 +2482,7 @@ pub(crate) mod test {
     use nexus_types::inventory::CockroachStatus;
     use nexus_types::inventory::InternalDnsGenerationStatus;
     use nexus_types::inventory::TimeSync;
+    use omicron_common::address::Ipv4Range;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::TufArtifactMeta;
@@ -2489,6 +2509,7 @@ pub(crate) mod test {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::net::IpAddr;
+    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactKind;
@@ -3007,7 +3028,9 @@ pub(crate) mod test {
                 Err(err) => {
                     let err = InlineErrorChain::new(&err).to_string();
                     assert!(
-                        err.contains("error allocating internal DNS"),
+                        err.contains(
+                            "no reserved subnets available for internal DNS"
+                        ),
                         "unexpected error: {err}"
                     );
                 }
@@ -3157,12 +3180,14 @@ pub(crate) mod test {
         // the service IP pool. This will force reuse of the IP that was
         // allocated to the expunged Nexus zone.
         let mut builder = input.into_builder();
-        assert_eq!(builder.policy_mut().service_ip_pool_ranges.len(), 1);
+        let num_available_external_ips = builder
+            .policy_mut()
+            .external_ips
+            .clone()
+            .into_non_external_dns_ips()
+            .count();
         builder.policy_mut().target_nexus_zone_count =
-            builder.policy_mut().service_ip_pool_ranges[0]
-                .len()
-                .try_into()
-                .unwrap();
+            num_available_external_ips;
         let input = builder.build();
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
@@ -3232,6 +3257,7 @@ pub(crate) mod test {
         // We should not be able to add any external DNS zones yet,
         // because we haven't give it any addresses (which currently
         // come only from RSS). This is not an error, though.
+        assert!(input.external_ip_policy().external_dns_ips().is_empty());
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3249,8 +3275,32 @@ pub(crate) mod test {
             )
             .expect_err("can't add external DNS zones");
 
-        // Build a builder for a modfied blueprint that will include
-        // some external DNS addresses.
+        // Change the policy: add some external DNS IPs.
+        let external_dns_ips =
+            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
+                addr.parse::<Ipv4Addr>()
+                    .expect("can't parse external DNS IP address")
+            });
+        let input = {
+            let mut builder = input.into_builder();
+            let mut ip_policy =
+                builder.policy_mut().external_ips.clone().into_builder();
+            // Add a "service IP pool" covering our external DNS IP range.
+            ip_policy
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(external_dns_ips[0], external_dns_ips[2])
+                        .unwrap(),
+                )
+                .unwrap();
+            // Set these IPs as "for external DNS".
+            for ip in external_dns_ips {
+                ip_policy.add_external_dns_ip(ip.into()).unwrap();
+            }
+            builder.policy_mut().external_ips = ip_policy.build();
+            builder.build()
+        };
+
+        // Build a builder for a modfied blueprint based on the new policy.
         let mut blueprint_builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -3260,18 +3310,6 @@ pub(crate) mod test {
             PlannerRng::from_entropy(),
         )
         .expect("failed to build blueprint builder");
-
-        // Manually reach into the external networking allocator and "find"
-        // some external IP addresses (maybe they fell off a truck).
-        // TODO-cleanup: Remove when external DNS addresses are in the policy.
-        let external_dns_ips =
-            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
-                addr.parse::<IpAddr>()
-                    .expect("can't parse external DNS IP address")
-            });
-        for addr in external_dns_ips {
-            blueprint_builder.inject_untracked_external_dns_ip(addr).unwrap();
-        }
 
         // Now we can add external DNS zones. We'll add two to the first
         // sled and one to the second.

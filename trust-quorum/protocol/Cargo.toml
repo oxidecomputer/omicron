@@ -1,0 +1,57 @@
+[package]
+name = "trust-quorum-protocol"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+description = "sans-io trust quorum protocol implementation"
+
+[lints]
+workspace = true
+
+[dependencies]
+bootstore.workspace = true
+bytes.workspace = true
+camino.workspace = true
+chacha20poly1305.workspace = true
+ciborium.workspace = true
+daft.workspace = true
+derive_more.workspace = true
+gfss.workspace = true
+hex.workspace = true
+hkdf.workspace = true
+iddqd.workspace = true
+omicron-uuid-kinds.workspace = true
+rand = { workspace = true, features = ["os_rng"] }
+secrecy.workspace = true
+serde.workspace = true
+serde_with.workspace = true
+sha3.workspace = true
+sled-agent-types.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+static_assertions.workspace = true
+subtle.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+assert_matches.workspace = true
+attest-mock.workspace = true
+dropshot.workspace = true
+omicron-test-utils.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+test-strategy.workspace = true
+trust-quorum-test-utils.workspace = true
+
+[features]
+# Impl `PartialEq` and `Eq` for types implementing `subtle::ConstantTimeEq` when
+# this feature is enabled.
+# 
+# This is of unknown risk. The rust compiler may obviate the security of using
+# subtle when we do this. On the other hand its very useful for testing and
+# debugging outside of production.
+danger_partial_eq_ct_wrapper = ["gfss/danger_partial_eq_ct_wrapper"]
+testing = []
