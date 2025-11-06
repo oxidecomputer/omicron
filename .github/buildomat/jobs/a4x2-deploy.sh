@@ -19,7 +19,7 @@ set -o pipefail
 set -o xtrace
 
 # shellcheck source=/dev/null
-source .github/buildomat/ci-env.sh
+# source .github/buildomat/ci-env.sh
 
 pfexec mkdir -p /out
 pfexec mkdir -p /out/logs
@@ -27,32 +27,65 @@ pfexec chown -R "$UID" /out
 
 # === TEMPORARY: - see: https://github.com/oxidecomputer/buildomat/issues/72
 # just doing this to try out the rest of the script
-POOL=/pool/int/*
+POOL=/pool/int/"$(ls /pool/int | head -n1)" # aaaaaaaaaaaaaaaaaaaaaaaaaa
 INPUT=$POOL/input
-WORK=$POOL/work
-mkdir -p $INPUT
-mkdir -p $WORK
+mkdir -p $INPUT/a4x2
 
 (
-    cd $INPUT
+    cd $INPUT/a4x2
     curl -LO https://buildomat.eng.oxide.computer/wg/0/artefact/01K7GGHDNM61M4RHXEAXSXHK1Q/OUbkXdqkWSzGqNrgcb7U5X5PahvEYNgNRGhZmIPCzTH1TbI5/01K7GGHT6NHC3NT8HDCC3QS26E/01K7GMQA3V38ZDD82QQWCM8ZSJ/a4x2-package.tar.gz
     curl -LO https://buildomat.eng.oxide.computer/wg/0/artefact/01K7GGHDNM61M4RHXEAXSXHK1Q/OUbkXdqkWSzGqNrgcb7U5X5PahvEYNgNRGhZmIPCzTH1TbI5/01K7GGHT6NHC3NT8HDCC3QS26E/01K7GMRGN7TSZWWQF510C0MZQE/xtask
+    pwd
+    ls
 )
-cd $WORK
 # ===
 
+
+#
+# Make space for CI work
+#
+
+# informational diskinfo for the logs
+pfexec diskinfo
+
+# Grab one of the U.2 drives by their Product ID, and format it for work
+DISK="$(pfexec diskinfo | awk '$4 ~ /WUS4/ { print $2 }' | head -n1)"
+pfexec zpool create -o ashift=12 -f cpool "$DISK"
+pfexec zfs create -o mountpoint=/ci cpool/ci
+pfexec chown "$UID" /ci
+cd /ci
+
+#
+# Define a zpool for falcon images and disks. Falcon will create the dataset
+# on demand.
+#
+export FALCON_DATASET=cpool/falcon
+
+#
+# xtask binary has tools for working with a4x2
+# 
 cp $INPUT/a4x2/xtask .
 chmod +x xtask
 
+#
+# Now we can define the diagnostics capture to run on exit, since we have
+# provided the tools it needs to run diagnostics in the first place.
+#
 capture_dianostics() {
     df -h
 
+    cd /ci
     # show what services have issues
-    for gimlet in g0 g1 g2 g3; do
-        ./a4x2 exec $gimlet "svcs -xvZ"
-    done
+    # TODO
+#    for gimlet in g0 g1 g2 g3; do
+#        ./a4x2 exec $gimlet "svcs -xvZ"
+#    done
 
     ./xtask a4x2 deploy collect-evidence
+
+    # create a bundle of output logs for easy bulk retrieval, but also include
+    # the logs as individual outputs for easy hot-linking.
+    tar -czEf /out/all-output-logs.tar.gz -C target/a4x2/deploy output-logs 
     mv target/a4x2/deploy/output-logs/* /out/logs/
 
     cp connectivity-report.json /out/
@@ -71,26 +104,8 @@ _exit_trap() {
 }
 trap _exit_trap EXIT
 
-#
-# Make space for CI work
-#
 
-# informational diskinfo for the logs
-pfexec diskinfo
 
-# Grab one of the U.2 drives by their Product ID, and format it for work
-DISK="$(pfexec diskinfo | awk '$4 ~ /WUS4/ { print $2 }' | head -n1)"
-pfexec zpool create -o ashift=12 -f cpool "$DISK"
-pfexec zfs create -o mountpoint=/ci cpool/ci
-
-#
-# Define a zpool for falcon images and disks. Falcon will create the dataset
-# on demand.
-#
-export FALCON_DATASET=cpool/falcon
-
-pfexec chown "$UID" /ci
-cd /ci
 
 #
 # Fetch the a4x2 topology manager program
@@ -100,8 +115,6 @@ cd /ci
 # testbed_rev=67454d38958bcf51830850aec36600df84b7d8a0
 # curl -fOL $buildomat_url/$testbed_artifact_path/$testbed_rev/a4x2
 # chmod +x a4x2
-
-
 
 #
 # Run the VM dhcp server
