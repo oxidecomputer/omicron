@@ -1125,6 +1125,7 @@ made target at:   2025-11-05 23:56:14.371809 UTC
 enabled:          true
 ```
 
+[#task-override-plan]
 === Task: Overriding system planning choices
 
 Prerequisites: <<using-omdb>>
@@ -1143,6 +1144,31 @@ This is intended as an important escape hatch for mitigating incidents where the
 This approach carries risk, depending on how the blueprint is generated.  There are quite a lot of safety checks in the planner.  `reconfigurator-cli`, by contrast, is primarily a developer tool and allows creating blueprints that might be dangerous on production systems.
 
 If you want to pursue this option, see xref:./reconfigurator-dev-guide.adoc#task-changing-live-systems[Task: making custom changes to live systems] in the Reconfigurator Dev Guide.
+
+== Recovering from a bad update
+
+By "bad update" here, we mean a situation where:
+
+* Some time after the update started, the customer experienced a new, unacceptable problems (e.g., instances lost network connectivity).
+* The update is stuck due to a bug that cannot be easily worked around.  (If it's stuck due to a bug, it may be possible to work around that by <<task-override-plan,overriding the planner>>.)
+
+If the update is still running and something bad has happened, consider <<task-pause-reconfigurator,pausing the update>> while figuring out what to do.
+
+There is currently no supported way to abort an update in progress nor rollback to an earlier version.footnote:[For more on why, see https://rfd.shared.oxide.computer/rfd/534[RFD 534 ("Upgrade rollback")].
+
+The primary way out of this situation is to MUPdate *all* sleds in the system to a known-working release.  This process is documented elsewhere.  The basic idea is to fully park the rack (essentially turning off the entire control plane) and MUPdate **all** sleds.
+
+Which release should you MUPdate to?  The safest release to MUPdate to is always a _subsequent_ release (compared with the one that was running before) that has the underlying issues fixed.
+
+MUPdating to the _previous_ release (the one that was running before) is unsafe if any component in the system has updated its on-disk format.  Components likely to do this include:
+
+* Nexus (really, the CockroachDB schema).  This changes with every release.  If Nexus handoff has already happened, the schema has been updated.  It's virtually impossible to go back to the previous release at this point.
+* Sled agent (part of the host OS).  This changes from time to time, but not every release.
+* Crucible.  It's uncommon for its file format to change, but if it did, user data could be at risk if you MUPdate backwards.
+
+Other components have on-disk file formats as well.
+
+Thus, it's generally very risky to MUPdate backwards once the host OS updates have started.  The only real options are emergency binary relief or fix-forward (i.e., a MUPdate or automated update to a fixed release).
 
 == FAQ
 
@@ -1220,8 +1246,7 @@ Another quirk to know about: if components haven't changed in the new target rel
 
 No, this is currently unsupported.
 
-// XXX-dap
-If you're trying to go backwards (i.e., to abort the upgrade), see XXX.
+If you're trying to go backwards (i.e., to abort the upgrade), see <<_recovering_from_a_bad_update>>.
 
 If you're trying to fix-forward, you need to either wait for the current update to finish (if that's possible) or else MUPdate the entire system to a known-working version (probably the one that you're trying to set the target release to).  Then, if it's still needed, you can set the target release to a newer version.
 
@@ -1233,8 +1258,7 @@ See <<_what_are_the_restrictions_on_setting_the_target_release>>.
 
 You cannot set the target release while an update is in progress.  See <<_can_i_change_the_target_release_while_an_update_is_in_progress>>
 
-// XXX-dap
-You cannot set the target release to a release _older_ than the current target release.  Rollback is not supported.  See XXX.
+You cannot set the target release to a release _older_ than the current target release.  Rollback is not supported.  See <<_recovering_from_a_bad_update>>.
 
 You can only set the target release to:
 
