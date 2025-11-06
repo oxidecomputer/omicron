@@ -632,7 +632,7 @@ Of particular note are:
 
 1. Although the planner ran 4s ago, it did _not_ save the resulting blueprint or change the system's target because the new blueprint was identical to the current target blueprint, `d4d61df2-93fd-404d-b775-a6142da7b4e6`.
 2. There are currently 419 blueprints in the database.  The maximum is 5000.  If the maximum number is reached (i.e., if there are 5000 blueprints in the database), the planner will not create a new one for fear that something is very wrong and filling the database will make it worse.
-3. As the name suggests, the planning report describes what's important about the most recently generated blueprint.  (In this case, that's the blueprint that was thrown away because it was identical to its parent.)  See <<task-understand-planner-report>>.
+3. As the name suggests, the planning report describes what's important about the most recently generated blueprint.  (In this case, that's the blueprint that was thrown away because it was identical to its parent.)  See <<task-understand-planning-report>>.
 
 If the blueprint limit has been reached, you'd see something like this:
 
@@ -767,19 +767,19 @@ You can copy that file around as needed, including off the system and onto one t
 
 There's more about this workflow in the xref:./reconfigurator-dev-guide.adoc#task-omdb-export[Reconfigurator Dev Guide].
 
-[#task-collect-planner-report]
-=== Task: Collecting planner reports
+[#task-collect-planning-report]
+=== Task: Collecting planning reports
 
 Prerequisite: see <<using-omdb>>
 
-When the planner generates blueprints, it also generates a **planner report** that includes information about the choices it made, including the changes made and the changes that it wanted to make but couldn't (i.e., what's blocked).
+When the planner generates blueprints, it also generates a **planning report** that includes information about the choices it made, including the changes made and the changes that it wanted to make but couldn't (i.e., what's blocked).
 
-You typically get a planner report from one of two places:
+You typically get a planning report from one of two places:
 
-* Using `omdb db blueprints planner-report show BLUEPRINT_ID`.  This can show you the planner report for any blueprint in the database.
-* From the <<check-blueprint-planner,`blueprint_planner` background task>>.  This shows the planner report for the most recent blueprint the planner generated, _whether or not that blueprint was saved to the database or became the target_.
+* Using `omdb db blueprints planner-report show BLUEPRINT_ID`.  This can show you the planning report for any blueprint in the database.
+* From the <<check-blueprint-planner,`blueprint_planner` background task>>.  This shows the planning report for the most recent blueprint the planner generated, _whether or not that blueprint was saved to the database or became the target_.
 +
-This is most important when the system is stuck for some reason because in that case the planner may generate a blueprint that's identical to the current target, but has a planner report with different information in it.  If you want to understand why the system is stuck, it's usually most helpful to look at the planner report for the blueprints currently _not_ being saved _because_ they make no changes.
+This is most important when the system is stuck for some reason because in that case the planner may generate a blueprint that's identical to the current target, but has a planning report with different information in it.  If you want to understand why the system is stuck, it's usually most helpful to look at the planning report for the blueprints currently _not_ being saved _because_ they make no changes.
 
 Here's an example:
 
@@ -805,16 +805,16 @@ planning report:
 
 ```
 
-Next, see <<task-understand-planner-report>>.
+Next, see <<task-understand-planning-report>>.
 
-[#task-understand-planner-report]
-=== Task: Understanding planner reports
+[#task-understand-planning-report]
+=== Task: Understanding planning reports
 
-Prerequisite: see <<task-collect-planner-report>>
+Prerequisite: see <<task-collect-planning-report>>
 
-CAUTION: Both the textual representation and the internal structure of planner reports are unstable.  They're really just for debugging.  They should not be relied on programmatically.
+CAUTION: Both the textual representation and the internal structure of planning reports are unstable.  They're really just for debugging.  They should not be relied on programmatically.
 
-Planner reports include details about why the planner made the choices that it made.  Here's an example:
+Planning reports include details about why the planner made the choices that it made.  Here's an example:
 
 ```
 planner report for blueprint 1b296f96-2425-41f8-ba69-a41272e84f06:
@@ -1154,7 +1154,7 @@ Generally, one of a few things is happening:
 * The prerequisites for the update you think should have happened were not satisfied.  For example, in order to plan a host OS update, the system must have information from that sled's sled agent in the inventory collection that it's using.  That might be missing if the sled is offline, which might be because the sled is still booting after some _other_ component update.  See below for an example.
 * The safety checks for the update you think should have happened were not satisfied.  This is basically the same as the previous case, except that it's not a strict dependency.  For example, the system won't update a sled with a CockroachDB node on it unless the CockroachDB cluster is fully healthy.  This means that when it updates an SP or host OS on a sled with a CockroachDB node on it, it will likely skip those updates for other sleds with CockroachDB nodes on them until the first sled is back.  But it may update other sleds' SPs and host OS in the meantime.
 
-In general, you can figure out why the planner made a choice by looking at the <<task-collect-planner-report,planner report>>.
+In general, you can figure out why the planner made a choice by looking at the <<task-collect-planning-report,planning report>>.
 
 Here's a sequence from our example earlier (with some metadata trimmed to minimize wrapping):
 
@@ -1174,7 +1174,7 @@ Here's a sequence from our example earlier (with some metadata trimmed to minimi
 2025-11-01T00:55:32Z 74129e2f-5372-4637-bb3d-3917a1ca76c3 update Sled 16 (BRM42220014) host phase 1 to 17.0.0-0.ci+git495eab19cfc
 ```
 
-You might ask: why did it go from updating sled 7's SP to 11's SP and then come back to updating sled 7's host OS?  We can answer this from the <<task-collect-planner-report,planner report>>, which says:
+You might ask: why did it go from updating sled 7's SP to 11's SP and then come back to updating sled 7's host OS?  We can answer this from the <<task-collect-planning-report,planning report>>, which says:
 
 ```
 root@oxz_switch0:~# omdb db blueprints planner-report show 1b296f96-2425-41f8-ba69-a41272e84f06
@@ -1199,7 +1199,7 @@ planning report:
 
 Note the blocked MGS update for sled BRM27230045 (sled 7, based on the output above).  The planner _wanted_ to update the host OS on this sled, but needed inventory from its sled agent in order to do that, and that wasn't available.  That's almost certainly because the system hasn't finished booting after the SP reset that was done two minutes earlier.
 
-The section on <<task-understand-planner-report,understanding planner reports>> has an example involving a failed safety check.
+The section on <<task-understand-planning-report,understanding planning reports>> has an example involving a failed safety check.
 
 === How do I determine update progress?
 
