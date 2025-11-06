@@ -2134,8 +2134,12 @@ fn cmd_blueprint_blippy(
     let resolved_id =
         state.system().resolve_blueprint_id(args.blueprint_id.into())?;
     let blueprint = state.system().get_blueprint(&resolved_id)?;
-    let report =
-        Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
+    let planning_input = sim
+        .planning_input(blueprint)
+        .context("failed to construct planning input")?;
+    let report = Blippy::new(&blueprint)
+        .check_against_planning_input(&planning_input)
+        .into_report(BlippyReportSortKey::Severity);
     Ok(Some(format!("{}", report.display())))
 }
 
