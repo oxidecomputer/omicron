@@ -215,6 +215,7 @@ impl Server {
             updates: config.updates.clone(),
             sled_reset_tx,
             sprockets: config.sprockets.clone(),
+            trust_quorum_handle: long_running_task_handles.trust_quorum.clone(),
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 

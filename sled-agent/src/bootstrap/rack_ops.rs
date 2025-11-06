@@ -149,6 +149,7 @@ impl RssAccess {
         global_zone_bootstrap_ip: Ipv6Addr,
         internal_disks_rx: &InternalDisksReceiver,
         bootstore_node_handle: &bootstore::NodeHandle,
+        trust_quorum_handle: &trust_quorum::NodeTaskHandle,
         request: RackInitializeRequestParams,
     ) -> Result<RackInitUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
@@ -195,6 +196,7 @@ impl RssAccess {
                         global_zone_bootstrap_ip,
                         internal_disks_rx,
                         bootstore_node_handle,
+                        trust_quorum_handle.clone(),
                         request,
                         step_tx,
                     )
@@ -335,6 +337,7 @@ async fn rack_initialize(
     global_zone_bootstrap_ip: Ipv6Addr,
     internal_disks_rx: InternalDisksReceiver,
     bootstore_node_handle: bootstore::NodeHandle,
+    trust_quorum_handle: trust_quorum::NodeTaskHandle,
     request: RackInitializeRequestParams,
     step_tx: watch::Sender<RssStep>,
 ) -> Result<(), SetupServiceError> {
@@ -345,6 +348,7 @@ async fn rack_initialize(
         global_zone_bootstrap_ip,
         internal_disks_rx,
         bootstore_node_handle,
+        trust_quorum_handle,
         step_tx,
     )
     .await
