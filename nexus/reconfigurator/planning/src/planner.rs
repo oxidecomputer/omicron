@@ -2560,7 +2560,7 @@ pub(crate) mod test {
         .expect("created planner");
         let child_blueprint =
             planner.plan().expect("planning should have succeded");
-        verify_blueprint(&child_blueprint);
+        verify_blueprint(&child_blueprint, &input);
         let summary = child_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
             "diff between blueprints (expected no changes):\n{}",
@@ -2584,7 +2584,7 @@ pub(crate) mod test {
             rng.next_system_rng(),
         )
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         let input = example
             .system
@@ -2624,7 +2624,7 @@ pub(crate) mod test {
         assert_eq!(summary.total_datasets_added(), 0);
         assert_eq!(summary.total_datasets_removed(), 0);
         assert_eq!(summary.total_datasets_modified(), 0);
-        verify_blueprint(&blueprint2);
+        verify_blueprint(&blueprint2, &input);
 
         // Now add a new sled.
         let mut sled_id_rng = rng.next_sled_id_rng();
@@ -2673,7 +2673,7 @@ pub(crate) mod test {
         ));
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
-        verify_blueprint(&blueprint3);
+        verify_blueprint(&blueprint3, &input);
 
         // Check that with no change in inventory, the planner makes no changes.
         // It needs to wait for inventory to reflect the new NTP zone before
@@ -2694,7 +2694,7 @@ pub(crate) mod test {
         assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
-        verify_blueprint(&blueprint4);
+        verify_blueprint(&blueprint4, &input);
 
         // Now update the inventory to have the requested NTP zone.
         //
@@ -2756,7 +2756,7 @@ pub(crate) mod test {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             }
         }
-        verify_blueprint(&blueprint5);
+        verify_blueprint(&blueprint5, &input);
 
         // Check that there are no more steps.
         assert_planning_makes_no_changes(
@@ -4912,7 +4912,7 @@ pub(crate) mod test {
         let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let mut collection = example.collection;
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         // We shouldn't have a clickhouse cluster config, as we don't have a
         // clickhouse policy set yet
@@ -6204,7 +6204,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         // We should start with nothing to do.
         assert_planning_makes_no_changes(
@@ -6622,7 +6622,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &example.input);
 
         // Update the example system and blueprint, as a part of test set-up.
         //
@@ -6926,7 +6926,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &example.input);
 
         // The example system creates three internal NTP zones, and zero
         // boundary NTP zones. This is a little arbitrary, but we're checking it
@@ -7087,7 +7087,7 @@ pub(crate) mod test {
         )
         .expect("can't create planner");
         let new_blueprint = planner.plan().expect("planning succeeded");
-        verify_blueprint(&new_blueprint);
+        verify_blueprint(&new_blueprint, &example.input);
         {
             let summary = new_blueprint.diff_since_blueprint(&blueprint);
             assert_eq!(summary.total_zones_added(), 0);
@@ -7545,7 +7545,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &example.input);
 
         // All zones should be sourced from the initial TUF repo by default.
         assert!(
@@ -7736,7 +7736,7 @@ pub(crate) mod test {
             }
             blueprint = new_blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
-            verify_blueprint(&blueprint);
+            verify_blueprint(&blueprint, &example.input);
 
             // Next blueprint: Add an (updated) internal DNS zone back
 
@@ -7762,7 +7762,7 @@ pub(crate) mod test {
             }
             blueprint = new_blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
-            verify_blueprint(&blueprint);
+            verify_blueprint(&blueprint, &example.input);
 
             assert_eq!(
                 blueprint
@@ -7822,7 +7822,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         // All zones should be sourced from the 0.0.1 repo by default.
         assert!(

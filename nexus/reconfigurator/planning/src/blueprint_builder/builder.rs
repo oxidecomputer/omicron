@@ -2803,9 +2803,13 @@ pub mod test {
 
     /// Checks various conditions that should be true for all blueprints
     #[track_caller]
-    pub fn verify_blueprint(blueprint: &Blueprint) {
-        let blippy_report =
-            Blippy::new(blueprint).into_report(BlippyReportSortKey::Kind);
+    pub fn verify_blueprint(
+        blueprint: &Blueprint,
+        planning_input: &PlanningInput,
+    ) {
+        let blippy_report = Blippy::new(blueprint)
+            .check_against_planning_input(planning_input)
+            .into_report(BlippyReportSortKey::Kind);
         if !blippy_report.notes().is_empty() {
             eprintln!("{}", blueprint.display());
             eprintln!("---");
@@ -2824,7 +2828,7 @@ pub mod test {
             rng.next_system_rng(),
         )
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -2861,7 +2865,7 @@ pub mod test {
         }
 
         let blueprint2 = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint2);
+        verify_blueprint(&blueprint2, &example.input);
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
@@ -2910,7 +2914,7 @@ pub mod test {
         builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
 
         let blueprint3 = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint3);
+        verify_blueprint(&blueprint3, &input);
         let summary = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
             "expecting new NTP and Crucible zones:\n{}",
@@ -3005,7 +3009,7 @@ pub mod test {
         let mut rng = SimRngState::from_seed(TEST_NAME);
         let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME);
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &input);
 
         // Mark one sled as having a desired state of decommissioned.
         let decommision_sled_id =
@@ -3057,7 +3061,7 @@ pub mod test {
         )
         .expect("created builder")
         .build(BlueprintSource::Test);
-        verify_blueprint(&blueprint2);
+        verify_blueprint(&blueprint2, &input);
 
         // We carried forward the desired state.
         assert_eq!(
@@ -3095,7 +3099,7 @@ pub mod test {
         )
         .expect("created builder")
         .build(BlueprintSource::Test);
-        verify_blueprint(&blueprint3);
+        verify_blueprint(&blueprint3, &input);
         assert_eq!(
             blueprint3.sleds.get(&decommision_sled_id).map(|c| c.state),
             Some(SledState::Decommissioned),
@@ -3221,7 +3225,7 @@ pub mod test {
         // `sled_ensure_datasets`.
         //
         // Verify that it has created the datasets we expect to exist.
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -3276,7 +3280,7 @@ pub mod test {
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -3294,7 +3298,7 @@ pub mod test {
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
 
         // Find the datasets we've expunged in the blueprint
         let expunged_datasets = blueprint
@@ -3636,7 +3640,7 @@ pub mod test {
         builder.sled_ensure_zone_datasets(target_sled_id).unwrap();
 
         let blueprint = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
         assert_eq!(
             blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
