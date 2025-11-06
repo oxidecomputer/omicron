@@ -376,6 +376,7 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(format!("{}-nic1", instance_name)),
     ));
+    builder.new_resource(authz::VpcList::new(project.clone()));
     builder.new_resource(vpc1.clone());
     // Test a resource nested two levels below Project
     builder.new_resource(authz::VpcSubnet::new(

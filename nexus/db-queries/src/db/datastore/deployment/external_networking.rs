@@ -12,9 +12,12 @@ use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::IncompleteNetworkInterface;
+use nexus_db_model::IpConfig;
 use nexus_db_model::IpPool;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -29,8 +32,57 @@ use slog::error;
 use slog::info;
 use slog::warn;
 use slog_error_chain::InlineErrorChain;
+use std::collections::BTreeSet;
+use std::net::IpAddr;
 
 impl DataStore {
+    /// Return the set of external IPs configured for our external DNS servers
+    /// when the rack was set up.
+    ///
+    /// We should have explicit storage for the external IPs on which we run
+    /// external DNS that an operator can update. Today, we do not: whatever
+    /// external DNS IPs are provided at rack setup time are the IPs we use
+    /// forever. (Fixing this is tracked by
+    /// <https://github.com/oxidecomputer/omicron/issues/8255>.)
+    pub async fn external_dns_external_ips_specified_by_rack_setup(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<BTreeSet<IpAddr>, Error> {
+        // We can _implicitly_ determine the set of external DNS IPs provided
+        // during rack setup by examining the current target blueprint and
+        // looking at the IPs of all of its external DNS zones. We _must_
+        // include expunged zones as well as in-service zones: during an update,
+        // we'll create a blueprint that expunges an external DNS zone, waits
+        // for it to go away, then wants to reassign that zone's external IP to
+        // a new external DNS zone. But because we are scanning expunged zones,
+        // we also have to allow for duplicates - this isn't an error and is
+        // expected if we've performed more than one update, at least until we
+        // start pruning old expunged zones out of the blueprint (tracked by
+        // https://github.com/oxidecomputer/omicron/issues/5552).
+        //
+        // Because we can't (yet) change external DNS IPs, we don't have to
+        // worry about the current blueprint changing between when we read it
+        // and when we calculate the set of external DNS IPs: the set will be
+        // identical for all blueprints back to the original one created by RSS.
+        //
+        // We don't really need to load the entire blueprint here, but it's easy
+        // and ideally this code will be deleted in relatively short order.
+        let (_target, blueprint) =
+            self.blueprint_target_get_current_full(opctx).await?;
+
+        let external_dns_ips = blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .filter_map(|(_sled_id, z)| match &z.zone_type {
+                BlueprintZoneType::ExternalDns(external_dns) => {
+                    Some(external_dns.dns_address.addr.ip())
+                }
+                _ => None,
+            })
+            .collect();
+
+        Ok(external_dns_ips)
+    }
+
     pub(super) async fn ensure_zone_external_networking_allocated_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -384,6 +436,16 @@ impl DataStore {
         if self.is_nic_already_allocated(conn, service_id, nic, log).await? {
             return Ok(());
         }
+
+        // TODO-completeness: Handle dual-stack `shared::NetworkInterface`s.
+        // See https://github.com/oxidecomputer/omicron/issues/9246.
+        let std::net::IpAddr::V4(ip) = nic.ip else {
+            return Err(Error::internal_error(&format!(
+                "Unexpectedly found a service NIC without an IPv4 \
+                address, nic_id=\"{}\"",
+                nic.id,
+            )));
+        };
         let nic_arg = IncompleteNetworkInterface::new_service(
             nic.id,
             service_id.into_untyped_uuid(),
@@ -392,7 +454,7 @@ impl DataStore {
                 name: nic.name.clone(),
                 description: format!("{} service vNIC", zone_kind.report_str()),
             },
-            nic.ip,
+            IpConfig::from_ipv4(ip),
             nic.mac,
             nic.slot,
         )?;
@@ -450,9 +512,10 @@ mod tests {
     use chrono::Utc;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SqlU16;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
@@ -472,10 +535,12 @@ mod tests {
     use omicron_common::api::external::Vni;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::ExternalIpUuid;
+    use omicron_uuid_kinds::ExternalZpoolUuid;
+    use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use oxnet::IpNet;
-    use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::SocketAddr;
     use uuid::Uuid;
@@ -1276,6 +1341,152 @@ mod tests {
 
         harness.assert_ips_are_deleted_in_datastore(&datastore).await;
         harness.assert_nics_are_deleted_in_datastore(&datastore).await;
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_external_dns_external_ips_specified_by_rack_setup() {
+        const TEST_NAME: &str =
+            "test_external_dns_external_ips_specified_by_rack_setup";
+
+        // Helper closures to reduce boilerplate below.
+        let make_bp_target = |blueprint_id| BlueprintTarget {
+            target_id: blueprint_id,
+            enabled: false,
+            time_made_target: Utc::now(),
+        };
+        let mut opte_ip_iter = DNS_OPTE_IPV4_SUBNET.addr_iter();
+        let mut mac_iter = MacAddr::iter_system();
+        let mut make_external_dns_zone = |ip, disposition| {
+            let zone_id = OmicronZoneUuid::new_v4();
+            let pool = ZpoolName::External(ExternalZpoolUuid::new_v4());
+            BlueprintZoneConfig {
+                disposition,
+                id: zone_id,
+                filesystem_pool: pool,
+                zone_type: BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns {
+                        dataset: OmicronZoneDataset { pool_name: pool },
+                        http_address: "[::1]:0".parse().unwrap(),
+                        dns_address: OmicronZoneExternalFloatingAddr {
+                            id: ExternalIpUuid::new_v4(),
+                            addr: SocketAddr::new(ip, 0),
+                        },
+                        nic: NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: zone_id.into_untyped_uuid(),
+                            },
+                            name: "test-external-dns".parse().unwrap(),
+                            ip: opte_ip_iter.next().unwrap().into(),
+                            mac: mac_iter.next().unwrap(),
+                            subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                            transit_ips: vec![],
+                        },
+                    },
+                ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            }
+        };
+
+        // Set up.
+        let logctx = dev::test_setup_log(TEST_NAME);
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Create a blueprint with one sled and no zones. Insert it and make it
+        // the target.
+        let sled_id = SledUuid::new_v4();
+        let bp0 = BlueprintBuilder::build_empty_with_sleds(
+            std::iter::once(sled_id),
+            TEST_NAME,
+        );
+        datastore.blueprint_insert(opctx, &bp0).await.expect("inserted bp0");
+        datastore
+            .blueprint_target_set_current(opctx, make_bp_target(bp0.id))
+            .await
+            .expect("made bp0 the target");
+
+        // No external DNS zones => no external DNS IPs.
+        let external_dns_ips = datastore
+            .external_dns_external_ips_specified_by_rack_setup(opctx)
+            .await
+            .expect("got external DNS IPs");
+        assert_eq!(external_dns_ips, BTreeSet::new());
+
+        // Create a blueprint with three in-service external DNS zones. We
+        // should get their IPs back.
+        let expected_ips = ["192.168.1.1", "192.168.1.2", "192.168.1.3"]
+            .into_iter()
+            .map(|ip| ip.parse::<IpAddr>().unwrap())
+            .collect::<BTreeSet<_>>();
+        let mut bp1 = bp0.clone();
+        bp1.id = BlueprintUuid::new_v4();
+        bp1.parent_blueprint_id = Some(bp0.id);
+        for &ip in &expected_ips {
+            bp1.sleds.get_mut(&sled_id).unwrap().zones.insert(
+                make_external_dns_zone(ip, BlueprintZoneDisposition::InService),
+            );
+        }
+
+        // Insert bp1 and make it the target. Confirm we get back the expected
+        // external DNS IPs.
+        datastore.blueprint_insert(opctx, &bp1).await.expect("inserted bp1");
+        datastore
+            .blueprint_target_set_current(opctx, make_bp_target(bp1.id))
+            .await
+            .expect("made bp1 the target");
+        let external_dns_ips = datastore
+            .external_dns_external_ips_specified_by_rack_setup(opctx)
+            .await
+            .expect("got external DNS IPs");
+        assert_eq!(external_dns_ips, expected_ips);
+
+        // Create a third blueprint with multiple expunged external DNS zones
+        // covering a couple additional IPs. Those should also be returned.
+        let extra_ips = ["192.168.1.4", "192.168.1.5"]
+            .into_iter()
+            .map(|ip| ip.parse::<IpAddr>().unwrap())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(expected_ips.intersection(&extra_ips).count(), 0);
+
+        let mut bp2 = bp1.clone();
+        bp2.id = BlueprintUuid::new_v4();
+        bp2.parent_blueprint_id = Some(bp1.id);
+        for &ip in &extra_ips {
+            for i in 0..4 {
+                bp2.sleds.get_mut(&sled_id).unwrap().zones.insert(
+                    make_external_dns_zone(
+                        ip,
+                        BlueprintZoneDisposition::Expunged {
+                            as_of_generation: Generation::new(),
+                            ready_for_cleanup: i % 2 == 0,
+                        },
+                    ),
+                );
+            }
+        }
+
+        // Insert bp1 and make it the target. Confirm we get back the expected
+        // external DNS IPs.
+        datastore.blueprint_insert(opctx, &bp2).await.expect("inserted bp2");
+        datastore
+            .blueprint_target_set_current(opctx, make_bp_target(bp2.id))
+            .await
+            .expect("made bp2 the target");
+        let external_dns_ips = datastore
+            .external_dns_external_ips_specified_by_rack_setup(opctx)
+            .await
+            .expect("got external DNS IPs");
+        let expected_ips =
+            expected_ips.union(&extra_ips).copied().collect::<BTreeSet<_>>();
+        assert_eq!(external_dns_ips, expected_ips);
 
         // Clean up.
         db.terminate().await;

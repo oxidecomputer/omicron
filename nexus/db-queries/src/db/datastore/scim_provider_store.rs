@@ -509,11 +509,6 @@ impl<'a> CrdbScimProviderStore<'a> {
             use nexus_db_schema::schema::role_assignment::dsl;
 
             diesel::delete(dsl::role_assignment)
-                .filter(
-                    dsl::resource_type
-                        .eq(self.authz_silo.resource_type().to_string()),
-                )
-                .filter(dsl::resource_id.eq(self.authz_silo.resource_id()))
                 .filter(dsl::identity_type.eq(IdentityType::SiloUser))
                 .filter(dsl::identity_id.eq(to_db_typed_uuid(user_id)))
                 .execute_async(conn)
@@ -820,7 +815,7 @@ impl<'a> CrdbScimProviderStore<'a> {
                 .await?;
 
             if let Some(admin_group_name) = silo.admin_group_name {
-                if admin_group_name == display_name {
+                if admin_group_name.eq_ignore_ascii_case(&display_name) {
                     // XXX code copied from silo create
 
                     use nexus_db_schema::schema::role_assignment::dsl;
@@ -1091,8 +1086,14 @@ impl<'a> CrdbScimProviderStore<'a> {
 
                 // Did the group's name match the admin group name, and was it
                 // changed?
-                if existing_group.display_name == admin_group_name {
-                    if group.display_name != admin_group_name {
+                if existing_group
+                    .display_name
+                    .eq_ignore_ascii_case(&admin_group_name)
+                {
+                    if !group
+                        .display_name
+                        .eq_ignore_ascii_case(&admin_group_name)
+                    {
                         // Scan for the matching role assignment, and delete
                         // that.
 
@@ -1118,7 +1119,10 @@ impl<'a> CrdbScimProviderStore<'a> {
                     }
                 } else {
                     // Did the group's name change _to_ the admin group name?
-                    if group.display_name == admin_group_name {
+                    if group
+                        .display_name
+                        .eq_ignore_ascii_case(&admin_group_name)
+                    {
                         // If so, insert a new assignment.
 
                         let new_assignment = model::RoleAssignment::new(
@@ -1205,11 +1209,6 @@ impl<'a> CrdbScimProviderStore<'a> {
             use nexus_db_schema::schema::role_assignment::dsl;
 
             diesel::delete(dsl::role_assignment)
-                .filter(
-                    dsl::resource_type
-                        .eq(self.authz_silo.resource_type().to_string()),
-                )
-                .filter(dsl::resource_id.eq(self.authz_silo.resource_id()))
                 .filter(dsl::identity_id.eq(to_db_typed_uuid(group_id)))
                 .filter(dsl::identity_type.eq(IdentityType::SiloGroup))
                 .execute_async(conn)
@@ -1275,21 +1274,24 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             }
         };
 
+        let authz_silo_user = authz::SiloUser::new(
+            self.authz_silo.clone(),
+            user_id,
+            LookupType::by_id(user_id),
+        );
         self.opctx
-            .authorize(
-                authz::Action::ListChildren,
-                &SiloUserList::new(self.authz_silo.clone()),
-            )
+            .authorize(authz::Action::Read, &authz_silo_user)
             .await
             .map_err(external_error_to_provider_error)?;
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 
@@ -1538,11 +1540,13 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             }
         };
 
+        let authz_silo_group = authz::SiloGroup::new(
+            self.authz_silo.clone(),
+            group_id,
+            LookupType::by_id(group_id),
+        );
         self.opctx
-            .authorize(
-                authz::Action::ListChildren,
-                &SiloGroupList::new(self.authz_silo.clone()),
-            )
+            .authorize(authz::Action::Read, &authz_silo_group)
             .await
             .map_err(external_error_to_provider_error)?;
         let conn = self
@@ -1756,14 +1760,15 @@ impl<'a> ProviderStore for CrdbScimProviderStore<'a> {
             .await
             .map_err(external_error_to_provider_error)?;
 
-        let conn =
-            self.datastore.pool_connection_unauthorized().await.map_err(
-                |err| {
-                    ProviderStoreError::StoreError(anyhow!(
-                        "Failed to access DB connection: {err}"
-                    ))
-                },
-            )?;
+        let conn = self
+            .datastore
+            .pool_connection_authorized(self.opctx)
+            .await
+            .map_err(|err| {
+                ProviderStoreError::StoreError(anyhow!(
+                    "Failed to access DB connection: {err}"
+                ))
+            })?;
 
         let err: OptionalError<ProviderStoreError> = OptionalError::new();
 

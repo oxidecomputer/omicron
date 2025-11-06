@@ -940,9 +940,9 @@ WHERE
   (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 CREATE UNIQUE INDEX IF NOT EXISTS
-  lookup_silo_user_by_silo_and_user_name
+  lookup_silo_user_by_silo_and_user_name_lower
 ON
-  omicron.public.silo_user (silo_id, user_name)
+  omicron.public.silo_user (silo_id, LOWER(user_name))
 WHERE
   time_deleted IS NULL AND user_provision_type = 'scim';
 
@@ -1003,9 +1003,9 @@ WHERE
   (user_provision_type = 'api_only' OR user_provision_type = 'jit');
 
 CREATE UNIQUE INDEX IF NOT EXISTS
-  lookup_silo_group_by_silo_and_display_name
+  lookup_silo_group_by_silo_and_display_name_lower
 ON
-  omicron.public.silo_group (silo_id, display_name)
+  omicron.public.silo_group (silo_id, LOWER(display_name))
 WHERE
   time_deleted IS NULL AND user_provision_type = 'scim';
 
@@ -2464,11 +2464,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
 /*
  * Index used to support quickly looking up children of the IP Pool range table,
- * when checking for allocated addresses during deletion.
+ * when checking for allocated addresses during deletion. Note that this cannot
+ * be unique, because SNAT addresses can share different port ranges of the same
+ * IP address.
  */
 CREATE INDEX IF NOT EXISTS external_ip_by_pool ON omicron.public.external_ip (
     ip_pool_id,
-    ip_pool_range_id
+    ip_pool_range_id,
+    ip
 )
     WHERE time_deleted IS NULL;
 
@@ -3146,6 +3149,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.role_assignment (
         identity_type
      )
 );
+
+/*
+ * When SCIM IdPs delete users and groups we want to be able to cleanup all role
+ * assignments associated with them.
+ */
+CREATE INDEX IF NOT EXISTS lookup_role_assignment_by_identity_id
+    ON omicron.public.role_assignment ( identity_id );
 
 /*******************************************************************/
 
@@ -6857,7 +6867,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '202.0.0', NULL)
+    (TRUE, NOW(), NOW(), '203.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

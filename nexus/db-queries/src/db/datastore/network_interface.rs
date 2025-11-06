@@ -145,8 +145,13 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
             .map_err(network_interface::InsertError::External)?;
+        // Creating a NIC doesn't create a child resource of the subnet itself;
+        // it creates a child of the Instance. We only need Read permission on
+        // the subnet to reference it. This allows limited-collaborators to
+        // create instances while still blocking them from modifying networking
+        // infrastructure.
         opctx
-            .authorize(authz::Action::CreateChild, authz_subnet)
+            .authorize(authz::Action::Read, authz_subnet)
             .await
             .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await
@@ -943,6 +948,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+    use nexus_db_model::IpConfig;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
     use std::collections::BTreeSet;
@@ -994,7 +1000,7 @@ mod tests {
                     name: name.parse().unwrap(),
                     description: name,
                 },
-                ip.into(),
+                IpConfig::from_ipv4(ip),
                 macs.next().unwrap(),
                 0,
             )

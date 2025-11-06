@@ -106,6 +106,12 @@ impl InternalServer {
             log.new(o!("component" => "dropshot_internal")),
         )
         .config(config.deployment.dropshot_internal.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                nexus_internal_api::latest_version(),
+            ),
+        )))
         .start()
         .map_err(|error| format!("initializing internal server: {}", error))
         {
