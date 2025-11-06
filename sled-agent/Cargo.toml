@@ -110,6 +110,7 @@ tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
 toml.workspace = true
+trust-quorum.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-brand-metadata.workspace = true
 usdt.workspace = true

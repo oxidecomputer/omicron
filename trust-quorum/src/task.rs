@@ -31,7 +31,7 @@ use trust_quorum_protocol::{
 };
 
 // TODO: Move to this crate
-// https://github.com/oxidecomputer/omicron/issues/9311
+// https://github.com/oxidecomputer/omicron/issues/9311;
 use bootstore::schemes::v0::NetworkConfig;
 
 /// Whether or not a configuration has committed or is still underway.
