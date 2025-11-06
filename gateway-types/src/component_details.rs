@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use dropshot::HttpError;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -149,17 +150,40 @@ pub enum PhyType {
     Vsc8562,
 }
 
-impl From<gateway_messages::ComponentDetails> for SpComponentDetails {
-    fn from(details: gateway_messages::ComponentDetails) -> Self {
+/// Error type for `gateway_messages::ComponentDetails` that are not supported
+/// by MGS proper and are only available via `faux-mgs`.
+#[derive(Debug, thiserror::Error)]
+#[error("unsupported component details: {description}")]
+pub struct UnsupportedComponentDetails {
+    pub description: String,
+}
+
+impl From<UnsupportedComponentDetails> for HttpError {
+    fn from(value: UnsupportedComponentDetails) -> Self {
+        HttpError::for_bad_request(
+            None,
+            format!(
+                "requested component details are not yet supported: {value}"
+            ),
+        )
+    }
+}
+
+impl TryFrom<gateway_messages::ComponentDetails> for SpComponentDetails {
+    type Error = UnsupportedComponentDetails;
+
+    fn try_from(
+        details: gateway_messages::ComponentDetails,
+    ) -> Result<Self, Self::Error> {
         use gateway_messages::ComponentDetails;
         match details {
             ComponentDetails::PortStatus(Ok(status)) => {
-                Self::PortStatus(status.into())
+                Ok(Self::PortStatus(status.into()))
             }
             ComponentDetails::PortStatus(Err(err)) => {
-                Self::PortStatusError(err.into())
+                Ok(Self::PortStatusError(err.into()))
             }
-            ComponentDetails::Measurement(m) => match m.value {
+            ComponentDetails::Measurement(m) => Ok(match m.value {
                 Ok(value) => Self::Measurement(Measurement {
                     name: m.name,
                     kind: m.kind.into(),
@@ -170,7 +194,17 @@ impl From<gateway_messages::ComponentDetails> for SpComponentDetails {
                     kind: m.kind.into(),
                     error: err.into(),
                 }),
-            },
+            }),
+            ComponentDetails::LastPostCode(inner) => {
+                Err(UnsupportedComponentDetails {
+                    description: format!("last post code: {inner:?}"),
+                })
+            }
+            ComponentDetails::GpioToggleCount(inner) => {
+                Err(UnsupportedComponentDetails {
+                    description: format!("GPIO toggle count: {inner:?}"),
+                })
+            }
         }
     }
 }
