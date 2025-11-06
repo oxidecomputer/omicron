@@ -1149,12 +1149,14 @@ If you want to pursue this option, see xref:./reconfigurator-dev-guide.adoc#task
 
 By "bad update" here, we mean a situation where:
 
-* Some time after the update started, the customer experienced a new, unacceptable problems (e.g., instances lost network connectivity).
 * The update is stuck due to a bug that cannot be easily worked around.  (If it's stuck due to a bug, it may be possible to work around that by <<task-override-plan,overriding the planner>>.)
+* Some time after the update started, the customer experienced a new, unacceptable problems (e.g., instances lost network connectivity).  The update may be still running or it may have already finished.
+
+While the system has been carefully designed to avoid these situations, it's possible that they will come up.
 
 If the update is still running and something bad has happened, consider <<task-pause-reconfigurator,pausing the update>> while figuring out what to do.
 
-There is currently no supported way to abort an update in progress nor rollback to an earlier version.footnote:[For more on why, see https://rfd.shared.oxide.computer/rfd/534[RFD 534 ("Upgrade rollback")].
+There is currently no supported way to abort an update in progress nor rollback to an earlier version.footnote:[For more on why, see https://rfd.shared.oxide.computer/rfd/534[RFD 534 ("Upgrade rollback")]].
 
 The primary way out of this situation is to MUPdate *all* sleds in the system to a known-working release.  This process is documented elsewhere.  The basic idea is to fully park the rack (essentially turning off the entire control plane) and MUPdate **all** sleds.
 
@@ -1166,7 +1168,7 @@ MUPdating to the _previous_ release (the one that was running before) is unsafe 
 * Sled agent (part of the host OS).  This changes from time to time, but not every release.
 * Crucible.  It's uncommon for its file format to change, but if it did, user data could be at risk if you MUPdate backwards.
 
-Other components have on-disk file formats as well.
+This is not an exhaustive list.  Other components have on-disk file formats that can change.
 
 Thus, it's generally very risky to MUPdate backwards once the host OS updates have started.  The only real options are emergency binary relief or fix-forward (i.e., a MUPdate or automated update to a fixed release).
 
@@ -1250,7 +1252,7 @@ If you're trying to go backwards (i.e., to abort the upgrade), see <<_recovering
 
 If you're trying to fix-forward, you need to either wait for the current update to finish (if that's possible) or else MUPdate the entire system to a known-working version (probably the one that you're trying to set the target release to).  Then, if it's still needed, you can set the target release to a newer version.
 
-=== What are the restrictions on what you can upgrade from/to?
+=== What are the restrictions on what I can upgrade from/to?
 
 See <<_what_are_the_restrictions_on_setting_the_target_release>>.
 
