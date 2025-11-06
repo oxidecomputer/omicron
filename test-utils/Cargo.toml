@@ -36,6 +36,7 @@ tokio-postgres.workspace = true
 usdt.workspace = true
 rcgen.workspace = true
 reqwest.workspace = true
+sha2.workspace = true
 walkdir.workspace = true
 omicron-workspace-hack.workspace = true
 uuid.workspace = true
