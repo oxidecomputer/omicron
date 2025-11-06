@@ -3881,7 +3881,7 @@ dependencies = [
 [[package]]
 name = "gateway-ereport-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=6bd2660d651332f38949cdfd3d23d751ca54b120#6bd2660d651332f38949cdfd3d23d751ca54b120"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=669fe557b66f44aed3c622bd17bc092f08797e0c#669fe557b66f44aed3c622bd17bc092f08797e0c"
 dependencies = [
  "serde",
  "zerocopy 0.8.27",
@@ -3890,7 +3890,7 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=6bd2660d651332f38949cdfd3d23d751ca54b120#6bd2660d651332f38949cdfd3d23d751ca54b120"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=669fe557b66f44aed3c622bd17bc092f08797e0c#669fe557b66f44aed3c622bd17bc092f08797e0c"
 dependencies = [
  "bitflags 2.9.4",
  "hubpack",
@@ -3908,7 +3908,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=6bd2660d651332f38949cdfd3d23d751ca54b120#6bd2660d651332f38949cdfd3d23d751ca54b120"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=669fe557b66f44aed3c622bd17bc092f08797e0c#669fe557b66f44aed3c622bd17bc092f08797e0c"
 dependencies = [
  "async-trait",
  "backoff",

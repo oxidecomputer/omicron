@@ -201,7 +201,11 @@ impl GatewayApi for GatewayImpl {
                 })?;
 
             Ok(HttpResponseOk(
-                details.entries.into_iter().map(Into::into).collect(),
+                details
+                    .entries
+                    .into_iter()
+                    .map(SpComponentDetails::try_from)
+                    .collect::<Result<Vec<_>, _>>()?,
             ))
         };
 
