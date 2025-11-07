@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use indent_write::indentable::Indentable as _;
 use itertools::Itertools;
 use omicron_common::api::external::{Generation, Name};
-use omicron_uuid_kinds::ReconfiguratorSimUuid;
+use omicron_uuid_kinds::ReconfiguratorSimStateUuid;
 use swrite::{SWrite, swriteln};
 use thiserror::Error;
 
@@ -170,7 +170,7 @@ impl UnknownZoneNamesError {
 #[derive(Clone, Debug)]
 pub struct StateMatch {
     /// The state ID.
-    pub id: ReconfiguratorSimUuid,
+    pub id: ReconfiguratorSimStateUuid,
     /// The state generation.
     pub generation: Generation,
     /// The state description.

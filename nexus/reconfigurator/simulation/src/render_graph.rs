@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use omicron_uuid_kinds::ReconfiguratorSimUuid;
+use omicron_uuid_kinds::ReconfiguratorSimStateUuid;
 use renderdag::{Ancestor, GraphRowRenderer, Renderer};
 use swrite::{SWrite, swrite, swriteln};
 
@@ -17,13 +17,13 @@ use crate::{SimState, Simulator, utils::DisplayUuidPrefix};
 pub struct GraphRenderOptions {
     verbose: bool,
     limit: Option<usize>,
-    from: Option<ReconfiguratorSimUuid>,
-    current: ReconfiguratorSimUuid,
+    from: Option<ReconfiguratorSimStateUuid>,
+    current: ReconfiguratorSimStateUuid,
 }
 
 impl GraphRenderOptions {
     /// Create new render options with the current state.
-    pub fn new(current: ReconfiguratorSimUuid) -> Self {
+    pub fn new(current: ReconfiguratorSimStateUuid) -> Self {
         Self { verbose: false, limit: None, from: None, current }
     }
 
@@ -40,7 +40,10 @@ impl GraphRenderOptions {
     }
 
     /// Set the starting state for ancestry filtering.
-    pub fn with_from(mut self, from: Option<ReconfiguratorSimUuid>) -> Self {
+    pub fn with_from(
+        mut self,
+        from: Option<ReconfiguratorSimStateUuid>,
+    ) -> Self {
         self.from = from;
         self
     }
@@ -59,7 +62,7 @@ impl Simulator {
         &self,
         options: &GraphRenderOptions,
     ) -> Vec<&SimState> {
-        let mut remaining_heads: Vec<ReconfiguratorSimUuid> =
+        let mut remaining_heads: Vec<ReconfiguratorSimStateUuid> =
             if let Some(from_id) = options.from {
                 vec![from_id]
             } else {
@@ -106,10 +109,10 @@ impl Simulator {
     /// Recursively walk a branch, processing merge points along the way.
     fn walk_branch_recursive<'a>(
         &'a self,
-        mut current_id: ReconfiguratorSimUuid,
+        mut current_id: ReconfiguratorSimStateUuid,
         node_to_heads: &HashMap<
-            ReconfiguratorSimUuid,
-            Vec<ReconfiguratorSimUuid>,
+            ReconfiguratorSimStateUuid,
+            Vec<ReconfiguratorSimStateUuid>,
         >,
         walk_state: &mut WalkState<'a>,
     ) {
@@ -151,12 +154,12 @@ impl Simulator {
 /// State accumulated during graph traversal.
 struct WalkState<'a> {
     states: Vec<&'a SimState>,
-    visited: HashSet<ReconfiguratorSimUuid>,
-    remaining_heads: Vec<ReconfiguratorSimUuid>,
+    visited: HashSet<ReconfiguratorSimStateUuid>,
+    remaining_heads: Vec<ReconfiguratorSimStateUuid>,
 }
 
 impl<'a> WalkState<'a> {
-    fn new(heads: Vec<ReconfiguratorSimUuid>) -> Self {
+    fn new(heads: Vec<ReconfiguratorSimStateUuid>) -> Self {
         Self {
             states: Vec::new(),
             visited: HashSet::new(),

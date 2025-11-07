@@ -61,7 +61,7 @@ use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::ReconfiguratorSimUuid;
+use omicron_uuid_kinds::ReconfiguratorSimStateUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
@@ -89,7 +89,7 @@ struct ReconfiguratorSim {
     // The simulator currently being used.
     sim: Simulator,
     // The current state.
-    current: ReconfiguratorSimUuid,
+    current: ReconfiguratorSimStateUuid,
     // The current system state
     log: slog::Logger,
 }
@@ -1456,7 +1456,7 @@ enum StateArgs {
 struct StateLogArgs {
     /// Starting state ID (defaults to current state)
     #[clap(long)]
-    from: Option<ReconfiguratorSimUuid>,
+    from: Option<ReconfiguratorSimStateUuid>,
 
     /// Limit number of states to display
     #[clap(long, short = 'n')]
@@ -2829,7 +2829,7 @@ fn cmd_state_switch(
     args: StateSwitchArgs,
 ) -> anyhow::Result<Option<String>> {
     // Try parsing as a full UUID first, then fall back to prefix matching.
-    let target_id = match args.state_id.parse::<ReconfiguratorSimUuid>() {
+    let target_id = match args.state_id.parse::<ReconfiguratorSimStateUuid>() {
         Ok(id) => id,
         Err(_) => sim.sim.get_state_by_prefix(&args.state_id)?,
     };
