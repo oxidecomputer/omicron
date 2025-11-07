@@ -7,6 +7,8 @@
 //! See crate-level documentation for details.
 
 use crate::blueprint_builder::BlueprintBuilder;
+use crate::blueprint_builder::ClickhouseAllocator;
+use crate::blueprint_builder::ClickhouseZonesThatShouldBeRunning;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::EnsureMupdateOverrideAction;
@@ -36,6 +38,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
@@ -63,6 +66,7 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog::error;
 use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -2341,6 +2345,11 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan_clickhouse_cluster_settings(&mut self) -> () /* FIXME */ {
+        // Generate a new cluster config based on the policy and parent
+        // blueprint.
+        let new_config = self.generate_current_clickhouse_cluster_config();
+        self.blueprint.set_clickhouse_cluster_config(new_config);
+
         // Not directly clickhouse cluster settings, but closely related: also
         // update how we read from Oximeter based on the input policy.
         let oximeter_read_policy = self.input.oximeter_read_settings();
@@ -2348,6 +2357,58 @@ impl<'a> Planner<'a> {
             oximeter_read_policy.version.into(),
             oximeter_read_policy.mode,
         );
+    }
+
+    fn generate_current_clickhouse_cluster_config(
+        &mut self,
+    ) -> Option<ClickhouseClusterConfig> {
+        if !self.input.clickhouse_cluster_enabled() {
+            if self.blueprint.clickhouse_cluster_config().is_some() {
+                info!(
+                    self.log,
+                    "clickhouse cluster disabled via policy: \
+                     discarding existing 'ClickhouseAllocator' and \
+                     the resulting generated 'ClickhouseClusterConfig"
+                );
+            }
+            return None;
+        }
+
+        // If we have the clickhouse cluster setup enabled via policy and we
+        // don't yet have a `ClickhouseClusterConfiguration`, then we must
+        // create one and feed it to our `ClickhouseAllocator`.
+        let parent_config =
+            self.blueprint.clickhouse_cluster_config().cloned().unwrap_or_else(
+                || {
+                    info!(
+                        self.log,
+                        "Clickhouse cluster enabled by policy: \
+                         generating initial ClickhouseClusterConfig"
+                    );
+                    self.blueprint.make_empty_clickhouse_cluster_config()
+                },
+            );
+        let allocator = ClickhouseAllocator::new(
+            self.log.clone(),
+            parent_config,
+            self.inventory.latest_clickhouse_keeper_membership(),
+        );
+        let should_be_running =
+            ClickhouseZonesThatShouldBeRunning::new(&self.blueprint);
+
+        match allocator.plan(&should_be_running) {
+            Ok(config) => Some(config),
+            Err(err) => {
+                error!(
+                    self.log, "clickhouse allocator planning failed";
+                    InlineErrorChain::new(&err),
+                );
+
+                // If planning the new config failed, carry forward our
+                // parent's config.
+                Some(allocator.into_parent_config())
+            }
+        }
     }
 
     /// Return the image source for zones that we need to add.

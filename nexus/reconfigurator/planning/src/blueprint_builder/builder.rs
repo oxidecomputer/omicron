@@ -57,6 +57,7 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
+use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
@@ -91,14 +92,10 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
 use thiserror::Error;
-
-use super::ClickhouseZonesThatShouldBeRunning;
-use super::clickhouse::ClickhouseAllocator;
-use nexus_types::inventory::BaseboardId;
-use std::sync::Arc;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -507,11 +504,11 @@ pub struct BlueprintBuilder<'a> {
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
+    /// Clickhouse cluster config
+    clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
+
     /// Oximeter read policy
     oximeter_read_policy: OximeterReadPolicy,
-
-    /// The latest inventory collection
-    collection: &'a Collection,
 
     /// The ID that the completed blueprint will have
     new_blueprint_id: BlueprintUuid,
@@ -672,8 +669,10 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
+            clickhouse_cluster_config: parent_blueprint
+                .clickhouse_cluster_config
+                .clone(),
             oximeter_read_policy,
-            collection: inventory,
             new_blueprint_id: rng.next_blueprint(),
             input,
             sled_editors,
@@ -696,6 +695,28 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn new_blueprint_id(&self) -> BlueprintUuid {
         self.new_blueprint_id
+    }
+
+    pub fn clickhouse_cluster_config(
+        &self,
+    ) -> Option<&ClickhouseClusterConfig> {
+        self.clickhouse_cluster_config.as_ref()
+    }
+
+    pub fn make_empty_clickhouse_cluster_config(
+        &mut self,
+    ) -> ClickhouseClusterConfig {
+        ClickhouseClusterConfig::new(
+            OXIMETER_CLUSTER.to_string(),
+            self.rng.next_clickhouse().to_string(),
+        )
+    }
+
+    pub fn set_clickhouse_cluster_config(
+        &mut self,
+        clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
+    ) {
+        self.clickhouse_cluster_config = clickhouse_cluster_config;
     }
 
     pub fn set_oximeter_read_policy(
@@ -816,7 +837,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
-    pub fn build(mut self, source: BlueprintSource) -> Blueprint {
+    pub fn build(self, source: BlueprintSource) -> Blueprint {
         let blueprint_id = self.new_blueprint_id();
 
         // Collect the Omicron zones config for all sleds, including sleds that
@@ -850,62 +871,6 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
-        // If we have the clickhouse cluster setup enabled via policy and we
-        // don't yet have a `ClickhouseClusterConfiguration`, then we must
-        // create one and feed it to our `ClickhouseAllocator`.
-        let clickhouse_allocator = if self.input.clickhouse_cluster_enabled() {
-            let parent_config = self
-                .parent_blueprint
-                .clickhouse_cluster_config
-                .clone()
-                .unwrap_or_else(|| {
-                    info!(
-                        self.log,
-                        concat!(
-                            "Clickhouse cluster enabled by policy: ",
-                            "generating initial 'ClickhouseClusterConfig' ",
-                            "and 'ClickhouseAllocator'"
-                        )
-                    );
-                    ClickhouseClusterConfig::new(
-                        OXIMETER_CLUSTER.to_string(),
-                        self.rng.next_clickhouse().to_string(),
-                    )
-                });
-            Some(ClickhouseAllocator::new(
-                self.log.clone(),
-                parent_config,
-                self.collection.latest_clickhouse_keeper_membership(),
-            ))
-        } else {
-            if self.parent_blueprint.clickhouse_cluster_config.is_some() {
-                info!(
-                    self.log,
-                    concat!(
-                        "clickhouse cluster disabled via policy ",
-                        "discarding existing 'ClickhouseAllocator' and ",
-                        "the resulting generated 'ClickhouseClusterConfig"
-                    )
-                );
-            }
-            None
-        };
-
-        // If we have an allocator, use it to generate a new config. If an error
-        // is returned then log it and carry over the parent_config.
-        let clickhouse_cluster_config = clickhouse_allocator.map(|a| {
-            let should_be_running = ClickhouseZonesThatShouldBeRunning::new(
-                sleds.iter().map(|(id, c)| (*id, c)),
-            );
-            match a.plan(&should_be_running) {
-                Ok(config) => config,
-                Err(e) => {
-                    error!(self.log, "clickhouse allocator error: {e}");
-                    a.parent_config().clone()
-                }
-            }
-        });
-
         Blueprint {
             id: blueprint_id,
             sleds,
@@ -924,7 +889,7 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
 
-            clickhouse_cluster_config,
+            clickhouse_cluster_config: self.clickhouse_cluster_config,
             oximeter_read_version: self.oximeter_read_policy.version,
             oximeter_read_mode: self.oximeter_read_policy.mode,
             time_created: now_db_precision(),
