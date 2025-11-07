@@ -376,6 +376,10 @@ task: "physical_disk_adoption"
     ensure new physical disks are automatically marked in-service
 
 
+task: "probe_distributor"
+    distributes networking probe zones to sleds
+
+
 task: "read_only_region_replacement_start"
     detect if read-only regions need replacement and begin the process
 
@@ -685,6 +689,13 @@ task: "physical_disk_adoption"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
+
+task: "probe_distributor"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    succesfully-pushed probes: 0 total
+    errors while pushing probes: 0 total
 
 task: "read_only_region_replacement_start"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
@@ -1220,6 +1231,13 @@ task: "physical_disk_adoption"
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
+
+task: "probe_distributor"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    succesfully-pushed probes: 0 total
+    errors while pushing probes: 0 total
 
 task: "read_only_region_replacement_start"
   configured period: every <REDACTED_DURATION>days <REDACTED_DURATION>h <REDACTED_DURATION>m <REDACTED_DURATION>s
