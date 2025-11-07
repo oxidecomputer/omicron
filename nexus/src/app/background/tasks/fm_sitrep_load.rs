@@ -200,7 +200,7 @@ mod test {
 
     #[tokio::test]
     async fn test_load_sitreps() {
-        let logctx = dev::test_setup_log("test_inventory_loader");
+        let logctx = dev::test_setup_log("test_load_sitreps");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
