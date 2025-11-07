@@ -435,6 +435,81 @@ started:    <REDACTED_TIMESTAMP>
 done:       <REDACTED_TIMESTAMP>
 errors:     0
 
+Sled serial0
+    part number: model0
+    power:    A2
+    revision: 0
+    MGS slot: Sled 0
+    found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
+    host phase 1 hashes:
+        SLOT HASH                                                             
+        A    0101010101010101010101010101010101010101010101010101010101010101 
+        B    0202020202020202020202020202020202020202020202020202020202020202 
+    cabooses:
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
+        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
+        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
+    RoT pages:
+        SLOT DATA_BASE64 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: slotAdigest1
+    RoT: slot B SHA3-256: slotBdigest1
+
+Sled serial1
+    part number: model1
+    power:    A2
+    revision: 0
+    MGS slot: Sled 1
+    found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
+    host phase 1 hashes:
+        SLOT HASH                                                             
+        A    0101010101010101010101010101010101010101010101010101010101010101 
+        B    0202020202020202020202020202020202020202020202020202020202020202 
+    cabooses:
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
+        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
+        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
+    RoT pages:
+        SLOT DATA_BASE64 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: slotAdigest1
+    RoT: slot B SHA3-256: slotBdigest1
+
+Sled serial2
+    part number: model2
+    power:    A2
+    revision: 0
+    MGS slot: Sled 2
+    found at: <REDACTED_TIMESTAMP> from fake MGS 1
+    host phase 1 active slot: A
+    host phase 1 hashes:
+        SLOT HASH                                                             
+        A    0101010101010101010101010101010101010101010101010101010101010101 
+        B    0202020202020202020202020202020202020202020202020202020202020202 
+    cabooses:
+        SLOT     BOARD       NAME        VERSION GIT_COMMIT SIGN        
+        SpSlot0  SimGimletSp SimGimletSp 0.0.1   unknown    n/a         
+        RotSlotA SimRot      SimRot      0.0.2   unknown    sign-gimlet 
+        Stage0   SimRot      SimRot      0.0.1   unknown    sign-gimlet 
+    RoT pages:
+        SLOT DATA_BASE64 
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: slotAdigest1
+    RoT: slot B SHA3-256: slotBdigest1
+
 SLED AGENTS
 
 sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (role = Gimlet, serial serial1)
