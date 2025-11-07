@@ -773,10 +773,6 @@ impl<'a> BlueprintBuilder<'a> {
         }))
     }
 
-    pub fn planning_input(&self) -> &PlanningInput {
-        &self.input
-    }
-
     /// Iterates over the list of sled IDs for which we have zones.
     ///
     /// This may include decommissioned sleds.
