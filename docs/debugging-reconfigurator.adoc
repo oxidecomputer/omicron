@@ -1232,7 +1232,7 @@ Unfortunately, even if we assume nothing goes wrong, it's hard to provide accura
 
 The most time-consuming individual steps are the sled reboots for SP and host OS updates.  These happen early in the update process.  If you're counting progress by number of components updated, things will get faster after those steps complete.
 
-Another quirk to know about: if components haven't changed in the new target release, the update system will not make any changes, and it will immediately consider those components up-to-date.  That means as soon as you start the update, you may immediately see a whole bunch of components appear done already.  This should be uncommon for scheduled releases on customer systems because these releases always change all components.
+Another quirk to know about: for components that haven't changed in the new target release, the update system may not make any changes, and it will immediately consider those components up-to-date.  That means as soon as you start the update, you may immediately see a whole bunch of components appear done already.  This is especially common in development systems, where frequent updates means components are less likely to have changed since the last update.
 
 === Can I change the target release while an update is in progress?
 
