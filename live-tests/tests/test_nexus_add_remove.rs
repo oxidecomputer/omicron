@@ -10,7 +10,6 @@ use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
-use nexus_inventory::CollectionBuilder;
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_lockstep_client::types::QuiesceState;
 use nexus_lockstep_client::types::Saga;
@@ -59,11 +58,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
-    let collection = datastore
-        .inventory_get_latest_collection(opctx)
-        .await
-        .expect("latest inventory collection")
-        .unwrap_or_else(|| CollectionBuilder::new("test").build());
     let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
     let nexus = initial_nexus_clients.first().expect("internal Nexus client");
 
@@ -75,7 +69,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let (blueprint1, blueprint2) = blueprint_edit_current_target(
         log,
         &planning_input,
-        &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             // We have to tell the builder what image source to use for the new
@@ -196,7 +189,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let (_blueprint2, blueprint3) = blueprint_edit_current_target(
         log,
         &planning_input,
-        &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             builder

@@ -187,7 +187,6 @@ impl<'a> Planner<'a> {
             &log,
             parent_blueprint,
             input,
-            inventory,
             creator,
             rng,
         )?;
@@ -3408,7 +3407,6 @@ pub(crate) mod test {
             &logctx.log,
             &blueprint1,
             &input,
-            &collection,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )

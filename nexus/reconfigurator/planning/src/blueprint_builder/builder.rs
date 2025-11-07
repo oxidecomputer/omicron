@@ -58,7 +58,6 @@ use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::BaseboardId;
-use nexus_types::inventory::Collection;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
@@ -610,7 +609,6 @@ impl<'a> BlueprintBuilder<'a> {
         log: &Logger,
         parent_blueprint: &'a Blueprint,
         input: &'a PlanningInput,
-        inventory: &'a Collection,
         creator: &str,
         mut rng: PlannerRng,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
@@ -2623,7 +2621,6 @@ pub mod test {
             &logctx.log,
             &blueprint1,
             &example.input,
-            &example.collection,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -2675,7 +2672,6 @@ pub mod test {
             &logctx.log,
             &blueprint2,
             &input,
-            &example.collection,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -2796,7 +2792,7 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (collection, input, mut blueprint1) =
+        let (_collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME);
         verify_blueprint(&blueprint1);
 
@@ -2844,7 +2840,6 @@ pub mod test {
             &logctx.log,
             &blueprint1,
             &input,
-            &collection,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
@@ -2882,7 +2877,6 @@ pub mod test {
             &logctx.log,
             &blueprint2,
             &input,
-            &collection,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
@@ -2910,7 +2904,6 @@ pub mod test {
                 .create_zones(false)
                 .create_disks_in_blueprint(false)
                 .build();
-        let collection = example.collection;
         let input = example.input;
 
         {
@@ -2919,7 +2912,6 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3008,7 +3000,7 @@ pub mod test {
         static TEST_NAME: &str = "test_datasets_for_zpools_and_zones";
         let logctx = test_setup_log(TEST_NAME);
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (collection, input, blueprint) = example(&logctx.log, TEST_NAME);
+        let (_collection, input, blueprint) = example(&logctx.log, TEST_NAME);
 
         // Creating the "example" blueprint should already invoke
         // `sled_ensure_datasets`.
@@ -3020,7 +3012,6 @@ pub mod test {
             &logctx.log,
             &blueprint,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3075,7 +3066,6 @@ pub mod test {
             &logctx.log,
             &blueprint,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3115,7 +3105,6 @@ pub mod test {
             &logctx.log,
             &blueprint,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3157,7 +3146,6 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3276,7 +3264,6 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3307,7 +3294,6 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3363,7 +3349,6 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3439,7 +3424,6 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3482,7 +3466,6 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3529,7 +3512,6 @@ pub mod test {
             &logctx.log,
             &blueprint1,
             &system.input,
-            &system.collection,
             TEST_NAME,
             rng.next_planner_rng(),
         )

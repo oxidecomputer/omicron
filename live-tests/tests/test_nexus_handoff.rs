@@ -55,7 +55,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     // That blueprint should be propagated to all sleds.  We wait just a bit
     // here to deal with races set up by other tests failing or other ongoing
     // activity.
-    let collection = blueprint_wait_sled_configs_propagated(
+    let _collection = blueprint_wait_sled_configs_propagated(
         opctx,
         datastore,
         &blueprint_initial,
@@ -171,7 +171,6 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &planning_input,
-            &collection,
             &nexus,
             &|builder: &mut BlueprintBuilder| {
                 let mut external_networking_alloc =
@@ -226,7 +225,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     // SMF may still be starting up the zone.  Even once the Nexus process
     // starts, it will become blocked on the "not yet" DbMetadataNexusState,
     // waiting for handoff.
-    let collection = blueprint_wait_sled_configs_propagated(
+    let _collection = blueprint_wait_sled_configs_propagated(
         opctx,
         datastore,
         &blueprint_new_nexus,
@@ -271,7 +270,6 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &planning_input,
-            &collection,
             &nexus,
             &|builder: &mut BlueprintBuilder| {
                 builder.set_nexus_generation(next_generation);
@@ -437,7 +435,6 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &planning_input,
-            &collection,
             new_nexus,
             &|builder: &mut BlueprintBuilder| {
                 for (id, current_zone) in &current_nexus_zones {
