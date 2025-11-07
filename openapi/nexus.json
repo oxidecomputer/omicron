@@ -19172,28 +19172,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19216,9 +19210,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
@@ -19252,28 +19243,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19296,9 +19281,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
@@ -19332,28 +19314,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19376,9 +19352,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
@@ -19412,28 +19385,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19456,9 +19423,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
@@ -19492,28 +19456,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19536,9 +19494,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
@@ -19572,28 +19527,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19616,9 +19565,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
@@ -19654,28 +19600,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19698,9 +19638,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
@@ -19736,28 +19673,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19780,9 +19711,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
@@ -19818,28 +19746,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19862,9 +19784,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
@@ -19900,28 +19819,22 @@
             "minimum": 0
           },
           "p50": {
+            "nullable": true,
             "description": "p50 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
+            "nullable": true,
             "description": "p95 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
+            "nullable": true,
             "description": "p99 Quantile",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "description": "M2 for Welford's algorithm for variance calculation.\n\nRead about [Welford's algorithm](https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm) for more information on the algorithm.",
@@ -19944,9 +19857,6 @@
           "max",
           "min",
           "n_samples",
-          "p50",
-          "p90",
-          "p99",
           "squared_mean",
           "start_time",
           "sum_of_samples"
