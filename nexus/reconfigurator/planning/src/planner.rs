@@ -294,6 +294,10 @@ impl<'a> Planner<'a> {
         // planned independently of the rest of the system.
         let cockroachdb_settings = self.do_plan_cockroachdb_settings();
 
+        // Clickhouse cluster settings aren't dependent on zones, so they can be
+        // planned indepdently of the rest of the system.
+        let () = self.do_plan_clickhouse_cluster_settings();
+
         Ok(PlanningReport {
             planner_config: *self.input.planner_config(),
             expunge,
@@ -2334,6 +2338,16 @@ impl<'a> Planner<'a> {
         // cluster version -- we're likely in the middle of an upgrade!
         //
         // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
+    }
+
+    fn do_plan_clickhouse_cluster_settings(&mut self) -> () /* FIXME */ {
+        // Not directly clickhouse cluster settings, but closely related: also
+        // update how we read from Oximeter based on the input policy.
+        let oximeter_read_policy = self.input.oximeter_read_settings();
+        self.blueprint.set_oximeter_read_policy(
+            oximeter_read_policy.version.into(),
+            oximeter_read_policy.mode,
+        );
     }
 
     /// Return the image source for zones that we need to add.

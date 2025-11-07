@@ -478,6 +478,14 @@ impl fmt::Display for Operation {
     }
 }
 
+/// Equivalent to `nexus_types::deployment::planning_input::OximeterReadPolicy`,
+/// but without the `time_modified` field (which isn't stored in blueprints).
+#[derive(Debug, Clone, Copy)]
+struct OximeterReadPolicy {
+    version: Generation,
+    mode: OximeterReadMode,
+}
+
 /// Helper for assembling a blueprint
 ///
 /// There are two basic ways to assemble a new blueprint:
@@ -498,6 +506,9 @@ pub struct BlueprintBuilder<'a> {
 
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
+
+    /// Oximeter read policy
+    oximeter_read_policy: OximeterReadPolicy,
 
     /// The latest inventory collection
     collection: &'a Collection,
@@ -651,9 +662,17 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
+        // Copy the Oximeter read policy from our parent blueprint so we can
+        // track changes to it.
+        let oximeter_read_policy = OximeterReadPolicy {
+            version: parent_blueprint.oximeter_read_version,
+            mode: parent_blueprint.oximeter_read_mode,
+        };
+
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
+            oximeter_read_policy,
             collection: inventory,
             new_blueprint_id: rng.next_blueprint(),
             input,
@@ -677,6 +696,14 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn new_blueprint_id(&self) -> BlueprintUuid {
         self.new_blueprint_id
+    }
+
+    pub fn set_oximeter_read_policy(
+        &mut self,
+        version: Generation,
+        mode: OximeterReadMode,
+    ) {
+        self.oximeter_read_policy = OximeterReadPolicy { version, mode };
     }
 
     pub fn available_internal_dns_subnets(
@@ -879,11 +906,6 @@ impl<'a> BlueprintBuilder<'a> {
             }
         });
 
-        let (oximeter_read_mode, oximeter_read_version) = {
-            let policy = self.input.oximeter_read_settings();
-            (policy.mode.clone(), policy.version)
-        };
-
         Blueprint {
             id: blueprint_id,
             sleds,
@@ -903,8 +925,8 @@ impl<'a> BlueprintBuilder<'a> {
                 .cockroachdb_setting_preserve_downgrade,
 
             clickhouse_cluster_config,
-            oximeter_read_version: oximeter_read_version.into(),
-            oximeter_read_mode,
+            oximeter_read_version: self.oximeter_read_policy.version,
+            oximeter_read_mode: self.oximeter_read_policy.mode,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
