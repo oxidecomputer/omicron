@@ -218,9 +218,7 @@ impl SledEditor {
     /// decommissioned.
     pub fn baseboard_id(&self) -> Option<&Arc<BaseboardId>> {
         match &self.0 {
-            InnerSledEditor::Active(active) => {
-                Some(&active.baseboard_id)
-            }
+            InnerSledEditor::Active(active) => Some(&active.baseboard_id),
             InnerSledEditor::Decommissioned(_) => None,
         }
     }
