@@ -56,7 +56,7 @@ impl<'a> CollectionDisplay<'a> {
         Self {
             collection,
             // Display all items by default.
-            include_sps: CollectionDisplayIncludeSps::None,
+            include_sps: CollectionDisplayIncludeSps::All,
             include_sleds: true,
             include_orphaned_datasets: true,
             include_clickhouse_keeper_membership: true,
