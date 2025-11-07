@@ -61,7 +61,7 @@ impl BootstrapServerContext {
             self.global_zone_bootstrap_ip,
             &self.internal_disks_rx,
             &self.bootstore_node_handle,
-            &self.trust_quorum_handle
+            &self.trust_quorum_handle,
             request,
         )
     }
