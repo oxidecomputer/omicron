@@ -18,3 +18,10 @@
 // updated.
 pub const BUNDLE_FILE_NAME: &str = "bundle.zip";
 pub const BUNDLE_TMP_FILE_NAME: &str = "bundle.zip.tmp";
+
+/// When a bundle is destroyed, and it returns a 404 due to
+/// the bundle not being found, what error message do we expect?
+///
+/// This helps distinguish from other errors which might cause a 404 to
+/// propagate.
+pub const NESTED_DATASET_NOT_FOUND: &str = "Nested dataset not found";

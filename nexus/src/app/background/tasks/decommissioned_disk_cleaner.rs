@@ -233,7 +233,7 @@ mod tests {
             .await
             .unwrap();
 
-        let dataset = datastore
+        let crucible_dataset = datastore
             .crucible_dataset_upsert(CrucibleDataset::new(
                 DatasetUuid::new_v4(),
                 zpool.id(),
@@ -252,7 +252,7 @@ mod tests {
         let region = {
             let volume_id = VolumeUuid::new_v4();
             Region::new(
-                dataset.id(),
+                crucible_dataset.id(),
                 volume_id,
                 512_i64.try_into().unwrap(),
                 10,
@@ -270,12 +270,16 @@ mod tests {
             .await
             .unwrap();
 
-        (zpool.id(), dataset.id(), RegionUuid::from_untyped_uuid(region_id))
+        (
+            zpool.id(),
+            crucible_dataset.id(),
+            RegionUuid::from_untyped_uuid(region_id),
+        )
     }
 
     struct TestFixture {
         zpool_id: ZpoolUuid,
-        dataset_id: DatasetUuid,
+        crucible_dataset_id: DatasetUuid,
         region_id: RegionUuid,
         disk_id: PhysicalDiskUuid,
     }
@@ -285,11 +289,13 @@ mod tests {
             let sled_id = SledUuid::from_str(&SLED_AGENT_UUID).unwrap();
 
             let disk_id = make_disk_in_db(datastore, opctx, 0, sled_id).await;
-            let (zpool_id, dataset_id, region_id) =
+
+            let (zpool_id, crucible_dataset_id, region_id) =
                 add_zpool_dataset_and_region(
                     &datastore, &opctx, disk_id, sled_id,
                 )
                 .await;
+
             datastore
                 .physical_disk_update_policy(
                     &opctx,
@@ -299,7 +305,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            Self { zpool_id, dataset_id, region_id, disk_id }
+            Self { zpool_id, crucible_dataset_id, region_id, disk_id }
         }
 
         async fn delete_region(&self, datastore: &DataStore) {
@@ -334,8 +340,11 @@ mod tests {
                 .expect("Zpool query should succeed");
 
             use nexus_db_schema::schema::crucible_dataset::dsl as dataset_dsl;
-            let fetched_dataset = dataset_dsl::crucible_dataset
-                .filter(dataset_dsl::id.eq(self.dataset_id.into_untyped_uuid()))
+            let fetched_crucible_dataset = dataset_dsl::crucible_dataset
+                .filter(
+                    dataset_dsl::id
+                        .eq(self.crucible_dataset_id.into_untyped_uuid()),
+                )
                 .filter(dataset_dsl::time_deleted.is_null())
                 .select(CrucibleDataset::as_select())
                 .first_async(&*conn)
@@ -343,11 +352,12 @@ mod tests {
                 .optional()
                 .expect("Dataset query should succeed");
 
-            match (fetched_zpool, fetched_dataset) {
+            match (fetched_zpool, fetched_crucible_dataset) {
                 (Some(_), Some(_)) => false,
                 (None, None) => true,
                 _ => panic!(
-                    "If zpool and dataset were cleaned, they should be cleaned together"
+                    "If zpool and datasets were cleaned, they should be \
+                    cleaned together"
                 ),
             }
         }
