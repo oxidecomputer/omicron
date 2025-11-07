@@ -61,7 +61,7 @@ pub struct Simulator {
     // points to the same memory address.
     root_state: Arc<SimState>,
     // Top-level (unversioned) RNG.
-    sim_uuid_rng: TypedUuidRng<ReconfiguratorSimKind>,
+    sim_uuid_rng: TypedUuidRng<ReconfiguratorSimStateKind>,
 }
 
 impl Simulator {
