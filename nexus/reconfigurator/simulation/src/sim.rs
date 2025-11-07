@@ -11,7 +11,11 @@ use indexmap::IndexSet;
 use omicron_uuid_kinds::{ReconfiguratorSimKind, ReconfiguratorSimUuid};
 use typed_rng::TypedUuidRng;
 
-use crate::{SimState, seed_from_entropy};
+use crate::{
+    SimState,
+    errors::{StateIdPrefixError, StateMatch},
+    seed_from_entropy,
+};
 
 /// A store to track reconfigurator states: the main entrypoint for
 /// reconfigurator simulation.
@@ -113,6 +117,56 @@ impl Simulator {
     /// [`Self::get_state`]`(`[`Self::ROOT_ID`]`).unwrap()`.
     pub fn root_state(&self) -> &SimState {
         &self.root_state
+    }
+
+    /// Get a state by UUID prefix.
+    ///
+    /// Returns the unique state ID that matches the given prefix.
+    /// Returns an error if zero or multiple states match the prefix.
+    pub fn get_state_by_prefix(
+        &self,
+        prefix: &str,
+    ) -> Result<ReconfiguratorSimUuid, StateIdPrefixError> {
+        let mut matching_ids = Vec::new();
+
+        if Self::ROOT_ID.to_string().starts_with(prefix) {
+            matching_ids.push(Self::ROOT_ID);
+        }
+
+        for id in self.states.keys() {
+            if id.to_string().starts_with(prefix) {
+                matching_ids.push(*id);
+            }
+        }
+
+        match matching_ids.len() {
+            0 => Err(StateIdPrefixError::NoMatch(prefix.to_string())),
+            1 => Ok(matching_ids[0]),
+            n => {
+                // Sort for deterministic output.
+                matching_ids.sort();
+
+                let matches = matching_ids
+                    .iter()
+                    .map(|id| {
+                        let state = self
+                            .get_state(*id)
+                            .expect("matching ID should have a state");
+                        StateMatch {
+                            id: *id,
+                            generation: state.generation(),
+                            description: state.description().to_string(),
+                        }
+                    })
+                    .collect();
+
+                Err(StateIdPrefixError::Ambiguous {
+                    prefix: prefix.to_string(),
+                    count: n,
+                    matches,
+                })
+            }
+        }
     }
 
     #[inline]
