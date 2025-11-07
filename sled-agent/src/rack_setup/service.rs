@@ -421,7 +421,7 @@ impl ServiceInner {
             warn!(
                 log,
                 "failed to set sled Omicron config";
-                "error" => &error,
+                &error,
                 "retry_after" => ?delay,
             );
         };
@@ -545,7 +545,7 @@ impl ServiceInner {
             warn!(
                 log,
                 "sled config not yet reconciled";
-                "error" => &error,
+                &error,
                 "retry_after" => ?delay,
             );
         };
