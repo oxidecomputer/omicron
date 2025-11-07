@@ -23,7 +23,6 @@ use gateway_client::types::SpIgnition;
 use gateway_types::component::SpType;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
-use nexus_db_model::Ereport;
 use nexus_db_model::Sled;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
@@ -35,7 +34,7 @@ use nexus_db_queries::db::datastore::EreportFilters;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_reconfigurator_preparation::reconfigurator_state_load;
 use nexus_types::deployment::SledFilter;
-
+use nexus_types::fm::Ereport;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
@@ -1203,11 +1202,10 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("failed to create directory '{dir}'"))?;
-    let ereport_id = ereport.id();
-    let file_path = dir.join(format!("{}.json", ereport_id.ena));
-    let ereport = nexus_types::fm::Ereport::from(ereport);
-    let json = serde_json::to_vec(&ereport)
-        .with_context(|| format!("failed to serialize ereport {ereport_id}"))?;
+    let file_path = dir.join(format!("{}.json", ereport.id.ena));
+    let json = serde_json::to_vec(&ereport).with_context(|| {
+        format!("failed to serialize ereport {pn}:{sn}/{}", ereport.id)
+    })?;
     tokio::fs::write(&file_path, json)
         .await
         .with_context(|| format!("failed to write '{file_path}'"))
