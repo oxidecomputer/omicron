@@ -1324,14 +1324,15 @@ impl<'a> BlueprintBuilder<'a> {
                 "tried to ensure mupdate override for unknown sled {sled_id}"
             ))
         })?;
+        let baseboard_id = editor.baseboard_id().ok_or_else(|| {
+            // All commissioned sleds have baseboards; this should never fail.
+            Error::Planner(anyhow!(
+                "tried to ensure mupdate override for \
+                 decommissioned sled {sled_id}"
+            ))
+        })?;
 
         // Also map the editor to the corresponding PendingMgsUpdates.
-        let baseboard_id = self
-            .commissioned_sleds
-            .get(&sled_id)
-            .map(|details| &details.baseboard_id)
-            // TODO-john store baseboard in editor to get rid of this expect?
-            .expect("details must exist for a sled if we have a sled editor");
         let pending_mgs_update = self.pending_mgs_updates.entry(baseboard_id);
         let noop_sled_info = noop_info.sled_info_mut(sled_id)?;
 

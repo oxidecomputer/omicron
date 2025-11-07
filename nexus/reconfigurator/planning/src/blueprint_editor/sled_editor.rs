@@ -214,6 +214,17 @@ impl SledEditor {
         }
     }
 
+    /// Returns the baseboard of this sled if it is active, or `None` if it is
+    /// decommissioned.
+    pub fn baseboard_id(&self) -> Option<&Arc<BaseboardId>> {
+        match &self.0 {
+            InnerSledEditor::Active(active) => {
+                Some(&active.baseboard_id)
+            }
+            InnerSledEditor::Decommissioned(_) => None,
+        }
+    }
+
     /// Returns the subnet of this sled if it is active, or `None` if it is
     /// decommissioned.
     pub fn subnet(&self) -> Option<Ipv6Subnet<SLED_PREFIX>> {
