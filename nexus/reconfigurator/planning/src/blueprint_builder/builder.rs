@@ -50,6 +50,7 @@ use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
@@ -512,8 +513,8 @@ pub struct BlueprintBuilder<'a> {
     /// The ID that the completed blueprint will have
     new_blueprint_id: BlueprintUuid,
 
-    // These fields are used to allocate resources for sleds.
-    input: &'a PlanningInput,
+    // All the known commissioned sleds and their associated details.
+    commissioned_sleds: BTreeMap<SledUuid, SledDetails>,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
@@ -620,6 +621,12 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
+        // Clone the sled details for all commissioned sleds.
+        let commissioned_sleds = input
+            .all_sleds(SledFilter::Commissioned)
+            .map(|(sled_id, sled_details)| (sled_id, sled_details.clone()))
+            .collect::<BTreeMap<_, _>>();
+
         // Convert our parent blueprint's sled configs into `SledEditor`s.
         let mut sled_editors = BTreeMap::new();
         for (sled_id, sled_cfg) in &parent_blueprint.sleds {
@@ -627,8 +634,8 @@ impl<'a> BlueprintBuilder<'a> {
 
             let editor = match state {
                 SledState::Active => {
-                    let subnet = input
-                        .sled_lookup(SledFilter::Commissioned, *sled_id)
+                    let subnet = commissioned_sleds
+                        .get(sled_id)
                         .with_context(|| {
                             format!(
                                 "failed to find sled details for \
@@ -652,8 +659,8 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Add new, empty `SledEditor`s for any commissioned sleds in our input
         // that weren't in the parent blueprint. (These are newly-added sleds.)
-        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
-            if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
+        for (sled_id, details) in &commissioned_sleds {
+            if let Entry::Vacant(slot) = sled_editors.entry(*sled_id) {
                 slot.insert(SledEditor::for_new_active(
                     details.resources.subnet,
                 ));
@@ -675,7 +682,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .clone(),
             oximeter_read_policy,
             new_blueprint_id: rng.next_blueprint(),
-            input,
+            commissioned_sleds,
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
@@ -747,10 +754,10 @@ impl<'a> BlueprintBuilder<'a> {
         // multirack (either DNS will be on a wider subnet or we need to pick a
         // particular rack subnet here?).
         let any_sled_subnet = self
-            .input
-            .all_sled_resources(SledFilter::Commissioned)
-            .map(|(_sled_id, resources)| resources.subnet)
+            .commissioned_sleds
+            .values()
             .next()
+            .map(|details| details.resources.subnet)
             .ok_or(Error::RackSubnetUnknownNoSleds)?;
         let rack_subnet = ReservedRackSubnet::from_subnet(any_sled_subnet);
 
@@ -1317,12 +1324,13 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
 
         // Also map the editor to the corresponding PendingMgsUpdates.
-        let sled_details = self
-            .input
-            .sled_lookup(SledFilter::InService, sled_id)
-            .map_err(|error| Error::Planner(anyhow!(error)))?;
-        let pending_mgs_update =
-            self.pending_mgs_updates.entry(&sled_details.baseboard_id);
+        let baseboard_id = self
+            .commissioned_sleds
+            .get(&sled_id)
+            .map(|details| &details.baseboard_id)
+            // TODO-john store baseboard in editor to get rid of this expect?
+            .expect("details must exist for a sled if we have a sled editor");
+        let pending_mgs_update = self.pending_mgs_updates.entry(baseboard_id);
         let noop_sled_info = noop_info.sled_info_mut(sled_id)?;
 
         editor
@@ -2157,14 +2165,12 @@ impl<'a> BlueprintBuilder<'a> {
     fn sled_resources(
         &self,
         sled_id: SledUuid,
-    ) -> Result<&'a SledResources, Error> {
-        let details = self
-            .input
-            .sled_lookup(SledFilter::Commissioned, sled_id)
-            .map_err(|error| {
-                Error::Planner(anyhow!(error).context(format!(
-                    "for sled {sled_id}, error looking up resources"
-                )))
+    ) -> Result<&SledResources, Error> {
+        let details =
+            self.commissioned_sleds.get(&sled_id).ok_or_else(|| {
+                Error::Planner(anyhow!(
+                    "tried to access sled resources for unknown sled {sled_id}"
+                ))
             })?;
         Ok(&details.resources)
     }
