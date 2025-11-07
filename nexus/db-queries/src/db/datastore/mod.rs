@@ -78,6 +78,7 @@ pub mod instance;
 mod inventory;
 mod ip_pool;
 mod lldp;
+mod local_storage;
 mod lookup_interface;
 mod migration;
 mod nat_entry;

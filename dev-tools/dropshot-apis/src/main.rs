@@ -193,7 +193,7 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
         ManagedApiConfig {
             title: "Oxide Region API",
             versions: Versions::new_lockstep(semver::Version::new(
-                20251008, 0, 0,
+                20251208, 0, 0,
             )),
             metadata: ManagedApiMetadata {
                 description: Some(

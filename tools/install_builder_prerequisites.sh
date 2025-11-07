@@ -199,7 +199,7 @@ function install_packages {
     )
     confirm "Install (or update) [${packages[*]}]?" && brew install "${packages[@]}"
   else
-    echo "Unsupported OS: ${HOST_OS}"
+    echo "Skipping builder prereqs for unsupported OS: ${HOST_OS}"
     exit 1
   fi
 }

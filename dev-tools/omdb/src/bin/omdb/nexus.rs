@@ -54,6 +54,7 @@ use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
@@ -1482,6 +1483,26 @@ fn print_task_blueprint_loader(details: &serde_json::Value) {
     }
 }
 
+fn print_datasets_rendezvous_stats(
+    stats: &DatasetsRendezvousStats,
+    dataset_name: &'static str,
+) {
+    let DatasetsRendezvousStats {
+        num_inserted,
+        num_already_exist,
+        num_not_in_inventory,
+        num_tombstoned,
+        num_already_tombstoned,
+    } = stats;
+
+    println!("    {dataset_name} rendezvous counts:");
+    println!("        num_inserted:           {num_inserted}");
+    println!("        num_already_exist:      {num_already_exist}");
+    println!("        num_not_in_inventory:   {num_not_in_inventory}");
+    println!("        num_tombstoned:         {num_tombstoned}");
+    println!("        num_already_tombstoned: {num_already_tombstoned}");
+}
+
 fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
     match serde_json::from_value::<BlueprintRendezvousStatus>(details.clone()) {
         Err(error) => eprintln!(
@@ -1494,27 +1515,13 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 "    inventory collection: {}",
                 status.inventory_collection_id
             );
-            println!("    debug_dataset rendezvous counts:");
-            println!(
-                "        num_inserted:           {}",
-                status.stats.debug_dataset.num_inserted
+
+            print_datasets_rendezvous_stats(
+                &status.stats.debug_dataset,
+                "debug_dataset",
             );
-            println!(
-                "        num_already_exist:      {}",
-                status.stats.debug_dataset.num_already_exist
-            );
-            println!(
-                "        num_not_in_inventory:   {}",
-                status.stats.debug_dataset.num_not_in_inventory
-            );
-            println!(
-                "        num_tombstoned:         {}",
-                status.stats.debug_dataset.num_tombstoned
-            );
-            println!(
-                "        num_already_tombstoned: {}",
-                status.stats.debug_dataset.num_already_tombstoned
-            );
+
+            // crucible datasets have a different number of rendezvous stats
             println!("    crucible_dataset rendezvous counts:");
             println!(
                 "        num_inserted:         {}",
@@ -1527,6 +1534,11 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
             println!(
                 "        num_not_in_inventory: {}",
                 status.stats.crucible_dataset.num_not_in_inventory
+            );
+
+            print_datasets_rendezvous_stats(
+                &status.stats.local_storage_dataset,
+                "local_storage_dataset",
             );
         }
     }
