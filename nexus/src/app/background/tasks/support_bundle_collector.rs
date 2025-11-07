@@ -955,7 +955,7 @@ impl BundleCollection {
             Err((n_collected, err)) => {
                 warn!(
                     &self.log,
-                    "Support bundle: sp ereport collection failed \
+                    "Support bundle: SP ereport collection failed \
                      ({n_collected} collected successfully)";
                     InlineErrorChain::new(err.as_ref()),
                 );
@@ -1046,7 +1046,7 @@ impl BundleCollection {
         let mut extra_steps: Vec<(&'static str, CollectionStepFn)> = vec![];
         for sp in get_available_sps(&mgs_client).await? {
             extra_steps.push((
-                "sp dump",
+                "SP dump",
                 Box::new({
                     let mgs_client = mgs_client.clone();
                     move |collection, dir| {
@@ -1128,7 +1128,7 @@ impl BundleCollection {
                 }),
             ),
             (
-                "sp ereports",
+                "SP ereports",
                 Box::new(|collection, dir| {
                     collection.collect_sp_ereports(dir).boxed()
                 }),
@@ -1153,7 +1153,7 @@ impl BundleCollection {
                 }),
             ),
             (
-                "spawn steps to query all sp dumps",
+                "spawn steps to query all SP dumps",
                 Box::new({
                     let mgs_client = mgs_client.clone();
                     move |collection, dir| {
