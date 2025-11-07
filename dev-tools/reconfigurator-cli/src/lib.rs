@@ -2137,8 +2137,7 @@ fn cmd_blueprint_blippy(
     let planning_input = sim
         .planning_input(blueprint)
         .context("failed to construct planning input")?;
-    let report = Blippy::new(&blueprint)
-        .check_against_planning_input(&planning_input)
+    let report = Blippy::new(&blueprint, &planning_input)
         .into_report(BlippyReportSortKey::Severity);
     Ok(Some(format!("{}", report.display())))
 }

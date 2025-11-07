@@ -743,8 +743,8 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
         let (_, _, blueprint) = example(&logctx.log, TEST_NAME);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         if !report.notes().is_empty() {
             eprintln!("{}", report.display());
             panic!("example blueprint should have no blippy notes");
@@ -837,8 +837,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -924,8 +924,8 @@ mod tests {
         mem::drop(dns0);
         mem::drop(dns1);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         assert!(
             report.notes().contains(&expected_note),
@@ -994,8 +994,8 @@ mod tests {
         mem::drop(nexus0);
         mem::drop(nexus1);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1061,8 +1061,8 @@ mod tests {
         mem::drop(nexus0);
         mem::drop(nexus1);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1128,8 +1128,8 @@ mod tests {
         mem::drop(nexus0);
         mem::drop(nexus1);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1211,8 +1211,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1286,8 +1286,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1345,8 +1345,8 @@ mod tests {
             },
         }];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1390,8 +1390,8 @@ mod tests {
         }
         assert!(found_duplicate);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in report.notes() {
             match &note.kind {
@@ -1474,8 +1474,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1549,8 +1549,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1621,8 +1621,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1692,8 +1692,8 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!expected_notes.is_empty());
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1794,8 +1794,8 @@ mod tests {
         // We should have modified 3 datasets.
         assert_eq!(expected_notes.len(), 3);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1909,8 +1909,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         assert_eq!(report.notes(), &expected_notes);
 
@@ -1936,8 +1936,8 @@ mod tests {
             ),
         }];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         assert_eq!(report.notes(), &expected_notes);
 
@@ -2039,8 +2039,8 @@ mod tests {
             },
         }];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         assert_eq!(report.notes(), &expected_notes);
 

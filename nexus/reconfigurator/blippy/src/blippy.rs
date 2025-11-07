@@ -582,18 +582,23 @@ pub struct Blippy<'a> {
 }
 
 impl<'a> Blippy<'a> {
-    pub fn new(blueprint: &'a Blueprint) -> Self {
+    /// Check `blueprint` for internal inconsistencies and check for
+    /// inconsistencies between `blueprint` and `planning_input`.
+    pub fn new(
+        blueprint: &'a Blueprint,
+        planning_input: &PlanningInput,
+    ) -> Self {
         let mut slf = Self { blueprint, notes: Vec::new() };
         checks::perform_all_blueprint_only_checks(&mut slf);
+        checks::perform_planning_input_checks(&mut slf, planning_input);
         slf
     }
 
-    pub fn check_against_planning_input(
-        mut self,
-        input: &PlanningInput,
-    ) -> Self {
-        checks::perform_planning_input_checks(&mut self, input);
-        self
+    /// Check `blueprint` for internal inconsistencies.
+    pub fn new_blueprint_only(blueprint: &'a Blueprint) -> Self {
+        let mut slf = Self { blueprint, notes: Vec::new() };
+        checks::perform_all_blueprint_only_checks(&mut slf);
+        slf
     }
 
     pub fn blueprint(&self) -> &'a Blueprint {

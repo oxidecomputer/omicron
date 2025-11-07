@@ -2807,8 +2807,7 @@ pub mod test {
         blueprint: &Blueprint,
         planning_input: &PlanningInput,
     ) {
-        let blippy_report = Blippy::new(blueprint)
-            .check_against_planning_input(planning_input)
+        let blippy_report = Blippy::new(blueprint, planning_input)
             .into_report(BlippyReportSortKey::Kind);
         if !blippy_report.notes().is_empty() {
             eprintln!("{}", blueprint.display());
