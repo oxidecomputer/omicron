@@ -371,7 +371,7 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
     // map as we perform the next set of checks.
     let mut crucible_zone_by_zpool = BTreeMap::new();
 
-    // All disks should have debug and zone root datasets.
+    // All disks should have debug, zone root, and local storage datasets.
     for (&sled_id, sled_config) in &blippy.blueprint().sleds {
         let sled_datasets = datasets.get_cached(blippy, sled_id, sled_config);
 
@@ -408,6 +408,23 @@ fn check_datasets(blippy: &mut Blippy<'_>) {
                         sled_id,
                         Severity::Fatal,
                         SledKind::ZpoolMissingZoneRootDataset {
+                            zpool: disk.pool_id,
+                        },
+                    );
+                }
+            }
+
+            match sled_datasets
+                .and_then(|by_zpool| by_zpool.get(&DatasetKind::LocalStorage))
+            {
+                Some(dataset) => {
+                    expected_datasets.insert(dataset.id);
+                }
+                None => {
+                    blippy.push_sled_note(
+                        sled_id,
+                        Severity::Fatal,
+                        SledKind::ZpoolMissingLocalStorageDataset {
                             zpool: disk.pool_id,
                         },
                     );
@@ -1664,17 +1681,18 @@ mod tests {
                 }
 
                 let note = match dataset.kind {
-                    DatasetKind::Debug | DatasetKind::TransientZoneRoot => {
-                        Note {
-                            severity: Severity::Fatal,
-                            kind: Kind::Sled {
-                                sled_id,
-                                kind: Box::new(SledKind::OrphanedDataset {
-                                    dataset: dataset.clone(),
-                                }),
-                            },
-                        }
-                    }
+                    DatasetKind::Debug
+                    | DatasetKind::TransientZoneRoot
+                    | DatasetKind::LocalStorage => Note {
+                        severity: Severity::Fatal,
+                        kind: Kind::Sled {
+                            sled_id,
+                            kind: Box::new(SledKind::OrphanedDataset {
+                                dataset: dataset.clone(),
+                            }),
+                        },
+                    },
+
                     _ => Note {
                         severity: Severity::Fatal,
                         kind: Kind::Sled {

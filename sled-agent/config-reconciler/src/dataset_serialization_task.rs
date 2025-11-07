@@ -300,6 +300,7 @@ impl DatasetTaskHandle {
         .await
     }
 
+    // Returns a "not found" error if the dataset does not exist
     pub async fn nested_dataset_destroy(
         &self,
         name: NestedDatasetLocation,
@@ -675,7 +676,8 @@ impl DatasetTask {
                 | DatasetKind::ClickhouseServer
                 | DatasetKind::ExternalDns
                 | DatasetKind::InternalDns
-                | DatasetKind::Debug => {
+                | DatasetKind::Debug
+                | DatasetKind::LocalStorage => {
                     non_transient_zone_configs.push(dataset);
                 }
             }
@@ -1013,6 +1015,7 @@ impl DatasetTask {
         }
     }
 
+    // Returns a "not found" error if the dataset does not exist
     async fn nested_dataset_destroy<T: ZfsImpl>(
         &self,
         name: NestedDatasetLocation,
@@ -1177,7 +1180,9 @@ fn reason_to_skip_orphaned_dataset_destruction(
         // These kinds are part of our config, but it would be surprising to
         // have them disappear: they should always be present for any managed
         // disk. Refuse to remove them.
-        DatasetKind::TransientZoneRoot | DatasetKind::Debug => Some(format!(
+        DatasetKind::TransientZoneRoot
+        | DatasetKind::Debug
+        | DatasetKind::LocalStorage => Some(format!(
             "refusing to delete dataset of kind {kind:?} \
              (expected to exist for all managed disks)",
         )),
