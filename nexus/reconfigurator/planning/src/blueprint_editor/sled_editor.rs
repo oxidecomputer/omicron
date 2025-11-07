@@ -150,6 +150,7 @@ pub enum SledEditError {
 pub(crate) struct SledEditor(InnerSledEditor);
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum InnerSledEditor {
     // Internally, `SledEditor` has a variant for each variant of `SledState`,
     // as the operations allowed in different states are substantially different
