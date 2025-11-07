@@ -519,8 +519,11 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+    cockroachdb_fingerprint: String,
     target_release_minimum_generation: Generation,
     nexus_generation: Generation,
+    internal_dns_version: Generation,
+    external_dns_version: Generation,
 
     creator: String,
     operations: Vec<Operation>,
@@ -676,10 +679,16 @@ impl<'a> BlueprintBuilder<'a> {
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
+            cockroachdb_fingerprint: input
+                .cockroachdb_settings()
+                .state_fingerprint
+                .clone(),
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
             nexus_generation: parent_blueprint.nexus_generation,
+            internal_dns_version: input.internal_dns_version(),
+            external_dns_version: input.external_dns_version(),
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -879,19 +888,14 @@ impl<'a> BlueprintBuilder<'a> {
             sleds,
             pending_mgs_updates: self.pending_mgs_updates,
             parent_blueprint_id: Some(self.parent_blueprint.id),
-            internal_dns_version: self.input.internal_dns_version(),
-            external_dns_version: self.input.external_dns_version(),
+            internal_dns_version: self.internal_dns_version,
+            external_dns_version: self.external_dns_version,
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
             nexus_generation: self.nexus_generation,
-            cockroachdb_fingerprint: self
-                .input
-                .cockroachdb_settings()
-                .state_fingerprint
-                .clone(),
+            cockroachdb_fingerprint: self.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
-
             clickhouse_cluster_config: self.clickhouse_cluster_config,
             oximeter_read_version: self.oximeter_read_policy.version,
             oximeter_read_mode: self.oximeter_read_policy.mode,
