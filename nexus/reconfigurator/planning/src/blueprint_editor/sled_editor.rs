@@ -205,6 +205,17 @@ impl SledEditor {
         }
     }
 
+    /// Returns the subnet of this sled if it is active, or `None` if it is
+    /// decommissioned.
+    pub fn subnet(&self) -> Option<Ipv6Subnet<SLED_PREFIX>> {
+        match &self.0 {
+            InnerSledEditor::Active(active) => {
+                Some(active.underlay_ip_allocator.subnet())
+            }
+            InnerSledEditor::Decommissioned(_) => None,
+        }
+    }
+
     pub fn edit_counts(&self) -> SledEditCounts {
         match &self.0 {
             InnerSledEditor::Active(editor) => editor.edit_counts(),

@@ -753,11 +753,10 @@ impl<'a> BlueprintBuilder<'a> {
         // internal DNS subnets are. Pick any sled; this isn't right in
         // multirack (either DNS will be on a wider subnet or we need to pick a
         // particular rack subnet here?).
-        let any_sled_subnet = self
-            .commissioned_sleds
+        let any_sled_subnet = self.sled_editors
             .values()
+            .filter_map(|editor| editor.subnet())
             .next()
-            .map(|details| details.resources.subnet)
             .ok_or(Error::RackSubnetUnknownNoSleds)?;
         let rack_subnet = ReservedRackSubnet::from_subnet(any_sled_subnet);
 
