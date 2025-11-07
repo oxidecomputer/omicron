@@ -17,6 +17,7 @@ use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use nexus_internal_api::*;
+use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
@@ -435,4 +436,38 @@ impl NexusInternalApi for NexusInternalApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
+
+    async fn probes_get(
+        rqctx: RequestContext<Self::Context>,
+        _path_params: Path<ProbePathParam>,
+        _query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async { Err(deprecated_endpoint_error()) };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn refresh_vpc_routes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async { Err(deprecated_endpoint_error()) };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+}
+
+fn deprecated_endpoint_error() -> HttpError {
+    HttpError::for_client_error(
+        None,
+        dropshot::ClientErrorStatusCode::GONE,
+        String::from(
+            "This endpoint is deprecated and will be removed in future versions",
+        ),
+    )
 }

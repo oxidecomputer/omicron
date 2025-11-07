@@ -11,7 +11,10 @@ use dropshot::{
 };
 use dropshot_api_manager_types::api_versions;
 use nexus_types::{
-    external_api::views::{Ping, PingStatus},
+    external_api::{
+        shared::ProbeInfo,
+        views::{Ping, PingStatus},
+    },
     internal_api::{
         params::{
             OximeterInfo, SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
@@ -247,6 +250,34 @@ pub trait NexusInternalApi {
         path_params: Path<RpwNatPathParam>,
         query_params: Query<RpwNatQueryParam>,
     ) -> Result<HttpResponseOk<Vec<NatEntryView>>, HttpError>;
+
+    /// This endpoint has been abandoned and will permanently return a 410 Gone
+    /// error.
+    //
+    // Remove this once we can appropriately handle client-side versioned APIs.
+    // See https://github.com/oxidecomputer/omicron/issues/9290 for details.
+    #[endpoint {
+        method = GET,
+        path = "/probes/{sled}"
+    }]
+    async fn probes_get(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ProbePathParam>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError>;
+
+    /// This endpoint has been abandoned and will permanently return a 410 Gone
+    /// error.
+    //
+    // Remove this once we can appropriately handle client-side versioned APIs.
+    // See https://github.com/oxidecomputer/omicron/issues/9290 for details.
+    #[endpoint {
+        method = POST,
+        path = "/refresh-vpc-routes"
+    }]
+    async fn refresh_vpc_routes(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
 /// Path parameters for Sled Agent requests (internal API)
@@ -328,4 +359,11 @@ pub struct RpwNatQueryParam {
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct SledId {
     pub id: SledUuid,
+}
+
+/// Path parameters for probes
+#[derive(Deserialize, JsonSchema)]
+pub struct ProbePathParam {
+    #[schemars(with = "Uuid")]
+    pub sled: SledUuid,
 }
