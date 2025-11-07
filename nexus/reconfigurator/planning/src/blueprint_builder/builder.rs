@@ -634,17 +634,18 @@ impl<'a> BlueprintBuilder<'a> {
 
             let editor = match state {
                 SledState::Active => {
-                    let subnet = commissioned_sleds
-                        .get(sled_id)
-                        .with_context(|| {
+                    let details =
+                        commissioned_sleds.get(sled_id).with_context(|| {
                             format!(
                                 "failed to find sled details for \
                                  active sled in parent blueprint {sled_id}"
                             )
-                        })?
-                        .resources
-                        .subnet;
-                    SledEditor::for_existing_active(subnet, sled_cfg.clone())
+                        })?;
+                    SledEditor::for_existing_active(
+                        Arc::new(details.baseboard_id.clone()),
+                        details.resources.subnet,
+                        sled_cfg.clone(),
+                    )
                 }
                 SledState::Decommissioned => {
                     SledEditor::for_existing_decommissioned(sled_cfg.clone())
@@ -662,6 +663,7 @@ impl<'a> BlueprintBuilder<'a> {
         for (sled_id, details) in &commissioned_sleds {
             if let Entry::Vacant(slot) = sled_editors.entry(*sled_id) {
                 slot.insert(SledEditor::for_new_active(
+                    Arc::new(details.baseboard_id.clone()),
                     details.resources.subnet,
                 ));
             }
@@ -753,7 +755,8 @@ impl<'a> BlueprintBuilder<'a> {
         // internal DNS subnets are. Pick any sled; this isn't right in
         // multirack (either DNS will be on a wider subnet or we need to pick a
         // particular rack subnet here?).
-        let any_sled_subnet = self.sled_editors
+        let any_sled_subnet = self
+            .sled_editors
             .values()
             .filter_map(|editor| editor.subnet())
             .next()
