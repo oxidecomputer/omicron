@@ -67,3 +67,34 @@ set planner-config --add-zones-with-mupdate-override true
 # Sled index out of bounds, will error out.
 wipe all
 load-example --seed test-basic --nsleds 3 --sled-policy 3:non-provisionable
+
+log
+log --verbose
+
+# Switch states with a full UUID.
+switch 4d8d6725-1ae3-4f88-b9cb-a34db82d7439
+log -n 3
+
+# Switch states with a unique prefix.
+switch 860f
+log -n 3
+
+# Switch states with an ambiguous prefix (should fail).
+switch 4
+
+# Switch states with a non-existent prefix (should fail).
+switch zzzz
+
+# Make a new branch.
+sled-add
+sled-add
+
+# Make an additional branch based on the previous branch.
+switch 4d8d6725
+sled-add
+
+# Go back to the previous branch.
+switch 5c53cf4b
+
+log
+log --verbose

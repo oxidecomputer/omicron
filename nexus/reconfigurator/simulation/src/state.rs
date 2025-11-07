@@ -8,7 +8,7 @@ use anyhow::{Context, anyhow, bail};
 use nexus_inventory::CollectionBuilder;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Generation;
-use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimUuid};
+use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimStateUuid};
 use sync_ptr::SyncConstPtr;
 
 use crate::{
@@ -31,9 +31,9 @@ pub struct SimState {
     // is stored behind an `Arc`. This means that the address stays stable even
     // if the `Simulator` struct is cloned or moved in memory.
     root_state: SyncConstPtr<SimState>,
-    id: ReconfiguratorSimUuid,
+    id: ReconfiguratorSimStateUuid,
     // The parent state that this state was derived from.
-    parent: Option<ReconfiguratorSimUuid>,
+    parent: Option<ReconfiguratorSimStateUuid>,
     // The state's generation, starting from 0.
     //
     // TODO: Should this be its own type to avoid confusion with other
@@ -79,14 +79,20 @@ impl SimState {
 
     #[inline]
     #[must_use]
-    pub fn id(&self) -> ReconfiguratorSimUuid {
+    pub fn id(&self) -> ReconfiguratorSimStateUuid {
         self.id
     }
 
     #[inline]
     #[must_use]
-    pub fn parent(&self) -> Option<ReconfiguratorSimUuid> {
+    pub fn parent(&self) -> Option<ReconfiguratorSimStateUuid> {
         self.parent
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn generation(&self) -> Generation {
+        self.generation
     }
 
     #[inline]
@@ -179,7 +185,7 @@ pub struct SimStateBuilder {
     // Used to check that the simulator is the same as the one that created
     // this state.
     root_state: SyncConstPtr<SimState>,
-    parent: ReconfiguratorSimUuid,
+    parent: ReconfiguratorSimStateUuid,
     parent_gen: Generation,
     system: SimSystemBuilder,
     config: SimConfigBuilder,
@@ -189,7 +195,7 @@ pub struct SimStateBuilder {
 impl SimStateBuilder {
     #[inline]
     #[must_use]
-    pub fn parent(&self) -> ReconfiguratorSimUuid {
+    pub fn parent(&self) -> ReconfiguratorSimStateUuid {
         self.parent
     }
 
@@ -265,7 +271,7 @@ impl SimStateBuilder {
         self,
         description: String,
         sim: &mut Simulator,
-    ) -> ReconfiguratorSimUuid {
+    ) -> ReconfiguratorSimStateUuid {
         // Check for unrelated histories.
         if !std::ptr::eq(sim.root_state(), self.root_state.inner()) {
             panic!(

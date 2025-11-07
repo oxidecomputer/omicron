@@ -6499,9 +6499,9 @@ dependencies = [
 
 [[package]]
 name = "newtype-uuid"
-version = "1.3.1"
+version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74d1216f62e63be5fb25a9ecd1e2b37b1556a9b8c02f4831770f5d01df85c226"
+checksum = "5c012d14ef788ab066a347d19e3dda699916c92293b05b85ba2c76b8c82d2830"
 dependencies = [
  "proptest",
  "schemars 0.8.22",
@@ -7285,6 +7285,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
+ "indent_write",
  "indexmap 2.11.4",
  "itertools 0.14.0",
  "nexus-inventory",
@@ -7295,6 +7296,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "petname",
+ "sapling-renderdag",
  "slog",
  "strum 0.27.2",
  "swrite",
@@ -12117,6 +12119,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "sapling-renderdag"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edffb89cab87bd0901c5749d576f5d37a1f34e05160e936f463f4e94cc447b61"
+dependencies = [
+ "bitflags 2.9.4",
 ]
 
 [[package]]
