@@ -695,12 +695,8 @@ impl<'a> BlueprintBuilder<'a> {
         self.new_blueprint_id
     }
 
-    pub fn clickhouse_cluster_config(
-        &self,
-    ) -> Option<&ClickhouseClusterConfig> {
-        self.clickhouse_cluster_config.as_ref()
-    }
-
+    /// Helper method to construct an empty [`ClickhouseClusterConfig`] using
+    /// this builder's internal RNG (for reproducible testing, primarily).
     pub fn make_empty_clickhouse_cluster_config(
         &mut self,
     ) -> ClickhouseClusterConfig {
@@ -710,6 +706,14 @@ impl<'a> BlueprintBuilder<'a> {
         )
     }
 
+    /// Get the current Clickhouse cluster config.
+    pub fn clickhouse_cluster_config(
+        &self,
+    ) -> Option<&ClickhouseClusterConfig> {
+        self.clickhouse_cluster_config.as_ref()
+    }
+
+    /// Get the Clickhouse cluster config.
     pub fn set_clickhouse_cluster_config(
         &mut self,
         clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
@@ -717,6 +721,7 @@ impl<'a> BlueprintBuilder<'a> {
         self.clickhouse_cluster_config = clickhouse_cluster_config;
     }
 
+    /// Set the Oximeter read policy.
     pub fn set_oximeter_read_policy(
         &mut self,
         version: Generation,

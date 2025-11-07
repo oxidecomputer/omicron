@@ -299,7 +299,10 @@ impl<'a> Planner<'a> {
 
         // Clickhouse cluster settings aren't dependent on zones, so they can be
         // planned indepdently of the rest of the system.
-        let () = self.do_plan_clickhouse_cluster_settings();
+        //
+        // TODO-cleanup We should include something about clickhouse cluster
+        // configs in the PlanningReport.
+        self.do_plan_clickhouse_cluster_settings();
 
         Ok(PlanningReport {
             planner_config: *self.input.planner_config(),
@@ -2343,7 +2346,7 @@ impl<'a> Planner<'a> {
         // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
     }
 
-    fn do_plan_clickhouse_cluster_settings(&mut self) -> () /* FIXME */ {
+    fn do_plan_clickhouse_cluster_settings(&mut self) {
         // Generate a new cluster config based on the policy and parent
         // blueprint.
         let new_config = self.generate_current_clickhouse_cluster_config();
