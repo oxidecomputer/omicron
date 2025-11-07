@@ -324,22 +324,19 @@ async fn main() -> Result<()> {
                 }
             } else {
                 // check that our helios clone is up to date
-                Command::new(&args.git_bin)
-                    .arg("-C")
-                    .arg(&args.helios_dir)
-                    // HEAD in a remote repository refers to the default
-                    // branch, even if the default branch is renamed.
-                    // `--no-write-fetch-head` avoids modifying FETCH_HEAD.
-                    .args(["fetch", HELIOS_REPO, "HEAD"])
-                    .ensure_success(&logger)
+                let stdout = Command::new(&args.git_bin)
+                    .args(["ls-remote", "--exit-code", HELIOS_REPO, "HEAD"])
+                    .ensure_stdout(&logger)
                     .await?;
-                let upstream_commit = git_resolve_commit(
-                    &args.git_bin,
-                    &args.helios_dir,
-                    "FETCH_HEAD",
-                    &logger,
-                )
-                .await?;
+                let upstream_commit = stdout
+                    .lines()
+                    .find_map(|line| match line.split_once('\t') {
+                        Some((commit, "HEAD")) => Some(commit),
+                        _ => None,
+                    })
+                    .with_context(|| {
+                        format!("remote {HELIOS_REPO} did not list HEAD")
+                    })?;
                 if helios_commit != upstream_commit {
                     error!(
                         logger,
