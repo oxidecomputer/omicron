@@ -115,17 +115,6 @@ The top-level items in this list are strictly sequential.  Control plane zone up
 
 MGS updates (e.g., SP updates) may be skipped if the new target release specifies the same versions for these components that are already deployed.  This is common in development/test environments, though unexpected in customer environments.  All releases, even development ones, have new versions of the host OS and control plane zones so these are never skipped.
 
-=== Stepping through the update
-
-Generally, the system only takes one step a time (e.g., updating one zone).  By "taking a step", we usually mean that the system:
-
-* creates a new blueprint that differs from the parent only in specifying this one change
-* makes that the target blueprint
-* executes that blueprint
-* waits for inventory to reflect the change
-
-You can thus observe these steps by looking at the blueprint history.  See <<task-check-reconfigurator-history>>.
-
 === Verifying that everything is working okay during the update
 
 During an update, we expect:
@@ -136,7 +125,7 @@ During an update, we expect:
 
 These are observable in the web console ("time last step planned" and progress) and external API.
 
-With `omdb`, you can watch <<task-check-reconfigurator-history,`omdb reconfigurator history`>> for blueprint creation and <<task-check-progress>> to see the counts of components at each version.
+With `omdb`, you can watch <<task-check-reconfigurator-history,`omdb reconfigurator history`>> for blueprint creation and <<task-check-progress,`omdb nexus update-status`>> to see the counts of components at each version.
 
 It's possible to observe transient errors internally (including with `omdb`) while the upgrade is ongoing.  These will generally show up as connection errors, request timeouts, or HTTP 503 ("Service Unavailable") errors.
 
@@ -150,6 +139,17 @@ After the update:
 See the previous section for how to observe these.
 
 We rely on the health check script that support uses to verify that the system is fully healthy.
+
+=== Stepping through the update
+
+Generally, the system only takes one step a time (e.g., updating one zone).  By "taking a step", we usually mean that the system:
+
+* creates a new blueprint that differs from the parent only in specifying this one change
+* makes that the target blueprint
+* executes that blueprint
+* waits for inventory to reflect the change
+
+You can thus observe these steps by looking at the blueprint history.  See <<task-check-reconfigurator-history>>.
 
 === Types of update steps
 
