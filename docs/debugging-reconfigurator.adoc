@@ -1404,19 +1404,19 @@ NOTE: This table is a work in progress, prioritized by the conditions we have se
 |<<debug-stuck-MGS-update>>
 
 |blocked MGS update
-|The planner cannot start a needed MGS-driven update (SP, RoT, RoT bootloader, or host OS)
+|The planner cannot start a needed MGS-driven update (SP, RoT, RoT bootloader, or host OS).
 |<<debug-blocked-MGS-update>>
 
 |zone updates waiting on pending MGS updates
-|The planner cannot proceed with updating control plane zones because there are some MGS updates that are started but haven't finished
+|The planner cannot proceed with updating control plane zones because there are some MGS updates that are started but haven't finished.
 |Debug the `pending MGS update` in the same planning report.
 
 |zone updates waiting on blocked MGS updates
-|The planner cannot proceed with updating control plane zones because there are some MGS updates that need to be done
+|The planner cannot proceed with updating control plane zones because there are some MGS updates that need to be done.
 |Debug the `blocked MGS update` in the same planning report.
 
 |zone updates waiting on zone propagation to inventory
-|The planner is waiting for its recent changes to be reflected in the real state of the system (as visible through inventory)
+|The planner is waiting for its recent changes to be reflected in the real state of the system (as visible through inventory).
 |Check the change made in the previous blueprint (e.g., zone added).  Check inventory to see if it's reflected (e.g., the corresponding sled shows the zone in its config and it's reconciled its latest config).
 
 |sled not present in inventory collection
@@ -1424,7 +1424,7 @@ NOTE: This table is a work in progress, prioritized by the conditions we have se
 |Check to see if the corresponding sled agent is online and responding to inventory requests.  If not, debug that.  If so, check that there's a recent enough inventory collection that should have included it.  If not, <<debug-stuck-inventory,debug that>>.  If so, check whether it's been loaded by the `inventory_loader` background task in the Nexus that reports this message.
 
 |corresponding SP is not in inventory
-|The planner cannot proceed with this step because the inventory collection it's using doesn't include information from this board's SP
+|The planner cannot proceed with this step because the inventory collection it's using doesn't include information from this board's SP.
 |Check to see if the corresponding SP is online and responding to inventory requests through MGS.  If not, debug that.  If so, check that there's a recent enough inventory collection that should have included it.  If not, <<debug-stuck-inventory,debug that>>.  If so, check whether it's been loaded by the `inventory_loader` background task in the Nexus that reports this message.
 
 |sled contains zones that are unsafe to shut down
