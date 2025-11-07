@@ -703,10 +703,13 @@ fn poll_device_tree(
 
 // Using an external process, watch for the disappearance of a tofino device.
 fn monitor_tofino(log: slog::Logger, tx: broadcast::Sender<HardwareUpdate>) {
-    if std::fs::exists(TOFINO_MONITOR).is_err() {
-        error!(&log, "tofino monitor tool not found at {}", TOFINO_MONITOR);
-        return;
-    }
+    match std::fs::exists(TOFINO_MONITOR) {
+        Err(_) | Ok(false) => {
+            error!(&log, "tofino monitor tool not found at {}", TOFINO_MONITOR);
+            return;
+        }
+        _ => {}
+    };
 
     loop {
         let mut child = match std::process::Command::new(TOFINO_MONITOR).spawn()
@@ -729,7 +732,10 @@ fn monitor_tofino(log: slog::Logger, tx: broadcast::Sender<HardwareUpdate>) {
         // then received a "tofino removed" event from the kernel.  If that
         // happens, it should exit cleanly with an exit code of 0.  If the child
         // exits for any other reason, we don't know what it means, and can only
-        // log the event for posterity.
+        // log the event for posterity.  In either case, we send a message to
+        // the hardware monitor task indicating that the Tofino is gone, and it
+        // will perform any necessary cleanup.  This cleanup will include
+        // shutting down the switch zone if, for some reason, it still exists.
         match child.wait() {
             Err(e) => error!(&log, "failed to collect exit status: {e:?}"),
             Ok(s) => info!(&log, "child exited with code: {:?}", s.code()),
