@@ -616,12 +616,6 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
-        // Clone the sled details for all commissioned sleds.
-        let commissioned_sleds = input
-            .all_sleds(SledFilter::Commissioned)
-            .map(|(sled_id, sled_details)| (sled_id, sled_details.clone()))
-            .collect::<BTreeMap<_, _>>();
-
         // Convert our parent blueprint's sled configs into `SledEditor`s.
         let mut sled_editors = BTreeMap::new();
         for (sled_id, sled_cfg) in &parent_blueprint.sleds {
@@ -629,8 +623,9 @@ impl<'a> BlueprintBuilder<'a> {
 
             let editor = match state {
                 SledState::Active => {
-                    let details =
-                        commissioned_sleds.get(sled_id).with_context(|| {
+                    let details = input
+                        .sled_lookup(SledFilter::Commissioned, *sled_id)
+                        .with_context(|| {
                             format!(
                                 "failed to find sled details for \
                                  active sled in parent blueprint {sled_id}"
@@ -655,8 +650,8 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Add new, empty `SledEditor`s for any commissioned sleds in our input
         // that weren't in the parent blueprint. (These are newly-added sleds.)
-        for (sled_id, details) in &commissioned_sleds {
-            if let Entry::Vacant(slot) = sled_editors.entry(*sled_id) {
+        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
+            if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
                 slot.insert(SledEditor::for_new_active(
                     Arc::new(details.baseboard_id.clone()),
                     details.resources.subnet,
