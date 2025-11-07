@@ -70,7 +70,7 @@ impl_typed_uuid_kinds! {
         Rack = {},
         RackInit = {},
         RackReset = {},
-        ReconfiguratorSim = {},
+        ReconfiguratorSimState = {},
         Region = {},
         SiloGroup = {},
         SiloUser = {},

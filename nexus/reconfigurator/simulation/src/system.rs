@@ -579,6 +579,45 @@ pub enum SimSystemLogEntry {
     Wipe,
 }
 
+impl fmt::Display for SimSystemLogEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SimSystemLogEntry::LoadExample {
+                collection_id,
+                blueprint_id,
+                internal_dns_version,
+                external_dns_version,
+            } => {
+                write!(
+                    f,
+                    "load example: collection {}, blueprint {}, \
+                     internal dns {}, external dns {}",
+                    collection_id,
+                    blueprint_id,
+                    internal_dns_version,
+                    external_dns_version
+                )
+            }
+            SimSystemLogEntry::LoadSerialized(result) => {
+                write!(f, "load serialized:\n{}", result)
+            }
+            SimSystemLogEntry::AddCollection(id) => {
+                write!(f, "add collection {}", id)
+            }
+            SimSystemLogEntry::AddBlueprint(id) => {
+                write!(f, "add blueprint {}", id)
+            }
+            SimSystemLogEntry::AddInternalDns(gen) => {
+                write!(f, "add internal dns {}", gen)
+            }
+            SimSystemLogEntry::AddExternalDns(gen) => {
+                write!(f, "add external dns {}", gen)
+            }
+            SimSystemLogEntry::Wipe => write!(f, "wipe"),
+        }
+    }
+}
+
 /// The result of loading a serialized system state.
 ///
 /// Returned by [`LoadSerializedResult`](crate::LoadSerializedResult), as well
