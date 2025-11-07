@@ -3,26 +3,16 @@
 :toc: left
 
 // XXX-dap
-// - things you could see
-//   - failure to plan because something is missing from inventory
-//   - failure to PUT sled config due to missing artifact
 //   - "errors from component output" -- see Oct 27 dogfood channel
-//   - failure to insert blueprint because we hit the cap
-//   - MUPdate/suspended updates
-// - decision tree
-//   - is it stuck
-//   - why is it stuck
-//   - what if the update gets stuck
-//   - what if the API / control plane go down
-//   - what if instances don't come back online
-//   - why the planner might get stuck
-//   - what if you want to roll back
+//     (I wrote a note about this but don't remember anything more than that.)
 
 = Reconfigurator Debugging Guide
 
 This guide is aimed at helping support and engineering debug problems with Reconfigurator.  If you run into a problem that's not covered here, consider adding it!
 
 This guide is _not_ aimed at end users (customers).  See the https://docs.oxide.computer/[product documentation] for the customer view.
+
+**If you are debugging a Reconfigurator problem right now, start with the <<_reconfigurator_debugging_decision_tree>>.**
 
 CAUTION: This document describes the current behavior of the system in terms of its implementation details.  These are all subject to change!
 
@@ -745,6 +735,7 @@ task: "blueprint_executor"
     error:            (none)
 ```
 
+[#task-collect-detailed-state]
 === Task: Collecting detailed Reconfigurator debugging state
 
 Prerequisite: see <<using-omdb>>
@@ -838,8 +829,6 @@ This report is telling us:
 
 This is a pretty typical report from early in an upgrade, when SPs and host OS's are still being updated.  However, if the system got _stuck_ in this state, the questions would be: why is the SP update on BRM42220006 not completing and why is sled BRM27230045's sled agent persistently absent from inventory?
 
-// XXX-dap what to do in those cases
-
 Here's an example that shows the system updating sleds in a different order than it otherwise might have because of a safety check:
 
 ```
@@ -863,6 +852,8 @@ planning report:
 ```
 
 The interesting bit here is the "blocked MGS update" for sled BRM42220014.  It's saying that it would have updated the host OS on that sled, but that sled has a CockroachDB node on it and some other CockroachDB node is down.  Again, this is common during an update for a little while (i.e., immediately after the system updated a different sled that had a CockroachDB node on it).  If it got stuck in this state, you'd want to debug why the CockroachDB cluster wasn't becoming healthy again.
+
+For more on different ways the planner can be blocked and what they mean, see <<debug-planner-blocked>>.
 
 == Controlling Reconfigurator
 
@@ -1315,3 +1306,161 @@ You can only set the target release to:
 |Backwards
 
 |===
+
+== Reconfigurator debugging decision tree
+
+What's the problem?
+
+* <<debug-stuck,Upgrade (or other Reconfigurator activity) is stuck>>
+* <<debug-bad-choice,Upgrade (or other Reconfigurator activity) did something unexpected>>
+
+Other bad things can happend uring an upgrade that can happen at any other time, too:
+
+* The API is down
+* The API is reporting unexpected errors (especially 500 or 503 errors)
+* An instance is unexpectedly down
+
+We could use debugging guides for these, too.
+
+[#debug-stuck]
+=== Debugging why upgrade (or other Reconfigurator activity) is stuck
+
+**Have their been recent blueprints?**  Check <<task-check-reconfigurator-history,recent Reconfigurator activity>> to see what the system has been doing.  If there have been new blueprints in the last 10-15 minutes, then the system may not be stuck.
+
+If there have been no recent blueprints, **what is the planner currently waiting for?**  <<check-blueprint-planner,Check>> to see.  You will likely see one of the following:
+
+* `plan unchanged from parent`.  This is the common case.  It means that the planner is waiting for something about the system to change before taking the next step.  In this case, <<task-understand-planning-report,look at the planning report>> to see what the planner is waiting for.
+* `blueprint auto-planning disabled because current blueprint count >= limit`.  See <<debug-too-many-blueprints>>.
+* `blueprint planning disabled, doing nothing`.  This means the planner has been disabled using `omdb`.  See <<task-disable-planner>>.
+
+You may see these normal, expected, transient errors that you can ignore:
+
+* `Blueprint BLUEPRINT_ID's parent blueprint is not the current target blueprint`.  It means two Nexus instances tried to take a planning step at the same time and the one you're looking at lost the race.
+* `reconfigurator config not yet loaded; doing nothing`.  This should only happen during Nexus startup and should not last long.  If it does, <<check-background-tasks,check the task status>> for the `reconfigurator_config_watcher` background task.
+
+If you see one of these transient errors, you can check the other Nexus instances or check again after the next planner task activation.
+
+Less likely possibilities include:
+
+* The planner is unable to run due to an explicit error other than one of the above (e.g., failure to load state from the database).
+* The planner task is not running (e.g., due to a scheduling issue).  This will be evident because the task status will report that it's not running and has not run for longer than its configured interval.
+* The planner task itself is stuck (e.g., due to an infinite loop).  This will be evident because the task status will report that it's running and has been running for a long time.
+* `no inventory collection available` error.  This should only happen _sometimes_ immediately after an upgrade and before Nexus has managed to collect inventory.  This should not last long.  If it does, <<check-background-tasks,check the task status>> for the `inventory_collection` background task.
+
+[#debug-bad-choice]
+=== Debugging why the planner made a bad choice
+
+If Reconfigurator has done something unexpected, first <<task-check-reconfigurator-history,check recent Reconfigurator activity>> to see what it's been doing.
+
+From this information, if you've found that the planner has made a bad choice of some kind, find the <<task-collect-planning-report,planning report>> to <<task-understand-planning-report,understand>> why it made that choice.  Sometimes you may be surprised to find that the choice was correct given some information that you didn't know about (but the planner did).
+
+Assuming the choice really was wrong, if this is the most recent blueprint and the system's state hasn't meaningfully changed, then it should be possible to reproduce the issue outside the live system if you <<task-collect-detailed-state,collect detailed Reconfigurator state>> and load it into `reconfigurator-cli`.  From here, you'd use normal debugging techniques for fully reproducible problems (e.g., check (and potentially augment) logs or other instrumentation).
+
+[#debug-too-many-blueprints]
+=== Debugging planner error about too many blueprints
+
+If you see this in the <<check-blueprint-planner,blueprint planner status>>:
+
+```
+blueprint auto-planning disabled because current blueprint count >= limit (5000); planning report contains what would have been stored had the limit not been reached
+```
+
+That means the system is refusing to create another blueprint because there are too many in the database.  This should never happen.
+
+**Is the blueprint planner in a loop, creating the same blueprint (or same sequence of blueprints)?**  Check <<task-check-reconfigurator-history,`omdb reconfigurator history`>> to see if the recent blueprints appear to be the same.  For example, you could see dozens of lines like this:
+
+```
+...
+31384 2025-09-25T20:36:41.559Z 7b097d29-3a10-43b1-a613-d94a06718950  enabled:
+31385 2025-09-25T20:37:04.830Z 9990ad3c-5517-4d87-b4a5-73b2591e1f95  enabled:
+31386 2025-09-25T20:37:15.841Z ec9d4078-e5e6-4cb3-9bc9-f2b3f3525941  enabled:
+31387 2025-09-25T20:37:30.282Z 12184a43-25d3-442f-b536-a8e67f8e2d74  enabled:
+...
+```
+
+or it's possible that they say something after `enabled:` that's the same for all blueprints.  If you see dozens, hundreds, or thousands like this, then this is almost certainly a planner bug.  You can use `omdb nexus blueprints diff` on any of these blueprints to see what's actually different.  To root-cause, see <<#debug-bad-choice>>.
+
+In terms of the live system, your options depend on the nature of the problem.  The worst-case is that you <<task-disable-planner,disable the planner>>, wait for a release with the fix to be available, and MUPdate to it.  Depending on what's causing the planner to generate these blueprints, there may be some other change you can make to the system to stop the planner doing this, or you may be able to <<task-override-plan,override the planner>>.
+
+**If the planner does _not_ appear to be in a loop like this**, then **are some of the blueprints very old and unrelated to the current activity?**  Use the `--limit` option with `omdb reconfigurator history` to look back further than it does by default.  If these blueprints look normal (i.e., not a loop like the above) but are just old, then it sounds like somebody is not cleaning up the old blueprints.  Old blueprints are supposed to be cleaned up regularly (by a person) with each self-service update.  You can do it by hand with `omdb reconfigurator archive`, but look for the documented procedure because you'll want to save the resulting file in case you need it for future debugging.
+
+[#debug-planner-blocked]
+=== Debugging why the planner is blocked
+
+This section discusses conditions that you might see in a <<task-understand-planning-report,planning report>>.
+
+IMPORTANT: The conditions described in this section do not by themselves mean that the planner is stuck or that anything is wrong.  It's only if they don't resolve themselves within 10-15 minutes that there'd be reason to think there's a problem.
+
+NOTE: This table is a work in progress, prioritized by the conditions we have seen or expect to see in practice.  If you run into something new, please add it!
+
+[cols="1m,1,1",options="header"]
+|===
+|Message in planning report
+|Meaning
+|Debugging it
+
+|pending MGS update
+|The planner is waiting for one of the MGS-driven updates to complete (SP, RoT, RoT bootloader, or host OS).
+|<<debug-stuck-MGS-update>>
+
+|blocked MGS update
+|The planner cannot start a needed MGS-driven update (SP, RoT, RoT bootloader, or host OS)
+|<<debug-blocked-MGS-update>>
+
+|zone updates waiting on pending MGS updates
+|The planner cannot proceed with updating control plane zones because there are some MGS updates that are started but haven't finished
+|Debug the `pending MGS update` in the same planning report.
+
+|zone updates waiting on blocked MGS updates
+|The planner cannot proceed with updating control plane zones because there are some MGS updates that need to be done
+|Debug the `blocked MGS update` in the same planning report.
+
+|zone updates waiting on zone propagation to inventory
+|The planner is waiting for its recent changes to be reflected in the real state of the system (as visible through inventory)
+|Check the change made in the previous blueprint (e.g., zone added).  Check inventory to see if it's reflected (e.g., the corresponding sled shows the zone in its config and it's reconciled its latest config).
+
+|sled not present in inventory collection
+|The planner cannot proceed with this step because the inventory collection it's using doesn't include information about this sled.
+|Check to see if the corresponding sled agent is online and responding to inventory requests.  If not, debug that.  If so, check that there's a recent enough inventory collection that should have included it.  If not, <<debug-stuck-inventory,debug that>>.  If so, check whether it's been loaded by the `inventory_loader` background task in the Nexus that reports this message.
+
+|corresponding SP is not in inventory
+|The planner cannot proceed with this step because the inventory collection it's using doesn't include information from this board's SP
+|Check to see if the corresponding SP is online and responding to inventory requests through MGS.  If not, debug that.  If so, check that there's a recent enough inventory collection that should have included it.  If not, <<debug-stuck-inventory,debug that>>.  If so, check whether it's been loaded by the `inventory_loader` background task in the Nexus that reports this message.
+
+|sled contains zones that are unsafe to shut down
+|The planner cannot proceed with this step because it would reduce availability of a critical service like CockroachDB, Internal DNS, or Boundary NTP.  The message should say which one it is.
+|Figure out why that service is already at reduced availability.  Most commonly, a recent step has taken out a different instance of the same service.  See if it came back up and appears healthy.  If so, check that there's a recent enough inventory collection that should have reflected that.  If not, <<debug-stuck-inventory,debug that>>.  If so, check whether it's been loaded by the `inventory_loader` background task in the Nexus that reports this message.
+
+|waiting to update top-level nexus_generation: some non-Nexus zones are not yet updated
+|The planner cannot proceed with Nexus handoff because there are some non-Nexus zones that are not yet updated.
+|Debug the `zone updates waiting on` message in the same planning report.
+
+|current target release generation (...) is lower than minimum required by blueprint (...)
+|This means that the system has detected that one or more sleds has been MUPdated since the last time the operator set the target release.  See the MUPdate resolution process for details.
+|Resolve the MUPdate.  (This generally means uploading the TUF repo that was MUPdated-to and then setting the target release again, possibly to the same value it already has.)
+
+|===
+
+[#debug-stuck-MGS-update]
+=== Debugging why an MGS-driven update appears stuck
+
+// XXX-dap
+
+XXX `omdb nexus mgs-updates`
+
+[#debug-blocked-MGS-update]
+=== Debugging why an MGS-driven update is blocked
+
+// XXX-dap
+
+XXX go through the list of common reasons why it gets blocked -- but this might overlap with stuff that's already in the table above so maybe this isn't necessary
+
+[#debug-stuck-inventory]
+=== Debugging why inventory seems stale
+
+// XXX-dap
+
+XXX check ground truth
+XXX check inventory_collection background task
+XXX check inventory_loader background task
+XXX check blueprint_planner background task
