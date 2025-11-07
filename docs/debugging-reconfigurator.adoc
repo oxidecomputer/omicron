@@ -69,7 +69,7 @@ The system then asynchronously updates all the software and eventually reports t
 
 NOTE: When debugging, it's important to understand that internally, the system does not have a notion of a "software update" operation that starts and finishes.  Rather, the system is always and continually trying to make the system's software match whatever the current target release is.  If the operator changes the target release, then the system starts taking steps to update individual components accordingly.  If a component is found to mismatch the target release, even long after the update "completed", the system will take steps to update the component.
 
-The external API provides very basic progress information in the form of the number of compnents running at each software version.  End users (customers) do not have any deeper visibility into what's going on during the update (because communicating more would require customers to understand implementation details of the control plane that they shouldn't need to know to operate the system).
+The external API provides very basic progress information in the form of the number of components running at each software version.  End users (customers) do not have any deeper visibility into what's going on during the update (because communicating more would require customers to understand implementation details of the control plane that they shouldn't need to know to operate the system).
 
 === Update sequence
 
@@ -108,6 +108,7 @@ There is no particular order in which the sleds themselves get updated.  The sys
 .. Drain all currently running sagas
 .. Disable database access
 .. Hand off control from old Nexus instances to new Nexus instances
+.. Database schema migration
 .. Old Nexus instances expunged
 
 The top-level items in this list are strictly sequential.  Control plane zone updates do not start until all MGS-driven updates are complete.  Nexus handoff does not start until all other control plane zones are completed.
@@ -247,14 +248,14 @@ The final unlabeled blueprint(s) mark(s) the expunged Nexus zones ready for clea
 
 The time for update is dominated by:
 
-* Sled reboots.  The process reboots each sled twice: once for SP update and once for host OS update.  It generally takes 4-5 minutes after the SP update and 8 minutes after the host OS update before the system moves onto the next step.
+* Sled reboots.  The process reboots each sled twice: once for SP update and once for host OS update.  On today's Gimlet-based systems, it generally takes 4-5 minutes after the SP update and 8 minutes after the host OS update before the system moves onto the next step.
 * Updating Crucible zones.  These steps take about 30-40 seconds, but there are 10 per sled.
 
 Engineering's `rack2` (dogfood) deployment has 12 sleds.  System updates that update all components take 4.5 - 5 hours.
 
 We expect time to scale about linearly with the number of sleds, so a 16-sled rack would take 6-6.5 hours and a 32-sled rack would take 12-13 hours.
 
-Reducing the duration upgrade is an area of ongoing engineering focus.
+Reducing the duration of an upgrade is an area of ongoing engineering focus.
 
 === Impact on running instances
 
@@ -272,7 +273,7 @@ Broadly speaking, the API, CLI, and console should be working for the duration o
 
 . First, new sagas are disallowed.  API operations that create sagas (e.g., starting/stopping instances) will fail starting at this point.  However, other operations will succeed  (e.g., listing projects and instances, creating ssh keys, etc.). Next, existing sagas must complete.
 . Once existing sagas complete, existing Nexus instances cease use of the database.  _All_ API requests will begin failing at this point.
-. Shortly after that, the new Nexus instances will take over and resume normal operation.
+. Shortly after that, the new Nexus instances will take over, apply schema updates, and resume normal operation.
 
 In a typical successful upgrade, this whole process takes less than a minute.  It's important to note that the new Nexus instances operate on different IPs than the previous ones did.  Depending on the client's DNS client behavior, the observed downtime can be a bit longer.
 
@@ -504,7 +505,7 @@ You may or may not care which Nexus instance you're looking at, depending on the
 
 The most important background tasks for Reconfigurator are:
 
-[cols="1m,4",options="header"]
+[cols="1m,4"]
 |===
 |blueprint_planner
 |Generates blueprints to take the next step in upgrade, etc.
@@ -545,7 +546,7 @@ For more on the task-specific output, see:
 
 Other Reconfigurator-related tasks include:
 
-[cols="1m,4",options="header"]
+[cols="1m,4"]
 |===
 |tuf_artifact_replication
 |Distributes software artifacts to all sleds.  Check here if software artifacts are unexpectedly missing from sleds.
@@ -707,9 +708,7 @@ note: using Nexus URL http://[fd00:1122:3344:10b::3f]:12232
 [Nov 05 23:13:42] Completed (15/15) Kick off MGS-managed updates: after 6.43µs
 ```
 
-Problems during blueprint execution may show up in the `error` field above or in the report.
-
-Here's an example where a step failed because of a timeout trying to make a request to sled agent:
+Problems during blueprint execution may show up in the `error` field, the `warning` field, or in the report.  Here's an example where a step failed because of a timeout trying to make a request to sled agent:
 
 ```
 support@oxz_switch1:~$ omdb nexus background-tasks show blueprint_executor
@@ -1382,7 +1381,7 @@ or it's possible that they say something after `enabled:` that's the same for al
 
 In terms of the live system, your options depend on the nature of the problem.  The worst-case is that you <<task-disable-planner,disable the planner>>, wait for a release with the fix to be available, and MUPdate to it.  Depending on what's causing the planner to generate these blueprints, there may be some other change you can make to the system to stop the planner doing this, or you may be able to <<task-override-plan,override the planner>>.
 
-**If the planner does _not_ appear to be in a loop like this**, then **are some of the blueprints very old and unrelated to the current activity?**  Use the `--limit` option with `omdb reconfigurator history` to look back further than it does by default.  If these blueprints look normal (i.e., not a loop like the above) but are just old, then it sounds like somebody is not cleaning up the old blueprints.  Old blueprints are supposed to be cleaned up regularly (by a person) with each self-service update.  You can do it by hand with `omdb reconfigurator archive`, but look for the documented procedure because you'll want to save the resulting file in case you need it for future debugging.
+**If the planner does _not_ appear to be in a loop like this, then are some of the blueprints very old and unrelated to the current activity?**  Use the `--limit` option with `omdb reconfigurator history` to look back further than it does by default.  If these blueprints look normal (i.e., not a loop like the above) but are just old, then it sounds like somebody is not cleaning up the old blueprints.  Old blueprints are supposed to be cleaned up regularly (by a person) with each self-service update.  You can do it by hand with `omdb reconfigurator archive`, but look for the documented procedure because you'll want to save the resulting file in case you need it for future debugging.
 
 [#debug-planner-blocked]
 === Debugging why the planner is blocked
