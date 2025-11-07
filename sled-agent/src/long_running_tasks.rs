@@ -28,7 +28,6 @@ use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, RawDisksSender,
     TimeSyncConfig,
 };
-use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
@@ -213,18 +212,15 @@ async fn spawn_trust_quorum_task(
         .current()
         .all_cluster_datasets()
         .collect::<Vec<_>>();
-    let baseboard = hardware_manager.baseboard();
-    let baseboard_id = BaseboardId {
-        serial_number: baseboard.identifier().to_string(),
-        part_number: baseboard.model().to_string(),
-    };
+    let baseboard_id =
+        hardware_manager.baseboard().try_into().expect("known baseboard type");
     let config = new_trust_quorum_config(
         &cluster_dataset_paths,
         baseboard_id,
         global_zone_bootstrap_ip,
         sprockets_config,
     )
-    .unwrap();
+    .expect("valid trust quorum config");
 
     info!(log, "Starting trust quorum node task");
 

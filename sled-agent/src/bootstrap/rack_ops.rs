@@ -189,6 +189,7 @@ impl RssAccess {
                 let internal_disks_rx = internal_disks_rx.clone();
                 let bootstore_node_handle = bootstore_node_handle.clone();
                 let status = Arc::clone(&self.status);
+                let trust_quorum_handle = trust_quorum_handle.clone();
                 tokio::spawn(async move {
                     let result = rack_initialize(
                         &parent_log,
@@ -196,7 +197,7 @@ impl RssAccess {
                         global_zone_bootstrap_ip,
                         internal_disks_rx,
                         bootstore_node_handle,
-                        trust_quorum_handle.clone(),
+                        trust_quorum_handle,
                         request,
                         step_tx,
                     )

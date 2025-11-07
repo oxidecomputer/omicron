@@ -117,6 +117,7 @@ use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
@@ -132,6 +133,7 @@ use sled_agent_types::rack_init::{
     RackInitializeRequestParams,
 };
 use sled_agent_types::rack_ops::RssStep;
+use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -143,6 +145,7 @@ use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
+use trust_quorum::NodeApiError;
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
@@ -249,6 +252,9 @@ pub enum SetupServiceError {
 
     #[error("Rack initialization was interrupted. Clean-slate required")]
     RackInitInterrupted,
+
+    #[error("Trust quorum error")]
+    TrustQuorum(#[from] NodeApiError),
 }
 
 // The workload / information allocated to a single sled.
@@ -1284,6 +1290,16 @@ impl ServiceInner {
             bootstore
                 .init_rack(sled_plan.rack_id.into(), initial_membership)
                 .await?;
+
+            // TODO: Gate this with a feature flag until the whole trust quorum
+            // is ready to go.
+            let tq_members: BTreeSet<BaseboardId> = peers
+                .iter()
+                .cloned()
+                .map(|id| id.try_into().expect("known baseboard type"))
+                .collect();
+
+            init_trust_quorum(&self.log, trust_quorum, tq_members).await?;
         }
 
         // Save the relevant network config in the bootstore. We want this to
@@ -1475,6 +1491,24 @@ impl ServiceInner {
 
         Ok(())
     }
+}
+
+async fn init_trust_quorum(
+    log: &Logger,
+    trust_quorum: trust_quorum::NodeTaskHandle,
+    members: BTreeSet<BaseboardId>,
+) -> Result<(), NodeApiError> {
+    let threshold = trust_quorum_protocol::Threshold(
+        (tq_members.len() as u8 / 2 + 1) as u8,
+    );
+
+    let msg = trust_quorum_protocol::ReconfigureMsg {
+        rack_id: RackUuid::from_untyped_uuid(sled_plan.rack_id),
+        epoch: trust_quorum_protocol::Epoch(1),
+        last_committed_epoch: None,
+        members: tq_members,
+        threshold,
+    };
 }
 
 /// The service plan describes all the zones that we will eventually
