@@ -2,10 +2,6 @@
 :numbered:
 :toc: left
 
-// XXX-dap
-//   - "errors from component output" -- see Oct 27 dogfood channel
-//     (I wrote a note about this but don't remember anything more than that.)
-
 = Reconfigurator Debugging Guide
 
 This guide is aimed at helping support and engineering debug problems with Reconfigurator.  If you run into a problem that's not covered here, consider adding it!
@@ -489,7 +485,7 @@ You may also see these columns instead of a particular release:
 
 You can see the specific value for each component with the `--details` flag.
 
-[#check-background-tasks]
+[#task-check-background-tasks]
 === Task: Collecting information about Nexus background tasks
 
 Prerequisite: see <<using-omdb>>.
@@ -541,8 +537,8 @@ All but the last three lines of output here are common to all background tasks. 
 
 For more on the task-specific output, see:
 
-* <<check-blueprint-planner>>
-* <<check-blueprint-executor>>
+* <<task-check-blueprint-planner>>
+* <<task-check-blueprint-executor>>
 
 Other Reconfigurator-related tasks include:
 
@@ -595,10 +591,10 @@ task: "tuf_repo_pruner"
     other repos eligible for pruning: none
 ```
 
-[#check-blueprint-planner]
+[#task-check-blueprint-planner]
 === Task: Checking the status of the blueprint planner
 
-Prerequisite: <<check-background-tasks>>.
+Prerequisite: <<task-check-background-tasks>>.
 
 Here's example output from the blueprint planner:
 
@@ -643,10 +639,10 @@ planning report:
 ...
 ```
 
-[#check-blueprint-executor]
+[#task-check-blueprint-executor]
 === Task: Checking the status of the blueprint executor
 
-Prerequisite: <<check-background-tasks>>.
+Prerequisite: <<task-check-background-tasks>>.
 
 Here's example output from the blueprint executor:
 
@@ -767,7 +763,7 @@ When the planner generates blueprints, it also generates a **planning report** t
 You typically get a planning report from one of two places:
 
 * Using `omdb db blueprints planner-report show BLUEPRINT_ID`.  This can show you the planning report for any blueprint in the database.
-* From the <<check-blueprint-planner,`blueprint_planner` background task>>.  This shows the planning report for the most recent blueprint the planner generated, _whether or not that blueprint was saved to the database or became the target_.
+* From the <<task-check-blueprint-planner,`blueprint_planner` background task>>.  This shows the planning report for the most recent blueprint the planner generated, _whether or not that blueprint was saved to the database or became the target_.
 +
 This is most important when the system is stuck for some reason because in that case the planner may generate a blueprint that's identical to the current target, but has a planning report with different information in it.  If you want to understand why the system is stuck, it's usually most helpful to look at the planning report for the blueprints currently _not_ being saved _because_ they make no changes.
 
@@ -853,6 +849,304 @@ planning report:
 The interesting bit here is the "blocked MGS update" for sled BRM42220014.  It's saying that it would have updated the host OS on that sled, but that sled has a CockroachDB node on it and some other CockroachDB node is down.  Again, this is common during an update for a little while (i.e., immediately after the system updated a different sled that had a CockroachDB node on it).  If it got stuck in this state, you'd want to debug why the CockroachDB cluster wasn't becoming healthy again.
 
 For more on different ways the planner can be blocked and what they mean, see <<debug-planner-blocked>>.
+
+[#task-collect-mgs-updates]
+=== Task: Collecting details about ongoing MGS-driven updates
+
+Prerequisite: see <<using-omdb>>.
+
+You can use `omdb nexus mgs-updates` to fetch information from Nexus about any MGS-driven updates that it's working on.  This output includes information on any current update attempts as well as a history of recent updates.  Here's an example:
+
+```
+# omdb nexus mgs-updates
+note: Nexus URL not specified.  Will pick one from DNS.
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using Nexus URL http://[fd00:1122:3344:104::3]:12232
+recent completed attempts:
+    2025-10-08T23:07:49.750Z to 2025-10-08T23:07:49.827Z (took 77ms): serial BRM27230045
+        attempt#: 150
+        version:  17.0.0-0.ci+gitb8efb9a08b3
+        hash:     3a6940e9917d578eb8c9c81e491f37885fbc044e37741fa2fe36a278e0012747
+        result:   Err("failed to fetch artifact: no repo depot clients available")
+...
+    2025-10-08T23:22:51.943Z to 2025-10-08T23:22:52.013Z (took 69ms): serial BRM27230045
+        attempt#: 165
+        version:  17.0.0-0.ci+gitb8efb9a08b3
+        hash:     3a6940e9917d578eb8c9c81e491f37885fbc044e37741fa2fe36a278e0012747
+        result:   Err("failed to fetch artifact: no repo depot clients available")
+
+currently in progress:
+
+waiting for retry:
+    serial BRM27230045: will try again at 2025-10-08 23:23:52.013361249 UTC (attempt 166)
+```
+
+This is saying:
+
+* There have been several recent attempts to update some component on BRM27230045.  They've all failed.
+* There is no update attempt in progress.
+* Another attempt will begin shortly.
+
+Note that the particular error reported here was a bug.  You should not see this specific error on real systems.
+
+[#task-check-inventory]
+=== Task: Checking the latest inventory collection
+
+Prerequisite: see <<using-omdb>>.
+
+Nexus instances periodically collect a full inventory of the system and store it into the database.  Only the most recent few are kept.  You can list available ones:
+
+```
+root@oxz_switch0:~# omdb db inventory collections list
+note: database URL not specified.  Will search DNS.
+note: (override with --db-url or OMDB_DB_URL)
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using database URL postgresql://root@[fd00:1122:3344:109::3]:32221,[fd00:1122:3344:105::3]:32221,[fd00:1122:3344:10b::3]:32221,[fd00:1122:3344:107::3]:32221,[fd00:1122:3344:108::3]:32221/omicron?sslmode=disable
+note: database schema version matches expected (203.0.0)
+ID                                   STARTED              TOOK     NSPS NERRORS
+43a3df0e-f197-498f-b6b5-dfcf00c44506 2025-11-07T19:33:53Z 37197 ms 16   2
+b0402300-4a81-4fa9-aaf6-4928cbce6aa8 2025-11-07T19:34:03Z 37411 ms 16   2
+f4e848c7-3285-4d04-93ae-75469cfede30 2025-11-07T19:34:09Z 42685 ms 16   2
+8f67cea3-637b-47e2-96a4-8d10f41b6d9b 2025-11-07T19:34:51Z 33085 ms 16   2
+```
+
+You can view specific ones or `latest` with:
+
+```
+root@oxz_switch0:~# omdb db inventory collections show latest
+note: database URL not specified.  Will search DNS.
+note: (override with --db-url or OMDB_DB_URL)
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using database URL postgresql://root@[fd00:1122:3344:109::3]:32221,[fd00:1122:3344:105::3]:32221,[fd00:1122:3344:10b::3]:32221,[fd00:1122:3344:107::3]:32221,[fd00:1122:3344:108::3]:32221/omicron?sslmode=disable
+note: database schema version matches expected (203.0.0)
+collection: 1ac3782b-0761-43b2-8371-bf3ee4127f1c
+collector:  cd808279-f4f3-4aeb-82ad-efa5fe69241f (likely a Nexus instance)
+started:    2025-11-07T19:31:56.803Z
+done:       2025-11-07T19:32:41.208Z
+errors:     0
+...
+```
+
+Note that this will produce a ton of output.  There's a lot of information in an inventory collection.
+
+[#task-understand-inventory]
+=== Task: Understanding an inventory collection
+
+This section walks through the `omdb db collections inventory show` output.  It's not exhaustive.
+
+==== Metadata and atomicity
+
+Example:
+
+```
+root@oxz_switch0:~# omdb db inventory collections show latest
+note: database URL not specified.  Will search DNS.
+note: (override with --db-url or OMDB_DB_URL)
+note: using DNS server for subnet fd00:1122:3344::/48
+note: (if this is not right, use --dns-server to specify an alternate DNS server)
+note: using database URL postgresql://root@[fd00:1122:3344:109::3]:32221,[fd00:1122:3344:105::3]:32221,[fd00:1122:3344:10b::3]:32221,[fd00:1122:3344:107::3]:32221,[fd00:1122:3344:108::3]:32221/omicron?sslmode=disable
+note: database schema version matches expected (203.0.0)
+collection: 095090fc-93e2-4123-bb3a-7fc45faedbaa
+collector:  cd808279-f4f3-4aeb-82ad-efa5fe69241f (likely a Nexus instance)
+started:    2025-11-07T19:37:52.828Z
+done:       2025-11-07T19:38:31.797Z
+```
+
+This tells us:
+
+* This inventory was collected by Nexus instance `cd808279-f4f3-4aeb-82ad-efa5fe69241f`.
+* This inventory collection started at `2025-11-07T19:37:52.828Z`.  Changes from before that are reflected in it.
+* This inventory collection finished at `2025-11-07T19:38:31.797Z`.  Changes from after that are not reflected in it.
+
+IMPORTANT: Inventory collections are not atomic.  They represent a lot of requests and queries made to a lot of different components over some period of time.  Changes made during the collection might not be reflected, might be partially reflected, or might be fully reflected in the collection.
+
+==== Errors
+
+Example:
+
+```
+errors:     2
+  error 0: MGS "http://[fd00:1122:3344:10b::2]:12225": fetching state of SP SpIdentifier { slot: 29, type_: Sled }: Error Response: status: 503 Service Unavailable; headers: {"content-type": "application/json", "x-request-id": "d4d73b4d-d68c-41aa-ab0b-f4da64061566", "content-length": "198", "date": "Fri, 07 Nov 2025 19:38:07 GMT"}; value: Error { error_code: Some("SpCommunicationFailed"), message: "error communicating with SP SpIdentifier { typ: Sled, slot: 29 }: no SP discovered", request_id: "d4d73b4d-d68c-41aa-ab0b-f4da64061566" }
+  error 1: MGS "http://[fd00:1122:3344:108::2]:12225": fetching state of SP SpIdentifier { slot: 29, type_: Sled }: Error Response: status: 503 Service Unavailable; headers: {"content-type": "application/json", "x-request-id": "64909ee6-4c92-47ce-a4fd-f97f50e56d24", "content-length": "198", "date": "Fri, 07 Nov 2025 19:38:26 GMT"}; value: Error { error_code: Some("SpCommunicationFailed"), message: "error communicating with SP SpIdentifier { typ: Sled, slot: 29 }: no SP discovered", request_id: "64909ee6-4c92-47ce-a4fd-f97f50e56d24" }
+```
+
+Errors reflect problems encountered while collecting inventory.  They _may or may not_ reflect actual problems with the system.  They could reflect a transient failure of some component that's actually healthy or they could reflect a deeper problem (e.g., a missing sled).  In this case, Management Gateway reported 503 errors trying to talk to sled 29.  It's not clear from this output alone what that means.
+
+==== SP inventory
+
+Example:
+
+```
+Sled BRM27230045
+    part number: 913-0000019
+    power:    A0
+    revision: 13
+    MGS slot: Sled 7
+```
+
+This basic information tells us which part number, serial number, and hardware revision was found.  "power" reflects the power state (see https://rfd.shared.oxide.computer/rfd/81[RFD 81]).
+
+```
+    found at: 2025-11-07T19:46:21.784Z from http://[fd00:1122:3344:10b::2]:12225
+```
+
+This information (reported with all inventory data) tells us exactly when and where this data came from.  In this case, this URL is a Management Gateway Service instance.
+
+```
+    host phase 1 active slot: B
+    host phase 1 hashes:
+        SLOT HASH
+        A    65d649aaab5e1bd259b560265692cc7693702c4913e1dfcd74a923a38380dc69
+        B    08a8356e36f18d2d0c00820c6d70523788830ae66995a00f0c72200f12dff1f7
+    cabooses:
+        SLOT       BOARD       NAME        VERSION GIT_COMMIT                               SIGN
+        SpSlot0    gimlet-e    gimlet-e    1.0.49  d38a6073d140184b114fb4769445991bf20baf0d n/a
+        SpSlot1    gimlet-e    gimlet-e    1.0.49  d38a6073d140184b114fb4769445991bf20baf0d n/a
+        RotSlotA   oxide-rot-1 oxide-rot-1 1.0.38  e40997968406278927d41c03d24b4ae6472c375a 5796ee3433f840519c3bcde73e19ee82ccb6af3857eddaabb928b8d9726d93c0
+        RotSlotB   oxide-rot-1 oxide-rot-1 1.0.38  e40997968406278927d41c03d24b4ae6472c375a 5796ee3433f840519c3bcde73e19ee82ccb6af3857eddaabb928b8d9726d93c0
+        Stage0     oxide-rot-1 oxide-rot-1 1.4.1   bdf56dd950b934360df596ed5b2d8b8813c92168 5796ee3433f840519c3bcde73e19ee82ccb6af3857eddaabb928b8d9726d93c0
+        Stage0Next oxide-rot-1 oxide-rot-1 1.4.1   bdf56dd950b934360df596ed5b2d8b8813c92168 5796ee3433f840519c3bcde73e19ee82ccb6af3857eddaabb928b8d9726d93c0
+    RoT pages:
+        SLOT         DATA_BASE64
+        Cmpa         oAAAiAAAAAAAAAAAAAAAAAAA//8AAP//...
+        CfpaActive   AAAAAFMAAAAAAAAAAAAAAAAAAAAAAAAA...
+        CfpaInactive AAAAAFIAAAAAAAAAAAAAAAAAAAAAAAAA...
+        CfpaScratch  AAAAAFMAAAAAAAAAAAAAAAAAAAAAAAAA...
+    RoT: active slot: slot A
+    RoT: persistent boot preference: slot A
+    RoT: pending persistent boot preference: -
+    RoT: transient boot preference: -
+    RoT: slot A SHA3-256: 87541100ae9707554399633d470816568f487247fb5daf265bf83bcb14d34dce
+    RoT: slot B SHA3-256: 9ac717ff6376e108ce01055ebb170a162d348286488ad520437c57ed1dae9557
+```
+
+This tells us about the various components adjacent to the SP that have updateable software (host phase 1, SP itself, RoT, RoT bootloader).  It tells us what images are in each component's A/B firmware slots and which slots are active.
+
+==== Sled agent inventory
+
+Example:
+
+```
+sled 0c7011f7-a4bf-4daf-90cc-1c2410103300 (role = Gimlet, serial BRM42220057)
+    found at:    2025-11-07T19:38:28.729Z from http://[fd00:1122:3344:104::1]:12345
+    address:     [fd00:1122:3344:104::1]:12345
+    usable hw threads:   128
+    CPU family:          amd_milan
+    usable memory (GiB): 1011
+    reservoir (GiB):     809
+```
+
+This section shows basic information about the sled hardware and when/where all the sled information came from.
+
+The next sections show information about physical disks, zpools configured on them, and ZFS datasets that are *present*.  (This is distinct from the ZFS datasets that are *configured* to be present.)
+
+```
+    physical disks:
+      U2: DiskIdentity { vendor: "1b96", model: "WUS4C6432DSP3X3", serial: "A084A704" } in 0
+      U2: DiskIdentity { vendor: "1b96", model: "WUS4C6432DSP3X3", serial: "A084A5DA" } in 1
+      ...
+      U2: DiskIdentity { vendor: "1b96", model: "WUS4C6432DSP3X3", serial: "A084A60F" } in 9
+      M2: DiskIdentity { vendor: "1344", model: "Micron_7300_MTFDHBG1T9TDF", serial: "21413275374B" } in 17
+      M2: DiskIdentity { vendor: "1344", model: "Micron_7300_MTFDHBG1T9TDF", serial: "214132748192" } in 18
+    zpools
+      05715ad8-59a1-44ab-ad5f-0cdffb46baab: total size: 2976 GiB
+      2ec2a731-3340-4777-b1bb-4a906c598174: total size: 2976 GiB
+      ...
+      f96c8d49-fdf7-4bd6-84f6-c282202d1abc: total size: 2976 GiB
+    datasets:
+      oxp_05715ad8-59a1-44ab-ad5f-0cdffb46baab - id: none, compression: off
+        available: 1099346468352 B, used: 1996251210240 B
+        reservation: None, quota: None
+      oxp_05715ad8-59a1-44ab-ad5f-0cdffb46baab/crucible - id: a76b3357-b690-43b8-8352-3300568ffc2b, compression: off
+        available: 1099346468352 B, used: 1930693963 KiB
+        reservation: None, quota: None
+      ...
+      oxp_f96c8d49-fdf7-4bd6-84f6-c282202d1abc/crypt/zone/oxz_crucible_167cf6a2-ec51-4de2-bc6c-7785bbc0e436 - id: 4fb55999-265a-40ed-996d-48a914825619, compression: off
+        available: 1235108139520 B, used: 344886784 B
+        reservation: None, quota: None
+```
+
+The next section reports the ledgered sled configuration.  This is the last configuration received by this sled agent from Nexus and covers the physical disks, ZFS datasets, and Omicron zones that should be in service.  Each new configuration gets a new generation number.  This is an easy way for both humans and Nexus to determine if the sled's config is up to date.
+
+```
+LEDGERED SLED CONFIG
+    generation: 305
+    remove_mupdate_override: None
+    desired host phase 2 slot a: artifact 654d8c78df4d80b72c467b5334757fcc6d3c1035be5eab93cc5c88feab6a870a
+    desired host phase 2 slot b: artifact 86a2b812218f5a7813a13b5ab3b8f35e1e528e1908cd0a68e4a093c8515d30d8
+    DISKS: 9
+        ID                                       ZPOOL_ID                                 VENDOR     MODEL               SERIAL   
+        2affbc9d-a029-4c5f-8c5c-0e900e247781     05715ad8-59a1-44ab-ad5f-0cdffb46baab     1b96       WUS4C6432DSP3X3     A084A723 
+	...
+        ce170025-3cc2-405e-9240-86ea5ef8bb88     2ec2a731-3340-4777-b1bb-4a906c598174     1b96       WUS4C6432DSP3X3     A084A643 
+    DATASETS: 40
+        ID                                       NAME                                                                                                             COMPRESSION     QUOTA       RESERVATION 
+        08c9d9ea-b048-4bcc-8d5a-a7577dc96467     oxp_613b58fc-5a80-42dc-a61c-b143cf220fb5/crypt/zone                                                              off             none        none        
+	...
+        fcdda266-fc6a-4518-89db-aec007a4b682     oxp_7e1293ad-b903-4054-aeae-2182d5e4a785/crucible                                                                off             none        none        
+    ZONES: 12
+        ID                                       KIND                IMAGE_SOURCE                                                               
+        167cf6a2-ec51-4de2-bc6c-7785bbc0e436     crucible            artifact: d61910f0ee36e7a9beb51dc82b44342bacccef628a67c8afc74ebb02a3c57fdf 
+	...
+        ff805a1f-414e-479a-bdb0-85b4913095ab     crucible_pantry     artifact: a059ff1c410a46f852f6cfde23ca3b94d4a0a7252645158010142b2f3fa20675 
+```
+
+To reiterate: the ledgered config is what the sled last received from Nexus.  It's not necessarily what's been applied to the sled.
+
+Next is information about Omicron zone images and MUPdate overrides present on the sled:
+
+```
+    zone image resolver status:
+        zone manifest:
+            path on boot disk: /pool/int/abb458c3-da10-4429-87e6-3476b57a7f21/install/zones.json
+            boot disk inventory:
+                manifest generated by installinator (mupdate ID: 04ec73d8-1de0-4878-810f-cc59e1180318)
+                artifacts in install dataset:
+                  - clickhouse.tar.gz (expected 323544943 bytes with hash e933f717a9895f7aee7fd1f832a3ecff456e1b805da77a0c8e02dfdf63fc4660): ok
+		  ...
+                  - probe.tar.gz (expected 3109590 bytes with hash a03f2ae3b440fdd778a115766956f9d6d0b0099fd98492facaa0db91d65110c0): ok
+            non-boot disk status:
+              - /pool/int/c1c52004-9e3d-422f-a827-66ac905d3925/install/zones.json (valid): valid zone manifest: 12 artifacts in manifest generated by installinator (mupdate ID: 04ec73d8-1de0-4878-810f-cc59e1180318): 12 valid, 0 mismatched, 0 errors:
+		  ...
+                  - probe.tar.gz: valid (3109590 bytes, a03f2ae3b440fdd778a115766956f9d6d0b0099fd98492facaa0db91d65110c0)
+
+        mupdate override:
+            path on boot disk: /pool/int/abb458c3-da10-4429-87e6-3476b57a7f21/install/mupdate-override.json
+            no override on boot disk
+            non-boot disk status:
+              - /pool/int/c1c52004-9e3d-422f-a827-66ac905d3925/install/mupdate-override.json (valid): matches boot disk (absent)
+```
+
+Then we have information about the host OS phase 2 contents on the M2 devices:
+
+```
+    boot disk slot: B
+    slot A details:
+        artifact: 654d8c78df4d80b72c467b5334757fcc6d3c1035be5eab93cc5c88feab6a870a (1048580096 bytes)
+        image name: ci f83a43d/3d3f97b 2025-11-05 21:26
+        phase 2 hash: f25d5b3bc3d43e52d087b8d1b7af89e23f47e73b7c3f70e8be263bdae92673d1
+    slot B details:
+        artifact: 86a2b812218f5a7813a13b5ab3b8f35e1e528e1908cd0a68e4a093c8515d30d8 (1048580096 bytes)
+        image name: ci 27b3ef9/3d3f97b 2025-11-06 22:49
+        phase 2 hash: ccdaebda45442884c7182c5088a6943baf4b73917f24ff9ee2f097060085fe86
+```
+
+An asynchronous _reconciler_ process is responsible for making the sled's actual state match the ledgered configuration.  That status is reported like this:
+
+```
+    last reconciled config: matches ledgered config
+        no mupdate override to clear
+        no orphaned datasets
+        all disks reconciled successfully
+        all datasets reconciled successfully
+        all zones reconciled successfully
+    reconciler task status: idle (finished at 2025-11-07T03:26:15.142Z after running for 10.124563923s)
+```
+
+If the sled had just been asked to add a zone, we might instead see here that the zone is present in the ledgered config, but does not actually exist yet, and the reconciler process would be running.
 
 == Controlling Reconfigurator
 
@@ -953,9 +1247,9 @@ warning: unknown background task: "reconfigurator_config_watcher" (don't know ho
 
 You can see from this when Nexus most recently updated its view of the configuration and when it will check again.  (The warning here is innocuous.)
 
-NOTE: <<check-background-tasks,Recall>> that `omdb nexus` picks an arbitrary Nexus instance each time you run it.  Since much of this propagates asynchronously, you can get slightly different results from invocation to invocation if you hit different Nexus instances.
+NOTE: <<task-check-background-tasks,Recall>> that `omdb nexus` picks an arbitrary Nexus instance each time you run it.  Since much of this propagates asynchronously, you can get slightly different results from invocation to invocation if you hit different Nexus instances.
 
-You can confirm that the planner is disabled by <<check-blueprint-planner,checking the blueprint planner>>:
+You can confirm that the planner is disabled by <<task-check-blueprint-planner,checking the blueprint planner>>:
 
 ```
 root@oxz_switch:~# omdb nexus background-tasks show blueprint_planner
@@ -1068,7 +1362,7 @@ made target at:   2025-11-05 23:56:02.618484 UTC
 enabled:          false
 ```
 
-The next time the blueprint executor runs, the <<check-blueprint-executor,blueprint execution background task>> will show something like this:
+The next time the blueprint executor runs, the <<task-check-blueprint-executor,blueprint execution background task>> will show something like this:
 
 ```
 root@oxz_switch:~# omdb nexus background-tasks show blueprint_executor 
@@ -1089,7 +1383,7 @@ task: "blueprint_executor"
 
 Note the `execution: disabled`.
 
-NOTE: <<check-background-tasks,Recall>> that `omdb nexus` picks an arbitrary Nexus instance each time you run it.  Since much of this propagates asynchronously, you can get slightly different results from invocation to invocation if you hit different Nexus instances.
+NOTE: <<task-check-background-tasks,Recall>> that `omdb nexus` picks an arbitrary Nexus instance each time you run it.  Since much of this propagates asynchronously, you can get slightly different results from invocation to invocation if you hit different Nexus instances.
 
 You can re-enable blueprint execution in the obvious way:
 
@@ -1326,7 +1620,7 @@ We could use debugging guides for these, too.
 
 **Have their been recent blueprints?**  Check <<task-check-reconfigurator-history,recent Reconfigurator activity>> to see what the system has been doing.  If there have been new blueprints in the last 10-15 minutes, then the system may not be stuck.
 
-If there have been no recent blueprints, **what is the planner currently waiting for?**  <<check-blueprint-planner,Check>> to see.  You will likely see one of the following:
+If there have been no recent blueprints, **what is the planner currently waiting for?**  <<task-check-blueprint-planner,Check>> to see.  You will likely see one of the following:
 
 * `plan unchanged from parent`.  This is the common case.  It means that the planner is waiting for something about the system to change before taking the next step.  In this case, <<task-understand-planning-report,look at the planning report>> to see what the planner is waiting for.
 * `blueprint auto-planning disabled because current blueprint count >= limit`.  See <<debug-too-many-blueprints>>.
@@ -1335,7 +1629,7 @@ If there have been no recent blueprints, **what is the planner currently waiting
 You may see these normal, expected, transient errors that you can ignore:
 
 * `Blueprint BLUEPRINT_ID's parent blueprint is not the current target blueprint`.  It means two Nexus instances tried to take a planning step at the same time and the one you're looking at lost the race.
-* `reconfigurator config not yet loaded; doing nothing`.  This should only happen during Nexus startup and should not last long.  If it does, <<check-background-tasks,check the task status>> for the `reconfigurator_config_watcher` background task.
+* `reconfigurator config not yet loaded; doing nothing`.  This should only happen during Nexus startup and should not last long.  If it does, <<task-check-background-tasks,check the task status>> for the `reconfigurator_config_watcher` background task.
 
 If you see one of these transient errors, you can check the other Nexus instances or check again after the next planner task activation.
 
@@ -1344,7 +1638,7 @@ Less likely possibilities include:
 * The planner is unable to run due to an explicit error other than one of the above (e.g., failure to load state from the database).
 * The planner task is not running (e.g., due to a scheduling issue).  This will be evident because the task status will report that it's not running and has not run for longer than its configured interval.
 * The planner task itself is stuck (e.g., due to an infinite loop).  This will be evident because the task status will report that it's running and has been running for a long time.
-* `no inventory collection available` error.  This should only happen _sometimes_ immediately after an upgrade and before Nexus has managed to collect inventory.  This should not last long.  If it does, <<check-background-tasks,check the task status>> for the `inventory_collection` background task.
+* `no inventory collection available` error.  This should only happen _sometimes_ immediately after an upgrade and before Nexus has managed to collect inventory.  This should not last long.  If it does, <<task-check-background-tasks,check the task status>> for the `inventory_collection` background task.
 
 [#debug-bad-choice]
 === Debugging why the planner made a bad choice
@@ -1358,7 +1652,7 @@ Assuming the choice really was wrong, if this is the most recent blueprint and t
 [#debug-too-many-blueprints]
 === Debugging planner error about too many blueprints
 
-If you see this in the <<check-blueprint-planner,blueprint planner status>>:
+If you see this in the <<task-check-blueprint-planner,blueprint planner status>>:
 
 ```
 blueprint auto-planning disabled because current blueprint count >= limit (5000); planning report contains what would have been stored had the limit not been reached
@@ -1400,11 +1694,11 @@ NOTE: This table is a work in progress, prioritized by the conditions we have se
 
 |pending MGS update
 |The planner is waiting for one of the MGS-driven updates to complete (SP, RoT, RoT bootloader, or host OS).
-|<<debug-stuck-MGS-update>>
+|<<task-collect-mgs-updates,Inspect details of ongoing MGS-driven updates.>>
 
 |blocked MGS update
 |The planner cannot start a needed MGS-driven update (SP, RoT, RoT bootloader, or host OS).
-|<<debug-blocked-MGS-update>>
+|Check the rest of this table for other related messages.
 
 |zone updates waiting on pending MGS updates
 |The planner cannot proceed with updating control plane zones because there are some MGS updates that are started but haven't finished.
@@ -1440,26 +1734,63 @@ NOTE: This table is a work in progress, prioritized by the conditions we have se
 
 |===
 
-[#debug-stuck-MGS-update]
-=== Debugging why an MGS-driven update appears stuck
-
-// XXX-dap
-
-XXX `omdb nexus mgs-updates`
-
-[#debug-blocked-MGS-update]
-=== Debugging why an MGS-driven update is blocked
-
-// XXX-dap
-
-XXX go through the list of common reasons why it gets blocked -- but this might overlap with stuff that's already in the table above so maybe this isn't necessary
-
 [#debug-stuck-inventory]
 === Debugging why inventory seems stale
 
-// XXX-dap
+Many Reconfigurator steps work like this:
 
-XXX check ground truth
-XXX check inventory_collection background task
-XXX check inventory_loader background task
-XXX check blueprint_planner background task
+. planner creates a new blueprint specifying some change
+. blueprint execution makes that change to the real system
+. inventory reflects that change
+. planner sees that its change has taken effect and moves onto the next step
+
+// For example, when expunging a zone:
+// 
+// . planner creates a new blueprint specifying that the zone should be expunged
+// . blueprint execution sends a request to the corresponding sled that removes the zone
+// .. asynchronously: sled agent removes the zone
+// .. eventually: sled agent inventory reflects the zone being gone
+// . inventory collection reflects the zone being gone
+// . planner knows the zone is no longer running and can proceed (e.g., re-using its resources for something else)
+
+For example, when updating an SP:
+
+. planner creates a new blueprint specifying details about the SP update
+. blueprint execution kicks off the SP update
+.. asynchronously: the update happens
+.. an inventory collection made while the SP is offline (during its reset) may be missing the SP
+. inventory collection made after the update reflects that the SP is present and updated
+. planner knows the SP update is finished and can proceed
+
+If this process is stuck, the next step is to figure out which step is stuck.  Below are all the steps in order and how to check them.  Based on availability of tools and likelihood that these steps go wrong, we recommend **starting by checking the latest inventory collection.**
+
+[cols="1,2",options="header"]
+|===
+|Step
+|Debugging it
+
+|New blueprint written and made the target
+|N/A: This section assumes you've already seen the new blueprint.
+
+|Nexus loads the new blueprint
+|<<task-check-background-tasks,Check the `blueprint_loader` background task.>>  The task status shows when it ran, which blueprint it loaded, and when it will run again.  In the success case, the correct blueprint will be loaded the first time the `blueprint_loader` task runs after that blueprint was made the target.
+
+|Nexus executes the new blueprint
+|<<task-check-blueprint-executor,Check the status of the blueprint executor>>.  The task status shows when it ran, what blueprint it executed, what the result was, and when it will run again.  In the success case, it will execute whatever blueprint was most recently loaded when it started, and there will be no errors or warnings.
+
+|The change gets made / component's inventory reflects the change
+|Varies by change.  You may be able to determine this by querying sled agent inventory (if it's a sled agent change) or SP status (using `faux-mgs`).
+
+|Inventory collection background task runs
+|<<task-check-background-tasks,Check the `inventory_collection` background task>>.  The task status shows when it last ran, what inventory collection it created, and when it will run again.  In the success case, the first collection that _starts_ after the change was made should reflect that change.
+
+|**Start here:** Latest inventory collection reflects the change
+|<<task-check-inventory,Check the latest inventory collection>> to see if it reflects the change.  If it started after the change was made, it should reflect the change.  If it does, check the steps below this one.  Otherwise if the latest inventory collection started before the change was made, then you'll want to figure out why a newer one hasn't been started.  Check the steps above this one.
+
+|Nexus loads the latest inventory collection
+|<<task-check-background-tasks,Check the `inventory_loader` background task>>.  The task status shows when it last ran, what inventory collection it loaded, and when it will run again.  In the success case, it should load the latest inventory collection that was present when it ran.
+
+|Nexus planner uses the latest inventory collection
+|<<task-check-background-tasks,Check the `blueprint_planner` background task>>.  The task status shows when it last ran, the planner report for the generated blueprint, and when it will run again.  If it hasn't run since the right inventory collection was loaded, then you'll want to debug that.
+
+|===
