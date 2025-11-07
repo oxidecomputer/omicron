@@ -43,9 +43,11 @@ impl TestInput {
 /// Ensure the oximeter database schemas for both single node and replicated
 /// cluster are not modified.
 ///
-/// Schema changes for the `oximeter` database are currently disabled due to
-/// ongoing self-service update work. More information about this restriction
-/// can be found in https://github.com/oxidecomputer/omicron/issues/8862
+/// Schema changes for the `oximeter` database are not allowed because there is
+/// no mechanism to apply them to existing systems. If we need to support schema
+/// changes at some point, we'll have to do the work to update them during
+/// automated update. See https://github.com/oxidecomputer/omicron/issues/8862
+/// for details.
 #[tokio::test]
 async fn test_schemas_are_not_modified() -> anyhow::Result<()> {
     let cur_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
