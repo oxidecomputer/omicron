@@ -4,8 +4,12 @@
 
 use std::collections::BTreeSet;
 
+use chrono::{DateTime, Utc};
+use indent_write::indentable::Indentable as _;
 use itertools::Itertools;
 use omicron_common::api::external::{Generation, Name};
+use omicron_uuid_kinds::{ReconfiguratorSimOpUuid, ReconfiguratorSimStateUuid};
+use swrite::{SWrite, swriteln};
 use thiserror::Error;
 
 use crate::{
@@ -161,4 +165,102 @@ impl UnknownZoneNamesError {
     pub(crate) fn new(unknown: Vec<String>, known: BTreeSet<String>) -> Self {
         Self { unknown, known }
     }
+}
+
+/// A state that matched a prefix query.
+#[derive(Clone, Debug)]
+pub struct StateMatch {
+    /// The state ID.
+    pub id: ReconfiguratorSimStateUuid,
+    /// The state generation.
+    pub generation: Generation,
+    /// The state description.
+    pub description: String,
+}
+
+/// Error when resolving a state ID by prefix.
+#[derive(Clone, Debug, Error)]
+pub enum StateIdPrefixError {
+    /// No state found with the given prefix.
+    #[error("no state found with prefix '{0}'")]
+    NoMatch(String),
+
+    /// Multiple states found with the given prefix.
+    #[error("prefix '{prefix}' is ambiguous: matches {count} states\n{}", format_matches(.matches))]
+    Ambiguous { prefix: String, count: usize, matches: Vec<StateMatch> },
+}
+
+fn format_matches(matches: &[StateMatch]) -> String {
+    let mut output = String::new();
+    for state_match in matches {
+        swriteln!(
+            output,
+            "  - {} generation {}:",
+            state_match.id,
+            state_match.generation
+        );
+        swriteln!(
+            output,
+            "{}",
+            state_match.description.trim_end().indented("    ")
+        );
+    }
+    output
+}
+
+/// An operation that matched a prefix query.
+#[derive(Clone, Debug)]
+pub struct OpMatch {
+    /// The operation ID.
+    pub id: ReconfiguratorSimOpUuid,
+    /// The operation description.
+    pub description: String,
+    /// The operation timestamp.
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Error when resolving an operation ID by prefix.
+#[derive(Clone, Debug, Error)]
+pub enum OperationIdPrefixError {
+    /// No operation found with the given prefix.
+    #[error("no operation found with prefix '{0}'")]
+    NoMatch(String),
+
+    /// Multiple operations found with the given prefix.
+    #[error("prefix '{prefix}' is ambiguous: matches {count} operations\n{}", format_op_matches(.matches))]
+    Ambiguous { prefix: String, count: usize, matches: Vec<OpMatch> },
+}
+
+fn format_op_matches(matches: &[OpMatch]) -> String {
+    let mut output = String::new();
+    for op_match in matches {
+        swriteln!(
+            output,
+            "  - {} ({}): {}",
+            op_match.id,
+            op_match.timestamp,
+            op_match.description
+        );
+    }
+    output
+}
+
+/// Error when performing operation log operations (undo/redo/restore).
+#[derive(Clone, Debug, Error)]
+pub enum OperationError {
+    /// Operation not found.
+    #[error("operation not found: {0}")]
+    NotFound(ReconfiguratorSimOpUuid),
+
+    /// State not found.
+    #[error("state not found: {0}")]
+    StateNotFound(ReconfiguratorSimStateUuid),
+
+    /// Cannot undo: already at root operation.
+    #[error("cannot undo: already at root operation")]
+    AtRoot,
+
+    /// Cannot redo: no operation to redo to.
+    #[error("cannot redo: no redo available")]
+    NoRedo,
 }
