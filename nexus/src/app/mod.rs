@@ -37,6 +37,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
+use qorb::policy::Policy;
+use qorb::resolvers::fixed::FixedResolver;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
 use slog::Logger;
@@ -405,14 +407,19 @@ impl Nexus {
             .map_err(|e| e.to_string())?;
 
         // Client to the ClickHouse database.
-        let timeseries_client = match &config.pkg.timeseries_db.address {
-            None => {
-                let native_resolver =
-                    qorb_resolver.for_service(ServiceName::OximeterReader);
-                oximeter_db::Client::new_with_resolver(native_resolver, &log)
-            }
-            Some(address) => oximeter_db::Client::new(*address, &log),
+        let timeseries_resolver = match &config.pkg.timeseries_db.address {
+            Some(address) => Box::new(FixedResolver::new([*address])),
+            None => qorb_resolver.for_service(ServiceName::OximeterReader),
         };
+        let mut timeseries_policy = Policy::default();
+        if let Some(max_slots) = config.pkg.timeseries_db.max_slots {
+            timeseries_policy.max_slots = max_slots;
+        }
+        let timeseries_client = oximeter_db::Client::new_with_pool_policy(
+            timeseries_resolver,
+            timeseries_policy,
+            &log,
+        );
 
         // TODO-cleanup We may want to make the populator a first-class
         // background task.
