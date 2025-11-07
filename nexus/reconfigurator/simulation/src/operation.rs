@@ -97,7 +97,7 @@ impl SimOperation {
     }
 }
 
-/// The kind of restore operation, part of [`OperationKind`].
+/// The kind of restore operation, part of [`SimOperationKind`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RestoreKind {
     /// An undo operation, moving backward in time.

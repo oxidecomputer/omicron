@@ -39,7 +39,7 @@
 //!
 //! Mutating states is done by calling [`SimState::to_mut`], which returns a
 //! [`SimStateBuilder`]. Once changes are made, the state can be committed back
-//! to the system with [`SimStateBuilder::commit`].
+//! to the system with [`SimStateBuilder::commit_and_bump`].
 //!
 //! ## Determinism
 //!

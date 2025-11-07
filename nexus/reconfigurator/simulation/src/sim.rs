@@ -55,7 +55,7 @@ pub struct Simulator {
     // moved in memory, but because `root_state` is never changed, it always
     // points to the same memory address.
     root_state: Arc<SimState>,
-    // Top-level (unversioned) RNG for state UUIDs.
+    // Top-level (unversioned) RNG.
     sim_uuid_rng: TypedUuidRng<ReconfiguratorSimStateKind>,
     // Append-only operation log tracking how heads change over time, similar to
     // `jj op log`.

@@ -179,7 +179,7 @@ impl SimState {
 ///
 /// `SimStateBuilder` is ephemeral, so it can be freely mutated without
 /// affecting anything else about the system. To store it into a system, call
-/// [`Self::commit`].
+/// [`Self::commit_and_bump`].
 #[derive(Clone, Debug)]
 pub struct SimStateBuilder {
     // Used to check that the simulator is the same as the one that created
