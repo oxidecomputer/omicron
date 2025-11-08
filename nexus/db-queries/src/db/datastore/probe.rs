@@ -367,12 +367,6 @@ impl super::DataStore {
     }
 
     // Construct a page of probe-create parameters for a specific sled.
-    //
-    // # Panics
-    //
-    // This panics if the `pagparams` is not in ascending order. This method
-    // paginates a big join of all the tables needed to build these parameters.
-    // We can't use the existing `paginated` method for that.
     async fn list_probe_create_params_for_sled(
         &self,
         opctx: &OpContext,
@@ -382,11 +376,6 @@ impl super::DataStore {
         use nexus_db_schema::schema::{
             external_ip, network_interface, probe, vpc, vpc_subnet,
         };
-
-        /*
-        assert_eq!(pagparams.direction, dropshot::PaginationOrder::Ascending);
-        let marker = pagparams.marker.cloned().unwrap_or_default();
-        */
 
         // TODO-correctness: This inner join below assumes exactly one external
         // IP for each probe. That's true today because of how we specify the
@@ -416,15 +405,12 @@ impl super::DataStore {
             .inner_join(
                 vpc::dsl::vpc.on(vpc::dsl::id.eq(vpc_subnet::dsl::vpc_id)),
             )
-            //.filter(probe::dsl::id.gt(marker))
             .filter(probe::dsl::sled.eq(sled_id.into_untyped_uuid()))
             .filter(probe::dsl::time_deleted.is_null())
             .filter(external_ip::dsl::time_deleted.is_null())
             .filter(network_interface::dsl::time_deleted.is_null())
             .filter(vpc_subnet::dsl::time_deleted.is_null())
             .filter(vpc::dsl::time_deleted.is_null())
-            //.order(probe::dsl::id.asc())
-            //.limit(pagparams.limit.get().into())
             .select((
                 probe::dsl::id,
                 external_ip::dsl::ip,
