@@ -90,6 +90,7 @@ mod webhook_rx;
 // for join-based marker trait generation.
 mod deployment;
 mod ereport;
+pub mod fm;
 pub mod nat_entry;
 mod omicron_zone_config;
 mod quota;
@@ -182,6 +183,7 @@ pub use dns::*;
 pub use downstairs::*;
 pub use ereport::*;
 pub use external_ip::*;
+pub use fm::*;
 pub use generation::*;
 pub use identity_provider::*;
 pub use image::*;

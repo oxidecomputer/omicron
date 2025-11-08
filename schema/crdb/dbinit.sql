@@ -6782,6 +6782,72 @@ ON omicron.public.host_ereport (
     time_deleted IS NULL;
 
 /*
+    * Fault management situation reports (and accessories)
+    *
+    * See RFD 603 for details:
+    * https://rfd.shared.oxide.computer/rfd/603
+*/
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
+    -- The ID of this sitrep.
+    id UUID PRIMARY KEY,
+    --  The ID of the parent sitrep.
+    --
+    -- A sitrep's _parent_ is the sitrep that was current when the planning
+    -- phase that produced that sitrep ran. The parent sitrep is a planning
+    -- input that produced this sitrep.
+    --
+    -- This is effectively a foreign key back to this table; however, it is
+    -- allowed to be NULL: the initial sitrep has no parent. Additionally,
+    -- it may be non-NULL but no longer reference a row in this table: once a
+    -- child sitrep has been created from a parent, it's possible for the
+    -- parent to be deleted. We do not NULL out this field on such a deletion,
+    -- so we can always see that there had been a particular parent even if
+    -- it's now gone.
+    parent_sitrep_id UUID,
+    -- The ID of the inventory collection that was used as input to this
+    -- sitrep.
+    --
+    -- This is a foreign key that references a row in the `inv_collection`
+    -- table (and other inventory records associated with that collection).
+    --
+    -- Note that inventory collections are pruned on a separate schedule
+    -- from sitreps, so the inventory collection records may not exist.
+    inv_collection_id UUID NOT NULL,
+
+    -- These fields are not semantically meaningful and are intended
+    -- debugging purposes.
+
+    -- The time at which this sitrep was created.
+    time_created TIMESTAMPTZ NOT NULL,
+    -- The Omicron zone UUID of the Nexus instance that created this
+    -- sitrep.
+    creator_id UUID NOT NULL,
+    -- A human-readable description of the changes represented by this
+    -- sitrep.
+    comment TEXT NOT NULL
+);
+
+-- The history of current sitreps.
+--
+-- The sitrep with the highest `version` in this table is the current sitrep.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_history (
+    -- Monotonically increasing version for all FM sitreps.
+    version INT8 PRIMARY KEY,
+
+    -- Effectively a foreign key into the `fm_sitrep` table, but may
+    -- reference a fm_sitrep that has been deleted (if this sitrep is
+    --  no longer current; the current sitrep must not be deleted).
+    sitrep_id UUID NOT NULL,
+
+    -- Timestamp for when this sitrep was made current.
+    time_made_current TIMESTAMPTZ NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+    lookup_sitrep_version_by_id
+ON omicron.public.fm_sitrep_history (sitrep_id);
+
+/*
  * List of datasets available to be sliced up and passed to VMMs for instance
  * local storage.
  *
@@ -6957,7 +7023,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '204.0.0', NULL)
+    (TRUE, NOW(), NOW(), '205.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

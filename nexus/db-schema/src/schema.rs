@@ -2836,3 +2836,26 @@ allow_tables_to_appear_in_same_query!(
     physical_disk,
     rendezvous_local_storage_dataset
 );
+
+table! {
+    fm_sitrep (id) {
+        id -> Uuid,
+        parent_sitrep_id -> Nullable<Uuid>,
+        inv_collection_id -> Uuid,
+        time_created -> Timestamptz,
+        creator_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, inv_collection);
+
+table! {
+    fm_sitrep_history (version) {
+        version -> Int8,
+        sitrep_id -> Uuid,
+        time_made_current -> Timestamptz,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);

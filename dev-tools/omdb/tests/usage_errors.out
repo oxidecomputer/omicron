@@ -132,6 +132,9 @@ Commands:
   region-snapshot-replacement  Query for information about region snapshot replacements, optionally
                                manually triggering one
   saga                         Commands for querying and interacting with sagas
+  sitrep                       Commands for querying and interacting with fault management situation
+                               reports
+  sitreps                      Show the current history of fault management situation reports
   sleds                        Print information about sleds
   instance                     Print information about customer instances
   instances                    Alias to `omdb instance list`
@@ -193,6 +196,9 @@ Commands:
   region-snapshot-replacement  Query for information about region snapshot replacements, optionally
                                manually triggering one
   saga                         Commands for querying and interacting with sagas
+  sitrep                       Commands for querying and interacting with fault management situation
+                               reports
+  sitreps                      Show the current history of fault management situation reports
   sleds                        Print information about sleds
   instance                     Print information about customer instances
   instances                    Alias to `omdb instance list`
@@ -704,6 +710,40 @@ Database Options:
 Safety Options:
   -w, --destructive
           Allow potentially-destructive subcommands
+---------------------------------------------
+stderr:
+=============================================
+EXECUTING COMMAND: omdb ["db", "sitrep", "--help"]
+termination: Exited(0)
+---------------------------------------------
+stdout:
+Commands for querying and interacting with fault management situation reports
+
+Usage: omdb db sitrep [OPTIONS] <COMMAND>
+
+Commands:
+  history  List the current situation report history
+  current  Show the current situation report
+  info     Show details on a situation report
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+  -h, --help                   Print help
+
+Connection Options:
+      --db-url <DB_URL>          URL of the database SQL interface [env: OMDB_DB_URL=]
+      --dns-server <DNS_SERVER>  [env: OMDB_DNS_SERVER=]
+
+Database Options:
+      --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
+                                   OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
+
+Safety Options:
+  -w, --destructive  Allow potentially-destructive subcommands
 ---------------------------------------------
 stderr:
 =============================================
