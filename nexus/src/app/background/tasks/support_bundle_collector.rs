@@ -1177,7 +1177,8 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
     // Nexus doesn't have full control over --- it came from the ereport
     // metadata --- we must check that it doesn't contain any characters
     // unsuitable for use in a filesystem path.
-    let pn = ereport.data
+    let pn = ereport
+        .data
         .part_number
         .as_deref()
         // If the part or serial numbers contain any unsavoury characters, it
@@ -1187,13 +1188,14 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         // giving up on using it in the path.
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_part");
-    let sn = ereport.data
+    let sn = ereport
+        .data
         .serial_number
         .as_deref()
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_serial");
     let id = &ereport.data.id;
-    
+
     let dir = dir
         .join(format!("{pn}-{sn}"))
         // N.B. that we call `into_untyped_uuid()` here, as the `Display`
