@@ -12,6 +12,7 @@ use crate::{
 };
 use daft::{BTreeSetDiff, Diffable, Leaf};
 use omicron_uuid_kinds::RackUuid;
+use serde::{Deserialize, Serialize};
 use slog::{Logger, error, info, warn};
 use std::collections::BTreeSet;
 
@@ -57,7 +58,9 @@ pub struct SledExpungedError {
     last_prepared_epoch: Option<Epoch>,
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, thiserror::Error, PartialEq, Eq, Serialize, Deserialize,
+)]
 #[error("mismatched rack id: expected {expected:?}, got {got:?}")]
 pub struct MismatchedRackIdError {
     pub expected: RackUuid,
