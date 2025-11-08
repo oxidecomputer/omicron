@@ -628,7 +628,6 @@ impl QueryFragment<Pg> for ListOrphanedQuery {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-
         // WITH current_sitrep_id AS (
         //     SELECT sitrep_id
         //     FROM omicron.public.fm_sitrep_history
