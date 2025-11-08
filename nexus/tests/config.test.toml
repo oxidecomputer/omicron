@@ -192,6 +192,9 @@ webhook_deliverator.first_retry_backoff_secs = 10
 webhook_deliverator.second_retry_backoff_secs = 20
 read_only_region_replacement_start.period_secs = 999999
 sp_ereport_ingester.period_secs = 30
+# How frequently to check for a new fault management sitrep (made by any Nexus).
+# This is cheap, so we should check frequently.
+fm.sitrep_load_period_secs = 15
 probe_distributor.period_secs = 60
 
 [default_region_allocation_strategy]

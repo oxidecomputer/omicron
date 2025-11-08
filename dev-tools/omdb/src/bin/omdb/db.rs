@@ -180,6 +180,7 @@ mod blueprints;
 mod db_metadata;
 mod ereport;
 mod saga;
+mod sitrep;
 mod user_data_export;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
@@ -378,6 +379,13 @@ enum DbCommands {
     RegionSnapshotReplacement(RegionSnapshotReplacementArgs),
     /// Commands for querying and interacting with sagas
     Saga(saga::SagaArgs),
+    /// Commands for querying and interacting with fault management situation
+    /// reports.
+    Sitrep(sitrep::SitrepArgs),
+    /// Show the current history of fault management situation reports.
+    ///
+    /// This is an alias for `omdb db sitrep history`.
+    Sitreps(sitrep::SitrepHistoryArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
     /// Print information about customer instances.
@@ -1296,6 +1304,12 @@ impl DbArgs {
                     }
                     DbCommands::Saga(args) => {
                         args.exec(&omdb, &opctx, &datastore).await
+                    }
+                    DbCommands::Sitrep(args) => {
+                        sitrep::cmd_db_sitrep(&opctx, &datastore, &fetch_opts, args).await
+                    }
+                    DbCommands::Sitreps(args) => {
+                        sitrep::cmd_db_sitrep_history(&datastore, &fetch_opts, args).await
                     }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await

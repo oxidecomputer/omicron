@@ -103,6 +103,7 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
+use super::tasks::fm_sitrep_load;
 use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
@@ -146,6 +147,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::PendingMgsUpdates;
+use nexus_types::fm;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
@@ -255,6 +257,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator: Activator::new(),
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
+            task_fm_sitrep_loader: Activator::new(),
             task_probe_distributor: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
@@ -336,6 +339,7 @@ impl BackgroundTasksInitializer {
             task_webhook_deliverator,
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
+            task_fm_sitrep_loader,
             task_probe_distributor,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
@@ -1059,6 +1063,21 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "fm_sitrep_loader",
+            description:
+                "loads the current fault management situation report from \
+                 the database",
+            period: config.fm.sitrep_load_period_secs,
+            task_impl: Box::new(fm_sitrep_load::SitrepLoader::new(
+                datastore.clone(),
+                args.sitrep_load_tx,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_fm_sitrep_loader,
+        });
+
+        driver.register(TaskDefinition {
             name: "probe_distributor",
             description: "distributes networking probe zones to sleds",
             period: config.probe_distributor.period_secs,
@@ -1108,6 +1127,9 @@ pub struct BackgroundTasksData {
     pub mgs_updates_tx: watch::Sender<PendingMgsUpdates>,
     /// handle for controlling Nexus quiesce
     pub nexus_quiesce: NexusQuiesceHandle,
+    /// Channel for exposing the latest loaded fault-management sitrep.
+    pub sitrep_load_tx:
+        watch::Sender<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

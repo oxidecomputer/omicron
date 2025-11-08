@@ -2658,7 +2658,11 @@ pub(crate) mod test {
 
         assert_eq!(summary.diff.sleds.added.len(), 1);
         assert_eq!(summary.total_disks_added(), 10);
-        assert_eq!(summary.total_datasets_added(), 21);
+
+        // 10 disks added means 30 datasets (each disk adds a debug + zone root
+        //    + local storage), plus one transient zone root for the NTP zone
+        assert_eq!(summary.total_datasets_added(), 31);
+
         let (&sled_id, sled_added) =
             summary.diff.sleds.added.first_key_value().unwrap();
         // We have defined elsewhere that the first generation contains no
@@ -3524,9 +3528,13 @@ pub(crate) mod test {
         assert_eq!(summary.total_disks_added(), NEW_IN_SERVICE_DISKS);
         assert_eq!(summary.total_disks_removed(), 0);
 
-        // 1 Zone, Crucible, Transient Crucible Zone, and Debug dataset created
-        // per disk.
-        assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 4);
+        // Five new datasets created per disk:
+        // - Zone Root
+        // - Debug
+        // - Local Storage
+        // - 1 for the Crucible Agent
+        // - Transient Crucible Zone Root
+        assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 5);
         assert_eq!(summary.total_datasets_removed(), 0);
         assert_eq!(summary.total_datasets_modified(), 0);
 
@@ -3910,9 +3918,10 @@ pub(crate) mod test {
         // "decommissioned_disk_cleaner" background task for more context.
         assert_eq!(summary.total_datasets_removed(), 0);
 
-        // The disposition has changed from `InService` to `Expunged` for the 4
-        // datasets on this sled.
-        assert_eq!(summary.total_datasets_modified(), 4);
+        // The disposition has changed from `InService` to `Expunged` for the 5
+        // datasets (debug, zone root, local storage, crucible zone root, and
+        // crucible agent) on this sled.
+        assert_eq!(summary.total_datasets_modified(), 5);
         // We don't know the expected name, other than the fact it's a crucible zone
         let test_transient_zone_kind = DatasetKind::TransientZone {
             name: "some-crucible-zone-name".to_string(),
@@ -3921,6 +3930,7 @@ pub(crate) mod test {
             DatasetKind::Crucible,
             DatasetKind::Debug,
             DatasetKind::TransientZoneRoot,
+            DatasetKind::LocalStorage,
             test_transient_zone_kind.clone(),
         ]);
         let mut modified_sled_configs = Vec::new();

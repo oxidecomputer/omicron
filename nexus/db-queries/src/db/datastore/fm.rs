@@ -1,0 +1,757 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! [`DataStore`] methods on fault management internal data, such as situation
+//! reports (sitreps).
+//!
+//! See [RFD 603](https://rfd.shared.oxide.computer/rfd/0603) for details on the
+//! fault management sitrep.
+
+use super::DataStore;
+use crate::authz;
+use crate::context::OpContext;
+use crate::db::model;
+use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::pg::Pg;
+use diesel::prelude::*;
+use diesel::query_builder::AstPass;
+use diesel::query_builder::QueryFragment;
+use diesel::query_builder::QueryId;
+use diesel::result::DatabaseErrorKind;
+use diesel::result::Error as DieselError;
+use diesel::sql_types;
+use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
+use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
+use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
+use nexus_types::fm;
+use nexus_types::fm::Sitrep;
+use omicron_common::api::external::Error;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SitrepUuid;
+use uuid::Uuid;
+
+impl DataStore {
+    /// Reads the current [sitrep version](fm::SitrepVersion) from CRDB.
+    ///
+    /// If no sitreps have been generated, this returns `None`.
+    pub async fn fm_current_sitrep_version(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<fm::SitrepVersion>, Error> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let version = self
+            .fm_current_sitrep_version_on_conn(&conn)
+            .await?
+            .map(Into::into);
+        Ok(version)
+    }
+
+    async fn fm_current_sitrep_version_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<Option<model::SitrepVersion>, Error> {
+        history_dsl::fm_sitrep_history
+            .order_by(history_dsl::version.desc())
+            .select(model::SitrepVersion::as_select())
+            .first_async(conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Reads the [`fm::SitrepMetadata`] describing the sitrep with the given
+    /// ID, if one exists.
+    pub async fn fm_sitrep_metadata_read(
+        &self,
+        opctx: &OpContext,
+        id: SitrepUuid,
+    ) -> Result<fm::SitrepMetadata, Error> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let meta =
+            self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
+        Ok(meta)
+    }
+
+    async fn fm_sitrep_metadata_read_on_conn(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<model::SitrepMetadata, Error> {
+        sitrep_dsl::fm_sitrep
+            .filter(sitrep_dsl::id.eq(id.into_untyped_uuid()))
+            .select(model::SitrepMetadata::as_select())
+            .first_async(conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .ok_or_else(|| {
+                Error::non_resourcetype_not_found(format!("sitrep {id:?}"))
+            })
+    }
+
+    /// Reads the *entire* current sitrep, along with its version.
+    ///
+    /// This is equivalent to reading the current sitrep version using
+    /// [`DataStore::fm_current_sitrep_version`], and then reading the sitrep
+    /// itself using [`DataStore::fm_sitrep_read`].
+    ///
+    /// If this method returns `None`, there is no current sitrep, meaning that
+    /// no sitreps have been created.
+    pub async fn fm_sitrep_read_current(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<(fm::SitrepVersion, Sitrep)>, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let version: fm::SitrepVersion =
+            match self.fm_current_sitrep_version_on_conn(&conn).await? {
+                Some(version) => version.into(),
+                None => return Ok(None),
+            };
+        let sitrep = self.fm_sitrep_read_on_conn(version.id, &conn).await?;
+        Ok(Some((version, sitrep)))
+    }
+
+    /// Reads the entire content of the sitrep with the provided ID, if one exists.
+    pub async fn fm_sitrep_read(
+        &self,
+        opctx: &OpContext,
+        id: SitrepUuid,
+    ) -> Result<Sitrep, Error> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.fm_sitrep_read_on_conn(id, &conn).await
+    }
+
+    async fn fm_sitrep_read_on_conn(
+        &self,
+        id: SitrepUuid,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<Sitrep, Error> {
+        let metadata =
+            self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
+
+        // TODO(eliza): this is where we would read all the other sitrep data,
+        // if there was any.
+
+        Ok(Sitrep { metadata })
+    }
+
+    /// Insert the provided [`Sitrep`] into the database, and attempt to mark it
+    /// as the current sitrep.
+    ///
+    /// If the sitrep's parent is not the current sitrep, the new sitrep is not
+    /// added to the sitrep history, and an error is returned. See [this
+    /// section](https://rfd.shared.oxide.computer/rfd/0603#_creating_sitreps)
+    /// in RFD 603 for details.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if the new sitrep was both successfully inserted *and* added
+    ///   to the sitrep history as the current sitrep.
+    ///
+    /// - `Err(`[`InsertSitrepError::ParentNotCurrent`]`)` if the sitrep's
+    ///    `parent_sitrep_id` is not the current sitrep, indicating that it was
+    ///    generated based on out of date inputs.
+    ///
+    ///    This error indicates that the sitrep is orphaned and should be
+    ///    deleted. It is out of date, and another sitrep has already been
+    ///    generated based on the same inputs.
+    ///
+    /// - `Err(`[`InsertSitrepError::Other`]`)` if another error occurred while
+    ///    inserting the sitrep.
+    pub async fn fm_sitrep_insert(
+        &self,
+        opctx: &OpContext,
+        sitrep: &Sitrep,
+    ) -> Result<(), InsertSitrepError> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // TODO(eliza): there should probably be an authz object for the fm sitrep?
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        // Create the sitrep metadata record.
+        diesel::insert_into(sitrep_dsl::fm_sitrep)
+            .values(model::SitrepMetadata::from(sitrep.metadata.clone()))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+                    .internal_context("failed to insert sitrep metadata record")
+            })?;
+
+        // TODO(eliza): other sitrep records would be inserted here...
+
+        // Now, try to make the sitrep current.
+        let query = InsertSitrepVersionQuery { sitrep_id: sitrep.id() };
+        query
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| query.decode_error(e))
+            .map(|_| ())
+    }
+}
+
+/// Errors returned by [`DataStore::fm_sitrep_insert`].
+#[derive(Debug, thiserror::Error)]
+pub enum InsertSitrepError {
+    #[error(transparent)]
+    Other(#[from] Error),
+    /// The parent sitrep ID is no longer the current sitrep.
+    #[error("sitrep {0}'s parent is not the current sitrep")]
+    ParentNotCurrent(SitrepUuid),
+}
+
+/// Query to insert a new sitrep version into the `fm_sitrep_history` table,
+/// making it the current sitrep.
+///
+/// This implements the "compare-and-swap" operation [described in RFD
+/// 603](https://rfd.shared.oxide.computer/rfd/0603#_creating_sitreps). In
+/// particular, this query will insert a new sitrep version into the
+/// `fm_sitrep_history` table IF AND ONLY IF one of the following conditions
+/// are true:
+///
+/// 1. The new sitrep's parent sitrep ID is the current sitrep (i.e. the sitrep
+///    with the highest version number in `fm_sitrep_history`)
+/// 2. The new sitrep's parent sitrep ID is `NULL`, AND there are no other
+///    sitreps in `fm_sitrep_history` (i.e., we are inserting the first-ever
+///    sitrep)
+///
+/// Upholding these invariants ensures that sitreps are sequentially consistent,
+/// and `fm_sitrep_history` always contains a linear history of sitreps which
+/// were generated based on the previous current sitrep.
+///
+/// The CTE used to perform this operation is based on the one used in the
+/// `deployment` module to insert blueprints into the `bp_target` table. It
+/// differs in that it does not perform an existence check on the sitrep to be
+/// made current. This is because the `db::datastore::deployment` module's
+/// public API treats inserting a new blueprint and setting it as the current
+/// target as separate operations, so it is possible for a consumer of the API
+/// to try and set a blueprint as the target without first having created it.
+/// Here, however, we only ever set a sitrep as the current sitrep in the
+/// `Datastore::fm_sitrep_insert` method, which also creates the sitrep. So, it
+/// is impossible for a consumer of this API to attempt to make a sitrep current
+/// without having first created it.
+///
+/// The SQL generated for this CTE looks like this:
+///
+/// ```sql
+/// WITH
+///   -- Subquery to fetch the current sitrep (i.e., the row with the max
+///   -- version).
+///   current_sitrep AS (
+///     SELECT
+///       "version" AS version,
+///       "sitrep_id" AS sitrep_id,
+///     FROM "fm_sitrep_history"
+///     ORDER BY "version" DESC
+///     LIMIT 1
+///   ),
+///
+///   -- Error checking subquery: This uses similar tricks as elsewhere in
+///   -- this crate to `CAST(... AS UUID)` with non-UUID values that result
+///   -- in runtime errors in specific cases, allowing us to give accurate
+///   -- error messages.
+///   --
+///   -- This checks that the sitrep descends directly from the current
+///   -- sitrep, and will fail the query if it does not.
+///   check_validity AS MATERIALIZED (
+///     SELECT CAST(IF(
+///       -- Check for whether our new sitrep's parent matches our current
+///       -- sitrep. There are two cases here: The first is the common case
+///       -- (i.e., the new sitrep has a parent: does it match the current
+///       -- sitrep ID?). The second is the bootstrapping check: if we're
+///       -- trying to insert a new sitrep that does not have a parent,
+///       -- we should not have a sitrep target at all.
+///       --
+///       -- If either of these cases fails, we return `parent-not-current`.
+///       (
+///          SELECT "parent_sitrep_id" FROM "sitrep", current_sitrep
+///          WHERE
+///            "id" = <new_sitrep_id>
+///            AND current_sitrep.sitrep_id = "parent_sitrep_id"
+///       ) IS NOT NULL
+///       OR
+///       (
+///          SELECT 1 FROM "sitrep"
+///          WHERE
+///            "id" = <new_target_id>
+///            AND "parent_sitrep_id" IS NULL
+///            AND NOT EXISTS (SELECT version FROM current_sitrep)
+///       ) = 1,
+///       -- Sometime between v22.1.9 and v22.2.19, Cockroach's type checker
+///       -- became too smart for our `CAST(... as UUID)` error checking
+///       -- gadget: it can infer that `<new_target_id>` must be a UUID, so
+///       -- then tries to parse 'parent-not-target' and 'no-such-blueprint'
+///       -- as UUIDs _during typechecking_, which causes the query to always
+///       -- fail. We can defeat this by casting the UUID to text here, which
+///       -- will allow the 'parent-not-target' and 'no-such-blueprint'
+///       -- sentinels to survive type checking, making it to query execution
+///       -- where they will only be cast to UUIDs at runtime in the failure
+///       -- cases they're supposed to catch.
+///       CAST(<new_sitrep_id> AS text),
+///       'parent-not-current'
+///     ) AS UUID)
+///   ),
+///
+///   -- Determine the new version number to use: either 1 if this is the
+///   -- first sitrep being made the current sitrep, or 1 higher than
+///   -- the previous sitrep's version.
+///   --
+///   -- The final clauses of each of these WHERE clauses repeat the
+///   -- checks performed above in `check_validity`, and will cause this
+///   -- subquery to return no rows if we should not allow the new
+///   -- target to be set.
+///   new_sitrep AS (
+///     SELECT 1 AS new_version FROM "sitrep"
+///       WHERE
+///         "id" = <new_sitrep_id>
+///         AND "parent_sitrep_id" IS NULL
+///         AND NOT EXISTS (SELECT version FROM current_sitrep)
+///     UNION
+///     SELECT current_sitrep.version + 1 FROM current_sitrep, "sitrep"
+///       WHERE
+///         "id" = <new_sitrep_id>
+///         AND "parent_sitrep_id" IS NOT NULL
+///         AND "parent_sitrep_id" = current_sitrep.sitrep_id
+///   )
+///
+///   -- Perform the actual insertion.
+///   INSERT INTO "sitrep_history"(
+///     "version","sitrep_id","time_made_current"
+///   )
+///   SELECT
+///     new_sitrep.new_version,
+///     <new_sitrep_id>,
+///     NOW()
+///     FROM new_sitrep
+/// ```
+#[derive(Debug, Clone, Copy)]
+struct InsertSitrepVersionQuery {
+    sitrep_id: SitrepUuid,
+}
+
+// Uncastable sentinel used to detect we attempt to make a sitrep current when
+// its parent sitrep ID is no longer the current sitrep.
+const PARENT_NOT_CURRENT: &str = "parent-not-current";
+
+// Error messages generated from the above sentinel values.
+const PARENT_NOT_CURRENT_ERROR_MESSAGE: &str = "could not parse \
+    \"parent-not-current\" as type uuid: \
+     uuid: incorrect UUID length: parent-not-current";
+
+impl InsertSitrepVersionQuery {
+    fn decode_error(&self, err: DieselError) -> InsertSitrepError {
+        match err {
+            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
+                if info.message() == PARENT_NOT_CURRENT_ERROR_MESSAGE =>
+            {
+                InsertSitrepError::ParentNotCurrent(self.sitrep_id)
+            }
+            err => {
+                let err = public_error_from_diesel(err, ErrorHandler::Server)
+                    .internal_context("failed to insert new sitrep version");
+                InsertSitrepError::Other(err)
+            }
+        }
+    }
+}
+
+impl QueryId for InsertSitrepVersionQuery {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
+
+impl QueryFragment<Pg> for InsertSitrepVersionQuery {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
+        use nexus_db_schema::schema;
+        const CURRENT_SITREP: &'static str = "current_sitrep";
+        type FromClause<T> =
+            diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
+        const SITREP_FROM_CLAUSE: FromClause<schema::fm_sitrep::table> =
+            FromClause::new();
+        const SITREP_HISTORY_FROM_CLAUSE: FromClause<
+            schema::fm_sitrep_history::table,
+        > = FromClause::new();
+
+        out.push_sql("WITH ");
+
+        out.push_identifier(CURRENT_SITREP)?;
+        out.push_sql(" AS (SELECT ");
+        out.push_identifier(history_dsl::version::NAME)?;
+        out.push_sql(" AS version,");
+        out.push_identifier(history_dsl::sitrep_id::NAME)?;
+        out.push_sql(" AS sitrep_id");
+        out.push_sql(" FROM ");
+        SITREP_HISTORY_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" ORDER BY ");
+        out.push_identifier(history_dsl::version::NAME)?;
+        out.push_sql(" DESC LIMIT 1),");
+
+        out.push_sql(
+            "check_validity AS MATERIALIZED ( \
+               SELECT \
+                 CAST( \
+                   IF(",
+        );
+        out.push_sql("(SELECT ");
+        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
+        out.push_sql(" FROM ");
+        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(", ");
+        out.push_identifier(CURRENT_SITREP)?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(sitrep_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            self.sitrep_id.as_untyped_uuid(),
+        )?;
+        out.push_sql(" AND ");
+        out.push_identifier(CURRENT_SITREP)?;
+        out.push_sql(".sitrep_id = ");
+        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
+        out.push_sql(
+            ") IS NOT NULL \
+            OR \
+            (SELECT 1 FROM ",
+        );
+        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(sitrep_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            self.sitrep_id.as_untyped_uuid(),
+        )?;
+        out.push_sql(" AND ");
+        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
+        out.push_sql(
+            "IS NULL \
+            AND NOT EXISTS ( \
+                SELECT version FROM current_sitrep) \
+            ) = 1, ",
+        );
+        out.push_sql("  CAST(");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            self.sitrep_id.as_untyped_uuid(),
+        )?;
+        out.push_sql("  AS text), ");
+        out.push_bind_param::<sql_types::Text, &'static str>(
+            &PARENT_NOT_CURRENT,
+        )?;
+        out.push_sql(
+            ") \
+            AS UUID) \
+          ), ",
+        );
+
+        out.push_sql("new_sitrep AS (SELECT 1 AS new_version FROM ");
+        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(sitrep_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            self.sitrep_id.as_untyped_uuid(),
+        )?;
+        out.push_sql(" AND ");
+        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
+        out.push_sql(
+            " IS NULL \
+            AND NOT EXISTS \
+            (SELECT version FROM current_sitrep) \
+             UNION \
+            SELECT current_sitrep.version + 1 FROM \
+              current_sitrep, ",
+        );
+        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(sitrep_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            self.sitrep_id.as_untyped_uuid(),
+        )?;
+        out.push_sql(" AND ");
+        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
+        out.push_sql(" IS NOT NULL AND ");
+        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
+        out.push_sql(" = current_sitrep.sitrep_id) ");
+
+        out.push_sql("INSERT INTO ");
+        SITREP_HISTORY_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql("(");
+        out.push_identifier(history_dsl::version::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(history_dsl::sitrep_id::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(history_dsl::time_made_current::NAME)?;
+        out.push_sql(") SELECT new_sitrep.new_version, ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(
+            self.sitrep_id.as_untyped_uuid(),
+        )?;
+        out.push_sql(", NOW()");
+        out.push_sql(" FROM new_sitrep");
+
+        Ok(())
+    }
+}
+
+impl RunQueryDsl<DbConnection> for InsertSitrepVersionQuery {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::explain::ExplainableAsync;
+    use crate::db::pub_test_utils::TestDatabase;
+    use chrono::Utc;
+    use omicron_test_utils::dev;
+    use omicron_uuid_kinds::CollectionUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
+
+    #[tokio::test]
+    async fn explain_insert_sitrep_version_query() {
+        let logctx = dev::test_setup_log("explain_insert_sitrep_version_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let query = InsertSitrepVersionQuery { sitrep_id: SitrepUuid::nil() };
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+        eprintln!("{explanation}");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_sitrep_without_parent() {
+        // Setup
+        let logctx = dev::test_setup_log("test_insert_sitrep_without_parent");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        // Base case: there should be no current sitrep.
+        let current = datastore.fm_sitrep_read_current(&opctx).await.unwrap();
+        assert!(current.is_none());
+
+        // Okay, let's create a new sitrep.
+        let sitrep = nexus_types::fm::Sitrep {
+            metadata: nexus_types::fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "TEST SITREP PLEASE IGNORE".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+        };
+
+        datastore.fm_sitrep_insert(&opctx, &sitrep).await.unwrap();
+
+        let current = datastore
+            .fm_sitrep_read_current(&opctx)
+            .await
+            .expect("should successfully read current sitrep");
+        let (version, current_sitrep) = current.expect("sitrep should be Some");
+        assert_eq!(version.id, sitrep.metadata.id);
+        assert_eq!(version.version, 1);
+        assert_eq!(sitrep.id(), current_sitrep.id());
+        assert_eq!(sitrep.parent_id(), current_sitrep.parent_id());
+        assert_eq!(
+            sitrep.metadata.creator_id,
+            current_sitrep.metadata.creator_id
+        );
+        assert_eq!(sitrep.metadata.comment, current_sitrep.metadata.comment);
+
+        // Trying to insert the same sitrep again should fail.
+        let err =
+            datastore.fm_sitrep_insert(&opctx, &sitrep).await.unwrap_err();
+        assert!(err.to_string().contains("duplicate key"));
+
+        // Clean up.
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_sitrep_with_current_parent() {
+        let logctx =
+            dev::test_setup_log("test_insert_sitrep_with_current_parent");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+        let creator_id = OmicronZoneUuid::new_v4();
+        // Create an initial sitrep (no parent)
+        let sitrep1 = nexus_types::fm::Sitrep {
+            metadata: nexus_types::fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id,
+                comment: "TEST SITREP 1".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+        };
+        datastore.fm_sitrep_insert(&opctx, &sitrep1).await.unwrap();
+
+        // Create a second sitrep with the first as parent
+        let sitrep2 = nexus_types::fm::Sitrep {
+            metadata: nexus_types::fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id,
+                comment: "TEST SITREP 2".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: Some(sitrep1.id()),
+            },
+        };
+        datastore.fm_sitrep_insert(&opctx, &sitrep2).await.expect(
+            "inserting a sitrep whose parent is current should succeed",
+        );
+
+        // Verify the second sitrep is now current
+        let (version, current_sitrep) = datastore
+            .fm_sitrep_read_current(&opctx)
+            .await
+            .unwrap()
+            .expect("current sitrep should be Some");
+        assert_eq!(version.id, sitrep2.id());
+        assert_eq!(version.version, 2);
+        assert_eq!(sitrep2.id(), current_sitrep.id());
+        assert_eq!(sitrep2.parent_id(), current_sitrep.parent_id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_sitrep_with_nonexistent_parent_fails() {
+        let logctx = dev::test_setup_log(
+            "test_insert_sitrep_with_nonexistent_parent_fails",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let creator_id = OmicronZoneUuid::new_v4();
+
+        // Create an initial sitrep (no parent)
+        let sitrep1 = nexus_types::fm::Sitrep {
+            metadata: nexus_types::fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id,
+                comment: "TEST SITREP 1".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+        };
+        datastore.fm_sitrep_insert(&opctx, &sitrep1).await.unwrap();
+
+        // Try to insert a sitrep with a non-existent parent ID
+        let nonexistent_id = SitrepUuid::new_v4();
+        let sitrep2 = nexus_types::fm::Sitrep {
+            metadata: nexus_types::fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id,
+                comment: "TEST SITREP WITH BAD PARENT".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: Some(nonexistent_id),
+            },
+        };
+
+        let result = datastore.fm_sitrep_insert(&opctx, &sitrep2).await;
+
+        // Should fail with ParentNotCurrent error
+        match result {
+            Err(super::InsertSitrepError::ParentNotCurrent(_)) => {}
+            _ => panic!("expected ParentNotCurrent error, got {result:?}"),
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_insert_sitrep_with_outdated_parent_fails() {
+        let logctx = dev::test_setup_log(
+            "test_insert_sitrep_with_outdated_parent_fails",
+        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let creator_id = OmicronZoneUuid::new_v4();
+
+        // Create an initial sitrep (no parent)
+        let sitrep1 = nexus_types::fm::Sitrep {
+            metadata: nexus_types::fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id,
+                comment: "TEST SITREP 1".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: None,
+            },
+        };
+        datastore.fm_sitrep_insert(&opctx, &sitrep1).await.unwrap();
+
+        // Create a second sitrep with the first as parent
+        let sitrep2 = nexus_types::fm::Sitrep {
+            metadata: nexus_types::fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id,
+                comment: "TEST SITREP 2".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: Some(sitrep1.id()),
+            },
+        };
+        datastore.fm_sitrep_insert(&opctx, &sitrep2).await.unwrap();
+
+        // Try to create a third sitrep with sitrep1 (outdated) as parent.
+        // This should fail, as sitrep2 is now the current sitrep.
+        let sitrep3 = nexus_types::fm::Sitrep {
+            metadata: nexus_types::fm::SitrepMetadata {
+                id: SitrepUuid::new_v4(),
+                inv_collection_id: CollectionUuid::new_v4(),
+                creator_id: OmicronZoneUuid::new_v4(),
+                comment: "TEST SITREP 3 WITH OUTDATED PARENT".to_string(),
+                time_created: Utc::now(),
+                parent_sitrep_id: Some(sitrep1.id()),
+            },
+        };
+        let result = datastore.fm_sitrep_insert(&opctx, &sitrep3).await;
+
+        // Should fail with ParentNotCurrent error
+        match result {
+            Err(InsertSitrepError::ParentNotCurrent(_)) => {}
+            _ => panic!("expected ParentNotCurrent error, got {result:?}"),
+        }
+
+        // Verify sitrep2 is still current
+        let (version, current_sitrep) = datastore
+            .fm_sitrep_read_current(&opctx)
+            .await
+            .unwrap()
+            .expect("current sitrep should be Some");
+        assert_eq!(version.id, sitrep2.id());
+        assert_eq!(version.version, 2);
+        assert_eq!(sitrep2.id(), current_sitrep.id());
+        assert_eq!(sitrep2.parent_id(), current_sitrep.parent_id());
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+}
