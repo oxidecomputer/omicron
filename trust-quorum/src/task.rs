@@ -63,27 +63,27 @@ pub struct Config {
 /// LRTQ upgrade.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoordinatorStatus {
-    config: Configuration,
-    acked_prepares: BTreeSet<BaseboardId>,
+    pub config: Configuration,
+    pub acked_prepares: BTreeSet<BaseboardId>,
 }
 
 // Details about a given node's status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeStatus {
-    connected_peers: BTreeSet<BaseboardId>,
-    alarms: BTreeSet<Alarm>,
-    persistent_state: NodePersistentStateSummary,
+    pub connected_peers: BTreeSet<BaseboardId>,
+    pub alarms: BTreeSet<Alarm>,
+    pub persistent_state: NodePersistentStateSummary,
 }
 
 /// A summary of a node's persistent state, leaving out things like key shares
 /// and hashes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodePersistentStateSummary {
-    has_lrtq_share: bool,
-    configs: BTreeSet<Epoch>,
-    shares: BTreeSet<Epoch>,
-    commits: BTreeSet<Epoch>,
-    expunged: Option<ExpungedMetadata>,
+    pub has_lrtq_share: bool,
+    pub configs: BTreeSet<Epoch>,
+    pub shares: BTreeSet<Epoch>,
+    pub commits: BTreeSet<Epoch>,
+    pub expunged: Option<ExpungedMetadata>,
 }
 
 impl From<&PersistentState> for NodePersistentStateSummary {
@@ -142,6 +142,34 @@ pub enum NodeApiRequest {
         rack_id: RackUuid,
         epoch: Epoch,
         tx: oneshot::Sender<Result<CommitStatus, CommitError>>,
+    },
+
+    /// Proxy a `Commit` operation to another node
+    ///
+    /// When sled-agent is not running there is no direct way to issue `commit`
+    /// operations from Nexus. This occurs when when a node has not yet joined a
+    /// trust quorum configuration, but the mechanism is also useful during RSS.
+    /// In these cases, we need to take an existing node that we have access to
+    /// and proxy requests over sprockets to the `destination` node.
+    ProxyCommit {
+        destination: BaseboardId,
+        rack_id: RackUuid,
+        epoch: Epoch,
+        tx: oneshot::Sender<Result<CommitStatus, CommitError>>,
+    },
+
+    /// Proxy a `PrepareAndCommit` operation from RSS/Nexus to another node
+    ///
+    /// When `sled-agent` is not running there is no direct way to issue
+    /// `prepare_and_commit` operations from Nexus. This occurs when when a
+    /// node has not yet joined a trust quorum configuration, but the mechanism
+    /// is also useful during RSS. In these cases, we need to take an existing
+    /// node that we have access to and proxy requests over sprockets to the
+    /// `destination` node.
+    ProxyPrepareAndCommit {
+        destination: BaseboardId,
+        config: Configuration,
+        tx: oneshot::Sender<Result<CommitStatus, PrepareAndCommitError>>,
     },
 
     /// Coordinate a reconfiguration at this node
@@ -609,6 +637,16 @@ impl NodeTask {
                     });
                 self.save_persistent_state().await;
                 let _ = tx.send(res);
+            }
+            NodeApiRequest::ProxyCommit { destination, rack_id, epoch, tx } => {
+                todo!()
+            }
+            NodeApiRequest::ProxyPrepareAndCommit {
+                destination,
+                config,
+                tx,
+            } => {
+                todo!()
             }
             NodeApiRequest::Reconfigure { msg, tx } => {
                 let res =
