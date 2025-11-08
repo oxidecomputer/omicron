@@ -148,6 +148,34 @@ pub enum NodeApiRequest {
         tx: oneshot::Sender<Result<CommitStatus, CommitError>>,
     },
 
+    /// Proxy a `Commit` operation to another node
+    ///
+    /// When sled-agent is not running there is no direct way to issue `commit`
+    /// operations from Nexus. This occurs when when a node has not yet joined a
+    /// trust quorum configuration, but the mechanism is also useful during RSS.
+    /// In these cases, we need to take an existing node that we have access to
+    /// and proxy requests over sprockets to the `destination` node.
+    ProxyCommit {
+        destination: BaseboardId,
+        rack_id: RackUuid,
+        epoch: Epoch,
+        tx: oneshot::Sender<Result<CommitStatus, CommitError>>,
+    },
+
+    /// Proxy a `PrepareAndCommit` operation from RSS/Nexus to another node
+    ///
+    /// When `sled-agent` is not running there is no direct way to issue
+    /// `prepare_and_commit` operations from Nexus. This occurs when when a
+    /// node has not yet joined a trust quorum configuration, but the mechanism
+    /// is also useful during RSS. In these cases, we need to take an existing
+    /// node that we have access to and proxy requests over sprockets to the
+    /// `destination` node.
+    ProxyPrepareAndCommit {
+        destination: BaseboardId,
+        config: Configuration,
+        tx: oneshot::Sender<Result<CommitStatus, PrepareAndCommitError>>,
+    },
+
     /// Coordinate a reconfiguration at this node
     Reconfigure {
         msg: ReconfigureMsg,
@@ -670,6 +698,16 @@ impl NodeTask {
             NodeApiRequest::PrepareAndCommit { config, tx } => {
                 let res = self.prepare_and_commit(config).await;
                 let _ = tx.send(res);
+            }
+            NodeApiRequest::ProxyCommit { destination, rack_id, epoch, tx } => {
+                todo!()
+            }
+            NodeApiRequest::ProxyPrepareAndCommit {
+                destination,
+                config,
+                tx,
+            } => {
+                todo!()
             }
             NodeApiRequest::Reconfigure { msg, tx } => {
                 let res =

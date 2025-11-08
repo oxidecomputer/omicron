@@ -1298,8 +1298,10 @@ impl ServiceInner {
                 .cloned()
                 .map(|id| id.try_into().expect("known baseboard type"))
                 .collect();
+            let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
 
-            init_trust_quorum(&self.log, trust_quorum, tq_members).await?;
+            init_trust_quorum(&self.log, trust_quorum, tq_members, rack_id)
+                .await?;
         }
 
         // Save the relevant network config in the bootstore. We want this to
@@ -1495,20 +1497,45 @@ impl ServiceInner {
 
 async fn init_trust_quorum(
     log: &Logger,
-    trust_quorum: trust_quorum::NodeTaskHandle,
+    trust_quorum_handle: trust_quorum::NodeTaskHandle,
     members: BTreeSet<BaseboardId>,
+    rack_id: RackUuid,
 ) -> Result<(), NodeApiError> {
-    let threshold = trust_quorum_protocol::Threshold(
-        (tq_members.len() as u8 / 2 + 1) as u8,
-    );
+    let threshold =
+        trust_quorum_protocol::Threshold((members.len() as u8 / 2 + 1) as u8);
 
     let msg = trust_quorum_protocol::ReconfigureMsg {
-        rack_id: RackUuid::from_untyped_uuid(sled_plan.rack_id),
+        rack_id,
         epoch: trust_quorum_protocol::Epoch(1),
         last_committed_epoch: None,
-        members: tq_members,
+        members: members.clone(),
         threshold,
     };
+
+    // Start the initial configuration with this node as coordinator
+    trust_quorum_handle.reconfigure(msg).await?;
+
+    // Poll indefinitely until all nodes have prepared
+    info!(log, "RSS: Starting to prepare trust quorum initial configuration");
+    loop {
+        let status = trust_quorum_handle
+            .coordinator_status()
+            .await?
+            .expect("This node is a coordinator");
+
+        if status.acked_prepares == members {
+            info!(log, "RSS: trust quorum prepared at all nodes");
+            break;
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    info!(log, "RSS: Starting to commit trust quorum initial configuration");
+    // Continue to commit at all nodes until done
+    loop {}
+
+    Ok(())
 }
 
 /// The service plan describes all the zones that we will eventually
