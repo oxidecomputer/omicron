@@ -19,6 +19,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::AstPass;
+use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::result::DatabaseErrorKind;
@@ -27,6 +28,7 @@ use diesel::sql_types;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_schema::schema;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_types::fm;
@@ -215,56 +217,21 @@ impl DataStore {
     pub async fn fm_sitrep_list_orphaned(
         &self,
         opctx: &OpContext,
-        version: &fm::SitrepVersion,
-    ) -> ListResultVec<fm::SitrepMetadata> {
+        pagparams: DataPageParams<'_, SitrepUuid>,
+    ) -> ListResultVec<SitrepUuid> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO(eliza): there should probably be an authz object for the fm sitrep?
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        // First, fetch the sitrep metadata for the selected version. We must do
-        // this in order to determine the parent of that sitrep, so that we can
-        // select all other sitreps with that parent.
-        let meta = self
-            .fm_sitrep_metadata_read_on_conn(version.id, &conn)
+        let list = ListOrphanedQuery::new(&pagparams)
+            .load_async::<Uuid>(&*conn)
             .await
-            .map_err(|e| {
-                e.internal_context("fetching metadata for committed sitrep")
-            })?;
-
-        // Okay, now actually list all the sitreps with the same parent as that
-        // version
-        let sitreps = if let Some(parent_id) = meta.parent_sitrep_id {
-            Self::list_orphaned_query(
-                meta.id.into_untyped_uuid(),
-                parent_id.into_untyped_uuid(),
-            )
-            .load_async(&*conn)
-            .await
-        } else {
-            sitrep_dsl::fm_sitrep
-                .filter(sitrep_dsl::parent_sitrep_id.is_null())
-                .filter(sitrep_dsl::id.ne(meta.id))
-                .select(model::SitrepMetadata::as_select())
-                .load_async(&*conn)
-                .await
-        }
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        .into_iter()
-        .map(fm::SitrepMetadata::from)
-        .collect();
-
-        Ok(sitreps)
-    }
-
-    fn list_orphaned_query(
-        committed_id: Uuid,
-        parent_id: Uuid,
-    ) -> impl RunnableQuery<model::SitrepMetadata> {
-        sitrep_dsl::fm_sitrep
-            .filter(sitrep_dsl::parent_sitrep_id.eq(parent_id))
-            .filter(sitrep_dsl::id.ne(committed_id))
-            .select(model::SitrepMetadata::as_select())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .map(|id| SitrepUuid::from_untyped_uuid(id))
+            .collect();
+        Ok(list)
     }
 
     /// Deletes all sitreps with the provided IDs.
@@ -503,23 +470,21 @@ impl QueryId for InsertSitrepVersionQuery {
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
+type FromClause<T> =
+    diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
+const SITREP_FROM_CLAUSE: FromClause<schema::fm_sitrep::table> =
+    FromClause::new();
+const SITREP_HISTORY_FROM_CLAUSE: FromClause<schema::fm_sitrep_history::table> =
+    FromClause::new();
+
 impl QueryFragment<Pg> for InsertSitrepVersionQuery {
     fn walk_ast<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-        use nexus_db_schema::schema;
         const CURRENT_SITREP: &'static str = "current_sitrep";
-        type FromClause<T> =
-            diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-        const SITREP_FROM_CLAUSE: FromClause<schema::fm_sitrep::table> =
-            FromClause::new();
-        const SITREP_HISTORY_FROM_CLAUSE: FromClause<
-            schema::fm_sitrep_history::table,
-        > = FromClause::new();
 
         out.push_sql("WITH ");
-
         out.push_identifier(CURRENT_SITREP)?;
         out.push_sql(" AS (SELECT ");
         out.push_identifier(history_dsl::version::NAME)?;
@@ -640,10 +605,150 @@ impl QueryFragment<Pg> for InsertSitrepVersionQuery {
 
 impl RunQueryDsl<DbConnection> for InsertSitrepVersionQuery {}
 
+/// CTE for listing orphaned sitreps (paginated).
+#[derive(Debug, Clone, Copy)]
+struct ListOrphanedQuery {
+    marker: Option<SitrepUuid>,
+    order: dropshot::PaginationOrder,
+    limit: i32,
+}
+
+impl ListOrphanedQuery {
+    fn new(pagparams: &DataPageParams<'_, SitrepUuid>) -> Self {
+        Self {
+            marker: pagparams.marker.clone().copied(),
+            order: pagparams.direction,
+            limit: pagparams.limit.get() as i32,
+        }
+    }
+}
+
+impl QueryFragment<Pg> for ListOrphanedQuery {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
+
+        // WITH current_sitrep_id AS (
+        //     SELECT sitrep_id
+        //     FROM omicron.public.fm_sitrep_history
+        //     ORDER BY version DESC
+        //     LIMIT 1
+        // ),
+        const CURRENT_SITREP_ID: &'static str = "current_sitrep_id";
+        out.push_sql("WITH ");
+        out.push_identifier(CURRENT_SITREP_ID)?;
+        out.push_sql(" AS (SELECT ");
+        out.push_identifier(history_dsl::sitrep_id::NAME)?;
+        out.push_sql(" FROM ");
+        SITREP_HISTORY_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" ORDER BY ");
+        out.push_identifier(history_dsl::version::NAME)?;
+        out.push_sql(" DESC LIMIT 1),");
+
+        // batch AS (
+        //     SELECT s.id, s.parent_sitrep_id
+        //     FROM omicron.public.fm_sitrep s
+        //     WHERE s.id > $1
+        //     ORDER BY s.id
+        //     LIMIT $2
+        // )
+        const BATCH: &'static str = "batch";
+        out.push_identifier(BATCH)?;
+        out.push_sql(" AS (SELECT ");
+        out.push_identifier(sitrep_dsl::id::NAME)?;
+        out.push_sql(", ");
+        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
+        out.push_sql(" FROM ");
+        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        if let Some(ref marker) = self.marker {
+            out.push_sql(" WHERE ");
+            out.push_identifier(sitrep_dsl::id::NAME)?;
+            out.push_sql(match self.order {
+                dropshot::PaginationOrder::Ascending => " > ",
+                dropshot::PaginationOrder::Descending => " < ",
+            });
+            out.push_bind_param::<sql_types::Uuid, Uuid>(
+                marker.as_untyped_uuid(),
+            )?;
+        }
+        out.push_sql(" ORDER BY ");
+        out.push_identifier(sitrep_dsl::id::NAME)?;
+        match self.order {
+            dropshot::PaginationOrder::Ascending => out.push_sql(" ASC"),
+            dropshot::PaginationOrder::Descending => out.push_sql(" DESC"),
+        }
+        out.push_sql(" LIMIT ");
+        out.push_bind_param::<sql_types::Integer, i32>(&self.limit)?;
+        out.push_sql(") ");
+
+        // SELECT id
+        // FROM omicron.public.fm_sitrep
+        // WHERE id IN (
+        //     SELECT b.id
+        //     FROM batch b
+        //     -- Lookup the sitrep in the history
+        //     LEFT JOIN omicron.public.fm_sitrep_history h ON h.sitrep_id = b.id
+        //     -- Find sitreps missing from history
+        //     WHERE h.sitrep_id IS NULL
+        //       -- ... where the sitrep cannot be made active
+        //       AND (b.parent_sitrep_id IS NULL
+        //            OR b.parent_sitrep_id != (SELECT sitrep_id FROM current_sitrep_id))
+        // );
+        out.push_sql("SELECT ");
+        out.push_identifier(sitrep_dsl::id::NAME)?;
+        out.push_sql(" FROM ");
+        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(sitrep_dsl::id::NAME)?;
+        out.push_sql(" IN (");
+        out.push_sql("SELECT ");
+        out.push_identifier(BATCH)?;
+        out.push_sql(".id");
+        out.push_sql(" FROM ");
+        out.push_identifier(BATCH)?;
+        out.push_sql(" LEFT JOIN ");
+        SITREP_HISTORY_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" h ON h.");
+        out.push_identifier(history_dsl::sitrep_id::NAME)?;
+        out.push_sql(" = ");
+        out.push_identifier(BATCH)?;
+        out.push_sql(".");
+        out.push_identifier(sitrep_dsl::id::NAME)?;
+        out.push_sql(" WHERE h.");
+        out.push_identifier(history_dsl::sitrep_id::NAME)?;
+        out.push_sql(" IS NULL AND (");
+        out.push_identifier(BATCH)?;
+        out.push_sql(".");
+        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
+        out.push_sql(" IS NULL OR ");
+        out.push_identifier(BATCH)?;
+        out.push_sql(".");
+        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
+        out.push_sql(" != (SELECT sitrep_id FROM ");
+        out.push_identifier(CURRENT_SITREP_ID)?;
+        out.push_sql(")));");
+
+        Ok(())
+    }
+}
+
+impl QueryId for ListOrphanedQuery {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
+
+impl RunQueryDsl<DbConnection> for ListOrphanedQuery {}
+
+impl Query for ListOrphanedQuery {
+    type SqlType = sql_types::Uuid;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use chrono::Utc;
     use nexus_types::fm;
@@ -660,6 +765,15 @@ mod tests {
         let conn = pool.claim().await.unwrap();
 
         let query = InsertSitrepVersionQuery { sitrep_id: SitrepUuid::nil() };
+
+        // Before trying to explain the query, elt's start by making sure it's
+        // valid SQL...
+        let q = diesel::debug_query::<Pg, _>(&query).to_string();
+        match dev::db::format_sql(&q).await {
+            Ok(q) => eprintln!("query: {q}"),
+            Err(e) => panic!("query is malformed: {e}\n{q}"),
+        }
+
         let explanation = query
             .explain_async(&conn)
             .await
@@ -682,7 +796,21 @@ mod tests {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query = DataStore::list_orphaned_query(Uuid::nil(), Uuid::nil());
+        let pagparams = DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(420).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        };
+        let query = ListOrphanedQuery::new(&pagparams);
+
+        // Before trying to explain the query, elt's start by making sure it's
+        // valid SQL...
+        let q = diesel::debug_query::<Pg, _>(&query).to_string();
+        match dev::db::format_sql(&q).await {
+            Ok(q) => eprintln!("query: {q}"),
+            Err(e) => panic!("query is malformed: {e}\n{q}"),
+        }
+
         let explanation = query
             .explain_async(&conn)
             .await
@@ -968,10 +1096,17 @@ mod tests {
             .expect("inserting initial sitrep should succeed");
 
         // Now, create some orphaned sitreps which also have no parent.
-        let mut orphans_v1 = BTreeSet::new();
+        let mut expected_orphans = BTreeSet::new();
         for i in 1..5 {
-            insert_orphan(&datastore, &opctx, &mut orphans_v1, None, 1, i)
-                .await;
+            insert_orphan(
+                &datastore,
+                &opctx,
+                &mut expected_orphans,
+                None,
+                1,
+                i,
+            )
+            .await;
         }
 
         // List orphans at the current version.
@@ -981,14 +1116,8 @@ mod tests {
             .unwrap()
             .expect("should have a version");
         assert_eq!(dbg!(&v1).id, sitrep1.metadata.id);
-        let listed_orphans = datastore
-            .fm_sitrep_list_orphaned(&opctx, &v1)
-            .await
-            .expect("listing orphans should succeed")
-            .iter()
-            .map(|sitrep| sitrep.id)
-            .collect::<BTreeSet<_>>();
-        assert_eq!(dbg!(&listed_orphans), &orphans_v1);
+        let listed_orphans = list_orphans(&datastore, &opctx).await.unwrap();
+        assert_eq!(dbg!(&listed_orphans), &expected_orphans);
 
         // Next, create a new sitrep which descends from sitrep 1.
         let sitrep2 = fm::Sitrep {
@@ -1007,12 +1136,11 @@ mod tests {
             .expect("inserting child sitrep should succeed");
 
         // Now, create some orphaned sitreps which also descend from sitrep 1.
-        let mut orphans_v2 = BTreeSet::new();
         for i in 1..5 {
             insert_orphan(
                 &datastore,
                 &opctx,
-                &mut orphans_v2,
+                &mut expected_orphans,
                 Some(sitrep1.metadata.id),
                 2,
                 i,
@@ -1021,33 +1149,30 @@ mod tests {
         }
 
         // List orphans at the current version.
-        let v2 = datastore
-            .fm_current_sitrep_version(&opctx)
-            .await
-            .unwrap()
-            .expect("should have a version");
-        assert_eq!(dbg!(&v2).id, sitrep2.metadata.id);
-        let listed_orphans_v2 = datastore
-            .fm_sitrep_list_orphaned(&opctx, &v2)
-            .await
-            .expect("listing orphans at v2 should succeed")
-            .iter()
-            .map(|sitrep| sitrep.id)
-            .collect::<BTreeSet<_>>();
-        assert_eq!(dbg!(&listed_orphans_v2), &orphans_v2);
-        // Orphans at the prior version should also be listable, and it should
-        // not include the committed sitrep at that version.
-        let listed_orphans_v1 = datastore
-            .fm_sitrep_list_orphaned(&opctx, &v1)
-            .await
-            .expect("listing orphans at v1 should succeed")
-            .iter()
-            .map(|sitrep| sitrep.id)
-            .collect::<BTreeSet<_>>();
-        assert_eq!(dbg!(&listed_orphans_v1), &orphans_v1);
+        let listed_orphans = list_orphans(&datastore, &opctx).await.unwrap();
+        assert_eq!(dbg!(&listed_orphans), &expected_orphans);
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    async fn list_orphans(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> Result<BTreeSet<SitrepUuid>, Error> {
+        let mut listed_orphans = BTreeSet::new();
+        let mut paginator = Paginator::new(
+            crate::db::datastore::SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Descending,
+        );
+        while let Some(p) = paginator.next() {
+            let orphans = datastore
+                .fm_sitrep_list_orphaned(&opctx, p.current_pagparams())
+                .await?;
+            paginator = p.found_batch(&orphans, &|id| *id);
+            listed_orphans.extend(orphans);
+        }
+        Ok(listed_orphans)
     }
 
     async fn insert_orphan(

@@ -8,7 +8,6 @@ use crate::db::DbFetchOptions;
 use crate::db::check_limit;
 use crate::helpers::const_max_len;
 use crate::helpers::datetime_opt_rfc3339_concise;
-use crate::helpers::display_option_blank;
 use anyhow::Context;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::{DateTime, Utc};
@@ -138,8 +137,6 @@ pub(super) async fn cmd_db_sitrep_history(
     struct SitrepRow {
         v: u32,
         id: Uuid,
-        #[tabled(display_with = "display_option_blank")]
-        orphans: Option<usize>,
         #[tabled(display_with = "datetime_opt_rfc3339_concise")]
         created_at: Option<DateTime<Utc>>,
         comment: String,
@@ -160,17 +157,6 @@ pub(super) async fn cmd_db_sitrep_history(
 
     let mut rows = Vec::with_capacity(versions.len());
     for v in versions {
-        let orphans = match datastore.fm_sitrep_list_orphaned(&opctx, &v).await
-        {
-            Ok(o) => Some(o.len()),
-            Err(e) => {
-                eprintln!(
-                    "failed to list orphaned sitreps at v{}: {e}",
-                    v.version
-                );
-                None
-            }
-        };
         let (comment, time_created) =
             match datastore.fm_sitrep_metadata_read(&opctx, v.id).await {
                 Ok(s) => (s.comment, Some(s.time_created)),
@@ -185,7 +171,6 @@ pub(super) async fn cmd_db_sitrep_history(
         rows.push(SitrepRow {
             v: v.version,
             id: v.id.into_untyped_uuid(),
-            orphans,
             created_at: time_created,
             comment,
         });

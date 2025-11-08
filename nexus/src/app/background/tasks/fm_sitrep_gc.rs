@@ -5,14 +5,12 @@
 //! Background task for fault management sitrep garbage collection.
 
 use crate::app::background::BackgroundTask;
-use crate::db::model::SqlU32;
 use crate::db::pagination::Paginator;
 use dropshot::PaginationOrder;
 use futures::future::BoxFuture;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
-use nexus_types::internal_api::background::OrphanedSitreps;
 use nexus_types::internal_api::background::SitrepGcStatus as Status;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
@@ -50,126 +48,72 @@ impl SitrepGc {
 
     async fn actually_activate(&mut self, opctx: &OpContext) -> Status {
         let mut status = Status::default();
-        let mut total_found = 0;
-        let mut total_deleted = 0;
         let mut paginator =
             Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
 
         while let Some(p) = paginator.next() {
-            let versions = match self
+            let orphans = match self
                 .datastore
-                .fm_sitrep_version_list(opctx, &p.current_pagparams())
+                .fm_sitrep_list_orphaned(&opctx, p.current_pagparams())
                 .await
             {
-                Ok(versions) => versions,
+                Ok(orphans) => orphans,
                 Err(err) => {
                     let err = InlineErrorChain::new(&err);
+                    const MSG: &str = "failed to list orphaned sitreps";
                     slog::error!(
                         &opctx.log,
-                        "failed to list committed sitrep versions";
+                        "{MSG}";
                         &err,
                     );
-                    status.errors.push(format!(
-                        "failed to list sitrep versions: {err}",
-                    ));
+                    status.errors.push(format!("{MSG}: {err}"));
                     break;
                 }
             };
 
-            paginator = p.found_batch(&versions, &|v| SqlU32::from(v.version));
+            paginator = p.found_batch(&orphans, &|id| *id);
+            let found = orphans.len();
+            status.orphaned_sitreps_found += found;
 
-            for v in versions {
-                let version = v.version;
-                let orphans = match self
-                    .datastore
-                    .fm_sitrep_list_orphaned(opctx, &v)
-                    .await
-                {
-                    Ok(orphans) if orphans.is_empty() => {
-                        slog::trace!(
-                            &opctx.log,
-                            "no orphaned sitreps found at v{version}";
-                            "version" => version,
-                        );
-                        continue;
-                    }
-                    Ok(orphans) => orphans,
-                    Err(err) => {
-                        const MSG: &str =
-                            "failed to list orphaned sitreps at v";
-                        let err = InlineErrorChain::new(&err);
-                        slog::error!(
-                            &opctx.log,
-                            "{MSG}{version}";
-                            "version" => version,
-                            &err,
-                        );
-                        status.errors.push(format!("{MSG}{version}: {err}"));
-                        continue;
-                    }
-                };
+            let deleted = match self
+                .datastore
+                .fm_sitrep_delete_all(&opctx, orphans)
+                .await
+            {
+                Ok(deleted) => deleted,
+                Err(err) => {
+                    let err = InlineErrorChain::new(&err);
+                    const MSG: &str = "failed to delete orphaned sitreps";
+                    slog::error!(
+                        &opctx.log,
+                        "{MSG}";
+                        &err,
+                    );
+                    status.errors.push(format!("{MSG}: {err}"));
+                    continue;
+                }
+            };
 
-                status.versions_scanned += 1;
-                let found = orphans.len();
-                total_found += found;
+            status.orphaned_sitreps_deleted += deleted;
+            if deleted > 0 {
+                slog::debug!(
+                    &opctx.log,
+                    "deleted {deleted} of {found} orphaned sitreps",
+                );
+            } else {
                 slog::trace!(
                     &opctx.log,
-                    "found {found} orphaned sitreps at v{version}";
-                    "version" => version,
+                    "all {found} orphaned sitreps in this batch have \
+                         already been deleted",
                 );
-
-                let deleted = match self
-                    .datastore
-                    .fm_sitrep_delete_all(
-                        &opctx,
-                        orphans.into_iter().map(|m| m.id),
-                    )
-                    .await
-                {
-                    Ok(deleted) => deleted,
-                    Err(err) => {
-                        let err = InlineErrorChain::new(&err);
-                        const MSG: &str =
-                            "failed to delete orphaned sitreps at v";
-                        slog::error!(
-                            &opctx.log,
-                            "{MSG}{version}";
-                            "version" => v.version,
-                            &err,
-                        );
-                        status.errors.push(format!("{MSG}{version}: {err}"));
-                        continue;
-                    }
-                };
-
-                total_deleted += deleted;
-                status
-                    .orphaned_sitreps
-                    .insert(version, OrphanedSitreps { found, deleted });
-
-                if deleted > 0 {
-                    slog::debug!(
-                        &opctx.log,
-                        "deleted {deleted} of {found} orphaned sitreps at \
-                         v{version}";
-                        "version" => v.version,
-                    );
-                } else {
-                    slog::trace!(
-                        &opctx.log,
-                        "all {found} orphaned sitreps at v{version} have \
-                         already been deleted";
-                        "version" => v.version,
-                    );
-                }
             }
         }
 
         slog::info!(
             &opctx.log,
-            "sitrep garbage collection scanned {} versions, \
-             found {total_found} orphaned sitreps, deleted {total_deleted}",
-            status.versions_scanned,
+            "sitrep garbage collection found {} orphaned sitreps, deleted {}",
+            status.orphaned_sitreps_found,
+            status.orphaned_sitreps_deleted
         );
 
         status
@@ -297,15 +241,8 @@ mod tests {
             .expect("sitrep 2 should still exist");
 
         assert_eq!(status.errors, Vec::<String>::new());
-        assert_eq!(status.versions_scanned, 2);
-        assert_eq!(
-            status.orphaned_sitreps.get(&1),
-            Some(&OrphanedSitreps { found: 4, deleted: 4 })
-        );
-        assert_eq!(
-            status.orphaned_sitreps.get(&2),
-            Some(&OrphanedSitreps { found: 3, deleted: 3 })
-        );
+        assert_eq!(status.orphaned_sitreps_found, 7);
+        assert_eq!(status.orphaned_sitreps_deleted, 7);
 
         db.terminate().await;
         logctx.cleanup_successful();
