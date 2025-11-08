@@ -616,7 +616,7 @@ struct ListOrphanedQuery {
 impl ListOrphanedQuery {
     fn new(pagparams: &DataPageParams<'_, SitrepUuid>) -> Self {
         Self {
-            marker: pagparams.marker.clone().copied(),
+            marker: pagparams.marker.copied(),
             order: pagparams.direction,
             limit: pagparams.limit.get() as i32,
         }
