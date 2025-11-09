@@ -9,6 +9,7 @@ use crate::connection_manager::{
     ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner,
 };
 use crate::ledgers::PersistentStateLedger;
+use crate::proxy;
 use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
@@ -144,32 +145,20 @@ pub enum NodeApiRequest {
         tx: oneshot::Sender<Result<CommitStatus, CommitError>>,
     },
 
-    /// Proxy a `Commit` operation to another node
+    /// Proxy a [`proxy::WireRequest`] operation to another node
     ///
-    /// When sled-agent is not running there is no direct way to issue `commit`
+    /// When sled-agent is not running there is no direct way to issue
     /// operations from Nexus. This occurs when when a node has not yet joined a
     /// trust quorum configuration, but the mechanism is also useful during RSS.
     /// In these cases, we need to take an existing node that we have access to
     /// and proxy requests over sprockets to the `destination` node.
-    ProxyCommit {
+    Proxy {
+        // Where to send the `wire_request`
         destination: BaseboardId,
-        rack_id: RackUuid,
-        epoch: Epoch,
-        tx: oneshot::Sender<Result<CommitStatus, CommitError>>,
-    },
-
-    /// Proxy a `PrepareAndCommit` operation from RSS/Nexus to another node
-    ///
-    /// When `sled-agent` is not running there is no direct way to issue
-    /// `prepare_and_commit` operations from Nexus. This occurs when when a
-    /// node has not yet joined a trust quorum configuration, but the mechanism
-    /// is also useful during RSS. In these cases, we need to take an existing
-    /// node that we have access to and proxy requests over sprockets to the
-    /// `destination` node.
-    ProxyPrepareAndCommit {
-        destination: BaseboardId,
-        config: Configuration,
-        tx: oneshot::Sender<Result<CommitStatus, PrepareAndCommitError>>,
+        /// The actual request proxied across nodes
+        wire_request: proxy::WireRequest,
+        /// A mechanism for responding to the caller
+        tx: oneshot::Sender<Result<proxy::WireValue, proxy::WireError>>,
     },
 
     /// Coordinate a reconfiguration at this node

@@ -6,16 +6,18 @@
 //! over sprockets.
 //!
 //! This is necessary in the case when there is no sled-agent with which Nexus
-//! can directly communicate on the underlay network. Since nexus is not on the
+//! can directly communicate on the underlay network. Since Nexus is not on the
 //! bootstrap network it cannot talk directly to trust quorum nodes.
 //!
 //! This proxy mechanism is also useful during RSS and for general debugging
 //! purposes.
 
-use futures::channel::oneshot;
+use crate::{CommitStatus, task::NodeApiRequest};
+use derive_more::From;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use slog_error_chain::SlogInlineError;
+use tokio::sync::{mpsc, oneshot};
 use trust_quorum_protocol::{
     BaseboardId, CommitError, Configuration, Epoch, PrepareAndCommitError,
 };
@@ -25,23 +27,109 @@ use uuid::Uuid;
 /// proxied again once receieved. The receiving node should instead immediately
 /// respond to the request to limit the time spent in the event loop, like a
 /// normal NodeApiRequest.
-pub struct ProxyRequest {
+pub struct WireRequest {
     request_id: Uuid,
-    op: ProxyOp,
+    op: WireOp,
 }
 
-pub enum ProxyOp {
+pub enum WireOp {
     Commit { rack_id: RackUuid, epoch: Epoch },
     PrepareAndCommit { config: Configuration },
 }
 
-pub struct ProxyResponse {
+pub struct WireResponse {
     request_id: Uuid,
-    result: Result<ProxyValue, ProxyError>,
+    result: Result<WireValue, WireError>,
 }
 
-/// The successful result of a proxy request
-pub enum ProxyValue {}
+/// A trackable in-flight proxy request, owned by the `Tracker`
+pub struct TrackableRequest {
+    destination: BaseboardId,
+    request_id: Uuid,
+    tx: oneshot::Sender<Result<WireValue, WireOp>>,
+}
+
+/// A handle given to a user for a proxied `Commit` operation
+pub struct CommitHandle {}
+
+/// A handle given to a user for a proxied `PrepareAndCommit` operation
+pub struct PrepareAndCommitHandle {}
+
+/// A mechanism for proxying requests
+pub struct Proxy {
+    // A mechanism to send a `WireRequest` to our local task for proxying.
+    tx: mpsc::Sender<NodeApiRequest>,
+}
+
+impl Proxy {
+    pub async fn commit(
+        &self,
+        destination: BaseboardId,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> oneshot::Receiver<Result<CommitStatus, ProxyError<CommitError>>> {
+        let request_id = Uuid::new_v4();
+        let wire_request =
+            WireRequest { request_id, op: WireOp::Commit { rack_id, epoch } };
+
+        // A wrapper for responses from the task
+        let (task_tx, task_rx) = oneshot::channel();
+
+        let api_request =
+            NodeApiRequest::Proxy { destination, wire_request, tx: task_tx };
+
+        // The channel used to communicate with the user
+        let (tx, rx) = oneshot::channel();
+
+        if let Err(e) = self.tx.try_send(api_request) {
+            match e {
+                mpsc::error::TrySendError::Full(_) => {
+                    tx.send(Err(ProxyError::Busy));
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    tx.send(Err(ProxyError::RecvError));
+                }
+            }
+            return rx;
+        }
+
+        let Ok(res) = task_rx.await else {
+            tx.send(Err(ProxyError::RecvError));
+            return rx;
+        };
+
+        match res {
+            Ok(WireValue) => {
+                // TODO: destructure
+            }
+            Err(WireError) => {
+                // TODO: destructure
+            }
+        }
+
+        todo!();
+    }
+
+    pub fn prepare_and_commit(
+        &self,
+        destination: BaseboardId,
+        config: Configuration,
+    ) -> oneshot::Receiver<
+        Result<CommitStatus, ProxyError<PrepareAndCommitError>>,
+    > {
+        todo!()
+    }
+}
+
+/// The successful variant of a [`WireResponse`]
+pub enum WireValue {}
+
+/// The error variant of a [`WireResponse`]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, From)]
+pub enum WireError {
+    Commit(ProxyError<CommitError>),
+    PrepareAndCommit(ProxyError<PrepareAndCommitError>),
+}
 
 /// The error result of a proxy request
 #[derive(
@@ -54,31 +142,27 @@ pub enum ProxyValue {}
     Serialize,
     Deserialize,
 )]
-pub enum ProxyError {
+pub enum ProxyError<T: std::error::Error> {
     #[error(transparent)]
-    Commit(#[from] CommitError),
-    #[error(transparent)]
-    PrepareAndCommit(PrepareAndCommitError),
+    Inner(#[from] T),
     #[error("disconnected")]
     Disconnected,
-    #[error("timeout")]
-    Timeout(BaseboardId),
+    #[error("response for different type received: {0}")]
+    InvalidResponse(String),
+    #[error("task sender dropped")]
+    RecvError,
+    #[error("task is busy: channel full")]
+    Busy,
 }
 
 pub struct TrackedProxyRequest {
     destination: BaseboardId,
-    tx: oneshot::Sender<Result<ProxyValue, ProxyError>>,
+    tx: oneshot::Sender<Result<WireValue, WireError>>,
 }
 /// A mechanism to keep track of proxied requests and wait for their replies
-pub struct Proxy {}
-
-impl Proxy {
-    pub async fn send(
-        op: ProxyOp,
-        tx: oneshot::Sender<Result<ProxyValue, ProxyError>>,
-    ) {
-        // TODO: Track the op by uuid and destination, set a timer, and return
-        // the request to be handed off to the connection manager.
-        todo!()
-    }
+pub struct Tracker {
+    // In flight operations
+    ops: iddqd::BiHashMap<TrackableRequest>,
 }
+
+impl Tracker {}
