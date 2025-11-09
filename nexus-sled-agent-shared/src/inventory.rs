@@ -12,8 +12,6 @@ use std::time::Duration;
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use daft::Diffable;
-use id_map::IdMap;
-use id_map::IdMappable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
@@ -1030,9 +1028,16 @@ impl HostPhase2DesiredSlots {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct OmicronSledConfig {
     pub generation: Generation,
-    pub disks: IdMap<OmicronPhysicalDiskConfig>,
-    pub datasets: IdMap<DatasetConfig>,
-    pub zones: IdMap<OmicronZoneConfig>,
+    // Serialize and deserialize disks, datasets, and zones as maps for
+    // backwards compatibility. Newer IdOrdMaps should not use IdOrdMapAsMap.
+    #[serde(
+        with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronPhysicalDiskConfig>"
+    )]
+    pub disks: IdOrdMap<OmicronPhysicalDiskConfig>,
+    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<DatasetConfig>")]
+    pub datasets: IdOrdMap<DatasetConfig>,
+    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronZoneConfig>")]
+    pub zones: IdOrdMap<OmicronZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
@@ -1042,9 +1047,9 @@ impl Default for OmicronSledConfig {
     fn default() -> Self {
         Self {
             generation: Generation::new(),
-            disks: IdMap::default(),
-            datasets: IdMap::default(),
-            zones: IdMap::default(),
+            disks: IdOrdMap::default(),
+            datasets: IdOrdMap::default(),
+            zones: IdOrdMap::default(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
         }
@@ -1107,12 +1112,14 @@ pub struct OmicronZoneConfig {
     pub image_source: OmicronZoneImageSource,
 }
 
-impl IdMappable for OmicronZoneConfig {
-    type Id = OmicronZoneUuid;
+impl IdOrdItem for OmicronZoneConfig {
+    type Key<'a> = OmicronZoneUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+
+    id_upcast!();
 }
 
 impl OmicronZoneConfig {

@@ -7,8 +7,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use id_map::{IdMap, IdMappable};
-use iddqd::IdOrdMap;
+use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_sled_agent_shared::inventory::{
     self, BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
@@ -76,9 +75,14 @@ impl From<inventory::Inventory> for Inventory {
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct OmicronSledConfig {
     pub generation: Generation,
-    pub disks: IdMap<OmicronPhysicalDiskConfig>,
-    pub datasets: IdMap<DatasetConfig>,
-    pub zones: IdMap<OmicronZoneConfig>,
+    #[serde(
+        with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronPhysicalDiskConfig>"
+    )]
+    pub disks: IdOrdMap<OmicronPhysicalDiskConfig>,
+    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<DatasetConfig>")]
+    pub datasets: IdOrdMap<DatasetConfig>,
+    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronZoneConfig>")]
+    pub zones: IdOrdMap<OmicronZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
@@ -111,7 +115,7 @@ impl From<inventory::OmicronSledConfig> for OmicronSledConfig {
 }
 
 /// Describes one Omicron-managed zone running on a sled
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OmicronZoneConfig {
     pub id: OmicronZoneUuid,
 
@@ -127,12 +131,14 @@ pub struct OmicronZoneConfig {
     pub image_source: OmicronZoneImageSource,
 }
 
-impl IdMappable for OmicronZoneConfig {
-    type Id = OmicronZoneUuid;
+impl IdOrdItem for OmicronZoneConfig {
+    type Key<'a> = OmicronZoneUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+
+    id_upcast!();
 }
 
 impl From<OmicronZoneConfig> for inventory::OmicronZoneConfig {
@@ -159,7 +165,7 @@ impl From<inventory::OmicronZoneConfig> for OmicronZoneConfig {
 
 /// Describes what kind of zone this is (i.e., what component is running in it)
 /// as well as any type-specific configuration
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OmicronZoneType {
     BoundaryNtp {

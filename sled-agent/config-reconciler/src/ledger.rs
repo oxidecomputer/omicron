@@ -680,7 +680,7 @@ mod tests {
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
     use camino_tempfile::tempfile;
-    use id_map::IdMap;
+    use iddqd::IdOrdMap;
     use illumos_utils::zpool::ZpoolName;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
@@ -906,8 +906,8 @@ mod tests {
             disks: [make_dummy_disk_config("test-serial")]
                 .into_iter()
                 .collect(),
-            datasets: IdMap::default(),
-            zones: IdMap::default(),
+            datasets: IdOrdMap::default(),
+            zones: IdOrdMap::default(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
         }
@@ -1067,7 +1067,7 @@ mod tests {
                 .await;
 
         // Mutate the sled_config but don't bump the generation.
-        sled_config.disks.insert(make_dummy_disk_config(TEST_NAME));
+        sled_config.disks.insert_overwrite(make_dummy_disk_config(TEST_NAME));
         let err = test_harness
             .task_handle
             .set_new_config(sled_config)
@@ -1103,8 +1103,8 @@ mod tests {
         // hash.
         let mut config = OmicronSledConfig {
             generation: Generation::new().next(),
-            disks: IdMap::new(),
-            datasets: IdMap::new(),
+            disks: IdOrdMap::new(),
+            datasets: IdOrdMap::new(),
             zones: [make_dummy_zone_config_using_artifact_hash(
                 nonexisting_artifact_hash,
             )]
@@ -1144,7 +1144,7 @@ mod tests {
         // Try a config that references a host phase 2 artifact that isn't in
         // the store; this should be rejected.
         config.generation = config.generation.next();
-        config.zones = IdMap::new();
+        config.zones = IdOrdMap::new();
         config.host_phase_2 = HostPhase2DesiredSlots {
             slot_a: HostPhase2DesiredContents::CurrentContents,
             slot_b: HostPhase2DesiredContents::Artifact {
@@ -1199,9 +1199,9 @@ mod tests {
         // with remove_mupdate_override set to a value.
         let mut config = make_nonempty_sled_config();
         config.remove_mupdate_override = Some(MupdateOverrideUuid::max());
-        config
-            .zones
-            .insert(make_dummy_zone_config_using_artifact_hash(artifact_hash));
+        config.zones.insert_overwrite(
+            make_dummy_zone_config_using_artifact_hash(artifact_hash),
+        );
 
         // The ledger task should reject this config due to the artifact store
         // set to InstallDataset.
@@ -1225,7 +1225,7 @@ mod tests {
         // Try a config where the host phase 2 contents are not set to
         // CurrentContents.
         config.generation = config.generation.next();
-        config.zones = IdMap::new();
+        config.zones = IdOrdMap::new();
         config.host_phase_2 = HostPhase2DesiredSlots {
             slot_a: HostPhase2DesiredContents::CurrentContents,
             slot_b: HostPhase2DesiredContents::Artifact { hash: artifact_hash },
@@ -1276,9 +1276,9 @@ mod tests {
         // Claim we have a host phase 2
         // Set up the ledger task with an initial config.
         let mut sled_config = make_nonempty_sled_config();
-        sled_config.zones.insert(make_dummy_zone_config_using_artifact_hash(
-            used_zone_artifact_hash,
-        ));
+        sled_config.zones.insert_overwrite(
+            make_dummy_zone_config_using_artifact_hash(used_zone_artifact_hash),
+        );
         sled_config.host_phase_2.slot_a = HostPhase2DesiredContents::Artifact {
             hash: used_host_artifact_hash,
         };

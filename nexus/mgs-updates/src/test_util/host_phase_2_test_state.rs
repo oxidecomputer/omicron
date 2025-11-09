@@ -196,7 +196,6 @@ mod api_impl {
     use dropshot::RequestContext;
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
-    use id_map::IdMap;
     use iddqd::IdOrdMap;
     use nexus_sled_agent_shared::inventory::BootImageHeader;
     use nexus_sled_agent_shared::inventory::BootPartitionContents;
@@ -302,9 +301,9 @@ mod api_impl {
             // with something quasi-reasonable (or empty, if we can).
             let config = OmicronSledConfig {
                 generation: Generation::new(),
-                disks: IdMap::new(),
-                datasets: IdMap::new(),
-                zones: IdMap::new(),
+                disks: IdOrdMap::new(),
+                datasets: IdOrdMap::new(),
+                zones: IdOrdMap::new(),
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots {
                     slot_a: HostPhase2DesiredContents::CurrentContents,

@@ -5,8 +5,7 @@
 //! Provides thin wrappers around a watch channel managing the set of
 //! [`RawDisk`]s sled-agent is aware of.
 
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdMap;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use omicron_common::disk::DiskIdentity;
 use sled_storage::disk::RawDisk;
@@ -24,11 +23,11 @@ pub(crate) fn new() -> (RawDisksSender, RawDisksReceiver) {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RawDisksReceiver(
-    pub(crate) watch::Receiver<Arc<IdMap<RawDiskWithId>>>,
+    pub(crate) watch::Receiver<Arc<IdOrdMap<RawDisk>>>,
 );
 
 impl Deref for RawDisksReceiver {
-    type Target = watch::Receiver<Arc<IdMap<RawDiskWithId>>>;
+    type Target = watch::Receiver<Arc<IdOrdMap<RawDisk>>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -42,7 +41,7 @@ impl DerefMut for RawDisksReceiver {
 }
 
 #[derive(Debug, Clone)]
-pub struct RawDisksSender(watch::Sender<Arc<IdMap<RawDiskWithId>>>);
+pub struct RawDisksSender(watch::Sender<Arc<IdOrdMap<RawDisk>>>);
 
 impl RawDisksSender {
     /// Set the complete set of raw disks visible to sled-agent.
@@ -51,16 +50,16 @@ impl RawDisksSender {
         I: Iterator<Item = RawDisk>,
     {
         let mut new_disks =
-            raw_disks.map(From::from).collect::<IdMap<RawDiskWithId>>();
+            raw_disks.map(From::from).collect::<IdOrdMap<RawDisk>>();
         self.0.send_if_modified(|disks| {
             // We can't just set `*disks = new_disks` here because we may have
             // disks that shouldn't be removed even if they're not present in
             // `new_disks`; check for that first.
             for old_disk in disks.iter() {
-                if !new_disks.contains_key(&old_disk.identity)
+                if !new_disks.contains_key(old_disk.identity())
                     && !can_remove_disk(old_disk, log)
                 {
-                    new_disks.insert(old_disk.clone());
+                    new_disks.insert_overwrite(old_disk.clone());
                 }
             }
 
@@ -75,28 +74,27 @@ impl RawDisksSender {
 
     /// Add or update the properties of a raw disk visible to sled-agent.
     pub fn add_or_update_raw_disk(&self, disk: RawDisk, log: &Logger) -> bool {
-        let disk = RawDiskWithId::from(disk);
         self.0.send_if_modified(|disks| {
-            match disks.get(&disk.identity) {
+            match disks.get(disk.identity()) {
                 Some(existing) if *existing == disk => {
                     return false;
                 }
                 Some(existing) => {
                     info!(
                         log, "Updating raw disk";
-                        "old" => ?existing.disk,
-                        "new" => ?disk.disk,
+                        "old" => ?existing,
+                        "new" => ?disk,
                     );
                 }
                 None => {
                     info!(
                         log, "Adding new raw disk";
-                        "disk" => ?disk.disk,
+                        "disk" => ?disk,
                     );
                 }
             }
 
-            Arc::make_mut(disks).insert(disk);
+            Arc::make_mut(disks).insert_overwrite(disk);
             true
         })
     }
@@ -149,51 +147,16 @@ impl RawDisksSender {
 
 // Synthetic disks added by sled-agent on startup in test/dev environments are
 // never added again; refuse to remove them.
-fn can_remove_disk(disk: &RawDiskWithId, log: &Logger) -> bool {
+fn can_remove_disk(disk: &RawDisk, log: &Logger) -> bool {
     if disk.is_synthetic() {
         // Synthetic disks are only added once; don't remove them.
         info!(
             log, "Not removing synthetic disk";
-            "identity" => ?disk.identity,
+            "identity" => ?disk.identity(),
         );
         false
     } else {
         true
-    }
-}
-
-// Adapter to store `RawDisk` in an `IdMap` with cheap key cloning.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RawDiskWithId {
-    identity: Arc<DiskIdentity>,
-    disk: RawDisk,
-}
-
-impl IdMappable for RawDiskWithId {
-    type Id = Arc<DiskIdentity>;
-
-    fn id(&self) -> Self::Id {
-        Arc::clone(&self.identity)
-    }
-}
-
-impl From<RawDisk> for RawDiskWithId {
-    fn from(disk: RawDisk) -> Self {
-        Self { identity: Arc::new(disk.identity().clone()), disk }
-    }
-}
-
-impl From<RawDiskWithId> for RawDisk {
-    fn from(disk: RawDiskWithId) -> Self {
-        disk.disk
-    }
-}
-
-impl Deref for RawDiskWithId {
-    type Target = RawDisk;
-
-    fn deref(&self) -> &Self::Target {
-        &self.disk
     }
 }
 

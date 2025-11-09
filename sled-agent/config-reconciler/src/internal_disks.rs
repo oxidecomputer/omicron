@@ -13,8 +13,9 @@ use camino::Utf8PathBuf;
 use core::cmp;
 use futures::future;
 use futures::future::Either;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use omicron_common::backoff::Backoff as _;
 use omicron_common::backoff::ExponentialBackoffBuilder;
 use omicron_common::disk::DiskIdentity;
@@ -48,7 +49,6 @@ use tokio::sync::watch::error::RecvError;
 
 use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
-use crate::raw_disks::RawDiskWithId;
 use crate::raw_disks::RawDisksReceiver;
 
 /// A thin wrapper around a [`watch::Receiver`] that presents a similar API.
@@ -61,11 +61,11 @@ pub struct InternalDisksReceiver {
 
 #[derive(Debug, Clone)]
 enum InternalDisksReceiverInner {
-    Real(watch::Receiver<IdMap<InternalDisk>>),
+    Real(watch::Receiver<IdOrdMap<InternalDisk>>),
     #[cfg(any(test, feature = "testing"))]
-    FakeStatic(Arc<IdMap<InternalDiskDetails>>),
+    FakeStatic(Arc<IdOrdMap<InternalDiskDetails>>),
     #[cfg(any(test, feature = "testing"))]
-    FakeDynamic(watch::Receiver<Arc<IdMap<InternalDiskDetails>>>),
+    FakeDynamic(watch::Receiver<Arc<IdOrdMap<InternalDiskDetails>>>),
 }
 
 impl InternalDisksReceiver {
@@ -152,7 +152,7 @@ impl InternalDisksReceiver {
         base_log: &Logger,
         disk_adopter: T,
     ) -> Self {
-        let (disks_tx, disks_rx) = watch::channel(IdMap::default());
+        let (disks_tx, disks_rx) = watch::channel(IdOrdMap::default());
         let (errors_tx, errors_rx) = watch::channel(Arc::default());
 
         tokio::spawn(
@@ -237,7 +237,7 @@ impl InternalDisksReceiver {
     /// watch channel locked).
     pub(crate) fn borrow_and_update_raw_disks(
         &mut self,
-    ) -> watch::Ref<'_, IdMap<InternalDisk>> {
+    ) -> watch::Ref<'_, IdOrdMap<InternalDisk>> {
         match &mut self.inner {
             InternalDisksReceiverInner::Real(rx) => rx.borrow_and_update(),
             #[cfg(any(test, feature = "testing"))]
@@ -293,7 +293,7 @@ impl InternalDisksReceiver {
 }
 
 pub struct InternalDisks {
-    disks: Arc<IdMap<InternalDiskDetails>>,
+    disks: Arc<IdOrdMap<InternalDiskDetails>>,
     mount_config: Arc<MountConfig>,
 }
 
@@ -409,7 +409,7 @@ impl InternalDisksWithBootDisk {
         let boot_disk = inner
             .disks
             .iter()
-            .find_map(|d| if d.is_boot_disk() { Some(d.id()) } else { None })?;
+            .find_map(|d| d.is_boot_disk().then(|| d.id.clone()))?;
         Some(Self { inner, boot_disk })
     }
 
@@ -517,12 +517,14 @@ pub use internal_disk_details::{InternalDiskDetails, InternalDiskDetailsId};
 #[cfg(not(any(test, feature = "testing")))]
 use internal_disk_details::{InternalDiskDetails, InternalDiskDetailsId};
 
-impl IdMappable for InternalDiskDetails {
-    type Id = InternalDiskDetailsId;
+impl IdOrdItem for InternalDiskDetails {
+    type Key<'a> = &'a InternalDiskDetailsId;
 
-    fn id(&self) -> Self::Id {
-        self.id.clone()
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
     }
+
+    id_upcast!();
 }
 
 impl From<&'_ Disk> for InternalDiskDetails {
@@ -624,12 +626,14 @@ impl Deref for InternalDisk {
     }
 }
 
-impl IdMappable for InternalDisk {
-    type Id = Arc<DiskIdentity>;
+impl IdOrdItem for InternalDisk {
+    type Key<'a> = &'a DiskIdentity;
 
-    fn id(&self) -> Self::Id {
-        Arc::clone(&self.identity)
+    fn key(&self) -> Self::Key<'_> {
+        &self.identity
     }
+
+    id_upcast!();
 }
 
 struct InternalDisksTask {
@@ -637,7 +641,7 @@ struct InternalDisksTask {
     raw_disks_rx: RawDisksReceiver,
 
     // The set of disks we've successfully started managing.
-    disks_tx: watch::Sender<IdMap<InternalDisk>>,
+    disks_tx: watch::Sender<IdOrdMap<InternalDisk>>,
 
     // Output channel summarizing any adoption errors.
     //
@@ -689,7 +693,7 @@ impl InternalDisksTask {
                     DiskVariant::M2 => true,
                 })
                 .cloned()
-                .collect::<IdMap<_>>();
+                .collect::<IdOrdMap<_>>();
 
             // Perform actual reconciliation, updating our output watch
             // channels.
@@ -744,7 +748,7 @@ impl InternalDisksTask {
 
     async fn reconcile_internal_disks<T: DiskAdopter>(
         &mut self,
-        internal_raw_disks: IdMap<RawDiskWithId>,
+        internal_raw_disks: IdOrdMap<RawDisk>,
         disk_adopter: &T,
     ) {
         info!(
@@ -755,8 +759,12 @@ impl InternalDisksTask {
 
         // We don't want to hold the `disks_tx` lock while we adopt disks, so
         // first capture a snapshot of which disks we have.
-        let current_disks =
-            self.disks_tx.borrow().keys().cloned().collect::<BTreeSet<_>>();
+        let current_disks = self
+            .disks_tx
+            .borrow()
+            .iter()
+            .map(|d| d.key().clone())
+            .collect::<BTreeSet<_>>();
 
         // Built the list of disks that are gone.
         let mut disks_to_remove = Vec::new();
@@ -819,7 +827,7 @@ impl InternalDisksTask {
                 changed = true;
             }
             for new_disk in disks_to_insert {
-                disks.insert(new_disk.into());
+                disks.insert_overwrite(new_disk.into());
                 changed = true;
             }
 
@@ -837,7 +845,7 @@ impl InternalDisksTask {
                     &self.log,
                 ) {
                     MaybeUpdatedDisk::Updated(new_disk) => {
-                        disks.insert(InternalDisk::from(new_disk));
+                        disks.insert_overwrite(InternalDisk::from(new_disk));
                         changed = true;
                     }
                     MaybeUpdatedDisk::Unchanged => (),
@@ -933,7 +941,7 @@ mod tests {
             ArbitraryInternalDiskDetailsId,
         >,
     ) {
-        let disk_map: IdMap<_> = values
+        let disk_map: IdOrdMap<_> = values
             .into_iter()
             .map(|id| InternalDiskDetails {
                 id: id.into(),
@@ -1052,7 +1060,7 @@ mod tests {
                 new_raw_test_disk(DiskVariant::M2, "m2-1"),
                 new_raw_test_disk(DiskVariant::U2, "u2-1"),
             ] {
-                disks.insert(disk.into());
+                disks.insert_overwrite(disk.into());
             }
         });
 
@@ -1120,7 +1128,7 @@ mod tests {
         );
         *raw_disk.firmware_mut() = new_firmware;
         raw_disks_tx.send_modify(|disks| {
-            Arc::make_mut(disks).insert(raw_disk.clone().into());
+            Arc::make_mut(disks).insert_overwrite(raw_disk.clone().into());
         });
 
         // Wait for the change to be noticed.

@@ -3150,9 +3150,9 @@ impl DataStore {
                             remove_mupdate_override: sled_config
                                 .remove_mupdate_override
                                 .map(From::from),
-                            disks: IdMap::default(),
-                            datasets: IdMap::default(),
-                            zones: IdMap::default(),
+                            disks: IdOrdMap::default(),
+                            datasets: IdOrdMap::default(),
+                            zones: IdOrdMap::default(),
                             host_phase_2: sled_config.host_phase_2.into(),
                         },
                     });
@@ -3268,7 +3268,7 @@ impl DataStore {
                 .map_err(|e| {
                     Error::internal_error(&format!("{:#}", e.to_string()))
                 })?;
-            config_with_id.config.zones.insert(zone);
+            config_with_id.config.zones.insert_overwrite(zone);
         }
 
         bail_unless!(
@@ -3309,7 +3309,7 @@ impl DataStore {
                                 row.id, row.sled_config_id
                             ))
                         })?;
-                    config_with_id.config.datasets.insert(
+                    config_with_id.config.datasets.insert_overwrite(
                         row.try_into().map_err(|e| {
                             Error::internal_error(&format!("{e:#}"))
                         })?,
@@ -3350,7 +3350,7 @@ impl DataStore {
                                 row.id, row.sled_config_id
                             ))
                         })?;
-                    config_with_id.config.disks.insert(row.into());
+                    config_with_id.config.disks.insert_overwrite(row.into());
                 }
             }
         }

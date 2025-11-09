@@ -70,7 +70,7 @@ heck = { version = "0.4.1", features = ["unicode"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
-iddqd = { version = "0.3.13", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.3.16", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.0.3" }
 indexmap = { version = "2.11.4", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
@@ -211,7 +211,7 @@ heck = { version = "0.4.1", features = ["unicode"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
-iddqd = { version = "0.3.13", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.3.16", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.0.3" }
 indexmap = { version = "2.11.4", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
