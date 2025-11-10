@@ -13,6 +13,7 @@ use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
+use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::MgsUpdatePlanner;
@@ -1010,6 +1011,11 @@ impl<'a> Planner<'a> {
         // discretionary zones, so defer its creation until it's needed.
         let mut zone_placement = None;
 
+        // Likewise, we usually don't need to create an
+        // `ExternalNetworkingAllocator` to add discretionary zones, so defer
+        // its creation until it's needed.
+        let mut external_networking_alloc = None;
+
         for zone_kind in [
             DiscretionaryOmicronZone::BoundaryNtp,
             DiscretionaryOmicronZone::Clickhouse,
@@ -1087,9 +1093,9 @@ impl<'a> Planner<'a> {
                 if num_zones_to_add == 0 {
                     continue;
                 }
-                // We need to add at least one zone; construct our `zone_placement`
-                // (or reuse the existing one if a previous loop iteration already
-                // created it).
+                // We need to add at least one zone; construct our
+                // `zone_placement` (or reuse the existing one if a previous
+                // loop iteration already created it)...
                 let zone_placement = zone_placement.get_or_insert_with(|| {
                     // This constructs a picture of the sleds as we currently
                     // understand them, as far as which sleds have discretionary
@@ -1124,8 +1130,27 @@ impl<'a> Planner<'a> {
                         });
                     OmicronZonePlacement::new(current_discretionary_zones)
                 });
+                // ...and our external networking allocator. (We can't use
+                // `get_or_insert_with()` because we can't bubble out the error,
+                // so recreate the same effect manually.)
+                let external_networking_alloc =
+                    match external_networking_alloc.as_mut() {
+                        Some(allocator) => allocator,
+                        None => {
+                            let allocator =
+                            ExternalNetworkingAllocator::from_current_zones(
+                                &self.blueprint,
+                                self.input.external_ip_policy(),
+                            )
+                            .map_err(Error::ExternalNetworkingAllocator)?;
+                            external_networking_alloc = Some(allocator);
+                            external_networking_alloc.as_mut().unwrap()
+                        }
+                    };
+
                 self.add_discretionary_zones(
                     zone_placement,
+                    external_networking_alloc,
                     zone_kind,
                     num_zones_to_add,
                     image_source,
@@ -1237,6 +1262,7 @@ impl<'a> Planner<'a> {
     fn add_discretionary_zones(
         &mut self,
         zone_placement: &mut OmicronZonePlacement,
+        external_networking_alloc: &mut ExternalNetworkingAllocator,
         kind: DiscretionaryOmicronZone,
         num_zones_to_add: usize,
         image_source: BlueprintZoneImageSource,
@@ -1274,8 +1300,12 @@ impl<'a> Planner<'a> {
             let image = image_source.clone();
             match kind {
                 DiscretionaryOmicronZone::BoundaryNtp => {
+                    let external_ip =
+                        external_networking_alloc.for_new_boundary_ntp()?;
                     self.blueprint.sled_promote_internal_ntp_to_boundary_ntp(
-                        sled_id, image,
+                        sled_id,
+                        image,
+                        external_ip,
                     )?
                 }
                 DiscretionaryOmicronZone::Clickhouse => {
@@ -1302,14 +1332,23 @@ impl<'a> Planner<'a> {
                     )?
                 }
                 DiscretionaryOmicronZone::ExternalDns => {
-                    self.blueprint.sled_add_zone_external_dns(sled_id, image)?
+                    let external_ip =
+                        external_networking_alloc.for_new_external_dns()?;
+                    self.blueprint.sled_add_zone_external_dns(
+                        sled_id,
+                        image,
+                        external_ip,
+                    )?
                 }
                 DiscretionaryOmicronZone::Nexus => {
+                    let external_ip =
+                        external_networking_alloc.for_new_nexus()?;
                     let nexus_generation =
                         self.determine_nexus_generation(&image)?;
                     self.blueprint.sled_add_zone_nexus(
                         sled_id,
                         image,
+                        external_ip,
                         nexus_generation,
                     )?
                 }
@@ -3258,22 +3297,15 @@ pub(crate) mod test {
         // because we haven't give it any addresses (which currently
         // come only from RSS). This is not an error, though.
         assert!(input.external_ip_policy().external_dns_ips().is_empty());
-        let mut builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint1,
-            &input,
-            &collection,
-            TEST_NAME,
-            PlannerRng::from_entropy(),
-        )
-        .expect("failed to build blueprint builder");
-        let sled_id = builder.sled_ids_with_zones().next().expect("no sleds");
-        builder
-            .sled_add_zone_external_dns(
-                sled_id,
-                BlueprintZoneImageSource::InstallDataset,
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_blueprint(
+                &blueprint1,
+                input.external_ip_policy(),
             )
-            .expect_err("can't add external DNS zones");
+            .expect("constructed allocator");
+        external_networking_alloc
+            .for_new_external_dns()
+            .expect_err("should not have available IPs for external DNS");
 
         // Change the policy: add some external DNS IPs.
         let external_dns_ips =
@@ -3310,32 +3342,47 @@ pub(crate) mod test {
             PlannerRng::from_entropy(),
         )
         .expect("failed to build blueprint builder");
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &blueprint_builder,
+                input.external_ip_policy(),
+            )
+            .expect("constructed allocator");
 
         // Now we can add external DNS zones. We'll add two to the first
         // sled and one to the second.
         let (sled_1, sled_2) = {
             let mut sleds = blueprint_builder.sled_ids_with_zones();
             (
-                sleds.next().expect("no first sled"),
-                sleds.next().expect("no second sled"),
+                sleds.next().expect("at least one sled"),
+                sleds.next().expect("at least two sleds"),
             )
         };
         blueprint_builder
             .sled_add_zone_external_dns(
                 sled_1,
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_external_dns()
+                    .expect("got IP for external DNS"),
             )
             .expect("added external DNS zone");
         blueprint_builder
             .sled_add_zone_external_dns(
                 sled_1,
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_external_dns()
+                    .expect("got IP for external DNS"),
             )
             .expect("added external DNS zone");
         blueprint_builder
             .sled_add_zone_external_dns(
                 sled_2,
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_external_dns()
+                    .expect("got IP for external DNS"),
             )
             .expect("added external DNS zone");
 
@@ -3398,13 +3445,13 @@ pub(crate) mod test {
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!("2 -> 3 (expunged sled):\n{}", diff.display());
         assert_eq!(
-            blueprint3.sleds[&sled_id]
+            blueprint3.sleds[&sled_1]
                 .zones
                 .iter()
                 .filter(|zone| {
                     zone.disposition
                         == BlueprintZoneDisposition::Expunged {
-                            as_of_generation: blueprint3.sleds[&sled_id]
+                            as_of_generation: blueprint3.sleds[&sled_1]
                                 .sled_agent_generation,
                             ready_for_cleanup: true,
                         }

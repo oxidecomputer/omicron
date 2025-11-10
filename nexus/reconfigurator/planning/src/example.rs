@@ -12,6 +12,7 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 use crate::blueprint_builder::BlueprintBuilder;
+use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::planner::rng::PlannerRng;
 use crate::system::RotStateOverrides;
 use crate::system::SledBuilder;
@@ -560,6 +561,12 @@ impl ExampleSystemBuilder {
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                base_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator");
 
         // * Create disks and non-discretionary zones on all sleds.
         // * Only create discretionary zones on discretionary sleds.
@@ -587,6 +594,9 @@ impl ExampleSystemBuilder {
                     for _ in 0..nexus_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
+                        let external_ip = external_networking_alloc
+                            .for_new_nexus()
+                            .expect("should have an external IP for Nexus");
                         builder
                             .sled_add_zone_nexus_with_config(
                                 sled_id,
@@ -595,6 +605,7 @@ impl ExampleSystemBuilder {
                                 self.target_release
                                     .zone_image_source(ZoneKind::Nexus)
                                     .expect("obtained Nexus image source"),
+                                external_ip,
                                 initial_blueprint.nexus_generation,
                             )
                             .unwrap();
@@ -633,6 +644,11 @@ impl ExampleSystemBuilder {
                         .external_dns_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
+                        let external_ip = external_networking_alloc
+                            .for_new_external_dns()
+                            .expect(
+                                "should have an external IP for external DNS",
+                            );
                         builder
                             .sled_add_zone_external_dns(
                                 sled_id,
@@ -641,6 +657,7 @@ impl ExampleSystemBuilder {
                                     .expect(
                                         "obtained ExternalDNS image source",
                                     ),
+                                external_ip,
                             )
                             .unwrap();
                     }

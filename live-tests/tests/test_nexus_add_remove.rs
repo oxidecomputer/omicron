@@ -16,6 +16,7 @@ use nexus_lockstep_client::types::QuiesceState;
 use nexus_lockstep_client::types::Saga;
 use nexus_lockstep_client::types::SagaState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -115,8 +116,20 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                     "could not find in-service Nexus in parent blueprint",
                 )?;
 
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                builder,
+                planning_input.external_ip_policy(),
+            )
+            .context("failed to construct external networking allocator")?
+            .for_new_nexus()
+            .context("failed to pick an external IP for Nexus")?;
             builder
-                .sled_add_zone_nexus(sled_id, image_source, *nexus_generation)
+                .sled_add_zone_nexus(
+                    sled_id,
+                    image_source,
+                    external_ip,
+                    *nexus_generation,
+                )
                 .context("adding Nexus zone")?;
 
             Ok(())
