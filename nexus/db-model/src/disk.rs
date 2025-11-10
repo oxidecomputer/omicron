@@ -75,7 +75,7 @@ pub struct Disk {
     /// (where rows are matched based on the disk_id field in that table) and
     /// combined into a higher level `datastore::Disk` enum.
     ///
-    /// For `Crucible` disks, see the `disk_type_crucible` table.
+    /// For `Crucible` disks, see the DiskTypeCrucible model.
     pub disk_type: DiskType,
 }
 
