@@ -160,7 +160,7 @@ pub(crate) mod test {
                 block_size: 0,
                 blocks_per_extent: 0,
                 extent_count: 0,
-                gen: 0,
+                r#gen: 0,
                 opts: CrucibleOpts {
                     id: *old_snapshot_volume_id.as_untyped_uuid(),
                     target: vec![

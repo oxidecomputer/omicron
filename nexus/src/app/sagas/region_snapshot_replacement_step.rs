@@ -277,7 +277,7 @@ async fn rssrs_create_fake_volume(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            r#gen: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
                 target: vec![],

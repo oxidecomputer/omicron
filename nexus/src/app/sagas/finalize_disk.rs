@@ -174,7 +174,7 @@ async fn sfd_set_finalizing_state(
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            Ok(db_disk.runtime().gen)
+            Ok(db_disk.runtime().generation)
         }
 
         _ => Err(ActionError::action_failed(Error::invalid_request(&format!(
@@ -211,7 +211,7 @@ async fn sfd_set_finalizing_state_undo(
             // import_read. Another saga racing with this one may have transitioned the disk to
             // finalizing - only set this disk to import_ready if the generation number matches this
             // saga.
-            if expected_disk_generation_number == db_disk.runtime().gen {
+            if expected_disk_generation_number == db_disk.runtime().generation {
                 info!(
                     log,
                     "undo: setting disk {} state from finalizing to import_ready",
@@ -232,7 +232,7 @@ async fn sfd_set_finalizing_state_undo(
                     log,
                     "disk {} has generation number {:?}, which doesn't match the expected {:?}: skip setting to import_ready",
                     params.disk_id,
-                    db_disk.runtime().gen,
+                    db_disk.runtime().generation,
                     expected_disk_generation_number,
                 );
             }
@@ -362,7 +362,7 @@ async fn sfd_set_detached_state(
 
     match db_disk.state().into() {
         external::DiskState::Finalizing => {
-            if expected_disk_generation_number == db_disk.runtime().gen {
+            if expected_disk_generation_number == db_disk.runtime().generation {
                 info!(
                     log,
                     "setting disk {} state from finalizing to detached",
@@ -383,7 +383,7 @@ async fn sfd_set_detached_state(
                     log,
                     "disk {} has generation number {:?}, which doesn't match the expected {:?}: skip setting to detached",
                     params.disk_id,
-                    db_disk.runtime().gen,
+                    db_disk.runtime().generation,
                     expected_disk_generation_number,
                 );
             }

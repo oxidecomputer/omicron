@@ -492,21 +492,21 @@ async fn sic_create_network_interface(
             )
             .await
         }
-        params::InstanceNetworkInterfaceAttachment::Create(
-            ref create_params,
-        ) => match create_params.get(nic_index) {
-            None => Ok(()),
-            Some(ref prs) => {
-                create_custom_network_interface(
-                    &sagactx,
-                    &saga_params,
-                    instance_id,
-                    interface_id,
-                    prs,
-                )
-                .await
+        params::InstanceNetworkInterfaceAttachment::Create(create_params) => {
+            match create_params.get(nic_index) {
+                None => Ok(()),
+                Some(ref prs) => {
+                    create_custom_network_interface(
+                        &sagactx,
+                        &saga_params,
+                        instance_id,
+                        interface_id,
+                        prs,
+                    )
+                    .await
+                }
             }
-        },
+        }
     }
 }
 
@@ -1267,8 +1267,8 @@ async fn sic_move_to_stopped(
     // of date.
     let new_state = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
-        gen: db::model::Generation::from(
-            instance_record.runtime_state.gen.next(),
+        generation: db::model::Generation::from(
+            instance_record.runtime_state.generation.next(),
         ),
         ..instance_record.runtime_state
     };

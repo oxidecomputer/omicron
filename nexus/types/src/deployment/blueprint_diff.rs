@@ -124,7 +124,9 @@ impl<'a> BlueprintDiffSummary<'a> {
     }
 
     /// All sled IDs present in the diff in any way
-    pub fn all_sled_ids(&self) -> impl Iterator<Item = SledUuid> + '_ {
+    pub fn all_sled_ids(
+        &self,
+    ) -> impl Iterator<Item = SledUuid> + '_ + use<'_> {
         self.diff
             .sleds
             .added
@@ -1787,7 +1789,7 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
 
     pub fn make_metadata_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvList> {
+    ) -> impl IntoIterator<Item = KvList> + use<> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
@@ -1848,7 +1850,7 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
 
     pub fn make_oximeter_read_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvList> {
+    ) -> impl IntoIterator<Item = KvList> + use<> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)

@@ -91,7 +91,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        let gen = disk.runtime().gen;
+        let generation = disk.runtime().generation;
         let name = disk.name().clone();
         let project_id = disk.project_id;
 
@@ -122,9 +122,9 @@ impl DataStore {
             runtime.disk_state
         );
         bail_unless!(
-            runtime.gen == gen,
+            runtime.generation == generation,
             "newly-created Disk has unexpected generation: {:?}",
-            runtime.gen
+            runtime.generation
         );
         Ok(disk)
     }
@@ -470,7 +470,7 @@ impl DataStore {
         let updated = diesel::update(dsl::disk)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(disk_id))
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(dsl::state_generation.lt(new_runtime.generation))
             .set(new_runtime.clone())
             .check_if_exists::<Disk>(disk_id)
             .execute_and_check(&*self.pool_connection_authorized(opctx).await?)

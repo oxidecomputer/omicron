@@ -1360,10 +1360,10 @@ impl<'a> Planner<'a> {
                 // If the image matches exactly, use it.
                 same_image_nexus_generation = Some(nexus.nexus_generation);
                 break;
-            } else if let Some(gen) = highest_seen_generation {
+            } else if let Some(generation) = highest_seen_generation {
                 // Otherwise, use the generation number if it's the highest
                 // we've seen
-                if nexus.nexus_generation > gen {
+                if nexus.nexus_generation > generation {
                     highest_seen_generation = Some(nexus.nexus_generation);
                 }
             } else {
@@ -1374,15 +1374,15 @@ impl<'a> Planner<'a> {
         }
 
         let determined_generation = match same_image_nexus_generation {
-            Some(gen) => Some(gen),
-            None => highest_seen_generation.map(|gen| gen.next()),
+            Some(generation) => Some(generation),
+            None => highest_seen_generation.map(|r#gen| r#gen.next()),
         };
 
-        let Some(gen) = determined_generation else {
+        let Some(r#gen) = determined_generation else {
             return Err(Error::NoNexusZonesInParentBlueprint);
         };
 
-        Ok(gen)
+        Ok(r#gen)
     }
 
     /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of

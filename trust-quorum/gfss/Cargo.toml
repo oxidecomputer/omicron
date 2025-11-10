@@ -2,7 +2,7 @@
 name = "gfss"
 version = "0.1.0"
 description = "Shamir secret sharing over GF(2^8)"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]

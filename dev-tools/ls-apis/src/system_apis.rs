@@ -206,7 +206,7 @@ impl SystemApis {
     pub fn deployment_unit_servers(
         &self,
         unit: &DeploymentUnitName,
-    ) -> Result<impl Iterator<Item = &ServerComponentName>> {
+    ) -> Result<impl Iterator<Item = &ServerComponentName> + use<'_>> {
         Ok(self
             .unit_server_components
             .get(unit)
@@ -224,7 +224,9 @@ impl SystemApis {
         &self,
         server_component: &ServerComponentName,
         filter: ApiDependencyFilter,
-    ) -> Result<impl Iterator<Item = (&ClientPackageName, &DepPath)> + '_> {
+    ) -> Result<
+        impl Iterator<Item = (&ClientPackageName, &DepPath)> + '_ + use<'_>,
+    > {
         let mut rv = Vec::new();
         let Some(apis_consumed) = self.apis_consumed.get(server_component)
         else {
@@ -257,7 +259,8 @@ impl SystemApis {
     pub fn api_producers<'apis>(
         &'apis self,
         client: &ClientPackageName,
-    ) -> impl Iterator<Item = &'apis ServerComponentName> + 'apis {
+    ) -> impl Iterator<Item = &'apis ServerComponentName> + 'apis + use<'apis>
+    {
         self.api_producers
             .get(client)
             .into_iter()
@@ -271,8 +274,9 @@ impl SystemApis {
         &self,
         client: &ClientPackageName,
         filter: ApiDependencyFilter,
-    ) -> Result<impl Iterator<Item = (&ServerComponentName, Vec<&DepPath>)> + '_>
-    {
+    ) -> Result<
+        impl Iterator<Item = (&ServerComponentName, Vec<&DepPath>)> + '_ + use<'_>,
+    > {
         let mut rv = Vec::new();
 
         let Some(api_consumers) = self.api_consumers.get(client) else {

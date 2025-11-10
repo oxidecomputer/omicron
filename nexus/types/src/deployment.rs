@@ -456,22 +456,22 @@ impl Blueprint {
         &self,
         nexus_zones: &BTreeSet<OmicronZoneUuid>,
     ) -> Result<Option<Generation>, anyhow::Error> {
-        let mut gen = None;
+        let mut r#gen = None;
         for (_, zone, nexus_zone) in
             self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
         {
             if nexus_zones.contains(&zone.id) {
                 let found_gen = nexus_zone.nexus_generation;
-                if let Some(gen) = gen {
-                    if found_gen != gen {
+                if let Some(r#gen) = r#gen {
+                    if found_gen != r#gen {
                         bail!("Multiple generations found for these zones");
                     }
                 }
-                gen = Some(found_gen);
+                r#gen = Some(found_gen);
             }
         }
 
-        Ok(gen)
+        Ok(r#gen)
     }
 
     /// Returns the Nexus generation number for Nexus `nexus_id`, which is
@@ -550,7 +550,7 @@ impl<'a> BlueprintHostPhase2TableData<'a> {
 
     fn diff_rows<'b>(
         diffs: &'b BlueprintHostPhase2DesiredSlotsDiff<'_>,
-    ) -> impl Iterator<Item = BpTableRow> + 'b {
+    ) -> impl Iterator<Item = BpTableRow> + 'b + use<'b> {
         [(M2Slot::A, &diffs.slot_a), (M2Slot::B, &diffs.slot_b)]
             .into_iter()
             .map(|(slot, diff)| {
@@ -1063,7 +1063,7 @@ impl ZoneSortKey for OmicronZoneConfig {
     }
 }
 
-fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
+fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord + use<T> {
     // First sort by kind, then by ID. This makes it so that zones of the same
     // kind (e.g. Crucible zones) are grouped together.
     (z.kind(), z.id())

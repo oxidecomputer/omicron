@@ -93,7 +93,7 @@ impl Vmm {
             runtime: VmmRuntimeState {
                 state: VmmState::Creating,
                 time_state_updated: now,
-                gen: Generation::new(),
+                generation: Generation::new(),
             },
         }
     }
@@ -122,7 +122,8 @@ pub struct VmmRuntimeState {
 
     /// The generation number protecting this VMM's state and update time.
     #[diesel(column_name = state_generation)]
-    pub gen: Generation,
+    #[serde(rename = "gen")]
+    pub generation: Generation,
 
     /// The state of this VMM. If this VMM is the active VMM for a given
     /// instance, this state is the instance's logical state.
@@ -138,7 +139,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
         Self {
             state: value.state.into(),
             time_state_updated: value.time_updated,
-            gen: value.gen.into(),
+            generation: value.generation.into(),
         }
     }
 }
@@ -146,7 +147,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
 impl From<Vmm> for sled_agent_client::types::VmmRuntimeState {
     fn from(s: Vmm) -> Self {
         Self {
-            gen: s.runtime.gen.into(),
+            r#gen: s.runtime.generation.into(),
             state: s.runtime.state.into(),
             time_updated: s.runtime.time_state_updated,
         }

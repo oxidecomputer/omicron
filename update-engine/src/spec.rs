@@ -119,7 +119,7 @@ impl<E> JsonSchema for GenericSpec<E> {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         // This means "accept any value here" -- this is irrelevant since we
         // only care about the schema name.

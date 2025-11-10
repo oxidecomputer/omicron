@@ -349,7 +349,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_silo: &authz::Silo,
         silo_group: model::SiloGroup,
-    ) -> Result<impl RunnableQueryNoReturn, Error> {
+    ) -> Result<impl RunnableQueryNoReturn + use<>, Error> {
         opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
 
         use nexus_db_schema::schema::silo_group::dsl;

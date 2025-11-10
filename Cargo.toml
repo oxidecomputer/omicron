@@ -323,6 +323,9 @@ default-members = [
 ]
 resolver = "3"
 
+[workspace.package]
+edition = "2024"
+
 #
 # Tree-wide lint configuration.
 # https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-lints-section

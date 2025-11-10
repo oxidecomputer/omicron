@@ -259,7 +259,7 @@ async fn alert_receiver_send_probe(
 
 fn is_valid_for_webhook(
     webhook: &views::WebhookReceiver,
-) -> impl FnOnce(httpmock::When) -> httpmock::When {
+) -> impl FnOnce(httpmock::When) -> httpmock::When + use<> {
     let path = webhook.config.endpoint.path().to_string();
     let id = webhook.identity.id.to_string();
     move |when| {

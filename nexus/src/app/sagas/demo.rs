@@ -58,7 +58,7 @@ impl CompletingDemoSagas {
     pub fn subscribe(
         &mut self,
         id: DemoSagaUuid,
-    ) -> impl Future<Output = Result<(), anyhow::Error>> {
+    ) -> impl Future<Output = Result<(), anyhow::Error>> + use<> {
         let sem =
             self.sagas.entry(id).or_insert_with(|| Arc::new(Semaphore::new(0)));
         let sem_clone = sem.clone();

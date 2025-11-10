@@ -251,7 +251,7 @@ mod tests {
                         runtime: VmmRuntimeState {
                             state: VmmState::Destroyed,
                             time_state_updated: Utc::now(),
-                            gen: Generation::new(),
+                            generation: Generation::new(),
                         }
                     }),
                 )

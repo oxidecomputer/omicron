@@ -2629,7 +2629,7 @@ async fn cmd_db_physical_disks(
 // SERVICES
 
 // Snapshots
-fn format_snapshot(state: &SnapshotState) -> impl Display {
+fn format_snapshot(state: &SnapshotState) -> impl Display + use<> {
     match state {
         SnapshotState::Creating => "creating".to_string(),
         SnapshotState::Ready => "ready".to_string(),
@@ -3003,7 +3003,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
         bs: String,
         bpe: u64,
         ec: u32,
-        gen: u64,
+        generation: u64,
         read_only: bool,
     }
 
@@ -3049,7 +3049,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
             block_size,
             blocks_per_extent,
             extent_count,
-            gen,
+            r#gen,
             opts,
         } => {
             let row = VCRRegion {
@@ -3057,7 +3057,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
                 bs: block_size.to_string(),
                 bpe: blocks_per_extent,
                 ec: extent_count,
-                gen,
+                generation: r#gen,
                 read_only: opts.read_only,
             };
             let table = tabled::Table::new(&[row])
@@ -4495,7 +4495,7 @@ async fn cmd_db_instance_info(
         dst_propolis_id,
         migration_id,
         nexus_state,
-        r#gen,
+        generation,
         time_last_auto_restarted,
     } = instance.runtime_state;
     println!("    {STATE:>WIDTH$}: {nexus_state:?}");
@@ -4509,7 +4509,7 @@ async fn cmd_db_instance_info(
     println!("    {INTENDED_STATE:>WIDTH$}: {}", instance.intended_state);
     println!(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
-        r#gen.0
+        generation.0
     );
 
     // Reincarnation status
@@ -4822,7 +4822,7 @@ async fn cmd_db_instance_info(
                     runtime:
                         db::model::VmmRuntimeState {
                             time_state_updated: _,
-                            r#gen,
+                            generation,
                             state,
                         },
                 } = vmm;
@@ -4830,7 +4830,7 @@ async fn cmd_db_instance_info(
                     state: VmmStateRow {
                         id,
                         state,
-                        generation: r#gen.0.into(),
+                        generation: generation.0.into(),
                     },
                     sled_id: sled_id.into(),
                     time_created,
@@ -6746,7 +6746,7 @@ fn print_name(
     }
 }
 
-fn format_record(record: &DnsRecord) -> impl Display {
+fn format_record(record: &DnsRecord) -> impl Display + use<> {
     match record {
         DnsRecord::A(addr) => format!("A    {}", addr),
         DnsRecord::Aaaa(addr) => format!("AAAA {}", addr),
@@ -7457,7 +7457,8 @@ fn prettyprint_vmm(
         propolis_ip,
         propolis_port,
         cpu_platform,
-        runtime: db::model::VmmRuntimeState { state, r#gen, time_state_updated },
+        runtime:
+            db::model::VmmRuntimeState { state, generation, time_state_updated },
     } = vmm;
 
     println!("{indent}{ID:>width$}: {id}");
@@ -7469,7 +7470,7 @@ fn prettyprint_vmm(
         println!("{indent}{DELETED:width$}: {deleted}");
     }
     println!("{indent}{STATE:>width$}: {state}");
-    let g = u64::from(r#gen.0);
+    let g = u64::from(generation.0);
     println!(
         "{indent}{UPDATED:>width$}: {time_state_updated:?} (generation {g})"
     );
@@ -7550,7 +7551,7 @@ async fn cmd_db_vmm_list(
     }
 
     impl<'a> From<&'a (Vmm, Option<Sled>)> for VmmRow<'a> {
-        fn from((ref vmm, ref sled): &'a (Vmm, Option<Sled>)) -> Self {
+        fn from((vmm, sled): &'a (Vmm, Option<Sled>)) -> Self {
             let &Vmm {
                 id,
                 time_created: _,
@@ -7563,7 +7564,7 @@ async fn cmd_db_vmm_list(
                 runtime:
                     db::model::VmmRuntimeState {
                         state,
-                        r#gen,
+                        generation,
                         time_state_updated: _,
                     },
             } = vmm;
@@ -7576,7 +7577,11 @@ async fn cmd_db_vmm_list(
             };
             VmmRow {
                 instance_id,
-                state: VmmStateRow { id, state, generation: r#gen.0.into() },
+                state: VmmStateRow {
+                    id,
+                    state,
+                    generation: generation.0.into(),
+                },
                 sled,
             }
         }

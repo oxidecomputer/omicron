@@ -401,7 +401,7 @@ table! {
 
         destination_volume_id -> Uuid,
 
-        gen -> Int8,
+        r#gen -> Int8,
         state -> crate::enums::SnapshotStateEnum,
         block_size -> crate::enums::BlockSizeEnum,
         size_bytes -> Int8,

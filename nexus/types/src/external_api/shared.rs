@@ -441,12 +441,12 @@ impl SwitchLinkState {
 
 impl JsonSchema for SwitchLinkState {
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         let obj = schemars::schema::Schema::Object(
             schemars::schema::SchemaObject::default(),
         );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        r#gen.definitions_mut().insert(Self::schema_name(), obj.clone());
         obj
     }
 
@@ -521,7 +521,7 @@ impl JsonSchema for AlertSubscription {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {

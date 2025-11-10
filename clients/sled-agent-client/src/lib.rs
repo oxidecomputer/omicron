@@ -134,7 +134,11 @@ impl From<types::VmmRuntimeState>
     for omicron_common::api::internal::nexus::VmmRuntimeState
 {
     fn from(s: types::VmmRuntimeState) -> Self {
-        Self { state: s.state.into(), gen: s.gen, time_updated: s.time_updated }
+        Self {
+            state: s.state.into(),
+            generation: s.r#gen,
+            time_updated: s.time_updated,
+        }
     }
 }
 
@@ -157,7 +161,7 @@ impl From<types::MigrationRuntimeState>
         Self {
             migration_id: s.migration_id,
             state: s.state.into(),
-            gen: s.gen,
+            generation: s.r#gen,
             time_updated: s.time_updated,
         }
     }
@@ -183,7 +187,7 @@ impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
     fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen,
+            r#gen: s.generation,
             time_updated: s.time_updated,
         }
     }
@@ -215,7 +219,7 @@ impl From<types::DiskRuntimeState>
     fn from(s: types::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen,
+            generation: s.r#gen,
             time_updated: s.time_updated,
         }
     }

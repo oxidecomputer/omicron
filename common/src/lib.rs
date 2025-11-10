@@ -84,12 +84,12 @@ impl<T> std::fmt::Debug for NoDebug<T> {
 }
 
 pub fn hex_schema<const N: usize>(
-    gen: &mut schemars::SchemaGenerator,
+    generator: &mut schemars::SchemaGenerator,
 ) -> schemars::schema::Schema {
     use schemars::JsonSchema;
 
     let mut schema: schemars::schema::SchemaObject =
-        <String>::json_schema(gen).into();
+        <String>::json_schema(generator).into();
     schema.format = Some(format!("hex string ({N} bytes)"));
     schema.into()
 }
