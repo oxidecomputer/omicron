@@ -205,6 +205,13 @@ impl<'a> Planner<'a> {
             )?;
         }
 
+        // Copy some "always update to the latest value" settings.
+        blueprint.set_cockroachdb_fingerprint(
+            input.cockroachdb_settings().state_fingerprint.clone(),
+        );
+        blueprint.set_internal_dns_version(input.internal_dns_version());
+        blueprint.set_external_dns_version(input.external_dns_version());
+
         Ok(Planner { log, input, blueprint, inventory })
     }
 

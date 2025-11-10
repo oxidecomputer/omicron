@@ -668,16 +668,15 @@ impl<'a> BlueprintBuilder<'a> {
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
-            cockroachdb_fingerprint: input
-                .cockroachdb_settings()
-                .state_fingerprint
+            cockroachdb_fingerprint: parent_blueprint
+                .cockroachdb_fingerprint
                 .clone(),
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
             nexus_generation: parent_blueprint.nexus_generation,
-            internal_dns_version: input.internal_dns_version(),
-            external_dns_version: input.external_dns_version(),
+            internal_dns_version: parent_blueprint.internal_dns_version,
+            external_dns_version: parent_blueprint.external_dns_version,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -778,6 +777,18 @@ impl<'a> BlueprintBuilder<'a> {
         mode: OximeterReadMode,
     ) {
         self.oximeter_read_policy = OximeterReadPolicy { version, mode };
+    }
+
+    pub fn set_cockroachdb_fingerprint(&mut self, fingerprint: String) {
+        self.cockroachdb_fingerprint = fingerprint;
+    }
+
+    pub fn set_internal_dns_version(&mut self, version: Generation) {
+        self.internal_dns_version = version;
+    }
+
+    pub fn set_external_dns_version(&mut self, version: Generation) {
+        self.external_dns_version = version;
     }
 
     pub fn available_internal_dns_subnets(
