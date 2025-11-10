@@ -4,6 +4,7 @@
 
 use crate::blippy::Blippy;
 use crate::blippy::BlueprintKind;
+use crate::blippy::PlanningInputKind;
 use crate::blippy::Severity;
 use crate::blippy::SledKind;
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -17,6 +18,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
+use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::DnsSubnet;
@@ -31,7 +33,15 @@ use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::btree_map::Entry;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
+
+pub(crate) fn perform_planning_input_checks(
+    blippy: &mut Blippy<'_>,
+    input: &PlanningInput,
+) {
+    check_planning_input_network_records_appear_in_blueprint(blippy, input);
+}
 
 pub(crate) fn perform_all_blueprint_only_checks(blippy: &mut Blippy<'_>) {
     check_underlay_ips(blippy);
@@ -750,8 +760,8 @@ mod tests {
         let logctx = test_setup_log(TEST_NAME);
         let (_, _, blueprint) = example(&logctx.log, TEST_NAME);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         if !report.notes().is_empty() {
             eprintln!("{}", report.display());
             panic!("example blueprint should have no blippy notes");
@@ -844,8 +854,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -931,8 +941,8 @@ mod tests {
         mem::drop(dns0);
         mem::drop(dns1);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         assert!(
             report.notes().contains(&expected_note),
@@ -1001,8 +1011,8 @@ mod tests {
         mem::drop(nexus0);
         mem::drop(nexus1);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1068,8 +1078,8 @@ mod tests {
         mem::drop(nexus0);
         mem::drop(nexus1);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1135,8 +1145,8 @@ mod tests {
         mem::drop(nexus0);
         mem::drop(nexus1);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1218,8 +1228,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1293,8 +1303,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1352,8 +1362,8 @@ mod tests {
             },
         }];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1397,8 +1407,8 @@ mod tests {
         }
         assert!(found_duplicate);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in report.notes() {
             match &note.kind {
@@ -1481,8 +1491,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1556,8 +1566,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1628,8 +1638,8 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1700,8 +1710,8 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!expected_notes.is_empty());
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1802,8 +1812,8 @@ mod tests {
         // We should have modified 3 datasets.
         assert_eq!(expected_notes.len(), 3);
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         for note in expected_notes {
             assert!(
@@ -1917,8 +1927,8 @@ mod tests {
             },
         ];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         assert_eq!(report.notes(), &expected_notes);
 
@@ -1944,8 +1954,8 @@ mod tests {
             ),
         }];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         assert_eq!(report.notes(), &expected_notes);
 
@@ -2047,11 +2057,171 @@ mod tests {
             },
         }];
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
         eprintln!("{}", report.display());
         assert_eq!(report.notes(), &expected_notes);
 
         logctx.cleanup_successful();
+    }
+}
+
+// For a given `PlanningInput` / `Blueprint` pair that could be passed to the
+// planner, there should never be any external networking resources in the
+// planning input (which is derived from the contents of CRDB) that we don't
+// know about from the parent blueprint. It's possible a given planning
+// iteration could see such a state if there have been intermediate changes made
+// by other Nexus instances; e.g.,
+//
+// 1. Nexus A generates a `PlanningInput` by reading from CRDB
+// 2. Nexus B executes on a target blueprint that removes IPs/NICs from
+//    CRDB
+// 3. Nexus B regenerates a new blueprint and prunes the zone(s) associated
+//    with the IPs/NICs from step 2
+// 4. Nexus B makes this new blueprint the target
+// 5. Nexus A attempts to run planning with its `PlanningInput` from step 1 but
+//    the target blueprint from step 4; this will fail the following checks
+//    because the input contains records that were removed in step 3
+//
+// We do not need to handle this class of error; it's a transient failure that
+// will clear itself up when Nexus A repeats its planning loop from the top and
+// generates a new `PlanningInput`.
+//
+// There may still be database records corresponding to _expunged_ zones, but
+// that's okay: it just means we haven't yet realized a blueprint where those
+// zones are expunged. And those should should still be in the blueprint (not
+// pruned) until their database records are cleaned up.
+//
+// It's also possible that there may be networking records in the database
+// assigned to zones that have been expunged, and the blueprint uses those same
+// records for new zones. This is also fine and expected, and is a similar case
+// to the previous paragraph: a zone with networking resources was expunged, the
+// database doesn't realize it yet, but can still move forward and make planning
+// decisions that reuse those resources for new zones.
+fn check_planning_input_network_records_appear_in_blueprint(
+    blippy: &mut Blippy<'_>,
+    input: &PlanningInput,
+) {
+    use nexus_types::deployment::OmicronZoneExternalIp;
+    use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+    use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
+    use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+    use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
+    use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
+    use omicron_common::address::NTP_OPTE_IPV6_SUBNET;
+    use omicron_common::api::external::MacAddr;
+
+    let mut all_macs: BTreeSet<MacAddr> = BTreeSet::new();
+    let mut all_nexus_nic_ips: BTreeSet<IpAddr> = BTreeSet::new();
+    let mut all_boundary_ntp_nic_ips: BTreeSet<IpAddr> = BTreeSet::new();
+    let mut all_external_dns_nic_ips: BTreeSet<IpAddr> = BTreeSet::new();
+    let mut all_external_ips: BTreeSet<OmicronZoneExternalIp> = BTreeSet::new();
+
+    // Unlike the construction of the external IP allocator and existing IPs
+    // constructed above in `BuilderExternalNetworking::new()`, we do not
+    // check for duplicates here: we could very well see reuse of IPs
+    // between expunged zones or between expunged -> running zones.
+    for (_, z) in
+        blippy.blueprint().all_omicron_zones(BlueprintZoneDisposition::any)
+    {
+        let zone_type = &z.zone_type;
+        match zone_type {
+            BlueprintZoneType::BoundaryNtp(ntp) => {
+                all_boundary_ntp_nic_ips.insert(ntp.nic.ip);
+            }
+            BlueprintZoneType::Nexus(nexus) => {
+                all_nexus_nic_ips.insert(nexus.nic.ip);
+            }
+            BlueprintZoneType::ExternalDns(dns) => {
+                all_external_dns_nic_ips.insert(dns.nic.ip);
+            }
+            _ => (),
+        }
+
+        if let Some((external_ip, nic)) = zone_type.external_networking() {
+            // Ignore localhost (used by the test suite).
+            if !external_ip.ip().is_loopback() {
+                all_external_ips.insert(external_ip);
+            }
+            all_macs.insert(nic.mac);
+        }
+    }
+    for external_ip_entry in
+        input.network_resources().omicron_zone_external_ips()
+    {
+        // As above, ignore localhost (used by the test suite).
+        if external_ip_entry.ip.ip().is_loopback() {
+            continue;
+        }
+        if !all_external_ips.contains(&external_ip_entry.ip) {
+            blippy.push_planning_input_note(
+                Severity::Fatal,
+                PlanningInputKind::IpNotInBlueprint(external_ip_entry.ip),
+            );
+        }
+    }
+    for nic_entry in input.network_resources().omicron_zone_nics() {
+        if !all_macs.contains(&nic_entry.nic.mac) {
+            blippy.push_planning_input_note(
+                Severity::Fatal,
+                PlanningInputKind::NicMacNotInBluperint(nic_entry),
+            );
+        }
+        match nic_entry.nic.ip {
+            IpAddr::V4(ip) if NEXUS_OPTE_IPV4_SUBNET.contains(ip) => {
+                if !all_nexus_nic_ips.contains(&ip.into()) {
+                    blippy.push_planning_input_note(
+                        Severity::Fatal,
+                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
+                    );
+                }
+            }
+            IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
+                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
+                    blippy.push_planning_input_note(
+                        Severity::Fatal,
+                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
+                    );
+                }
+            }
+            IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
+                if !all_external_dns_nic_ips.contains(&ip.into()) {
+                    blippy.push_planning_input_note(
+                        Severity::Fatal,
+                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
+                    );
+                }
+            }
+            IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
+                if !all_nexus_nic_ips.contains(&ip.into()) {
+                    blippy.push_planning_input_note(
+                        Severity::Fatal,
+                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
+                    );
+                }
+            }
+            IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
+                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
+                    blippy.push_planning_input_note(
+                        Severity::Fatal,
+                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
+                    );
+                }
+            }
+            IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
+                if !all_external_dns_nic_ips.contains(&ip.into()) {
+                    blippy.push_planning_input_note(
+                        Severity::Fatal,
+                        PlanningInputKind::NicIpNotInBlueprint(nic_entry),
+                    );
+                }
+            }
+            _ => {
+                blippy.push_planning_input_note(
+                    Severity::Fatal,
+                    PlanningInputKind::NicWithUnknownOpteSubnet(nic_entry),
+                );
+            }
+        }
     }
 }
