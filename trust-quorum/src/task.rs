@@ -34,6 +34,7 @@ use trust_quorum_protocol::{
 use bootstore::schemes::v0::NetworkConfig;
 
 /// Whether or not a configuration has committed or is still underway.
+#[derive(Debug)]
 pub enum CommitStatus {
     Committed,
     Pending,

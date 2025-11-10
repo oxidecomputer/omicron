@@ -12,11 +12,16 @@
 //! This proxy mechanism is also useful during RSS and for general debugging
 //! purposes.
 
-use crate::{CommitStatus, task::NodeApiRequest};
+use std::convert::Infallible;
+
+use crate::{
+    CommitStatus,
+    task::{NodeApiRequest, NodeStatus},
+};
 use derive_more::From;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
-use slog_error_chain::SlogInlineError;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::sync::{mpsc, oneshot};
 use trust_quorum_protocol::{
     BaseboardId, CommitError, Configuration, Epoch, PrepareAndCommitError,
@@ -35,6 +40,7 @@ pub struct WireRequest {
 pub enum WireOp {
     Commit { rack_id: RackUuid, epoch: Epoch },
     PrepareAndCommit { config: Configuration },
+    Status,
 }
 
 pub struct WireResponse {
@@ -64,15 +70,17 @@ impl Proxy {
     ) -> oneshot::Receiver<Result<CommitStatus, ProxyError<CommitError>>> {
         let op = WireOp::Commit { rack_id, epoch };
         let destructure_fn = move |res| match res {
-            Ok(val) => {
-                let WireValue::Commit(cs) = val;
-                Ok(cs)
-            }
+            Ok(val) => match val {
+                WireValue::Commit(cs) => Ok(cs),
+                other => {
+                    Err(ProxyError::InvalidResponse(format!("{other:#?}")))
+                }
+            },
             Err(err) => match err {
                 WireError::Commit(e) => Err(e.into()),
-                WireError::PrepareAndCommit(e) => {
-                    Err(ProxyError::InvalidResponse(e.to_string()))
-                }
+                other => Err(ProxyError::InvalidResponse(
+                    InlineErrorChain::new(&other).to_string(),
+                )),
             },
         };
 
@@ -88,15 +96,39 @@ impl Proxy {
     > {
         let op = WireOp::PrepareAndCommit { config };
         let destructure_fn = move |res| match res {
-            Ok(val) => {
-                let WireValue::Commit(cs) = val;
-                Ok(cs)
-            }
-            Err(err) => match err {
-                WireError::Commit(e) => {
-                    Err(ProxyError::InvalidResponse(e.to_string()))
+            Ok(val) => match val {
+                WireValue::Commit(cs) => Ok(cs),
+                other => {
+                    Err(ProxyError::InvalidResponse(format!("{other:#?}")))
                 }
+            },
+            Err(err) => match err {
                 WireError::PrepareAndCommit(e) => Err(e.into()),
+                other => Err(ProxyError::InvalidResponse(
+                    InlineErrorChain::new(&other).to_string(),
+                )),
+            },
+        };
+        self.send(destination, op, destructure_fn).await
+    }
+
+    pub async fn status(
+        &self,
+        destination: BaseboardId,
+    ) -> oneshot::Receiver<Result<NodeStatus, ProxyError<NoInnerError>>> {
+        let op = WireOp::Status;
+        let destructure_fn = move |res| match res {
+            Ok(val) => match val {
+                WireValue::Status(status) => Ok(status),
+                other => {
+                    Err(ProxyError::InvalidResponse(format!("{other:#?}")))
+                }
+            },
+            Err(err) => match err {
+                WireError::NoInnerError(e) => Err(e.into()),
+                other => Err(ProxyError::InvalidResponse(
+                    InlineErrorChain::new(&other).to_string(),
+                )),
             },
         };
         self.send(destination, op, destructure_fn).await
@@ -151,17 +183,44 @@ impl Proxy {
 }
 
 /// The successful variant of a [`WireResponse`]
+#[derive(Debug)]
 pub enum WireValue {
-    /// The successful response value for a `commit` or `prepare_and_commit` operation.
+    /// The successful response value for a `commit` or `prepare_and_commit`
+    /// operation
     Commit(CommitStatus),
+    /// The successful response value for a `status` operation
+    Status(NodeStatus),
 }
 
 /// The error variant of a [`WireResponse`]
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, From)]
+#[derive(
+    Debug, PartialEq, Eq, Serialize, Deserialize, From, thiserror::Error,
+)]
 pub enum WireError {
+    #[error(transparent)]
     Commit(ProxyError<CommitError>),
+    #[error(transparent)]
     PrepareAndCommit(ProxyError<PrepareAndCommitError>),
+    #[error(transparent)]
+    NoInnerError(ProxyError<NoInnerError>),
 }
+
+/// Define an Error for cases where the remote task doesn't return an error
+///
+/// This is roughly analagous to `Infallible`, but derives `Error`, `Serialize`,
+/// and `Deserialize`.
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    SlogInlineError,
+    Serialize,
+    Deserialize,
+)]
+#[error("inner error when none expected")]
+pub struct NoInnerError;
 
 /// The error result of a proxy request
 #[derive(
