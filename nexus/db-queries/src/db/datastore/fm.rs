@@ -287,10 +287,11 @@ impl DataStore {
                 FROM batch b \
                 LEFT JOIN omicron.public.fm_sitrep_history h \
                     ON h.sitrep_id = b.id \
-                WHERE
+                WHERE \
                     h.sitrep_id IS NULL \
-                AND (
-                    b.parent_sitrep_id IS NULL \
+                AND ( \
+                    (b.parent_sitrep_id IS NULL \
+                     AND current_sitrep_id.sitrep_id IS NOT NULL)
                     OR b.parent_sitrep_id != ( \
                         SELECT sitrep_id FROM current_sitrep_id \
                     ) \
