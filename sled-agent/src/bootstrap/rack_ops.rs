@@ -13,6 +13,7 @@ use sled_agent_config_reconciler::InternalDisksReceiver;
 use sled_agent_types::rack_init::RackInitializeRequestParams;
 use sled_agent_types::rack_ops::{RackOperationStatus, RssStep};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use sprockets_tls::keys::SprocketsConfig;
 use std::mem;
 use std::net::Ipv6Addr;
@@ -96,7 +97,7 @@ impl RssAccess {
             RssStatus::InitializationFailed { id, err } => {
                 RackOperationStatus::InitializationFailed {
                     id: *id,
-                    message: format!("{err:#}"),
+                    message: InlineErrorChain::new(err).to_string(),
                 }
             }
             RssStatus::InitializationPanicked { id } => {
@@ -132,7 +133,7 @@ impl RssAccess {
             RssStatus::ResetFailed { id, err } => {
                 RackOperationStatus::ResetFailed {
                     id: *id,
-                    message: format!("{err:#}"),
+                    message: InlineErrorChain::new(err).to_string(),
                 }
             }
             RssStatus::ResetPanicked { id } => {
@@ -161,7 +162,7 @@ impl RssAccess {
             }
             RssStatus::InitializationFailed { err, .. } => {
                 Err(RssAccessError::InitializationFailed {
-                    message: err.to_string(),
+                    message: InlineErrorChain::new(err).to_string(),
                 })
             }
             RssStatus::InitializationPanicked { .. } => {
@@ -170,7 +171,9 @@ impl RssAccess {
 
             RssStatus::Resetting { .. } => Err(RssAccessError::StillResetting),
             RssStatus::ResetFailed { err, .. } => {
-                Err(RssAccessError::ResetFailed { message: err.to_string() })
+                Err(RssAccessError::ResetFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
             }
             RssStatus::ResetPanicked { .. } => {
                 Err(RssAccessError::ResetPanicked)
@@ -227,7 +230,7 @@ impl RssAccess {
             }
             RssStatus::InitializationFailed { err, .. } => {
                 Err(RssAccessError::InitializationFailed {
-                    message: err.to_string(),
+                    message: InlineErrorChain::new(err).to_string(),
                 })
             }
             RssStatus::InitializationPanicked { .. } => {
@@ -235,7 +238,9 @@ impl RssAccess {
             }
             RssStatus::Resetting { .. } => Err(RssAccessError::StillResetting),
             RssStatus::ResetFailed { err, .. } => {
-                Err(RssAccessError::ResetFailed { message: err.to_string() })
+                Err(RssAccessError::ResetFailed {
+                    message: InlineErrorChain::new(err).to_string(),
+                })
             }
             RssStatus::ResetPanicked { .. } => {
                 Err(RssAccessError::ResetPanicked)

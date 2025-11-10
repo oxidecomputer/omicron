@@ -71,6 +71,7 @@ mod disk;
 mod dns;
 mod ereport;
 mod external_ip;
+pub mod fm;
 mod identity_provider;
 mod image;
 pub mod instance;
