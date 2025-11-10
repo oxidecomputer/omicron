@@ -199,7 +199,9 @@ impl DataStore {
                 DieselError::DatabaseError(
                     DatabaseErrorKind::Unknown,
                     info,
-                ) if info.message() == Self::PARENT_NOT_CURRENT_ERROR_MESSAGE => {
+                ) if info.message()
+                    == Self::PARENT_NOT_CURRENT_ERROR_MESSAGE =>
+                {
                     InsertSitrepError::ParentNotCurrent(sitrep.id())
                 }
                 err => {
