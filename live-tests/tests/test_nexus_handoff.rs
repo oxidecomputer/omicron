@@ -179,11 +179,13 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
                         builder,
                         planning_input.external_ip_policy(),
                     )
-                    .context("constructing ExternalNetworkingAllocator")?;
+                    .context(
+                        "failed to construct external networking allocator",
+                    )?;
                 for current_nexus in current_nexus_zones.values() {
                     let external_ip = external_networking_alloc
                         .for_new_nexus()
-                        .context("choosing external IP for new Nexus")?;
+                        .context("failed to pick an external IP for Nexus")?;
                     builder
                         .sled_add_zone_nexus(
                             current_nexus.sled_id,
