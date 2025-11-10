@@ -140,7 +140,6 @@ mod test {
             log,
             &blueprint1,
             &example.input,
-            &example.collection,
             "test suite",
             PlannerRng::from_entropy(),
         )
@@ -197,7 +196,6 @@ mod test {
             log,
             &blueprint2,
             &example.input,
-            &example.collection,
             "test suite",
             PlannerRng::from_entropy(),
         )

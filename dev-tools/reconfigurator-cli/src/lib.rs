@@ -2227,7 +2227,6 @@ fn cmd_blueprint_edit(
         &sim.log,
         blueprint,
         &planning_input,
-        &latest_collection,
         creator,
         rng,
     )

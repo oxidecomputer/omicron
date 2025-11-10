@@ -57,7 +57,7 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
-use nexus_types::inventory::Collection;
+use nexus_types::inventory::BaseboardId;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
@@ -91,14 +91,10 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
 use thiserror::Error;
-
-use super::ClickhouseZonesThatShouldBeRunning;
-use super::clickhouse::ClickhouseAllocator;
-use nexus_types::inventory::BaseboardId;
-use std::sync::Arc;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -478,6 +474,14 @@ impl fmt::Display for Operation {
     }
 }
 
+/// Equivalent to `nexus_types::deployment::planning_input::OximeterReadPolicy`,
+/// but without the `time_modified` field (which isn't stored in blueprints).
+#[derive(Debug, Clone, Copy)]
+struct OximeterReadPolicy {
+    version: Generation,
+    mode: OximeterReadMode,
+}
+
 /// Helper for assembling a blueprint
 ///
 /// There are two basic ways to assemble a new blueprint:
@@ -499,8 +503,11 @@ pub struct BlueprintBuilder<'a> {
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
-    /// The latest inventory collection
-    collection: &'a Collection,
+    /// Clickhouse cluster config
+    clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
+
+    /// Oximeter read policy
+    oximeter_read_policy: OximeterReadPolicy,
 
     /// The ID that the completed blueprint will have
     new_blueprint_id: BlueprintUuid,
@@ -602,7 +609,6 @@ impl<'a> BlueprintBuilder<'a> {
         log: &Logger,
         parent_blueprint: &'a Blueprint,
         input: &'a PlanningInput,
-        inventory: &'a Collection,
         creator: &str,
         mut rng: PlannerRng,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
@@ -651,10 +657,20 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
+        // Copy the Oximeter read policy from our parent blueprint so we can
+        // track changes to it.
+        let oximeter_read_policy = OximeterReadPolicy {
+            version: parent_blueprint.oximeter_read_version,
+            mode: parent_blueprint.oximeter_read_mode,
+        };
+
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
-            collection: inventory,
+            clickhouse_cluster_config: parent_blueprint
+                .clickhouse_cluster_config
+                .clone(),
+            oximeter_read_policy,
             new_blueprint_id: rng.next_blueprint(),
             input,
             sled_editors,
@@ -677,6 +693,41 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn new_blueprint_id(&self) -> BlueprintUuid {
         self.new_blueprint_id
+    }
+
+    /// Helper method to construct an empty [`ClickhouseClusterConfig`] using
+    /// this builder's internal RNG (for reproducible testing, primarily).
+    pub fn make_empty_clickhouse_cluster_config(
+        &mut self,
+    ) -> ClickhouseClusterConfig {
+        ClickhouseClusterConfig::new(
+            OXIMETER_CLUSTER.to_string(),
+            self.rng.next_clickhouse().to_string(),
+        )
+    }
+
+    /// Get the current Clickhouse cluster config.
+    pub fn clickhouse_cluster_config(
+        &self,
+    ) -> Option<&ClickhouseClusterConfig> {
+        self.clickhouse_cluster_config.as_ref()
+    }
+
+    /// Get the Clickhouse cluster config.
+    pub fn set_clickhouse_cluster_config(
+        &mut self,
+        clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
+    ) {
+        self.clickhouse_cluster_config = clickhouse_cluster_config;
+    }
+
+    /// Set the Oximeter read policy.
+    pub fn set_oximeter_read_policy(
+        &mut self,
+        version: Generation,
+        mode: OximeterReadMode,
+    ) {
+        self.oximeter_read_policy = OximeterReadPolicy { version, mode };
     }
 
     pub fn available_internal_dns_subnets(
@@ -789,7 +840,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
-    pub fn build(mut self, source: BlueprintSource) -> Blueprint {
+    pub fn build(self, source: BlueprintSource) -> Blueprint {
         let blueprint_id = self.new_blueprint_id();
 
         // Collect the Omicron zones config for all sleds, including sleds that
@@ -823,67 +874,6 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
-        // If we have the clickhouse cluster setup enabled via policy and we
-        // don't yet have a `ClickhouseClusterConfiguration`, then we must
-        // create one and feed it to our `ClickhouseAllocator`.
-        let clickhouse_allocator = if self.input.clickhouse_cluster_enabled() {
-            let parent_config = self
-                .parent_blueprint
-                .clickhouse_cluster_config
-                .clone()
-                .unwrap_or_else(|| {
-                    info!(
-                        self.log,
-                        concat!(
-                            "Clickhouse cluster enabled by policy: ",
-                            "generating initial 'ClickhouseClusterConfig' ",
-                            "and 'ClickhouseAllocator'"
-                        )
-                    );
-                    ClickhouseClusterConfig::new(
-                        OXIMETER_CLUSTER.to_string(),
-                        self.rng.next_clickhouse().to_string(),
-                    )
-                });
-            Some(ClickhouseAllocator::new(
-                self.log.clone(),
-                parent_config,
-                self.collection.latest_clickhouse_keeper_membership(),
-            ))
-        } else {
-            if self.parent_blueprint.clickhouse_cluster_config.is_some() {
-                info!(
-                    self.log,
-                    concat!(
-                        "clickhouse cluster disabled via policy ",
-                        "discarding existing 'ClickhouseAllocator' and ",
-                        "the resulting generated 'ClickhouseClusterConfig"
-                    )
-                );
-            }
-            None
-        };
-
-        // If we have an allocator, use it to generate a new config. If an error
-        // is returned then log it and carry over the parent_config.
-        let clickhouse_cluster_config = clickhouse_allocator.map(|a| {
-            let should_be_running = ClickhouseZonesThatShouldBeRunning::new(
-                sleds.iter().map(|(id, c)| (*id, c)),
-            );
-            match a.plan(&should_be_running) {
-                Ok(config) => config,
-                Err(e) => {
-                    error!(self.log, "clickhouse allocator error: {e}");
-                    a.parent_config().clone()
-                }
-            }
-        });
-
-        let (oximeter_read_mode, oximeter_read_version) = {
-            let policy = self.input.oximeter_read_settings();
-            (policy.mode.clone(), policy.version)
-        };
-
         Blueprint {
             id: blueprint_id,
             sleds,
@@ -902,9 +892,9 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
 
-            clickhouse_cluster_config,
-            oximeter_read_version: oximeter_read_version.into(),
-            oximeter_read_mode,
+            clickhouse_cluster_config: self.clickhouse_cluster_config,
+            oximeter_read_version: self.oximeter_read_policy.version,
+            oximeter_read_mode: self.oximeter_read_policy.mode,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
@@ -2639,7 +2629,6 @@ pub mod test {
             &logctx.log,
             &blueprint1,
             &example.input,
-            &example.collection,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -2691,7 +2680,6 @@ pub mod test {
             &logctx.log,
             &blueprint2,
             &input,
-            &example.collection,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -2812,7 +2800,7 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (collection, input, mut blueprint1) =
+        let (_collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME);
         verify_blueprint(&blueprint1, &input);
 
@@ -2860,7 +2848,6 @@ pub mod test {
             &logctx.log,
             &blueprint1,
             &input,
-            &collection,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
@@ -2898,7 +2885,6 @@ pub mod test {
             &logctx.log,
             &blueprint2,
             &input,
-            &collection,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
@@ -2926,7 +2912,6 @@ pub mod test {
                 .create_zones(false)
                 .create_disks_in_blueprint(false)
                 .build();
-        let collection = example.collection;
         let input = example.input;
 
         {
@@ -2935,7 +2920,6 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3024,7 +3008,7 @@ pub mod test {
         static TEST_NAME: &str = "test_datasets_for_zpools_and_zones";
         let logctx = test_setup_log(TEST_NAME);
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (collection, input, blueprint) = example(&logctx.log, TEST_NAME);
+        let (_collection, input, blueprint) = example(&logctx.log, TEST_NAME);
 
         // Creating the "example" blueprint should already invoke
         // `sled_ensure_datasets`.
@@ -3036,7 +3020,6 @@ pub mod test {
             &logctx.log,
             &blueprint,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3091,7 +3074,6 @@ pub mod test {
             &logctx.log,
             &blueprint,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3131,7 +3113,6 @@ pub mod test {
             &logctx.log,
             &blueprint,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3173,7 +3154,6 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3292,7 +3272,6 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3323,7 +3302,6 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3379,7 +3357,6 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3455,7 +3432,6 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3498,7 +3474,6 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3545,7 +3520,6 @@ pub mod test {
             &logctx.log,
             &blueprint1,
             &system.input,
-            &system.collection,
             TEST_NAME,
             rng.next_planner_rng(),
         )

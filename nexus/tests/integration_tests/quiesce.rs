@@ -13,7 +13,6 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::PlannerConfig;
-use omicron_common::api::external::Error;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::GenericUuid;
@@ -37,23 +36,6 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
         nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
 
     // Collect what we need to modify the blueprint.
-    let collection = wait_for_condition(
-        || async {
-            let collection = datastore
-                .inventory_get_latest_collection(&opctx)
-                .await
-                .map_err(CondCheckError::Failed)?;
-            match collection {
-                Some(s) => Ok(s),
-                None => Err(CondCheckError::<Error>::NotYet),
-            }
-        },
-        &Duration::from_secs(1),
-        &Duration::from_secs(60),
-    )
-    .await
-    .expect("initial inventory collection");
-
     let planner_config = datastore
         .reconfigurator_config_get_latest(&opctx)
         .await
@@ -78,7 +60,6 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
         log,
         &blueprint1,
         &planning_input,
-        &collection,
         "test-suite",
         PlannerRng::from_entropy(),
     )

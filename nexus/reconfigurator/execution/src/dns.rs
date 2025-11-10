@@ -330,7 +330,6 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
@@ -1563,12 +1562,10 @@ mod test {
         }
         .build()
         .unwrap();
-        let collection = CollectionBuilder::new("test").build();
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
             &planning_input,
-            &collection,
             "test suite",
             PlannerRng::from_entropy(),
         )

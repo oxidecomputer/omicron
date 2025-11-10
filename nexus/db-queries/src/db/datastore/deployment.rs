@@ -3113,7 +3113,6 @@ mod tests {
     use crate::db::raw_query_builder::QueryBuilder;
     use gateway_types::rot::RotSlot;
     use nexus_db_model::IpVersion;
-    use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
@@ -3439,7 +3438,6 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &planning_input,
-            &collection,
             "test",
             PlannerRng::from_entropy(),
         )
@@ -3787,7 +3785,6 @@ mod tests {
             &logctx.log,
             &blueprint2,
             &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3844,7 +3841,6 @@ mod tests {
             &logctx.log,
             &blueprint3,
             &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3898,7 +3894,6 @@ mod tests {
             &logctx.log,
             &blueprint4,
             &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3956,7 +3951,6 @@ mod tests {
             &logctx.log,
             &blueprint5,
             &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -4020,9 +4014,6 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("no target blueprint set"));
 
-        // Create an initial empty collection
-        let collection = CollectionBuilder::new("test").build();
-
         // Create three blueprints:
         // * `blueprint1` has no parent
         // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
@@ -4034,7 +4025,6 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
-            &collection,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -4044,7 +4034,6 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
-            &collection,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4145,7 +4134,6 @@ mod tests {
             &logctx.log,
             &blueprint3,
             &EMPTY_PLANNING_INPUT,
-            &collection,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4179,9 +4167,6 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Create an initial empty collection
-        let collection = CollectionBuilder::new("test").build();
-
         // Create an initial blueprint and a child.
         let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
             std::iter::empty(),
@@ -4191,7 +4176,6 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
-            &collection,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -4431,7 +4415,6 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &example_system.input,
-            &example_system.collection,
             &format!("{test_name}-2"),
             PlannerRng::from_entropy(),
         )
