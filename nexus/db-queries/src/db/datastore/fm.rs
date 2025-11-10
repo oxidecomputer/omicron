@@ -15,20 +15,21 @@ use crate::db::datastore::RunnableQuery;
 use crate::db::model;
 use crate::db::model::SqlU32;
 use crate::db::pagination::paginated;
+use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::AstPass;
-use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
+use dropshot::PaginationOrder;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
-use nexus_db_schema::schema;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_types::fm;
@@ -224,7 +225,7 @@ impl DataStore {
         // TODO(eliza): there should probably be an authz object for the fm sitrep?
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        let list = ListOrphanedQuery::new(&pagparams)
+        let list = Self::list_orphaned_query(&pagparams)
             .load_async::<Uuid>(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
@@ -232,6 +233,71 @@ impl DataStore {
             .map(|id| SitrepUuid::from_untyped_uuid(id))
             .collect();
         Ok(list)
+    }
+
+    fn list_orphaned_query(
+        pagparams: &DataPageParams<'_, SitrepUuid>,
+    ) -> TypedSqlQuery<sql_types::Uuid> {
+        let mut builder = QueryBuilder::new();
+        builder.sql(
+            "WITH current_sitrep_id AS ( \
+                SELECT sitrep_id \
+                FROM omicron.public.fm_sitrep_history \
+                ORDER BY version DESC \
+                LIMIT 1 \
+            ),",
+        );
+
+        // batch AS (
+        //     SELECT s.id, s.parent_sitrep_id
+        //     FROM omicron.public.fm_sitrep s
+        //     WHERE s.id > $1
+        //     ORDER BY s.id
+        //     LIMIT $2
+        // )
+        let (dir, cmp) = match pagparams.direction {
+            PaginationOrder::Ascending => ("ASC", "> "),
+            PaginationOrder::Descending => ("DESC", "< "),
+        };
+        builder.sql(
+            "batch AS ( \
+                SELECT s.id, s.parent_sitrep_id \
+                FROM omicron.public.fm_sitrep s ",
+        );
+        if let Some(marker) = pagparams.marker {
+            builder
+                .sql("WHERE s.id ")
+                .sql(cmp)
+                .param()
+                .bind::<sql_types::Uuid, _>(marker.into_untyped_uuid());
+        }
+        builder
+            .sql(" ORDER BY s.id ")
+            .sql(dir)
+            .sql(" LIMIT ")
+            .param()
+            .bind::<sql_types::Int8, _>(pagparams.limit.get() as i64)
+            .sql(") ");
+
+        builder.sql(
+            "SELECT id \
+            FROM omicron.public.fm_sitrep \
+            WHERE id IN ( \
+                SELECT b.id \
+                FROM batch b \
+                LEFT JOIN omicron.public.fm_sitrep_history h \
+                    ON h.sitrep_id = b.id \
+                WHERE
+                    h.sitrep_id IS NULL \
+                AND (
+                    b.parent_sitrep_id IS NULL \
+                    OR b.parent_sitrep_id != ( \
+                        SELECT sitrep_id FROM current_sitrep_id \
+                    ) \
+                ) \
+            );",
+        );
+        builder.query()
     }
 
     /// Deletes all sitreps with the provided IDs.
@@ -469,19 +535,21 @@ impl QueryId for InsertSitrepVersionQuery {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
-
-type FromClause<T> =
-    diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-const SITREP_FROM_CLAUSE: FromClause<schema::fm_sitrep::table> =
-    FromClause::new();
-const SITREP_HISTORY_FROM_CLAUSE: FromClause<schema::fm_sitrep_history::table> =
-    FromClause::new();
-
 impl QueryFragment<Pg> for InsertSitrepVersionQuery {
     fn walk_ast<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
+        use nexus_db_schema::schema;
+
+        type FromClause<T> =
+            diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
+        const SITREP_FROM_CLAUSE: FromClause<schema::fm_sitrep::table> =
+            FromClause::new();
+        const SITREP_HISTORY_FROM_CLAUSE: FromClause<
+            schema::fm_sitrep_history::table,
+        > = FromClause::new();
+
         const CURRENT_SITREP: &'static str = "current_sitrep";
 
         out.push_sql("WITH ");
@@ -605,150 +673,13 @@ impl QueryFragment<Pg> for InsertSitrepVersionQuery {
 
 impl RunQueryDsl<DbConnection> for InsertSitrepVersionQuery {}
 
-/// CTE for listing orphaned sitreps (paginated).
-#[derive(Debug, Clone, Copy)]
-struct ListOrphanedQuery {
-    marker: Option<SitrepUuid>,
-    order: dropshot::PaginationOrder,
-    limit: i32,
-}
-
-impl ListOrphanedQuery {
-    fn new(pagparams: &DataPageParams<'_, SitrepUuid>) -> Self {
-        Self {
-            marker: pagparams.marker.copied(),
-            order: pagparams.direction,
-            limit: pagparams.limit.get() as i32,
-        }
-    }
-}
-
-impl QueryFragment<Pg> for ListOrphanedQuery {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        // WITH current_sitrep_id AS (
-        //     SELECT sitrep_id
-        //     FROM omicron.public.fm_sitrep_history
-        //     ORDER BY version DESC
-        //     LIMIT 1
-        // ),
-        const CURRENT_SITREP_ID: &'static str = "current_sitrep_id";
-        out.push_sql("WITH ");
-        out.push_identifier(CURRENT_SITREP_ID)?;
-        out.push_sql(" AS (SELECT ");
-        out.push_identifier(history_dsl::sitrep_id::NAME)?;
-        out.push_sql(" FROM ");
-        SITREP_HISTORY_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" ORDER BY ");
-        out.push_identifier(history_dsl::version::NAME)?;
-        out.push_sql(" DESC LIMIT 1),");
-
-        // batch AS (
-        //     SELECT s.id, s.parent_sitrep_id
-        //     FROM omicron.public.fm_sitrep s
-        //     WHERE s.id > $1
-        //     ORDER BY s.id
-        //     LIMIT $2
-        // )
-        const BATCH: &'static str = "batch";
-        out.push_identifier(BATCH)?;
-        out.push_sql(" AS (SELECT ");
-        out.push_identifier(sitrep_dsl::id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
-        out.push_sql(" FROM ");
-        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        if let Some(ref marker) = self.marker {
-            out.push_sql(" WHERE ");
-            out.push_identifier(sitrep_dsl::id::NAME)?;
-            out.push_sql(match self.order {
-                dropshot::PaginationOrder::Ascending => " > ",
-                dropshot::PaginationOrder::Descending => " < ",
-            });
-            out.push_bind_param::<sql_types::Uuid, Uuid>(
-                marker.as_untyped_uuid(),
-            )?;
-        }
-        out.push_sql(" ORDER BY ");
-        out.push_identifier(sitrep_dsl::id::NAME)?;
-        match self.order {
-            dropshot::PaginationOrder::Ascending => out.push_sql(" ASC"),
-            dropshot::PaginationOrder::Descending => out.push_sql(" DESC"),
-        }
-        out.push_sql(" LIMIT ");
-        out.push_bind_param::<sql_types::Integer, i32>(&self.limit)?;
-        out.push_sql(") ");
-
-        // SELECT id
-        // FROM omicron.public.fm_sitrep
-        // WHERE id IN (
-        //     SELECT b.id
-        //     FROM batch b
-        //     -- Lookup the sitrep in the history
-        //     LEFT JOIN omicron.public.fm_sitrep_history h ON h.sitrep_id = b.id
-        //     -- Find sitreps missing from history
-        //     WHERE h.sitrep_id IS NULL
-        //       -- ... where the sitrep cannot be made active
-        //       AND (b.parent_sitrep_id IS NULL
-        //            OR b.parent_sitrep_id != (SELECT sitrep_id FROM current_sitrep_id))
-        // );
-        out.push_sql("SELECT ");
-        out.push_identifier(sitrep_dsl::id::NAME)?;
-        out.push_sql(" FROM ");
-        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(sitrep_dsl::id::NAME)?;
-        out.push_sql(" IN (");
-        out.push_sql("SELECT ");
-        out.push_identifier(BATCH)?;
-        out.push_sql(".id");
-        out.push_sql(" FROM ");
-        out.push_identifier(BATCH)?;
-        out.push_sql(" LEFT JOIN ");
-        SITREP_HISTORY_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" h ON h.");
-        out.push_identifier(history_dsl::sitrep_id::NAME)?;
-        out.push_sql(" = ");
-        out.push_identifier(BATCH)?;
-        out.push_sql(".");
-        out.push_identifier(sitrep_dsl::id::NAME)?;
-        out.push_sql(" WHERE h.");
-        out.push_identifier(history_dsl::sitrep_id::NAME)?;
-        out.push_sql(" IS NULL AND (");
-        out.push_identifier(BATCH)?;
-        out.push_sql(".");
-        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
-        out.push_sql(" IS NULL OR ");
-        out.push_identifier(BATCH)?;
-        out.push_sql(".");
-        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
-        out.push_sql(" != (SELECT sitrep_id FROM ");
-        out.push_identifier(CURRENT_SITREP_ID)?;
-        out.push_sql(")));");
-
-        Ok(())
-    }
-}
-
-impl QueryId for ListOrphanedQuery {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl RunQueryDsl<DbConnection> for ListOrphanedQuery {}
-
-impl Query for ListOrphanedQuery {
-    type SqlType = sql_types::Uuid;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
     use nexus_types::fm;
     use omicron_test_utils::dev;
@@ -788,6 +719,37 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    // Ensure we have the right query contents.
+    #[tokio::test]
+    async fn expectorate_sitrep_list_orphans_no_marker() {
+        let pagparams = DataPageParams {
+            marker: None,
+            limit: std::num::NonZeroU32::new(420).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        };
+        let query = DataStore::list_orphaned_query(&pagparams);
+        expectorate_query_contents(
+            &query,
+            "tests/output/sitrep_list_orphans_no_marker.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_sitrep_list_orphans_with_marker() {
+        let pagparams = DataPageParams {
+            marker: Some(&SitrepUuid::nil()),
+            limit: std::num::NonZeroU32::new(420).unwrap(),
+            direction: dropshot::PaginationOrder::Descending,
+        };
+        let query = DataStore::list_orphaned_query(&pagparams);
+        expectorate_query_contents(
+            &query,
+            "tests/output/sitrep_list_orphans_with_marker.sql",
+        )
+        .await;
+    }
+
     #[tokio::test]
     async fn explain_sitrep_list_orphaned_query() {
         let logctx = dev::test_setup_log("explain_sitrep_list_orphaned_query");
@@ -800,16 +762,7 @@ mod tests {
             limit: std::num::NonZeroU32::new(420).unwrap(),
             direction: dropshot::PaginationOrder::Descending,
         };
-        let query = ListOrphanedQuery::new(&pagparams);
-
-        // Before trying to explain the query, elt's start by making sure it's
-        // valid SQL...
-        let q = diesel::debug_query::<Pg, _>(&query).to_string();
-        match dev::db::format_sql(&q).await {
-            Ok(q) => eprintln!("query: {q}"),
-            Err(e) => panic!("query is malformed: {e}\n{q}"),
-        }
-
+        let query = DataStore::list_orphaned_query(&pagparams);
         let explanation = query
             .explain_async(&conn)
             .await
