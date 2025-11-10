@@ -2979,6 +2979,7 @@ mod tests {
     use nexus_db_model::IncompleteNetworkInterface;
     use nexus_db_model::IpConfig;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
@@ -3347,12 +3348,20 @@ mod tests {
                     )
                     .expect("ensured disks");
             }
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator")
+            .for_new_nexus()
+            .expect("found external IP for Nexus");
             builder
                 .sled_add_zone_nexus_with_config(
                     sled_ids[2],
                     false,
                     Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
+                    external_ip,
                     bp0.nexus_generation,
                 )
                 .expect("added nexus to third sled");
@@ -3422,13 +3431,23 @@ mod tests {
                 PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
+                    planning_input.external_ip_policy(),
+                )
+                .expect("constructed ExternalNetworkingAllocator");
             for &sled_id in &sled_ids {
+                let external_ip = external_networking_alloc
+                    .for_new_nexus()
+                    .expect("found external IP for Nexus");
                 builder
                     .sled_add_zone_nexus_with_config(
                         sled_id,
                         false,
                         Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
+                        external_ip,
                         bp2.nexus_generation,
                     )
                     .expect("added nexus to third sled");

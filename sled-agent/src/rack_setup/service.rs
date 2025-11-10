@@ -1994,8 +1994,8 @@ mod test {
         )
         .expect("built blueprint");
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
 
         if !report.notes().is_empty() {
             eprintln!("{}", report.display());

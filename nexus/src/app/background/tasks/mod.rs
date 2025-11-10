@@ -18,6 +18,7 @@ pub mod dns_propagation;
 pub mod dns_servers;
 pub mod ereport_ingester;
 pub mod external_endpoints;
+pub mod fm_sitrep_gc;
 pub mod fm_sitrep_load;
 pub mod instance_reincarnation;
 pub mod instance_updater;

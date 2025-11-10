@@ -782,6 +782,14 @@ pub enum SitrepLoadStatus {
     Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
 }
 
+/// The status of a `fm_sitrep_gc` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepGcStatus {
+    pub orphaned_sitreps_found: usize,
+    pub orphaned_sitreps_deleted: usize,
+    pub errors: Vec<String>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProbeError {
     /// ID of the sled we failed to send a probe to.

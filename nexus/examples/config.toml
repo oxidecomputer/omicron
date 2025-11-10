@@ -158,6 +158,11 @@ sp_ereport_ingester.period_secs = 30
 # Nexus).
 # This is cheap, so we should check frequently.
 fm.sitrep_load_period_secs = 15
+# Sitrep GC, on the other hand, does not need to be activated very frequently,
+# as it does not impact the responsiveness of the fault management system, and
+# is activated every time the current sitrep changes. Periodic activations are
+# only necessary to ensure that it always happens eventually.
+fm.sitrep_gc_period_secs = 600
 probe_distributor.period_secs = 60
 
 [default_region_allocation_strategy]
