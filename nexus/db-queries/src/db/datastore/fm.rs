@@ -203,18 +203,21 @@ impl DataStore {
             .map(|_| ())
     }
 
-    /// Lists all orphaned alternative sitreps for the provided
-    /// [`fm::SitrepVersion`].
+    /// Lists all orphaned alternative sitreps (paginated by sitrep UUID).
     ///
-    /// Orphaned sitreps at a given version are those which descend from the
-    /// same parent sitrep as the current sitrep at that version, but which were
-    /// not committed successfully to the sitrep history.
+    /// Orphaned sitreps are those which can never be committed to the
+    /// `fm_sitrep_history` table, because their parent sitrep ID is no longer
+    /// the current sitrep. Such sitreps are typically created when multiple
+    /// Nexus instances attempt to generate a new sitrep based on the same
+    /// parent. Only one of these sitreps can "win the race" to be committed to
+    /// the history, and any alternative sitreps are left orphaned. Orphaned
+    /// sitreps will never be read, since sitreps are only read when they are
+    /// current,[^1] so they can safely be deleted at any time.
     ///
-    /// Note that this operation is only performed relative to a committed
-    /// sitrep version. This is in order to prevent the returned list of sitreps
-    /// from including sitreps which are in the process of being prepared, by
-    /// only performing it on committed versions and selecting sitreps with the
-    /// same parent.
+    /// This query is used by the `fm_sitrep_gc` background task, which is
+    /// responsible for deleting orphaned sitreps.
+    ///
+    /// [^1]: Well, except for by OMDB, but that doesn't count.
     pub async fn fm_sitrep_list_orphaned(
         &self,
         opctx: &OpContext,
@@ -235,6 +238,25 @@ impl DataStore {
         Ok(list)
     }
 
+    /// Returns the CTE for listing orphaned sitreps.
+    ///
+    /// This query selects the IDs of sitreps where:
+    /// - the sitrep's ID is not present in the `fm_sitrep_history` table
+    /// - AND the sitrep's `parent_sitrep_id` is NOT the current sitrep
+    ///
+    /// This query is paginated by sitrep UUID to avoid performing a full-table
+    /// scan.
+    ///
+    /// This must be performed by a CTE in order to ensure that the
+    /// `fm_sitrep_history` table is locked while we are SELECTing orphans, so
+    /// that a new sitrep cannot be committed in the midst of the scan. If a new
+    /// current sitrep could be inserted while we are SELECTing, any potential
+    /// children of that sitrep would incorrectly be considered orphaned, as
+    /// their parent sitrep ID would not be the same as the one the SELECT
+    /// guards against selecting the children of. Therefore, we cannot perform
+    /// this query against the `watch` channel provided by the
+    /// `fm_sitrep_loader` background task, or by performing a separate query to
+    /// select the current sitrep ID before selecting orphans.
     fn list_orphaned_query(
         pagparams: &DataPageParams<'_, SitrepUuid>,
     ) -> TypedSqlQuery<sql_types::Uuid> {
