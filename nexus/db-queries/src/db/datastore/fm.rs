@@ -18,11 +18,7 @@ use crate::db::pagination::paginated;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use diesel::pg::Pg;
 use diesel::prelude::*;
-use diesel::query_builder::AstPass;
-use diesel::query_builder::QueryFragment;
-use diesel::query_builder::QueryId;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use diesel::sql_types;
@@ -195,12 +191,288 @@ impl DataStore {
         // TODO(eliza): other sitrep records would be inserted here...
 
         // Now, try to make the sitrep current.
-        let query = InsertSitrepVersionQuery { sitrep_id: sitrep.id() };
+        let query = Self::insert_sitrep_version_query(sitrep.id());
         query
             .execute_async(&*conn)
             .await
-            .map_err(|e| query.decode_error(e))
+            .map_err(|err| match err {
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::Unknown,
+                    info,
+                ) if info.message() == PARENT_NOT_CURRENT_ERROR_MESSAGE => {
+                    InsertSitrepError::ParentNotCurrent(sitrep.id())
+                }
+                err => {
+                    let err =
+                        public_error_from_diesel(err, ErrorHandler::Server)
+                            .internal_context(
+                                "failed to insert new sitrep version",
+                            );
+                    InsertSitrepError::Other(err)
+                }
+            })
             .map(|_| ())
+    }
+
+
+    /// Query to insert a new sitrep version into the `fm_sitrep_history` table,
+    /// making it the current sitrep.
+    ///
+    /// This implements the "compare-and-swap" operation [described in RFD
+    /// 603](https://rfd.shared.oxide.computer/rfd/0603#_creating_sitreps). In
+    /// particular, this query will insert a new sitrep version into the
+    /// `fm_sitrep_history` table IF AND ONLY IF one of the following conditions
+    /// are true:
+    ///
+    /// 1. The new sitrep's parent sitrep ID is the current sitrep (i.e. the sitrep
+    ///    with the highest version number in `fm_sitrep_history`)
+    /// 2. The new sitrep's parent sitrep ID is `NULL`, AND there are no other
+    ///    sitreps in `fm_sitrep_history` (i.e., we are inserting the first-ever
+    ///    sitrep)
+    ///
+    /// Upholding these invariants ensures that sitreps are sequentially consistent,
+    /// and `fm_sitrep_history` always contains a linear history of sitreps which
+    /// were generated based on the previous current sitrep.
+    ///
+    /// The CTE used to perform this operation is based on the one used in the
+    /// `deployment` module to insert blueprints into the `bp_target` table. It
+    /// differs in that it does not perform an existence check on the sitrep to be
+    /// made current. This is because the `db::datastore::deployment` module's
+    /// public API treats inserting a new blueprint and setting it as the current
+    /// target as separate operations, so it is possible for a consumer of the API
+    /// to try and set a blueprint as the target without first having created it.
+    /// Here, however, we only ever set a sitrep as the current sitrep in the
+    /// `Datastore::fm_sitrep_insert` method, which also creates the sitrep. So, it
+    /// is impossible for a consumer of this API to attempt to make a sitrep current
+    /// without having first created it.
+    ///
+    /// The SQL generated for this CTE looks like this:
+    ///
+    /// ```sql
+    /// WITH
+    ///   -- Subquery to fetch the current sitrep (i.e., the row with the max
+    ///   -- version).
+    ///   current_sitrep AS (
+    ///     SELECT
+    ///       "version" AS version,
+    ///       "sitrep_id" AS sitrep_id,
+    ///     FROM "fm_sitrep_history"
+    ///     ORDER BY "version" DESC
+    ///     LIMIT 1
+    ///   ),
+    ///
+    ///   -- Error checking subquery: This uses similar tricks as elsewhere in
+    ///   -- this crate to `CAST(... AS UUID)` with non-UUID values that result
+    ///   -- in runtime errors in specific cases, allowing us to give accurate
+    ///   -- error messages.
+    ///   --
+    ///   -- This checks that the sitrep descends directly from the current
+    ///   -- sitrep, and will fail the query if it does not.
+    ///   check_validity AS MATERIALIZED (
+    ///     SELECT CAST(IF(
+    ///       -- Check for whether our new sitrep's parent matches our current
+    ///       -- sitrep. There are two cases here: The first is the common case
+    ///       -- (i.e., the new sitrep has a parent: does it match the current
+    ///       -- sitrep ID?). The second is the bootstrapping check: if we're
+    ///       -- trying to insert a new sitrep that does not have a parent,
+    ///       -- we should not have a sitrep target at all.
+    ///       --
+    ///       -- If either of these cases fails, we return `parent-not-current`.
+    ///       (
+    ///          SELECT "parent_sitrep_id" FROM "sitrep", current_sitrep
+    ///          WHERE
+    ///            "id" = <new_sitrep_id>
+    ///            AND current_sitrep.sitrep_id = "parent_sitrep_id"
+    ///       ) IS NOT NULL
+    ///       OR
+    ///       (
+    ///          SELECT 1 FROM "sitrep"
+    ///          WHERE
+    ///            "id" = <new_target_id>
+    ///            AND "parent_sitrep_id" IS NULL
+    ///            AND NOT EXISTS (SELECT version FROM current_sitrep)
+    ///       ) = 1,
+    ///       -- Sometime between v22.1.9 and v22.2.19, Cockroach's type checker
+    ///       -- became too smart for our `CAST(... as UUID)` error checking
+    ///       -- gadget: it can infer that `<new_target_id>` must be a UUID, so
+    ///       -- then tries to parse 'parent-not-target' and 'no-such-blueprint'
+    ///       -- as UUIDs _during typechecking_, which causes the query to always
+    ///       -- fail. We can defeat this by casting the UUID to text here, which
+    ///       -- will allow the 'parent-not-target' and 'no-such-blueprint'
+    ///       -- sentinels to survive type checking, making it to query execution
+    ///       -- where they will only be cast to UUIDs at runtime in the failure
+    ///       -- cases they're supposed to catch.
+    ///       CAST(<new_sitrep_id> AS text),
+    ///       'parent-not-current'
+    ///     ) AS UUID)
+    ///   ),
+    ///
+    ///   -- Determine the new version number to use: either 1 if this is the
+    ///   -- first sitrep being made the current sitrep, or 1 higher than
+    ///   -- the previous sitrep's version.
+    ///   --
+    ///   -- The final clauses of each of these WHERE clauses repeat the
+    ///   -- checks performed above in `check_validity`, and will cause this
+    ///   -- subquery to return no rows if we should not allow the new
+    ///   -- target to be set.
+    ///   new_sitrep AS (
+    ///     SELECT 1 AS new_version FROM "sitrep"
+    ///       WHERE
+    ///         "id" = <new_sitrep_id>
+    ///         AND "parent_sitrep_id" IS NULL
+    ///         AND NOT EXISTS (SELECT version FROM current_sitrep)
+    ///     UNION
+    ///     SELECT current_sitrep.version + 1 FROM current_sitrep, "sitrep"
+    ///       WHERE
+    ///         "id" = <new_sitrep_id>
+    ///         AND "parent_sitrep_id" IS NOT NULL
+    ///         AND "parent_sitrep_id" = current_sitrep.sitrep_id
+    ///   )
+    ///
+    ///   -- Perform the actual insertion.
+    ///   INSERT INTO "sitrep_history"(
+    ///     "version","sitrep_id","time_made_current"
+    ///   )
+    ///   SELECT
+    ///     new_sitrep.new_version,
+    ///     <new_sitrep_id>,
+    ///     NOW()
+    ///     FROM new_sitrep
+    /// ```
+    fn insert_sitrep_version_query(
+        sitrep_id: SitrepUuid,
+    ) -> TypedSqlQuery<sql_types::BigInt> {
+        let mut builder = QueryBuilder::new();
+
+        // Subquery to fetch the current sitrep (i.e., the row with the max
+        // version).
+        builder.sql(
+            "WITH current_sitrep AS ( \
+                SELECT version AS version, sitrep_id AS sitrep_id \
+                FROM omicron.public.fm_sitrep_history \
+                ORDER BY version DESC \
+                LIMIT 1 \
+            ), ",
+        );
+
+        // Error checking subquery: This uses similar tricks as elsewhere in
+        // this crate to `CAST(... AS UUID)` with non-UUID values that result
+        // in runtime errors in specific cases, allowing us to give accurate
+        // error messages.
+        //
+        // This checks that the sitrep descends directly from the current
+        // sitrep, and will fail the query if it does not.
+        builder
+            .sql("check_validity AS MATERIALIZED ( ")
+            // Check for whether our new sitrep's parent matches our current
+            // sitrep. There are two cases here: The first is the common case
+            // (i.e., the new sitrep has a parent: does it match the current
+            // sitrep ID?). The second is the bootstrapping check: if we're
+            // trying to insert a new sitrep that does not have a parent, we
+            // should not have a sitrep target at all.
+            //
+            // If either of these cases fails, we return `parent-not-current`.
+            .sql(
+                "SELECT CAST( \
+                    IF( \
+                        (SELECT parent_sitrep_id \
+                         FROM omicron.public.fm_sitrep, current_sitrep \
+                         WHERE id = ",
+            )
+            .param()
+            .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
+            .sql(
+                " AND current_sitrep.sitrep_id = parent_sitrep_id) IS NOT NULL \
+                    OR \
+                    (SELECT 1 FROM omicron.public.fm_sitrep \
+                     WHERE id = ",
+            )
+            .param()
+            .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
+            .sql(
+                " AND parent_sitrep_id IS NULL \
+                  AND NOT EXISTS (SELECT version FROM current_sitrep)) = 1,",
+            )
+            // Sometime between v22.1.9 and v22.2.19, Cockroach's type checker
+            // became too smart for our `CAST(... as UUID)` error checking
+            // gadget: it can infer that `<new_target_id>` must be a UUID, so
+            // then tries to parse 'parent-not-target' as UUIDs _during
+            // typechecking_, which causes the query to always fail. We can
+            // defeat this by casting the UUID to text here, which will allow
+            // the 'parent-not-target' sentinel to survive type checking, making
+            // it to query execution where they will only be cast to UUIDs at
+            // runtime in the failure cases they're supposed to catch.
+            .sql(" CAST(")
+            .param()
+            .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
+            .sql(" AS text), ")
+            .sql(PARENT_NOT_CURRENT)
+            .sql(
+                ") AS UUID \
+                ) \
+                ), ",
+            );
+
+        // Determine the new version number to use: either 1 if this is the
+        // first sitrep being made the current sitrep, or 1 higher than
+        // the previous sitrep's version.
+        //
+        // The final clauses of each of these WHERE clauses repeat the
+        // checks performed above in `check_validity`, and will cause this
+        // subquery to return no rows if we should not allow the new
+        // target to be set.
+        //
+        // new_sitrep AS (
+        //   SELECT 1 AS new_version FROM omicron.public.fm_sitrep
+        //   WHERE
+        //       id = $5 AND parent_sitrep_id IS NULL
+        //   AND
+        //      NOT EXISTS (SELECT version FROM current_sitrep)
+        //   UNION
+        //   SELECT
+        //      current_sitrep.version + 1
+        //   FROM
+        //      current_sitrep, omicron.public.fm_sitrep
+        //   WHERE
+        //      id = $6 AND parent_sitrep_id IS NOT NULL
+        //   AND parent_sitrep_id = current_sitrep.sitrep_id
+        // )
+        builder
+            .sql(
+                "new_sitrep AS ( \
+                    SELECT 1 AS new_version FROM omicron.public.fm_sitrep \
+                    WHERE id = ",
+            )
+            .param()
+            .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
+            .sql(
+                "AND parent_sitrep_id IS NULL \
+                AND NOT EXISTS (SELECT version FROM current_sitrep) \
+                UNION \
+                SELECT current_sitrep.version + 1 \
+                FROM current_sitrep, omicron.public.fm_sitrep \
+                WHERE id = ",
+            )
+            .param()
+            .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
+            .sql(
+                " AND parent_sitrep_id IS NOT NULL \
+                AND parent_sitrep_id = current_sitrep.sitrep_id \
+                ) ",
+            );
+
+        //Finally, perform the actual insertion.
+        builder
+            .sql(
+                "INSERT INTO omicron.public.fm_sitrep_history \
+             (version, sitrep_id, time_made_current) \
+             SELECT new_sitrep.new_version, ",
+            )
+            .param()
+            .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
+            .sql(", NOW() FROM new_sitrep");
+
+        builder.query()
     }
 
     /// Lists all orphaned alternative sitreps (paginated by sitrep UUID).
@@ -401,135 +673,6 @@ pub enum InsertSitrepError {
     ParentNotCurrent(SitrepUuid),
 }
 
-/// Query to insert a new sitrep version into the `fm_sitrep_history` table,
-/// making it the current sitrep.
-///
-/// This implements the "compare-and-swap" operation [described in RFD
-/// 603](https://rfd.shared.oxide.computer/rfd/0603#_creating_sitreps). In
-/// particular, this query will insert a new sitrep version into the
-/// `fm_sitrep_history` table IF AND ONLY IF one of the following conditions
-/// are true:
-///
-/// 1. The new sitrep's parent sitrep ID is the current sitrep (i.e. the sitrep
-///    with the highest version number in `fm_sitrep_history`)
-/// 2. The new sitrep's parent sitrep ID is `NULL`, AND there are no other
-///    sitreps in `fm_sitrep_history` (i.e., we are inserting the first-ever
-///    sitrep)
-///
-/// Upholding these invariants ensures that sitreps are sequentially consistent,
-/// and `fm_sitrep_history` always contains a linear history of sitreps which
-/// were generated based on the previous current sitrep.
-///
-/// The CTE used to perform this operation is based on the one used in the
-/// `deployment` module to insert blueprints into the `bp_target` table. It
-/// differs in that it does not perform an existence check on the sitrep to be
-/// made current. This is because the `db::datastore::deployment` module's
-/// public API treats inserting a new blueprint and setting it as the current
-/// target as separate operations, so it is possible for a consumer of the API
-/// to try and set a blueprint as the target without first having created it.
-/// Here, however, we only ever set a sitrep as the current sitrep in the
-/// `Datastore::fm_sitrep_insert` method, which also creates the sitrep. So, it
-/// is impossible for a consumer of this API to attempt to make a sitrep current
-/// without having first created it.
-///
-/// The SQL generated for this CTE looks like this:
-///
-/// ```sql
-/// WITH
-///   -- Subquery to fetch the current sitrep (i.e., the row with the max
-///   -- version).
-///   current_sitrep AS (
-///     SELECT
-///       "version" AS version,
-///       "sitrep_id" AS sitrep_id,
-///     FROM "fm_sitrep_history"
-///     ORDER BY "version" DESC
-///     LIMIT 1
-///   ),
-///
-///   -- Error checking subquery: This uses similar tricks as elsewhere in
-///   -- this crate to `CAST(... AS UUID)` with non-UUID values that result
-///   -- in runtime errors in specific cases, allowing us to give accurate
-///   -- error messages.
-///   --
-///   -- This checks that the sitrep descends directly from the current
-///   -- sitrep, and will fail the query if it does not.
-///   check_validity AS MATERIALIZED (
-///     SELECT CAST(IF(
-///       -- Check for whether our new sitrep's parent matches our current
-///       -- sitrep. There are two cases here: The first is the common case
-///       -- (i.e., the new sitrep has a parent: does it match the current
-///       -- sitrep ID?). The second is the bootstrapping check: if we're
-///       -- trying to insert a new sitrep that does not have a parent,
-///       -- we should not have a sitrep target at all.
-///       --
-///       -- If either of these cases fails, we return `parent-not-current`.
-///       (
-///          SELECT "parent_sitrep_id" FROM "sitrep", current_sitrep
-///          WHERE
-///            "id" = <new_sitrep_id>
-///            AND current_sitrep.sitrep_id = "parent_sitrep_id"
-///       ) IS NOT NULL
-///       OR
-///       (
-///          SELECT 1 FROM "sitrep"
-///          WHERE
-///            "id" = <new_target_id>
-///            AND "parent_sitrep_id" IS NULL
-///            AND NOT EXISTS (SELECT version FROM current_sitrep)
-///       ) = 1,
-///       -- Sometime between v22.1.9 and v22.2.19, Cockroach's type checker
-///       -- became too smart for our `CAST(... as UUID)` error checking
-///       -- gadget: it can infer that `<new_target_id>` must be a UUID, so
-///       -- then tries to parse 'parent-not-target' and 'no-such-blueprint'
-///       -- as UUIDs _during typechecking_, which causes the query to always
-///       -- fail. We can defeat this by casting the UUID to text here, which
-///       -- will allow the 'parent-not-target' and 'no-such-blueprint'
-///       -- sentinels to survive type checking, making it to query execution
-///       -- where they will only be cast to UUIDs at runtime in the failure
-///       -- cases they're supposed to catch.
-///       CAST(<new_sitrep_id> AS text),
-///       'parent-not-current'
-///     ) AS UUID)
-///   ),
-///
-///   -- Determine the new version number to use: either 1 if this is the
-///   -- first sitrep being made the current sitrep, or 1 higher than
-///   -- the previous sitrep's version.
-///   --
-///   -- The final clauses of each of these WHERE clauses repeat the
-///   -- checks performed above in `check_validity`, and will cause this
-///   -- subquery to return no rows if we should not allow the new
-///   -- target to be set.
-///   new_sitrep AS (
-///     SELECT 1 AS new_version FROM "sitrep"
-///       WHERE
-///         "id" = <new_sitrep_id>
-///         AND "parent_sitrep_id" IS NULL
-///         AND NOT EXISTS (SELECT version FROM current_sitrep)
-///     UNION
-///     SELECT current_sitrep.version + 1 FROM current_sitrep, "sitrep"
-///       WHERE
-///         "id" = <new_sitrep_id>
-///         AND "parent_sitrep_id" IS NOT NULL
-///         AND "parent_sitrep_id" = current_sitrep.sitrep_id
-///   )
-///
-///   -- Perform the actual insertion.
-///   INSERT INTO "sitrep_history"(
-///     "version","sitrep_id","time_made_current"
-///   )
-///   SELECT
-///     new_sitrep.new_version,
-///     <new_sitrep_id>,
-///     NOW()
-///     FROM new_sitrep
-/// ```
-#[derive(Debug, Clone, Copy)]
-struct InsertSitrepVersionQuery {
-    sitrep_id: SitrepUuid,
-}
-
 // Uncastable sentinel used to detect we attempt to make a sitrep current when
 // its parent sitrep ID is no longer the current sitrep.
 const PARENT_NOT_CURRENT: &str = "parent-not-current";
@@ -539,165 +682,6 @@ const PARENT_NOT_CURRENT_ERROR_MESSAGE: &str = "could not parse \
     \"parent-not-current\" as type uuid: \
      uuid: incorrect UUID length: parent-not-current";
 
-impl InsertSitrepVersionQuery {
-    fn decode_error(&self, err: DieselError) -> InsertSitrepError {
-        match err {
-            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
-                if info.message() == PARENT_NOT_CURRENT_ERROR_MESSAGE =>
-            {
-                InsertSitrepError::ParentNotCurrent(self.sitrep_id)
-            }
-            err => {
-                let err = public_error_from_diesel(err, ErrorHandler::Server)
-                    .internal_context("failed to insert new sitrep version");
-                InsertSitrepError::Other(err)
-            }
-        }
-    }
-}
-
-impl QueryId for InsertSitrepVersionQuery {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-impl QueryFragment<Pg> for InsertSitrepVersionQuery {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        use nexus_db_schema::schema;
-
-        type FromClause<T> =
-            diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-        const SITREP_FROM_CLAUSE: FromClause<schema::fm_sitrep::table> =
-            FromClause::new();
-        const SITREP_HISTORY_FROM_CLAUSE: FromClause<
-            schema::fm_sitrep_history::table,
-        > = FromClause::new();
-
-        const CURRENT_SITREP: &'static str = "current_sitrep";
-
-        out.push_sql("WITH ");
-        out.push_identifier(CURRENT_SITREP)?;
-        out.push_sql(" AS (SELECT ");
-        out.push_identifier(history_dsl::version::NAME)?;
-        out.push_sql(" AS version,");
-        out.push_identifier(history_dsl::sitrep_id::NAME)?;
-        out.push_sql(" AS sitrep_id");
-        out.push_sql(" FROM ");
-        SITREP_HISTORY_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" ORDER BY ");
-        out.push_identifier(history_dsl::version::NAME)?;
-        out.push_sql(" DESC LIMIT 1),");
-
-        out.push_sql(
-            "check_validity AS MATERIALIZED ( \
-               SELECT \
-                 CAST( \
-                   IF(",
-        );
-        out.push_sql("(SELECT ");
-        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
-        out.push_sql(" FROM ");
-        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(", ");
-        out.push_identifier(CURRENT_SITREP)?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(sitrep_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.sitrep_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(CURRENT_SITREP)?;
-        out.push_sql(".sitrep_id = ");
-        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
-        out.push_sql(
-            ") IS NOT NULL \
-            OR \
-            (SELECT 1 FROM ",
-        );
-        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(sitrep_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.sitrep_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
-        out.push_sql(
-            "IS NULL \
-            AND NOT EXISTS ( \
-                SELECT version FROM current_sitrep) \
-            ) = 1, ",
-        );
-        out.push_sql("  CAST(");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.sitrep_id.as_untyped_uuid(),
-        )?;
-        out.push_sql("  AS text), ");
-        out.push_bind_param::<sql_types::Text, &'static str>(
-            &PARENT_NOT_CURRENT,
-        )?;
-        out.push_sql(
-            ") \
-            AS UUID) \
-          ), ",
-        );
-
-        out.push_sql("new_sitrep AS (SELECT 1 AS new_version FROM ");
-        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(sitrep_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.sitrep_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
-        out.push_sql(
-            " IS NULL \
-            AND NOT EXISTS \
-            (SELECT version FROM current_sitrep) \
-             UNION \
-            SELECT current_sitrep.version + 1 FROM \
-              current_sitrep, ",
-        );
-        SITREP_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(sitrep_dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.sitrep_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
-        out.push_sql(" IS NOT NULL AND ");
-        out.push_identifier(sitrep_dsl::parent_sitrep_id::NAME)?;
-        out.push_sql(" = current_sitrep.sitrep_id) ");
-
-        out.push_sql("INSERT INTO ");
-        SITREP_HISTORY_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql("(");
-        out.push_identifier(history_dsl::version::NAME)?;
-        out.push_sql(",");
-        out.push_identifier(history_dsl::sitrep_id::NAME)?;
-        out.push_sql(",");
-        out.push_identifier(history_dsl::time_made_current::NAME)?;
-        out.push_sql(") SELECT new_sitrep.new_version, ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            self.sitrep_id.as_untyped_uuid(),
-        )?;
-        out.push_sql(", NOW()");
-        out.push_sql(" FROM new_sitrep");
-
-        Ok(())
-    }
-}
-
-impl RunQueryDsl<DbConnection> for InsertSitrepVersionQuery {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -706,6 +690,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use chrono::Utc;
+    use diesel::pg::Pg;
     use nexus_types::fm;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
@@ -719,7 +704,7 @@ mod tests {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query = InsertSitrepVersionQuery { sitrep_id: SitrepUuid::nil() };
+        let query = DataStore::insert_sitrep_version_query(SitrepUuid::nil());
 
         // Before trying to explain the query, let's start by making sure it's
         // valid SQL...
@@ -742,6 +727,16 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_insert_sitrep_version_query() {
+        let query = DataStore::insert_sitrep_version_query(SitrepUuid::nil());
+        expectorate_query_contents(
+            &query,
+            "tests/output/insert_sitrep_version_query.sql",
+        )
+        .await;
     }
 
     // Ensure we have the right query contents.
