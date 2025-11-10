@@ -26,7 +26,7 @@ use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel, retryable};
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::{Ip, IpAssignment, Ipv4Addr, SqlU8};
+use nexus_db_model::{Ip, IpAssignment, SqlU8};
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
 use nexus_db_schema::enums::NetworkInterfaceKindEnum;
 use nexus_db_schema::schema::network_interface::dsl;
@@ -521,15 +521,8 @@ fn last_available_ipv6_address(network: &Ipv6Network) -> std::net::Ipv6Addr {
 
 /// The `NextIpv4Address` query is a `NextItem` query for choosing the next
 /// available IPv4 address for an interface.
-#[derive(Debug, Clone, Copy)]
 pub struct NextIpv4Address {
-    inner: NextItemSelfJoined<
-        nexus_db_schema::schema::network_interface::table,
-        Ipv4Addr,
-        nexus_db_schema::schema::network_interface::dsl::ip,
-        Uuid,
-        nexus_db_schema::schema::network_interface::dsl::subnet_id,
-    >,
+    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
 }
 
 impl NextIpv4Address {
@@ -537,12 +530,21 @@ impl NextIpv4Address {
         let min = first_available_ipv4_address(&subnet);
         let max = last_available_ipv4_address(&subnet);
         Self {
-            inner: NextItemSelfJoined::new_scoped(
+            inner: NextItemSelfJoined::<db::model::Ipv4Addr>::new_scoped(
+                "network_interface",
+                "ip",
+                "subnet_id",
                 subnet_id,
                 min.into(),
                 max.into(),
-            ),
+            ).to_query(),
         }
+    }
+}
+
+impl std::fmt::Debug for NextIpv4Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NextIpv4Address").finish_non_exhaustive()
     }
 }
 
@@ -550,15 +552,8 @@ delegate_query_fragment_impl!(NextIpv4Address);
 
 /// The `NextIpv6Address` query is a `NextItem` query for choosing the next
 /// available IPv6 address for an interface.
-#[derive(Debug, Clone, Copy)]
 pub struct NextIpv6Address {
-    inner: NextItemSelfJoined<
-        nexus_db_schema::schema::network_interface::table,
-        db::model::Ipv6Addr,
-        nexus_db_schema::schema::network_interface::dsl::ipv6,
-        Uuid,
-        nexus_db_schema::schema::network_interface::dsl::subnet_id,
-    >,
+    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
 }
 
 impl NextIpv6Address {
@@ -566,12 +561,21 @@ impl NextIpv6Address {
         let min = first_available_ipv6_address(&subnet);
         let max = last_available_ipv6_address(&subnet);
         Self {
-            inner: NextItemSelfJoined::new_scoped(
+            inner: NextItemSelfJoined::<db::model::Ipv6Addr>::new_scoped(
+                "network_interface",
+                "ipv6",
+                "subnet_id",
                 subnet_id,
                 min.into(),
                 max.into(),
-            ),
+            ).to_query(),
         }
+    }
+}
+
+impl std::fmt::Debug for NextIpv6Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NextIpv6Address").finish_non_exhaustive()
     }
 }
 
@@ -615,15 +619,8 @@ delegate_query_fragment_impl!(NextIpv6Address);
 /// slot number is 7), this query will return 8. However, this violates the
 /// check on the slot column being between `[0, 8)`. This check violation is
 /// used to detect the case when there are no slots available.
-#[derive(Debug, Clone, Copy)]
 pub struct NextNicSlot {
-    inner: NextItem<
-        nexus_db_schema::schema::network_interface::table,
-        i16,
-        nexus_db_schema::schema::network_interface::dsl::slot,
-        Uuid,
-        nexus_db_schema::schema::network_interface::dsl::parent_id,
-    >,
+    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
 }
 
 impl NextNicSlot {
@@ -635,7 +632,15 @@ impl NextNicSlot {
             0,
         )
         .expect("invalid min/max shift");
-        Self { inner: NextItem::new_scoped(generator, parent_id) }
+        Self {
+            inner: NextItem::new_scoped(
+                "network_interface",
+                "slot",
+                "parent_id",
+                parent_id,
+                generator,
+            ).to_query(),
+        }
     }
 }
 
@@ -648,17 +653,16 @@ impl QueryFragment<Pg> for NextNicSlot {
     }
 }
 
+impl std::fmt::Debug for NextNicSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NextNicSlot").finish_non_exhaustive()
+    }
+}
+
 /// A `NextItem` query that selects a random available MAC address for
 /// a network interface.
-#[derive(Debug, Clone, Copy)]
 pub struct NextMacAddress {
-    inner: NextItemSelfJoined<
-        nexus_db_schema::schema::network_interface::table,
-        db::model::MacAddr,
-        nexus_db_schema::schema::network_interface::dsl::mac,
-        Uuid,
-        nexus_db_schema::schema::network_interface::dsl::vpc_id,
-    >,
+    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
 }
 
 impl NextMacAddress {
@@ -673,7 +677,22 @@ impl NextMacAddress {
         };
         let min = db::model::MacAddr(MacAddr::from_i64(min));
         let max = db::model::MacAddr(MacAddr::from_i64(max));
-        Self { inner: NextItemSelfJoined::new_scoped(vpc_id, min, max) }
+        Self {
+            inner: NextItemSelfJoined::new_scoped(
+                "network_interface",
+                "mac",
+                "vpc_id",
+                vpc_id,
+                min,
+                max,
+            ).to_query(),
+        }
+    }
+}
+
+impl std::fmt::Debug for NextMacAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NextMacAddress").finish_non_exhaustive()
     }
 }
 
@@ -1026,7 +1045,7 @@ fn push_interface_validation_cte<'a>(
 /// portion of the query might need to be placed behind a conditional evaluation
 /// expression, such as `IF` or `COALESCE`, which only runs the subquery when
 /// the instance-validation check passes.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InsertQuery {
     interface: IncompleteNetworkInterface,
     now: DateTime<Utc>,

@@ -33,15 +33,8 @@ pub const MAX_DISKS_PER_INSTANCE: u32 = 8;
 /// enforces this at the database level).
 ///
 /// See the `NextItem` documentation for more details.
-#[derive(Debug, Clone, Copy)]
 struct NextDiskSlot {
-    inner: NextItem<
-        nexus_db_schema::schema::disk::table,
-        i16,
-        nexus_db_schema::schema::disk::dsl::slot,
-        Uuid,
-        nexus_db_schema::schema::disk::dsl::attach_instance_id,
-    >,
+    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
 }
 
 impl NextDiskSlot {
@@ -52,7 +45,15 @@ impl NextDiskSlot {
             0,
         )
         .expect("invalid min/max shift");
-        Self { inner: NextItem::new_scoped(generator, instance_id) }
+        Self {
+            inner: NextItem::new_scoped(
+                "disk",
+                "slot",
+                "attach_instance_id",
+                instance_id,
+                generator,
+            ).to_query(),
+        }
     }
 }
 
@@ -90,7 +91,6 @@ impl QueryFragment<Pg> for NextDiskSlot {
 /// This fragment can be passed to an `attach_resource` operation by supplying
 /// it as the argument to a `set`, e.g.
 /// `diesel::update(disk::dsl::disk).set(DiskSetClauseForAttach::new(instance_id))`.
-#[derive(Debug, Clone)]
 pub struct DiskSetClauseForAttach {
     attach_instance_id: Uuid,
     next_slot: NextDiskSlot,

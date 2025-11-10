@@ -4,18 +4,13 @@
 
 //! A generic query for selecting a unique next item from a table.
 
+use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use diesel::RunQueryDsl;
-use diesel::associations::HasTable;
 use diesel::pg::Pg;
-use diesel::prelude::Column;
-use diesel::prelude::Expression;
 use diesel::query_builder::AstPass;
-use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
-use diesel::serialize::ToSql;
 use diesel::sql_types;
-use diesel::sql_types::HasSqlType;
 use nexus_db_lookup::DbConnection;
 use std::marker::PhantomData;
 use uuid::Uuid;
@@ -167,70 +162,139 @@ use uuid::Uuid;
 ///
 /// [ordering]: https://www.cockroachlabs.com/docs/stable/select-clause#sorting-and-limiting-query-results
 #[derive(Debug, Clone, Copy)]
-pub(super) struct NextItem<
-    Table,
-    Item,
-    ItemColumn,
-    ScopeKey = NoScopeKey,
-    ScopeColumn = NoScopeColumn,
-    Generator = DefaultShiftGenerator<Item>,
-> {
-    table: Table,
-    _d: PhantomData<(Item, ItemColumn, ScopeColumn)>,
-    scope_key: ScopeKey,
+pub(super) struct NextItem<Item, Generator = DefaultShiftGenerator<Item>> {
+    table_name: &'static str,
+    item_column_name: &'static str,
+    scope: Option<NextItemScope>,
     shift_generator: Generator,
+    _phantom: PhantomData<Item>,
 }
 
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
-    NextItem<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
+/// Scope information for a NextItem query.
+#[derive(Debug, Clone, Copy)]
+struct NextItemScope {
+    key: Uuid,
+    column_name: &'static str,
+}
+
+impl<Item, Generator> NextItem<Item, Generator>
 where
-    // Table is a database table whose name can be used in a query fragment
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    // Item can be converted to the SQL type of the ItemColumn
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    // ItemColum is a column in the target table
-    ItemColumn: Column<Table = Table> + Copy,
-    // ScopeKey can be converted to the SQL type of the ScopeColumn
-    ScopeKey: ScopeKeyType + ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
-    // ScopeColumn is a column on the target table
-    ScopeColumn: ScopeColumnType + Column<Table = Table>,
-    // The Postgres backend supports the SQL types of both columns
-    Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
-        + HasSqlType<<ItemColumn as Expression>::SqlType>,
-    // We need an implementation to create the shifts from the base
     Generator: ShiftGenerator<Item>,
 {
     /// Create a new `NextItem` query, scoped to a particular key.
+    ///
+    /// # Arguments
+    /// * `table_name` - The name of the table to query (e.g., "vpc")
+    /// * `item_column_name` - The name of the column containing items (e.g., "vni")
+    /// * `scope_column_name` - The name of the scope column (e.g., "project_id")
+    /// * `scope_key` - The UUID value to scope the query to
+    /// * `shift_generator` - The generator for producing shifts from the base
     pub(super) fn new_scoped(
+        table_name: &'static str,
+        item_column_name: &'static str,
+        scope_column_name: &'static str,
+        scope_key: Uuid,
         shift_generator: Generator,
-        scope_key: ScopeKey,
     ) -> Self {
         Self {
-            table: Table::table(),
-            _d: PhantomData,
-            scope_key,
+            table_name,
+            item_column_name,
+            scope: Some(NextItemScope {
+                key: scope_key,
+                column_name: scope_column_name,
+            }),
             shift_generator,
+            _phantom: PhantomData,
         }
     }
-}
 
-impl<Table, Item, ItemColumn, Generator>
-    NextItem<Table, Item, ItemColumn, NoScopeKey, NoScopeColumn, Generator>
-where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    ItemColumn: Column<Table = Table> + Copy,
-    Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
-    Generator: ShiftGenerator<Item>,
-{
     /// Create a new `NextItem` query, with a global scope.
-    pub(super) fn new_unscoped(shift_generator: Generator) -> Self {
+    ///
+    /// # Arguments
+    /// * `table_name` - The name of the table to query (e.g., "item")
+    /// * `item_column_name` - The name of the column containing items (e.g., "value")
+    /// * `shift_generator` - The generator for producing shifts from the base
+    pub(super) fn new_unscoped(
+        table_name: &'static str,
+        item_column_name: &'static str,
+        shift_generator: Generator,
+    ) -> Self {
         Self {
-            table: Table::table(),
-            _d: PhantomData,
-            scope_key: NoScopeKey,
+            table_name,
+            item_column_name,
+            scope: None,
             shift_generator,
+            _phantom: PhantomData,
         }
+    }
+
+    /// Convert this NextItem query into a TypedSqlQuery using QueryBuilder.
+    ///
+    /// This builds the SQL query eagerly using the cleaner QueryBuilder API.
+    pub(super) fn to_query(self) -> TypedSqlQuery<()>
+    where
+        Item: NextItemBinder + Copy,
+        Generator: Copy,
+    {
+        let mut builder = QueryBuilder::new();
+
+        // Copy values we need to bind
+        let base = *self.shift_generator.base();
+        let first_end = *self.shift_generator.shift_indices().first_end();
+        let max_shift = *self.shift_generator.max_shift();
+        let second_start = *self.shift_generator.shift_indices().second_start();
+        let second_end = *self.shift_generator.shift_indices().second_end();
+        let min_shift = *self.shift_generator.min_shift();
+
+        // SELECT <base> + shift AS <item_column>
+        builder.sql("SELECT ");
+        base.bind_to_query_builder(&mut builder);
+        builder.sql(" + ").sql(SHIFT_COLUMN_IDENT);
+        builder.sql(" AS ").sql(self.item_column_name);
+
+        // FROM (<shift_generator>)
+        builder.sql(" FROM (SELECT generate_series(0, ");
+        builder.param().bind::<sql_types::BigInt, _>(first_end);
+        builder.sql(") AS ").sql(INDEX_COLUMN_IDENT);
+        builder.sql(", generate_series(0, ");
+        builder.param().bind::<sql_types::BigInt, _>(max_shift);
+        builder.sql(") AS ").sql(SHIFT_COLUMN_IDENT);
+        builder.sql(" UNION ALL SELECT generate_series(");
+        builder.param().bind::<sql_types::BigInt, _>(second_start);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::BigInt, _>(second_end);
+        builder.sql(") AS ").sql(INDEX_COLUMN_IDENT);
+        builder.sql(", generate_series(");
+        builder.param().bind::<sql_types::BigInt, _>(min_shift);
+        builder.sql(", -1) AS ").sql(SHIFT_COLUMN_IDENT);
+
+        // LEFT OUTER JOIN <table>
+        builder.sql(") LEFT OUTER JOIN ").sql(self.table_name);
+
+        // JOIN conditions
+        if let Some(scope) = &self.scope {
+            builder.sql(" ON (").sql(scope.column_name);
+            builder.sql(", ").sql(self.item_column_name);
+            builder.sql(", ").sql(TIME_DELETED_COLUMN_IDENT).sql(" IS NULL) = (");
+            builder.param().bind::<sql_types::Uuid, _>(scope.key);
+            builder.sql(", ");
+            base.bind_to_query_builder(&mut builder);
+            builder.sql(" + ").sql(SHIFT_COLUMN_IDENT);
+            builder.sql(", TRUE)");
+        } else {
+            builder.sql(" ON (").sql(self.item_column_name);
+            builder.sql(", ").sql(TIME_DELETED_COLUMN_IDENT).sql(" IS NULL) = (");
+            base.bind_to_query_builder(&mut builder);
+            builder.sql(" + ").sql(SHIFT_COLUMN_IDENT);
+            builder.sql(", TRUE)");
+        }
+
+        // WHERE <item_column> IS NULL ORDER BY "index" LIMIT 1
+        builder.sql(" WHERE ").sql(self.item_column_name);
+        builder.sql(" IS NULL ORDER BY ").sql(INDEX_COLUMN_IDENT);
+        builder.sql(" LIMIT 1");
+
+        builder.query()
     }
 }
 
@@ -240,167 +304,165 @@ const INDEX_COLUMN_IDENT: &str = "index";
 const SELF_JOIN_FIRST_TABLE_ALIAS: &str = "self_join_table1";
 const SELF_JOIN_SECOND_TABLE_ALIAS: &str = "self_join_table2";
 
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
-    QueryFragment<Pg>
-    for NextItem<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
+// We need to know the SQL types at compile time for binding, so we need
+// trait-based implementations for different item types. We'll use a helper
+// trait to abstract over the SQL type.
+pub(super) trait NextItemBinder {
+    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()>;
+    fn bind_to_query_builder(&self, builder: &mut QueryBuilder);
+}
+
+// Implement for common types used in NextItem queries
+impl NextItemBinder for i32 {
+    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+        out.push_bind_param::<sql_types::Int4, i32>(self)
+    }
+    fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
+        builder.param().bind::<sql_types::Int4, _>(*self);
+    }
+}
+
+impl NextItemBinder for i16 {
+    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+        out.push_bind_param::<sql_types::Int2, i16>(self)
+    }
+    fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
+        builder.param().bind::<sql_types::Int2, _>(*self);
+    }
+}
+
+// Vni uses Int4 as its SQL type
+impl NextItemBinder for crate::db::model::Vni {
+    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+        out.push_bind_param::<sql_types::Int4, crate::db::model::Vni>(self)
+    }
+    fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
+        builder.param().bind::<sql_types::Int4, _>(*self);
+    }
+}
+
+// Ipv4Addr and Ipv6Addr use Inet as their SQL type
+impl NextItemBinder for crate::db::model::Ipv4Addr {
+    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+        out.push_bind_param::<sql_types::Inet, crate::db::model::Ipv4Addr>(self)
+    }
+    fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
+        builder.param().bind::<sql_types::Inet, _>(*self);
+    }
+}
+
+impl NextItemBinder for crate::db::model::Ipv6Addr {
+    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+        out.push_bind_param::<sql_types::Inet, crate::db::model::Ipv6Addr>(self)
+    }
+    fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
+        builder.param().bind::<sql_types::Inet, _>(*self);
+    }
+}
+
+// MacAddr uses BigInt as its SQL type
+impl NextItemBinder for crate::db::model::MacAddr {
+    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+        out.push_bind_param::<sql_types::BigInt, crate::db::model::MacAddr>(self)
+    }
+    fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
+        builder.param().bind::<sql_types::BigInt, _>(*self);
+    }
+}
+
+impl<Item, Generator> QueryFragment<Pg> for NextItem<Item, Generator>
 where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    ItemColumn: Column<Table = Table> + Copy,
-    ScopeKey: ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
-    ScopeColumn: Column<Table = Table>,
-    Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
-        + HasSqlType<<ItemColumn as Expression>::SqlType>,
+    Item: Copy + NextItemBinder + 'static,
     Generator: ShiftGenerator<Item>,
 {
     fn walk_ast<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-        push_next_item_select_clause::<Table, Item, ItemColumn, Generator>(
-            &self.table,
-            &self.shift_generator,
-            out.reborrow(),
-        )?;
-
-        // This generates the JOIN conditions for the query, which look like:
-        // ON
-        //      (<scope_column>, <item_column>, time_deleted IS NULL) =
-        //      (<scope_key>, <base> + shift, TRUE)
-        out.push_sql(" ON (");
-        out.push_identifier(ScopeColumn::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier("time_deleted")?;
-        out.push_sql(" IS NULL) = (");
-        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
-            &self.scope_key,
-        )?;
-        out.push_sql(", ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            self.shift_generator.base(),
-        )?;
+        // SELECT <base> + shift AS <item_column>
+        // FROM (<shift_generator>) LEFT OUTER JOIN <table>
+        out.push_sql("SELECT ");
+        self.shift_generator.base().bind_item(&mut out)?;
         out.push_sql(" + ");
         out.push_identifier(SHIFT_COLUMN_IDENT)?;
-        out.push_sql(", TRUE) ");
+        out.push_sql(" AS ");
+        out.push_identifier(self.item_column_name)?;
+        out.push_sql(" FROM (");
+        // The shift generator doesn't actually need Table/ItemColumn at runtime,
+        // it just generates series with bind parameters
+        out.push_sql("SELECT generate_series(0, ");
+        out.push_bind_param::<sql_types::BigInt, i64>(
+            self.shift_generator.shift_indices().first_end(),
+        )?;
+        out.push_sql(") AS ");
+        out.push_identifier(INDEX_COLUMN_IDENT)?;
+        out.push_sql(", generate_series(0, ");
+        out.push_bind_param::<sql_types::BigInt, i64>(self.shift_generator.max_shift())?;
+        out.push_sql(") AS ");
+        out.push_identifier(SHIFT_COLUMN_IDENT)?;
+        out.push_sql(" UNION ALL SELECT generate_series(");
+        out.push_bind_param::<sql_types::BigInt, i64>(
+            self.shift_generator.shift_indices().second_start(),
+        )?;
+        out.push_sql(", ");
+        out.push_bind_param::<sql_types::BigInt, i64>(
+            self.shift_generator.shift_indices().second_end(),
+        )?;
+        out.push_sql(") AS ");
+        out.push_identifier(INDEX_COLUMN_IDENT)?;
+        out.push_sql(", generate_series(");
+        out.push_bind_param::<sql_types::BigInt, i64>(self.shift_generator.min_shift())?;
+        out.push_sql(", -1) AS ");
+        out.push_identifier(SHIFT_COLUMN_IDENT)?;
+        out.push_sql(") LEFT OUTER JOIN ");
+        out.push_sql(self.table_name);
 
-        push_next_item_where_clause::<Table, ItemColumn>(out.reborrow())
+        // This generates the JOIN conditions for the query
+        if let Some(scope) = &self.scope {
+            // ON (<scope_column>, <item_column>, time_deleted IS NULL) =
+            //    (<scope_key>, <base> + shift, TRUE)
+            out.push_sql(" ON (");
+            out.push_identifier(scope.column_name)?;
+            out.push_sql(", ");
+            out.push_identifier(self.item_column_name)?;
+            out.push_sql(", ");
+            out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+            out.push_sql(" IS NULL) = (");
+            out.push_bind_param::<sql_types::Uuid, Uuid>(&scope.key)?;
+            out.push_sql(", ");
+            self.shift_generator.base().bind_item(&mut out)?;
+            out.push_sql(" + ");
+            out.push_identifier(SHIFT_COLUMN_IDENT)?;
+            out.push_sql(", TRUE) ");
+        } else {
+            // ON (<item_column>, time_deleted IS NULL) = (<base> + shift, TRUE)
+            out.push_sql(" ON (");
+            out.push_identifier(self.item_column_name)?;
+            out.push_sql(", ");
+            out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+            out.push_sql(" IS NULL) = (");
+            self.shift_generator.base().bind_item(&mut out)?;
+            out.push_sql(" + ");
+            out.push_identifier(SHIFT_COLUMN_IDENT)?;
+            out.push_sql(", TRUE) ");
+        }
+
+        // WHERE <item_column> IS NULL ORDER BY "index" LIMIT 1
+        out.push_sql(" WHERE ");
+        out.push_identifier(self.item_column_name)?;
+        out.push_sql(" IS NULL ORDER BY ");
+        out.push_identifier(INDEX_COLUMN_IDENT)?;
+        out.push_sql(" LIMIT 1");
+        Ok(())
     }
 }
 
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator> QueryId
-    for NextItem<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
-{
+impl<Item, Generator> QueryId for NextItem<Item, Generator> {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
-    RunQueryDsl<DbConnection>
-    for NextItem<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
-{
-}
-
-impl<Table, Item, ItemColumn, Generator> QueryFragment<Pg>
-    for NextItem<Table, Item, ItemColumn, NoScopeKey, NoScopeColumn, Generator>
-where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    ItemColumn: Column<Table = Table> + Copy,
-    Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
-    Generator: ShiftGenerator<Item>,
-{
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        push_next_item_select_clause::<Table, Item, ItemColumn, Generator>(
-            &self.table,
-            &self.shift_generator,
-            out.reborrow(),
-        )?;
-
-        // This generates the JOIN conditions for the query, which look like:
-        // ON
-        //      (<item_column>, time_deleted IS NULL) =
-        //      (<base> + shift, TRUE)
-        //
-        // Note that there is no scope here.
-        out.push_sql(" ON (");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier("time_deleted")?;
-        out.push_sql(" IS NULL) = (");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            self.shift_generator.base(),
-        )?;
-        out.push_sql(" + ");
-        out.push_identifier(SHIFT_COLUMN_IDENT)?;
-        out.push_sql(", TRUE) ");
-
-        push_next_item_where_clause::<Table, ItemColumn>(out.reborrow())
-    }
-}
-
-// Push the initial `SELECT` clause shared by the scoped and unscoped next item
-// queries.
-//
-// ```sql
-// SELECT
-//      <base> + shift AS <item_column>
-// FROM
-//      <shift_generator.walk_ast()>
-// LEFT OUTER JOIN
-//      <table>
-// ```
-fn push_next_item_select_clause<'a, Table, Item, ItemColumn, Generator>(
-    table: &'a Table,
-    shift_generator: &'a Generator,
-    mut out: AstPass<'_, 'a, Pg>,
-) -> diesel::QueryResult<()>
-where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy + 'a,
-    ItemColumn: Column<Table = Table> + Copy,
-    Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
-    Generator: ShiftGenerator<Item>,
-{
-    out.push_sql("SELECT ");
-    out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-        shift_generator.base(),
-    )?;
-    out.push_sql(" + ");
-    out.push_identifier(SHIFT_COLUMN_IDENT)?;
-    out.push_sql(" AS ");
-    out.push_identifier(ItemColumn::NAME)?;
-    out.push_sql(" FROM (");
-    shift_generator.walk_ast::<Table, ItemColumn>(out.reborrow())?;
-    out.push_sql(") LEFT OUTER JOIN ");
-    table.walk_ast(out.reborrow())
-}
-
-// Push the final where clause shared by scoped and unscoped next item queries.
-//
-// ```sql
-// WHERE <item_column> IS NULL ORDER BY "index" LIMIT 1
-// ```
-fn push_next_item_where_clause<Table, ItemColumn>(
-    mut out: AstPass<Pg>,
-) -> diesel::QueryResult<()>
-where
-    Table: diesel::Table
-        + diesel::associations::HasTable<Table = Table>
-        + QueryFragment<Pg>,
-    ItemColumn: Column<Table = Table>,
-{
-    out.push_sql(" WHERE ");
-    out.push_identifier(ItemColumn::NAME)?;
-    out.push_sql(" IS NULL ORDER BY ");
-    out.push_identifier(INDEX_COLUMN_IDENT)?;
-    out.push_sql(" LIMIT 1");
-    Ok(())
-}
+impl<Item, Generator> RunQueryDsl<DbConnection> for NextItem<Item, Generator> {}
 
 /// A macro used to delegate the implementation of [`QueryFragment`] to a field
 /// of `self` called `inner`.
@@ -419,25 +481,6 @@ macro_rules! delegate_query_fragment_impl {
     };
 }
 
-/// A marker trait used to identify types that can be used as scope keys.
-pub(crate) trait ScopeKeyType: Sized + std::fmt::Debug {}
-impl ScopeKeyType for Uuid {}
-
-/// A type indicating that a [`NextItem`] query has no scope key.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct NoScopeKey;
-impl ScopeKeyType for NoScopeKey {}
-
-/// A marker trait used to identify types that identify the table column for a
-/// scope key.
-pub(crate) trait ScopeColumnType: Sized + std::fmt::Debug {}
-impl<T> ScopeColumnType for T where T: Column + std::fmt::Debug {}
-
-/// A type indicating that a [`NextItem`] query has no scope column.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct NoScopeColumn;
-impl ScopeColumnType for NoScopeColumn {}
-
 /// Trait for generating the shift from the base for a [`NextItem`] query.
 pub trait ShiftGenerator<Item> {
     /// Return the base item for the scan.
@@ -451,58 +494,6 @@ pub trait ShiftGenerator<Item> {
 
     /// Return the indices of the generated shifts for the scan.
     fn shift_indices(&self) -> &ShiftIndices;
-
-    /// Insert the part of the query represented by the shift of items into the
-    /// provided AstPass.
-    ///
-    /// The default implementation pushes:
-    ///
-    /// ```sql
-    /// SELECT
-    ///     generate_series(0, <n>) as "index"
-    ///     generate_series(0, <max_shift>) AS shift,
-    /// UNION ALL
-    /// SELECT
-    ///     generate_series(<n+1>, <range_size>) as "index"
-    ///     generate_series(<min_shift>, -1) AS shift,
-    /// ```
-    fn walk_ast<'a, 'b, Table, ItemColumn>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()>
-    where
-        Table:
-            diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-        Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-        ItemColumn: Column<Table = Table> + Copy,
-        Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
-        'a: 'b,
-    {
-        out.push_sql("SELECT generate_series(0, ");
-        out.push_bind_param::<sql_types::BigInt, i64>(
-            self.shift_indices().first_end(),
-        )?;
-        out.push_sql(") AS ");
-        out.push_identifier(INDEX_COLUMN_IDENT)?;
-        out.push_sql(", generate_series(0, ");
-        out.push_bind_param::<sql_types::BigInt, i64>(self.max_shift())?;
-        out.push_sql(") AS ");
-        out.push_identifier(SHIFT_COLUMN_IDENT)?;
-        out.push_sql(" UNION ALL SELECT generate_series(");
-        out.push_bind_param::<sql_types::BigInt, i64>(
-            self.shift_indices().second_start(),
-        )?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::BigInt, i64>(
-            self.shift_indices().second_end(),
-        )?;
-        out.push_sql(") AS ");
-        out.push_identifier(INDEX_COLUMN_IDENT)?;
-        out.push_sql(", generate_series(");
-        out.push_bind_param::<sql_types::BigInt, i64>(self.min_shift())?;
-        out.push_sql(", -1) AS ");
-        out.push_identifier(SHIFT_COLUMN_IDENT)
-    }
 }
 
 /// Helper to compute the range of the _index_ column, used to predictably sort
@@ -681,73 +672,187 @@ impl<Item> ShiftGenerator<Item> for DefaultShiftGenerator<Item> {
 /// would prefer to randomly distribute items rather than sequentially allocate
 /// them.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct NextItemSelfJoined<
-    Table,
-    Item,
-    ItemColumn,
-    ScopeKey = NoScopeKey,
-    ScopeColumn = NoScopeColumn,
-> {
-    table: Table,
-    _d: PhantomData<(Item, ItemColumn, ScopeColumn)>,
-    scope_key: ScopeKey,
+pub(super) struct NextItemSelfJoined<Item> {
+    table_name: &'static str,
+    item_column_name: &'static str,
+    scope: Option<NextItemScope>,
     item_min: Item,
     item_max: Item,
 }
 
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
-    NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
-where
-    // Table is a database table whose name can be used in a query fragment
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    // Item can be converted to the SQL type of the ItemColumn
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    // ItemColum is a column in the target table
-    ItemColumn: Column<Table = Table> + Copy,
-    // ScopeKey can be converted to the SQL type of the ScopeColumn
-    ScopeKey: ScopeKeyType + ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
-    // ScopeColumn is a column on the target table
-    ScopeColumn: ScopeColumnType + Column<Table = Table>,
-    // The Postgres backend supports the SQL types of both columns
-    Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
-        + HasSqlType<<ItemColumn as Expression>::SqlType>,
-{
+impl<Item> NextItemSelfJoined<Item> {
     /// Create a new `NextItemSelfJoined` query, scoped to a particular key.
     ///
     /// Both `item_min` and `item_max` are _inclusive_.
+    ///
+    /// # Arguments
+    /// * `table_name` - The name of the table to query
+    /// * `item_column_name` - The name of the column containing items
+    /// * `scope_column_name` - The name of the scope column
+    /// * `scope_key` - The UUID value to scope the query to
+    /// * `item_min` - The minimum item value (inclusive)
+    /// * `item_max` - The maximum item value (inclusive)
     pub(super) fn new_scoped(
-        scope_key: ScopeKey,
+        table_name: &'static str,
+        item_column_name: &'static str,
+        scope_column_name: &'static str,
+        scope_key: Uuid,
         item_min: Item,
         item_max: Item,
     ) -> Self {
         Self {
-            table: Table::table(),
-            _d: PhantomData,
-            scope_key,
+            table_name,
+            item_column_name,
+            scope: Some(NextItemScope {
+                key: scope_key,
+                column_name: scope_column_name,
+            }),
             item_min,
             item_max,
         }
     }
-}
 
-impl<Table, Item, ItemColumn>
-    NextItemSelfJoined<Table, Item, ItemColumn, NoScopeKey, NoScopeColumn>
-where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    ItemColumn: Column<Table = Table> + Copy,
-    Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
-{
     /// Create a new `NextItemSelfJoined` query, with a global scope.
+    ///
+    /// Both `item_min` and `item_max` are _inclusive_.
     #[cfg(test)]
-    fn new_unscoped(item_min: Item, item_max: Item) -> Self {
+    fn new_unscoped(
+        table_name: &'static str,
+        item_column_name: &'static str,
+        item_min: Item,
+        item_max: Item,
+    ) -> Self {
         Self {
-            table: Table::table(),
-            _d: PhantomData,
-            scope_key: NoScopeKey,
+            table_name,
+            item_column_name,
+            scope: None,
             item_min,
             item_max,
         }
+    }
+
+    /// Convert this NextItemSelfJoined query into a TypedSqlQuery using QueryBuilder.
+    ///
+    /// This builds the SQL query eagerly using the cleaner QueryBuilder API.
+    pub(super) fn to_query(self) -> TypedSqlQuery<()>
+    where
+        Item: NextItemBinder + Copy,
+    {
+        let mut builder = QueryBuilder::new();
+
+        // Copy values we need to bind
+        let item_min = self.item_min;
+        let item_max = self.item_max;
+        let scope_key = self.scope.as_ref().map(|s| s.key);
+        let scope_column = self.scope.as_ref().map(|s| s.column_name);
+
+        // SELECT (
+        builder.sql("SELECT (");
+
+        // First subquery: SELECT <min_item> WHERE NOT EXISTS (...)
+        builder.sql("SELECT ");
+        item_min.bind_to_query_builder(&mut builder);
+        builder.sql(" AS ").sql(self.item_column_name);
+        builder.sql(" WHERE NOT EXISTS (SELECT 1 FROM ");
+        builder.sql(self.table_name);
+        builder.sql(" WHERE ");
+
+        if let Some(scope_col) = scope_column {
+            builder.sql(scope_col);
+            builder.sql(" = ");
+            builder.param().bind::<sql_types::Uuid, _>(scope_key.unwrap());
+            builder.sql(" AND ");
+        }
+
+        builder.sql(TIME_DELETED_COLUMN_IDENT);
+        builder.sql(" IS NULL LIMIT 1)");
+
+        // UNION ALL - gap below
+        builder.sql(" UNION ALL (");
+        self.build_gap_query(&mut builder, Direction::Down, item_min, item_max, scope_column, scope_key);
+        builder.sql(")");
+
+        // UNION ALL - gap above
+        builder.sql(" UNION ALL (");
+        self.build_gap_query(&mut builder, Direction::Up, item_min, item_max, scope_column, scope_key);
+        builder.sql(")");
+
+        // LIMIT 1) AS <item_column>
+        builder.sql(" LIMIT 1) AS ").sql(self.item_column_name);
+
+        builder.query()
+    }
+
+    fn build_gap_query(
+        &self,
+        builder: &mut QueryBuilder,
+        direction: Direction,
+        item_min: Item,
+        item_max: Item,
+        scope_column: Option<&'static str>,
+        scope_key: Option<Uuid>,
+    ) where
+        Item: NextItemBinder + Copy,
+    {
+        let op_for_next = match direction {
+            Direction::Up => " + 1",
+            Direction::Down => " - 1",
+        };
+
+        // SELECT self_join_table1.<item> +/- 1
+        builder.sql(" SELECT ");
+        builder.sql(SELF_JOIN_FIRST_TABLE_ALIAS).sql(".");
+        builder.sql(self.item_column_name).sql(op_for_next);
+
+        // FROM <table> self_join_table1 LEFT JOIN <table> self_join_table2
+        builder.sql(" FROM ").sql(self.table_name).sql(" ");
+        builder.sql(SELF_JOIN_FIRST_TABLE_ALIAS);
+        builder.sql(" LEFT JOIN ").sql(self.table_name).sql(" ");
+        builder.sql(SELF_JOIN_SECOND_TABLE_ALIAS);
+
+        // ON conditions
+        builder.sql(" ON ");
+
+        if let Some(scope_col) = scope_column {
+            builder.sql(SELF_JOIN_SECOND_TABLE_ALIAS).sql(".");
+            builder.sql(scope_col).sql(" = ");
+            builder.sql(SELF_JOIN_FIRST_TABLE_ALIAS).sql(".");
+            builder.sql(scope_col).sql(" AND ");
+        }
+
+        builder.sql(SELF_JOIN_SECOND_TABLE_ALIAS).sql(".");
+        builder.sql(self.item_column_name).sql(" = ");
+        builder.sql(SELF_JOIN_FIRST_TABLE_ALIAS).sql(".");
+        builder.sql(self.item_column_name).sql(op_for_next);
+
+        builder.sql(" AND ");
+        builder.sql(SELF_JOIN_SECOND_TABLE_ALIAS).sql(".");
+        builder.sql(TIME_DELETED_COLUMN_IDENT).sql(" IS NULL");
+
+        // WHERE conditions
+        builder.sql(" WHERE ");
+
+        if let Some(scope_col) = scope_column {
+            builder.sql(SELF_JOIN_FIRST_TABLE_ALIAS).sql(".");
+            builder.sql(scope_col).sql(" = ");
+            builder.param().bind::<sql_types::Uuid, _>(scope_key.unwrap());
+            builder.sql(" AND ");
+        }
+
+        builder.sql(SELF_JOIN_FIRST_TABLE_ALIAS).sql(".");
+        builder.sql(TIME_DELETED_COLUMN_IDENT).sql(" IS NULL AND ");
+
+        builder.sql(SELF_JOIN_FIRST_TABLE_ALIAS).sql(".");
+        builder.sql(self.item_column_name).sql(op_for_next);
+        builder.sql(" BETWEEN ");
+        item_min.bind_to_query_builder(builder);
+        builder.sql(" AND ");
+        item_max.bind_to_query_builder(builder);
+
+        builder.sql(" AND ");
+        builder.sql(SELF_JOIN_SECOND_TABLE_ALIAS).sql(".");
+        builder.sql(self.item_column_name).sql(" IS NULL");
+        builder.sql(" LIMIT 1");
     }
 }
 
@@ -757,36 +862,29 @@ enum Direction {
     Down,
 }
 
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
-    NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+impl<Item> NextItemSelfJoined<Item>
 where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    ItemColumn: Column<Table = Table> + Copy,
-    ScopeKey: ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
-    ScopeColumn: Column<Table = Table>,
-    Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
-        + HasSqlType<<ItemColumn as Expression>::SqlType>,
+    Item: Copy + NextItemBinder + 'static,
 {
     fn push_select_min_item_subquery<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
         out.push_sql("SELECT ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_min,
-        )?;
+        self.item_min.bind_item(&mut out)?;
         out.push_sql(" AS ");
-        out.push_identifier(ItemColumn::NAME)?;
+        out.push_identifier(self.item_column_name)?;
         out.push_sql(" WHERE NOT EXISTS (SELECT 1 FROM ");
-        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(self.table_name);
         out.push_sql(" WHERE ");
-        out.push_identifier(ScopeColumn::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
-            &self.scope_key,
-        )?;
-        out.push_sql(" AND ");
+
+        if let Some(scope) = &self.scope {
+            out.push_identifier(scope.column_name)?;
+            out.push_sql(" = ");
+            out.push_bind_param::<sql_types::Uuid, Uuid>(&scope.key)?;
+            out.push_sql(" AND ");
+        }
+
         out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
         out.push_sql(" IS NULL LIMIT 1)");
         Ok(())
@@ -802,47 +900,40 @@ where
             Direction::Down => " - 1",
         };
 
-        // SELECT alias1.item + 1
-        // FROM table alias1
-        // LEFT JOIN table alias2
-        // ON alias2.scope_column = alias1.scope_column
-        // AND alias2.item = alias1.item + 1
-        // AND alias2.time_deleted IS NULL
-        // WHERE alias1.scope_column = scope_key
-        // AND alias1.time_deleted IS NULL
-        // AND alias1.item + 1 BETWEEN min_item AND max_item
-        // AND alias2.item IS NULL LIMIT 1;
         out.push_sql(" SELECT ");
         out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
         out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
+        out.push_identifier(self.item_column_name)?;
         out.push_sql(op_for_next);
         out.push_sql(" FROM ");
-        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(self.table_name);
         out.push_sql(" ");
         out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
         out.push_sql(" LEFT JOIN ");
-        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(self.table_name);
         out.push_sql(" ");
         out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
 
         out.push_sql(" ON ");
-        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(ScopeColumn::NAME)?;
-        out.push_sql(" = ");
-        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(ScopeColumn::NAME)?;
 
-        out.push_sql(" AND ");
+        if let Some(scope) = &self.scope {
+            out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
+            out.push_sql(".");
+            out.push_identifier(scope.column_name)?;
+            out.push_sql(" = ");
+            out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+            out.push_sql(".");
+            out.push_identifier(scope.column_name)?;
+            out.push_sql(" AND ");
+        }
+
         out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
         out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
+        out.push_identifier(self.item_column_name)?;
         out.push_sql(" = ");
         out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
         out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
+        out.push_identifier(self.item_column_name)?;
         out.push_sql(op_for_next);
 
         out.push_sql(" AND ");
@@ -851,15 +942,15 @@ where
         out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
         out.push_sql(" IS NULL WHERE ");
 
-        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(ScopeColumn::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
-            &self.scope_key,
-        )?;
+        if let Some(scope) = &self.scope {
+            out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
+            out.push_sql(".");
+            out.push_identifier(scope.column_name)?;
+            out.push_sql(" = ");
+            out.push_bind_param::<sql_types::Uuid, Uuid>(&scope.key)?;
+            out.push_sql(" AND ");
+        }
 
-        out.push_sql(" AND ");
         out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
         out.push_sql(".");
         out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
@@ -867,36 +958,25 @@ where
 
         out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
         out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
+        out.push_identifier(self.item_column_name)?;
         out.push_sql(op_for_next);
         out.push_sql(" BETWEEN ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_min,
-        )?;
+        self.item_min.bind_item(&mut out)?;
         out.push_sql(" AND ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_max,
-        )?;
+        self.item_max.bind_item(&mut out)?;
         out.push_sql(" AND ");
 
         out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
         out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
+        out.push_identifier(self.item_column_name)?;
         out.push_sql(" IS NULL LIMIT 1");
         Ok(())
     }
 }
 
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> QueryFragment<Pg>
-    for NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+impl<Item> QueryFragment<Pg> for NextItemSelfJoined<Item>
 where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    ItemColumn: Column<Table = Table> + Copy,
-    ScopeKey: ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
-    ScopeColumn: Column<Table = Table>,
-    Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
-        + HasSqlType<<ItemColumn as Expression>::SqlType>,
+    Item: Copy + NextItemBinder + 'static,
 {
     fn walk_ast<'a>(
         &'a self,
@@ -909,155 +989,16 @@ where
         out.push_sql(") UNION ALL (");
         self.push_select_item_from_gap(out.reborrow(), Direction::Up)?;
         out.push_sql(") LIMIT 1) AS ");
-        out.push_identifier(ItemColumn::NAME)
+        out.push_identifier(self.item_column_name)
     }
 }
 
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> QueryId
-    for NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
-{
+impl<Item> QueryId for NextItemSelfJoined<Item> {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
 
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> Query
-    for NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
-where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    ItemColumn: Column<Table = Table> + Copy,
-{
-    type SqlType = <ItemColumn as Expression>::SqlType;
-}
-
-impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> RunQueryDsl<DbConnection>
-    for NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
-{
-}
-
-impl<Table, Item, ItemColumn>
-    NextItemSelfJoined<Table, Item, ItemColumn, NoScopeKey, NoScopeColumn>
-where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    ItemColumn: Column<Table = Table> + Copy,
-    Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
-{
-    fn push_select_min_item_subquery<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        out.push_sql("SELECT ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_min,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" WHERE NOT EXISTS (SELECT 1 FROM ");
-        self.table.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL LIMIT 1)");
-        Ok(())
-    }
-
-    fn push_select_item_from_gap<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-        direction: Direction,
-    ) -> diesel::QueryResult<()> {
-        let op_for_next = match direction {
-            Direction::Up => " + 1",
-            Direction::Down => " - 1",
-        };
-
-        // SELECT alias1.item + 1
-        // FROM table alias1
-        // LEFT JOIN table alias2
-        // ON alias2.item = alias1.item + 1
-        // AND alias2.time_deleted IS NULL
-        // WHERE alias1.time_deleted IS NULL
-        // AND alias1.item + 1 BETWEEN min_item AND max_item
-        // AND alias2.item IS NULL LIMIT 1;
-        out.push_sql(" SELECT ");
-        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(op_for_next);
-        out.push_sql(" FROM ");
-        self.table.walk_ast(out.reborrow())?;
-        out.push_sql(" ");
-        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
-        out.push_sql(" LEFT JOIN ");
-        self.table.walk_ast(out.reborrow())?;
-        out.push_sql(" ");
-        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
-
-        out.push_sql(" ON ");
-        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" = ");
-        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(op_for_next);
-
-        out.push_sql(" AND ");
-        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL WHERE ");
-
-        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
-        out.push_sql(" IS NULL AND ");
-
-        out.push_identifier(SELF_JOIN_FIRST_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(op_for_next);
-        out.push_sql(" BETWEEN ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_min,
-        )?;
-        out.push_sql(" AND ");
-        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
-            &self.item_max,
-        )?;
-        out.push_sql(" AND ");
-
-        out.push_identifier(SELF_JOIN_SECOND_TABLE_ALIAS)?;
-        out.push_sql(".");
-        out.push_identifier(ItemColumn::NAME)?;
-        out.push_sql(" IS NULL LIMIT 1");
-        Ok(())
-    }
-}
-
-impl<Table, Item, ItemColumn> QueryFragment<Pg>
-    for NextItemSelfJoined<Table, Item, ItemColumn, NoScopeKey, NoScopeColumn>
-where
-    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
-    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
-    ItemColumn: Column<Table = Table> + Copy,
-    Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
-{
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        out.push_sql("SELECT (");
-        self.push_select_min_item_subquery(out.reborrow())?;
-        out.push_sql(" UNION ALL (");
-        self.push_select_item_from_gap(out.reborrow(), Direction::Down)?;
-        out.push_sql(") UNION ALL (");
-        self.push_select_item_from_gap(out.reborrow(), Direction::Up)?;
-        out.push_sql(") LIMIT 1) AS ");
-        out.push_identifier(ItemColumn::NAME)
-    }
-}
+impl<Item> RunQueryDsl<DbConnection> for NextItemSelfJoined<Item> {}
 
 #[cfg(test)]
 mod tests {
@@ -1119,14 +1060,20 @@ mod tests {
 
     #[derive(Debug, Clone, Copy)]
     struct NextItemQuery {
-        inner: NextItem<item::dsl::item, i32, item::dsl::value>,
+        inner: NextItem<i32>,
     }
 
     // These implementations are needed to actually allow inserting the results
     // of the `NextItemQuery` itself.
     impl NextItemQuery {
         fn new(generator: DefaultShiftGenerator<i32>) -> Self {
-            Self { inner: NextItem::new_unscoped(generator) }
+            Self {
+                inner: NextItem::new_unscoped(
+                    "test_schema.item",
+                    "value",
+                    generator,
+                ),
+            }
         }
     }
 
@@ -1178,14 +1125,14 @@ mod tests {
 
     #[derive(Debug, Clone, Copy)]
     struct NextItemSelfJoinedQuery {
-        inner: NextItemSelfJoined<item::dsl::item, i32, item::dsl::value>,
+        inner: NextItemSelfJoined<i32>,
     }
 
     // These implementations are needed to actually allow inserting the results
     // of the `NextItemSelfJoinedQuery` itself.
     impl NextItemSelfJoinedQuery {
         fn new(min: i32, max: i32) -> Self {
-            let inner = NextItemSelfJoined::new_unscoped(min, max);
+            let inner = NextItemSelfJoined::new_unscoped("test_schema.item", "value", min, max);
             Self { inner }
         }
     }
@@ -1397,13 +1344,14 @@ mod tests {
         // We're going to operate on a separate table, for simplicity.
         setup_test_schema(&pool).await;
 
-        let query = NextItemSelfJoined::<
-            item::dsl::item,
-            _,
-            item::dsl::value,
-            _,
-            item::dsl::id,
-        >::new_scoped(Uuid::nil(), i32::MIN, i32::MAX);
+        let query = NextItemSelfJoined::new_scoped(
+            "test_schema.item",
+            "value",
+            "id",
+            Uuid::nil(),
+            i32::MIN,
+            i32::MAX,
+        );
         let out = query.explain_async(&conn).await.unwrap();
         println!("{out}");
         db.terminate().await;
@@ -1525,15 +1473,13 @@ mod tests {
             .expect("Should be able to insert basic items");
 
         // Create the SQL queries in the two forms, and print them.
-        let next_item_generate =
-            NextItem::<item::dsl::item, i32, item::dsl::value>::new_unscoped(
-                DefaultShiftGenerator::new(0, N_ITEMS as _, 0).unwrap(),
-            );
-        let next_item_join = NextItemSelfJoined::<
-            item::dsl::item,
-            i32,
-            item::dsl::value,
-        >::new_unscoped(0, N_ITEMS as _);
+        let next_item_generate = NextItem::new_unscoped(
+            "test_schema.item",
+            "value",
+            DefaultShiftGenerator::new(0, N_ITEMS as _, 0).unwrap(),
+        );
+        let next_item_join =
+            NextItemSelfJoined::new_unscoped("test_schema.item", "value", 0, N_ITEMS as _);
         println!(
             "Next-item using `generate_series()`:\n{}\n\
             Next-item using self-join:\n{}\n",

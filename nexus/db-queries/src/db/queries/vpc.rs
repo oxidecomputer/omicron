@@ -238,9 +238,8 @@ impl QueryFragment<Pg> for InsertVpcQueryValues {
 
 /// A `NextItem` query to select a Geneve Virtual Network Identifier (VNI) for a
 /// new VPC.
-#[derive(Debug, Clone, Copy)]
 struct NextVni {
-    inner: NextItem<vpc::table, Vni, dsl::vni>,
+    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
 }
 
 impl NextVni {
@@ -248,7 +247,7 @@ impl NextVni {
         let VniShifts { min_shift, max_shift } = VniShifts::new(vni);
         let generator = DefaultShiftGenerator::new(vni, max_shift, min_shift)
             .expect("invalid min/max shift");
-        let inner = NextItem::new_unscoped(generator);
+        let inner = NextItem::new_unscoped("vpc", "vni", generator).to_query();
         Self { inner }
     }
 
@@ -264,12 +263,18 @@ impl NextVni {
         );
         let generator = DefaultShiftGenerator::new(vni, max_shift, min_shift)
             .expect("invalid min/max shift");
-        let inner = NextItem::new_unscoped(generator);
+        let inner = NextItem::new_unscoped("vpc", "vni", generator).to_query();
         Self { inner }
     }
 }
 
 delegate_query_fragment_impl!(NextVni);
+
+impl std::fmt::Debug for NextVni {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NextVni").finish_non_exhaustive()
+    }
+}
 
 // Helper type to compute the shift for a `NextItem` query to find VNIs.
 #[derive(Clone, Copy, Debug, PartialEq)]
