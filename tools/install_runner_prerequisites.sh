@@ -153,7 +153,7 @@ function install_packages {
       confirm "Install (or update) [${packages[*]}]?" && $maybe_sudo apt-get install "${packages[@]}"
     fi
   else
-    echo "Unsupported OS: ${HOST_OS}"
+    echo "Skipping runner prereqs for unsupported OS: ${HOST_OS}"
     exit 1
   fi
 }

@@ -170,6 +170,10 @@ alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 read_only_region_replacement_start.period_secs = 30
 sp_ereport_ingester.period_secs = 30
+# How frequently to check for a new fault management sitrep (made by any
+# Nexus).
+# This is cheap, so we should check frequently.
+fm.sitrep_load_period_secs = 15
 multicast_reconciler.period_secs = 60
 # TTL for sled-to-backplane-port mapping cache
 # Default: 3600 seconds (1 hour) - detects new sleds and inventory changes

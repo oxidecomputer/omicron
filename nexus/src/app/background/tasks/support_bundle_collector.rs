@@ -53,6 +53,7 @@ use parallel_task_set::ParallelTaskSet;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -176,12 +177,16 @@ impl SupportBundleCollector {
                 return Ok(SledAgentBundleCleanupResult::Deleted);
             }
             Err(progenitor_client::Error::ErrorResponse(err))
-                if err.status() == http::StatusCode::NOT_FOUND =>
+                if err.status() == http::StatusCode::NOT_FOUND
+                    && err.error_code.as_ref().is_some_and(|code| {
+                        code.contains(NESTED_DATASET_NOT_FOUND)
+                    }) =>
             {
                 warn!(
                     &opctx.log,
                     "SupportBundleCollector could not delete bundle (not found)";
-                    "id" => %bundle.id
+                    "id" => %bundle.id,
+                    "err" => ?err
                 );
 
                 return Ok(SledAgentBundleCleanupResult::NotFound);

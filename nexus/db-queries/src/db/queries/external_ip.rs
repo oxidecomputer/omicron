@@ -458,7 +458,12 @@ impl NextExternalIp {
                 UNION ALL ",
         );
         self.push_automatic_full_ip_subquery_body(out.reborrow())?;
-        out.push_sql(") AS all_candidates ORDER BY candidate_ip LIMIT 1 ");
+        out.push_sql(
+            ") AS all_candidates \
+            WHERE candidate_ip IS NOT NULL \
+            ORDER BY candidate_ip \
+            LIMIT 1 ",
+        );
         Ok(())
     }
 
@@ -857,7 +862,7 @@ mod tests {
             name: &str,
             range: IpRange,
             is_default: bool,
-        ) -> authz::IpPool {
+        ) -> (authz::IpPool, IpPool) {
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
@@ -867,7 +872,8 @@ mod tests {
                 IpPoolReservationType::ExternalSilos,
             );
 
-            self.db
+            let db_pool = self
+                .db
                 .datastore()
                 .ip_pool_create(self.db.opctx(), pool.clone())
                 .await
@@ -888,12 +894,14 @@ mod tests {
 
             self.initialize_ip_pool(name, range).await;
 
-            LookupPath::new(self.db.opctx(), self.db.datastore())
-                .ip_pool_id(pool.id())
-                .lookup_for(authz::Action::Read)
-                .await
-                .unwrap()
-                .0
+            let authz_pool =
+                LookupPath::new(self.db.opctx(), self.db.datastore())
+                    .ip_pool_id(pool.id())
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .unwrap()
+                    .0;
+            (authz_pool, db_pool)
         }
 
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
@@ -1123,7 +1131,7 @@ mod tests {
             res.unwrap_err(),
             Error::insufficient_capacity(
                 "No external IP addresses available",
-                "NextExternalIp::new tried to insert NULL ip",
+                "NextExternalIp::new returned NotFound",
             ),
         );
         context.success().await;
@@ -1604,7 +1612,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        let p1 = context.create_ip_pool("p1", second_range, false).await;
+        let (p1, ..) = context.create_ip_pool("p1", second_range, false).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
@@ -1649,7 +1657,7 @@ mod tests {
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        let p1 = context.create_ip_pool("p1", second_range, false).await;
+        let (p1, ..) = context.create_ip_pool("p1", second_range, false).await;
 
         // Allocate all available addresses in the second pool.
         let first_octet = first_address.octets()[3];
@@ -1811,7 +1819,7 @@ mod tests {
         let first_address = Ipv4Addr::new(10, 0, 0, 1);
         let last_address = Ipv4Addr::new(10, 0, 0, 3);
         let range = IpRange::try_from((first_address, last_address)).unwrap();
-        let p1 = context.create_ip_pool("default", range, true).await;
+        let (p1, ..) = context.create_ip_pool("default", range, true).await;
 
         let mut ips = Vec::with_capacity(range.len() as _);
         let mut instance_id = None;
@@ -1871,7 +1879,7 @@ mod tests {
         let first_address = Ipv4Addr::new(10, 0, 0, 1);
         let last_address = Ipv4Addr::new(10, 0, 0, 3);
         let range = IpRange::try_from((first_address, last_address)).unwrap();
-        let p1 = context.create_ip_pool("default", range, true).await;
+        let (p1, ..) = context.create_ip_pool("default", range, true).await;
 
         let mut ips = Vec::with_capacity(range.len() as usize * 4);
         let mut instance_id = None;
@@ -1938,7 +1946,7 @@ mod tests {
             "fd00::ffff".parse::<Ipv6Addr>().unwrap(),
         ))
         .unwrap();
-        let pool = context.create_ip_pool("default", range, true).await;
+        let (pool, ..) = context.create_ip_pool("default", range, true).await;
 
         let start = std::time::Instant::now();
         for (i, expected_addr) in range.iter().enumerate() {
@@ -2074,6 +2082,149 @@ mod tests {
         assert_eq!(ip.last_port.0, last_port);
         assert_eq!(ip.kind, IpKind::SNat);
         assert_eq!(ip.parent_id, Some(snat_service_id.into_untyped_uuid()));
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn can_allocate_ephemeral_ips_from_all_ranges_in_a_pool() {
+        let context = TestContext::new(
+            "can_allocate_ephemeral_ips_from_all_ranges_in_a_pool",
+        )
+        .await;
+
+        // Create two ranges in the same pool. Each range will have one address
+        // for simplicity.
+        let addrs = [Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 2)];
+        let range1 = IpRange::try_from((addrs[0], addrs[0])).unwrap();
+        let range2 = IpRange::try_from((addrs[1], addrs[1])).unwrap();
+        let (authz_pool, db_pool) =
+            context.create_ip_pool("default", range1, true).await;
+        let _ = context
+            .db
+            .datastore()
+            .ip_pool_add_range(
+                context.db.opctx(),
+                &authz_pool,
+                &db_pool,
+                &range2,
+            )
+            .await
+            .expect("able to add a second range to the pool");
+
+        // Allocate an instance and address, which should take the first address
+        // (which is the whole range).
+        let iid = context.create_instance("inst1").await;
+        let ip = context
+            .db
+            .datastore()
+            .allocate_instance_ephemeral_ip(
+                context.db.opctx(),
+                Uuid::new_v4(),
+                iid,
+                Some(authz_pool.clone()),
+                true,
+            )
+            .await
+            .expect("Failed to allocate instance ephemeral IP address")
+            .0;
+        if let IpAddr::V4(addr) = ip.ip.ip() {
+            assert_eq!(addr, addrs[0]);
+        } else {
+            panic!("Expected an IPv4 address");
+        }
+
+        // Allocate another one, which should take the second address, which is
+        // "all" of the second range.
+        let iid = context.create_instance("inst2").await;
+        let ip = context
+            .db
+            .datastore()
+            .allocate_instance_ephemeral_ip(
+                context.db.opctx(),
+                Uuid::new_v4(),
+                iid,
+                Some(authz_pool.clone()),
+                true,
+            )
+            .await
+            .expect("Failed to allocate instance ephemeral IP address")
+            .0;
+        if let IpAddr::V4(addr) = ip.ip.ip() {
+            assert_eq!(addr, addrs[1]);
+        } else {
+            panic!("Expected an IPv4 address");
+        }
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn can_allocate_snat_ips_from_all_ranges_in_a_pool() {
+        let context =
+            TestContext::new("can_allocate_snat_ips_from_all_ranges_in_a_pool")
+                .await;
+
+        // Create two ranges in the same pool. Each range will have one address
+        // for simplicity.
+        let addrs = [Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 2)];
+        let range1 = IpRange::try_from((addrs[0], addrs[0])).unwrap();
+        let range2 = IpRange::try_from((addrs[1], addrs[1])).unwrap();
+        let (authz_pool, db_pool) =
+            context.create_ip_pool("default", range1, true).await;
+        let _ = context
+            .db
+            .datastore()
+            .ip_pool_add_range(
+                context.db.opctx(),
+                &authz_pool,
+                &db_pool,
+                &range2,
+            )
+            .await
+            .expect("able to add a second range to the pool");
+
+        // Allocate 4 instances, to take the whole address that constitutes the
+        // first range.
+        for i in 0..4 {
+            let iid = context.create_instance(&format!("inst{i}")).await;
+            let ip = context
+                .db
+                .datastore()
+                .allocate_instance_snat_ip(
+                    context.db.opctx(),
+                    Uuid::new_v4(),
+                    iid,
+                    db_pool.id(),
+                )
+                .await
+                .expect("Failed to allocate instance SNAT IP address");
+            if let IpAddr::V4(addr) = ip.ip.ip() {
+                assert_eq!(addr, addrs[0]);
+            } else {
+                panic!("Expected an IPv4 address");
+            }
+        }
+
+        // Allocate another one, which should take the second address, the first
+        // port block in the second range.
+        let iid = context.create_instance("last").await;
+        let ip = context
+            .db
+            .datastore()
+            .allocate_instance_snat_ip(
+                context.db.opctx(),
+                Uuid::new_v4(),
+                iid,
+                db_pool.id(),
+            )
+            .await
+            .expect("Failed to allocate instance SNAT IP address");
+        if let IpAddr::V4(addr) = ip.ip.ip() {
+            assert_eq!(addr, addrs[1]);
+        } else {
+            panic!("Expected an IPv4 address");
+        }
 
         context.success().await;
     }

@@ -36,6 +36,7 @@ use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
+use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
@@ -309,7 +310,7 @@ impl ExampleSystemBuilder {
     /// anywhere between 0 and 30, inclusive, is permitted. (The limit of 30 is
     /// primarily to simplify the implementation.)
     ///
-    /// Each DNS server is assigned an address in the 10.x.x.x range.
+    /// Each DNS server is assigned an address in the 198.51.100.x range.
     pub fn external_dns_count(
         mut self,
         external_dns_count: usize,
@@ -500,9 +501,37 @@ impl ExampleSystemBuilder {
                 .unwrap();
         }
 
+        // Add as many external IPs as is necessary for external DNS zones. We
+        // pick addresses in the TEST-NET-2 (RFC 5737) range.
+        if self.external_dns_count.0 > 0 {
+            let mut builder =
+                system.external_ip_policy().clone().into_builder();
+            builder
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(
+                        "198.51.100.1".parse::<Ipv4Addr>().unwrap(),
+                        "198.51.100.30".parse::<Ipv4Addr>().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            for i in 0..self.external_dns_count.0 {
+                let lo = (i + 1)
+                    .try_into()
+                    .expect("external_dns_count is always <= 30");
+                builder
+                    .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
+                        198, 51, 100, lo,
+                    )))
+                    .expect("test IPs are valid service IPs");
+            }
+            system.set_external_ip_policy(builder.build());
+        }
+
         let mut input_builder = system
             .to_planning_input_builder()
             .expect("failed to make planning input builder");
+
         let base_input = input_builder.clone().build();
 
         // Start with an empty blueprint containing only our sleds, no zones.
@@ -528,24 +557,6 @@ impl ExampleSystemBuilder {
             rng.blueprint2_rng,
         )
         .unwrap();
-
-        // Add as many external IPs as is necessary for external DNS zones. We
-        // pick addresses in the TEST-NET-2 (RFC 5737) range.
-        for i in 0..self.external_dns_count.0 {
-            builder
-                .inject_untracked_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
-                    198,
-                    51,
-                    100,
-                    (i + 1)
-                        .try_into()
-                        .expect("external_dns_count is always <= 30"),
-                )))
-                .expect(
-                    "this shouldn't error because provided external IPs \
-                 are all unique",
-                );
-        }
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();
@@ -598,6 +609,8 @@ impl ExampleSystemBuilder {
                             )
                             .unwrap();
                     }
+                    let mut internal_dns_subnets =
+                        builder.available_internal_dns_subnets().unwrap();
                     for _ in 0..self
                         .internal_dns_count
                         .on(discretionary_ix, discretionary_sled_count)
@@ -610,6 +623,9 @@ impl ExampleSystemBuilder {
                                     .expect(
                                         "obtained InternalDNS image source",
                                     ),
+                                internal_dns_subnets.next().expect(
+                                    "sufficient available internal DNS subnets",
+                                ),
                             )
                             .unwrap();
                     }
@@ -959,11 +975,29 @@ pub fn extract_tuf_repo_description(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    use anyhow::anyhow;
     use chrono::{DateTime, Utc};
+    use hickory_resolver::ResolveErrorKind;
+    use hickory_resolver::proto::ProtoErrorKind;
+    use iddqd::IdOrdMap;
+    use internal_dns_resolver::QorbResolver;
+    use internal_dns_resolver::ResolveError;
+    use internal_dns_resolver::Resolver;
+    use internal_dns_types::names::ServiceName;
     use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, ZoneKind};
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::execution::blueprint_internal_dns_config;
+    use nexus_types::deployment::execution::overridables;
+    use nexus_types::internal_api::params::DnsConfigParams;
+    use omicron_common::address::REPO_DEPOT_PORT;
+    use omicron_common::address::get_sled_address;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use slog_error_chain::InlineErrorChain;
 
     use super::*;
 
@@ -1103,6 +1137,303 @@ mod tests {
         );
 
         logctx.cleanup_successful();
+    }
+
+    /// Test that services set up by the example system are reachable via DNS.
+    ///
+    /// This test catches issues like #9176, where a too-large DNS response can
+    /// cause packet fragmentation and queries to be lost.
+    #[tokio::test]
+    async fn dns_resolution_works() {
+        static TEST_NAME: &str = "dns_resolution_works";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Build a somewhat exaggerated, fully populated system with twice the
+        // number of Nexuses as a system in typical use.
+        let (example, blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(32)
+                .nexus_count(6)
+                .build();
+        let sleds_by_id = blueprint
+            .sleds
+            .keys()
+            .map(|sled_id| {
+                let sled_details = example
+                    .input
+                    .sled_lookup(SledFilter::Commissioned, *sled_id)
+                    .unwrap();
+                let sled_agent =
+                    example.collection.sled_agents.get(sled_id).unwrap_or_else(
+                        || panic!("sled {} not found in collection", sled_id),
+                    );
+                nexus_types::deployment::execution::Sled::new(
+                    *sled_id,
+                    sled_details.policy,
+                    get_sled_address(sled_details.resources.subnet),
+                    REPO_DEPOT_PORT,
+                    sled_agent.sled_role,
+                )
+            })
+            .collect::<IdOrdMap<_>>();
+
+        let dns_config = blueprint_internal_dns_config(
+            &blueprint,
+            &sleds_by_id,
+            Generation::new(),
+            &overridables::DEFAULT,
+        )
+        .expect("built DNS configuration");
+        eprintln!("DNS config: {dns_config:#?}");
+        let params = DnsConfigParams {
+            generation: Generation::new().next(),
+            serial: 0,
+            time_created: Utc::now(),
+            zones: vec![dns_config],
+        };
+
+        // Initialize a DNS server.
+        let dns = dns_server::TransientServer::new(&logctx.log)
+            .await
+            .expect("created DNS server");
+        dns.initialize_with_config(&logctx.log, &params)
+            .await
+            .expect("initialized DNS server");
+
+        // Query with the simple DNS resolver.
+        {
+            let resolver = Resolver::new_from_addrs(
+                logctx.log.clone(),
+                &[dns.dns_server.local_address()],
+            )
+            .expect("created DNS resolver");
+
+            let mut mismatched = BTreeMap::new();
+            for (service, expected_result) in service_names_to_query(&blueprint)
+            {
+                // Large packets can be fragmented which would cause lookups to
+                // timeout. Don't query services that we expect to have
+                // fragmented packets.
+                if expected_result == Err(QueryError::PacketFragmented) {
+                    continue;
+                }
+
+                eprintln!(
+                    "** looking up DNS for {:?} (expected: {:?})",
+                    service, expected_result
+                );
+
+                let lookup_result =
+                    resolver.lookup_all_socket_v6(service).await;
+                match (lookup_result, expected_result) {
+                    (Ok(addrs), Ok(())) => {
+                        if addrs.is_empty() {
+                            mismatched.insert(
+                                service,
+                                anyhow!("no addresses returned"),
+                            );
+                        }
+
+                        eprintln!("*** lookup successful: {addrs:?}");
+                    }
+                    (Ok(addrs), Err(e)) => {
+                        mismatched.insert(
+                            service,
+                            anyhow!(
+                                "expected Err({e:?}), but got Ok({addrs:?})"
+                            ),
+                        );
+                    }
+                    (Err(e), Ok(())) => {
+                        mismatched.insert(
+                            service,
+                            anyhow!(e)
+                                .context("expected Ok(()), but got an error"),
+                        );
+                    }
+                    (Err(e), Err(QueryError::NoRecordsFound)) => {
+                        // "No records found" is returned as a hickory ProtoError.
+                        if let ResolveError::Resolve(resolve_error) = &e {
+                            if let ResolveErrorKind::Proto(proto_error) =
+                                resolve_error.kind()
+                            {
+                                if let ProtoErrorKind::NoRecordsFound {
+                                    ..
+                                } = proto_error.kind()
+                                {
+                                    // This is the expected error case.
+                                    eprintln!(
+                                        "*** no records found as expected"
+                                    )
+                                } else {
+                                    mismatched.insert(
+                                        service,
+                                        anyhow!(
+                                            "expected NoRecordsFound error, \
+                                             but got a different proto error: {e:?}"
+                                        ),
+                                    );
+                                }
+                            } else {
+                                mismatched.insert(
+                                    service,
+                                    anyhow!(
+                                        "expected Proto error with NoRecordsFound, \
+                                        but got a different resolve error: {e:?}"
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    (_, Err(QueryError::PacketFragmented)) => {
+                        unreachable!("we don't query PacketFragmented")
+                    }
+                }
+            }
+
+            if !mismatched.is_empty() {
+                let mut errors = Vec::new();
+                for (service, error) in mismatched {
+                    errors.push(format!(
+                        "{:?}: {}",
+                        service,
+                        InlineErrorChain::new(error.as_ref())
+                    ));
+                }
+                panic!(
+                    "unexpected DNS lookup results for some services:\n{}",
+                    errors.join("\n"),
+                );
+            }
+        }
+
+        // Query with the qorb DNS resolver.
+        {
+            let resolver =
+                QorbResolver::new(vec![dns.dns_server.local_address()]);
+
+            // Ensure that service names can be looked up via the qorb resolver.
+            let mut services_with_errors = BTreeMap::new();
+            for (service, expected_result) in service_names_to_query(&blueprint)
+            {
+                // We can't really use qorb to query error cases, since those
+                // are handled internally by the resolver. Just query the
+                // success cases.
+                if expected_result.is_err() {
+                    continue;
+                }
+
+                eprintln!("*** using qorb to look up DNS for {:?}", service);
+                let mut srv_resolver = resolver.for_service(service);
+                let mut monitor_rx = srv_resolver.monitor();
+
+                // Wait for at least one result to be returned. We don't want to
+                // wait forever, so set a reasonable timeout. (15s matches the
+                // internal timeout within the simple DNS resolver.)
+                let backends = match tokio::time::timeout(
+                    Duration::from_secs(15),
+                    monitor_rx.wait_for(|backends| !backends.is_empty()),
+                )
+                .await
+                {
+                    Ok(Ok(backends)) => backends,
+                    Ok(Err(e)) => {
+                        services_with_errors.insert(service, anyhow!(e));
+                        continue;
+                    }
+                    Err(e) => {
+                        services_with_errors.insert(service, anyhow!(e));
+                        continue;
+                    }
+                };
+
+                eprintln!("*** qorb lookup successful: {:?}", &**backends);
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Returns the list of potential DNS service names in an example system,
+    /// along with whether we expect a successful or error response for each of
+    /// them.
+    fn service_names_to_query(
+        blueprint: &Blueprint,
+    ) -> BTreeMap<ServiceName, Result<(), QueryError>> {
+        let mut out = BTreeMap::new();
+
+        for service in ServiceName::iter() {
+            match service {
+                // Services that exist in the example system.
+                ServiceName::Clickhouse
+                | ServiceName::ClickhouseAdminSingleServer
+                | ServiceName::ClickhouseNative
+                | ServiceName::InternalDns
+                | ServiceName::Nexus
+                | ServiceName::NexusLockstep
+                | ServiceName::OximeterReader
+                | ServiceName::RepoDepot
+                | ServiceName::CruciblePantry => {
+                    out.insert(service, Ok(()));
+                }
+                // Services that are not currently part of the example system.
+                //
+                // TODO: They really should be part of the example system (at
+                // least in an optional mode). See
+                // https://github.com/oxidecomputer/omicron/issues/9349.
+                ServiceName::ClickhouseAdminKeeper
+                | ServiceName::ClickhouseAdminServer
+                | ServiceName::ClickhouseClusterNative
+                | ServiceName::ClickhouseKeeper
+                | ServiceName::ClickhouseServer
+                | ServiceName::Cockroach
+                | ServiceName::ExternalDns
+                | ServiceName::Oximeter
+                | ServiceName::ManagementGatewayService
+                | ServiceName::Wicketd
+                | ServiceName::Dendrite
+                | ServiceName::Tfport
+                | ServiceName::BoundaryNtp
+                | ServiceName::Maghemite
+                | ServiceName::Mgd => {
+                    out.insert(service, Err(QueryError::NoRecordsFound));
+                }
+                // InternalNtp is too large to fit in a single DNS packet and
+                // therefore times out, but DNS lookups for it aren't used
+                // anywhere. See #9178.
+                ServiceName::InternalNtp => {
+                    out.insert(service, Err(QueryError::PacketFragmented));
+                }
+                ServiceName::SledAgent(_) => {
+                    // Sled Agent DNS records don't currently exist. (Maybe they
+                    // should?)
+                    for sled_id in blueprint.sleds() {
+                        out.insert(
+                            ServiceName::SledAgent(sled_id),
+                            Err(QueryError::NoRecordsFound),
+                        );
+                    }
+                }
+                ServiceName::Crucible(_) => {
+                    // Each Crucible zone should be queryable.
+                    for (_, zone) in blueprint.all_omicron_zones(
+                        BlueprintZoneDisposition::is_in_service,
+                    ) {
+                        if zone.kind() == ZoneKind::Crucible {
+                            out.insert(ServiceName::Crucible(zone.id), Ok(()));
+                        }
+                    }
+                }
+            }
+        }
+
+        out
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum QueryError {
+        NoRecordsFound,
+        PacketFragmented,
     }
 
     fn blueprint_zones_of_kind(

@@ -444,6 +444,8 @@ pub struct BackgroundTaskConfig {
     pub webhook_deliverator: WebhookDeliveratorConfig,
     /// configuration for SP ereport ingester task
     pub sp_ereport_ingester: SpEreportIngesterConfig,
+    /// configuration for fault management background tasks
+    pub fm: FmTasksConfig,
     /// configuration for multicast reconciler (group+members) task
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
 }
@@ -928,6 +930,21 @@ impl Default for MulticastGroupReconcilerConfig {
     }
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct FmTasksConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads the latest fault management sitrep from the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_load_period_secs: Duration,
+}
+
+impl Default for FmTasksConfig {
+    fn default() -> Self {
+        Self { sitrep_load_period_secs: Duration::from_secs(15) }
+    }
+}
+
 /// Fixed underlay admin-scoped IPv6 multicast network (ff04::/64) used for
 /// internal multicast group allocation and external→underlay mapping.
 /// This /64 subnet within the admin-scoped space provides 2^64 host addresses
@@ -1251,6 +1268,7 @@ mod test {
             webhook_deliverator.first_retry_backoff_secs = 45
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
+            fm.sitrep_load_period_secs = 48
             multicast_reconciler.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
@@ -1501,6 +1519,9 @@ mod test {
                             sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
                             backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
                         },
+                        fm: FmTasksConfig {
+                            sitrep_load_period_secs: Duration::from_secs(48),
+                        }
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1600,6 +1621,7 @@ mod test {
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
+            fm.sitrep_load_period_secs = 45
             multicast_reconciler.period_secs = 60
 
             [default_region_allocation_strategy]

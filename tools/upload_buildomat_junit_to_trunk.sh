@@ -40,7 +40,11 @@ branch="$(jq -r .head_branch api/check_suite)"
 commit="$(jq -r .head_sha api/check_suite)"
 github_app="$(jq -r .app.slug api/check_suite)"
 
-gh api "repos/${GITHUB_REPOSITORY}/check-suites/${check_suite_id}/check-runs" > api/check_suite_runs
+# By default the check-runs endpoint returns only the most recent check run with any given name. We
+# want to upload the JUnit XML reports for *all* attempts though, as Trunk's flaky test detection
+# relies on a test both passing and failing for the same commit. The filter=all query parameter
+# ensures we also get past attempts (the default is filter=latest).
+gh api "repos/${GITHUB_REPOSITORY}/check-suites/${check_suite_id}/check-runs?filter=all" > api/check_suite_runs
 
 gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" > api/commit
 author_email="$(jq -r .commit.author.email api/commit)"
