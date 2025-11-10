@@ -199,7 +199,7 @@ impl DataStore {
                 DieselError::DatabaseError(
                     DatabaseErrorKind::Unknown,
                     info,
-                ) if info.message() == PARENT_NOT_CURRENT_ERROR_MESSAGE => {
+                ) if info.message() == Self::PARENT_NOT_CURRENT_ERROR_MESSAGE => {
                     InsertSitrepError::ParentNotCurrent(sitrep.id())
                 }
                 err => {
@@ -214,6 +214,14 @@ impl DataStore {
             .map(|_| ())
     }
 
+    // Uncastable sentinel used to detect we attempt to make a sitrep current when
+    // its parent sitrep ID is no longer the current sitrep.
+    const PARENT_NOT_CURRENT: &str = "parent-not-current";
+
+    // Error messages generated from the above sentinel values.
+    const PARENT_NOT_CURRENT_ERROR_MESSAGE: &str = "could not parse \
+        \"parent-not-current\" as type uuid: \
+         uuid: incorrect UUID length: parent-not-current";
 
     /// Query to insert a new sitrep version into the `fm_sitrep_history` table,
     /// making it the current sitrep.
@@ -245,100 +253,6 @@ impl DataStore {
     /// `Datastore::fm_sitrep_insert` method, which also creates the sitrep. So, it
     /// is impossible for a consumer of this API to attempt to make a sitrep current
     /// without having first created it.
-    ///
-    /// The SQL generated for this CTE looks like this:
-    ///
-    /// ```sql
-    /// WITH
-    ///   -- Subquery to fetch the current sitrep (i.e., the row with the max
-    ///   -- version).
-    ///   current_sitrep AS (
-    ///     SELECT
-    ///       "version" AS version,
-    ///       "sitrep_id" AS sitrep_id,
-    ///     FROM "fm_sitrep_history"
-    ///     ORDER BY "version" DESC
-    ///     LIMIT 1
-    ///   ),
-    ///
-    ///   -- Error checking subquery: This uses similar tricks as elsewhere in
-    ///   -- this crate to `CAST(... AS UUID)` with non-UUID values that result
-    ///   -- in runtime errors in specific cases, allowing us to give accurate
-    ///   -- error messages.
-    ///   --
-    ///   -- This checks that the sitrep descends directly from the current
-    ///   -- sitrep, and will fail the query if it does not.
-    ///   check_validity AS MATERIALIZED (
-    ///     SELECT CAST(IF(
-    ///       -- Check for whether our new sitrep's parent matches our current
-    ///       -- sitrep. There are two cases here: The first is the common case
-    ///       -- (i.e., the new sitrep has a parent: does it match the current
-    ///       -- sitrep ID?). The second is the bootstrapping check: if we're
-    ///       -- trying to insert a new sitrep that does not have a parent,
-    ///       -- we should not have a sitrep target at all.
-    ///       --
-    ///       -- If either of these cases fails, we return `parent-not-current`.
-    ///       (
-    ///          SELECT "parent_sitrep_id" FROM "sitrep", current_sitrep
-    ///          WHERE
-    ///            "id" = <new_sitrep_id>
-    ///            AND current_sitrep.sitrep_id = "parent_sitrep_id"
-    ///       ) IS NOT NULL
-    ///       OR
-    ///       (
-    ///          SELECT 1 FROM "sitrep"
-    ///          WHERE
-    ///            "id" = <new_target_id>
-    ///            AND "parent_sitrep_id" IS NULL
-    ///            AND NOT EXISTS (SELECT version FROM current_sitrep)
-    ///       ) = 1,
-    ///       -- Sometime between v22.1.9 and v22.2.19, Cockroach's type checker
-    ///       -- became too smart for our `CAST(... as UUID)` error checking
-    ///       -- gadget: it can infer that `<new_target_id>` must be a UUID, so
-    ///       -- then tries to parse 'parent-not-target' and 'no-such-blueprint'
-    ///       -- as UUIDs _during typechecking_, which causes the query to always
-    ///       -- fail. We can defeat this by casting the UUID to text here, which
-    ///       -- will allow the 'parent-not-target' and 'no-such-blueprint'
-    ///       -- sentinels to survive type checking, making it to query execution
-    ///       -- where they will only be cast to UUIDs at runtime in the failure
-    ///       -- cases they're supposed to catch.
-    ///       CAST(<new_sitrep_id> AS text),
-    ///       'parent-not-current'
-    ///     ) AS UUID)
-    ///   ),
-    ///
-    ///   -- Determine the new version number to use: either 1 if this is the
-    ///   -- first sitrep being made the current sitrep, or 1 higher than
-    ///   -- the previous sitrep's version.
-    ///   --
-    ///   -- The final clauses of each of these WHERE clauses repeat the
-    ///   -- checks performed above in `check_validity`, and will cause this
-    ///   -- subquery to return no rows if we should not allow the new
-    ///   -- target to be set.
-    ///   new_sitrep AS (
-    ///     SELECT 1 AS new_version FROM "sitrep"
-    ///       WHERE
-    ///         "id" = <new_sitrep_id>
-    ///         AND "parent_sitrep_id" IS NULL
-    ///         AND NOT EXISTS (SELECT version FROM current_sitrep)
-    ///     UNION
-    ///     SELECT current_sitrep.version + 1 FROM current_sitrep, "sitrep"
-    ///       WHERE
-    ///         "id" = <new_sitrep_id>
-    ///         AND "parent_sitrep_id" IS NOT NULL
-    ///         AND "parent_sitrep_id" = current_sitrep.sitrep_id
-    ///   )
-    ///
-    ///   -- Perform the actual insertion.
-    ///   INSERT INTO "sitrep_history"(
-    ///     "version","sitrep_id","time_made_current"
-    ///   )
-    ///   SELECT
-    ///     new_sitrep.new_version,
-    ///     <new_sitrep_id>,
-    ///     NOW()
-    ///     FROM new_sitrep
-    /// ```
     fn insert_sitrep_version_query(
         sitrep_id: SitrepUuid,
     ) -> TypedSqlQuery<sql_types::BigInt> {
@@ -406,7 +320,7 @@ impl DataStore {
             .param()
             .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
             .sql(" AS text), ")
-            .sql(PARENT_NOT_CURRENT)
+            .sql(Self::PARENT_NOT_CURRENT)
             .sql(
                 ") AS UUID \
                 ) \
@@ -673,15 +587,6 @@ pub enum InsertSitrepError {
     ParentNotCurrent(SitrepUuid),
 }
 
-// Uncastable sentinel used to detect we attempt to make a sitrep current when
-// its parent sitrep ID is no longer the current sitrep.
-const PARENT_NOT_CURRENT: &str = "parent-not-current";
-
-// Error messages generated from the above sentinel values.
-const PARENT_NOT_CURRENT_ERROR_MESSAGE: &str = "could not parse \
-    \"parent-not-current\" as type uuid: \
-     uuid: incorrect UUID length: parent-not-current";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -696,6 +601,16 @@ mod tests {
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::collections::BTreeSet;
+
+    #[tokio::test]
+    async fn expectorate_insert_sitrep_version_query() {
+        let query = DataStore::insert_sitrep_version_query(SitrepUuid::nil());
+        expectorate_query_contents(
+            &query,
+            "tests/output/insert_sitrep_version_query.sql",
+        )
+        .await;
+    }
 
     #[tokio::test]
     async fn explain_insert_sitrep_version_query() {
@@ -727,16 +642,6 @@ mod tests {
 
         db.terminate().await;
         logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn expectorate_insert_sitrep_version_query() {
-        let query = DataStore::insert_sitrep_version_query(SitrepUuid::nil());
-        expectorate_query_contents(
-            &query,
-            "tests/output/insert_sitrep_version_query.sql",
-        )
-        .await;
     }
 
     // Ensure we have the right query contents.
