@@ -1,14 +1,7 @@
 WITH
   current_sitrep
     AS (
-      SELECT
-        version AS version, sitrep_id AS sitrep_id
-      FROM
-        omicron.public.fm_sitrep_history
-      ORDER BY
-        version DESC
-      LIMIT
-        1
+      SELECT version, sitrep_id FROM omicron.public.fm_sitrep_history ORDER BY version DESC LIMIT 1
     ),
   check_validity
     AS MATERIALIZED (
