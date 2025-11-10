@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Multicast integration tests.
+//! Multicast integration tests and helper methods.
 
 use std::future::Future;
 use std::net::IpAddr;
@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use dropshot::test_util::ClientTestContext;
 use http::{Method, StatusCode};
 use slog::{debug, info, warn};
+use uuid::Uuid;
 
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
@@ -35,7 +36,7 @@ use omicron_common::api::external::{
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid, MulticastGroupUuid};
 
 use crate::integration_tests::instances as instance_helpers;
 
@@ -45,6 +46,7 @@ pub(crate) type ControlPlaneTestContext =
 
 mod api;
 mod authorization;
+mod cache_invalidation;
 mod enablement;
 mod failures;
 mod groups;
@@ -220,7 +222,7 @@ where
 /// This function verifies that inventory has SP data for EVERY in-service sled,
 /// not just that inventory completed.
 ///
-/// This is required for multicast member operations which map sled_id → sp_slot
+/// This is required for multicast member operations which map `sled_id` → `sp_slot`
 /// → switch ports via inventory.
 pub(crate) async fn ensure_inventory_ready(
     cptestctx: &ControlPlaneTestContext,
@@ -600,7 +602,7 @@ pub(crate) async fn wait_for_group_active(
 pub(crate) async fn wait_for_member_state(
     cptestctx: &ControlPlaneTestContext,
     group_name: &str,
-    instance_id: uuid::Uuid,
+    instance_id: Uuid,
     expected_state: nexus_db_model::MulticastGroupMemberState,
 ) -> MulticastGroupMember {
     let client = &cptestctx.external_client;
@@ -784,45 +786,14 @@ pub(crate) async fn wait_for_instance_sled_assignment(
     }
 }
 
-/// Assert that all members in an underlay group use rear (backplane) ports
-/// with Underlay direction.
-///
-/// This is a lightweight check that validates we're using backplane ports
-/// (not QSFP external ports) for underlay traffic. Use this in any test
-/// that fetches an underlay group.
-///
-/// For a more thorough check that also validates the exact rear port number
-/// matches inventory sp_slot, use [`verify_inventory_based_port_mapping()`].
-pub(crate) fn assert_underlay_members_use_rear_ports(
-    members: &[dpd_client::types::MulticastGroupMember],
-) {
-    for member in members {
-        assert!(
-            matches!(member.port_id, dpd_client::types::PortId::Rear(_)),
-            "Underlay member should use rear (backplane) port, got: {:?}",
-            member.port_id
-        );
-        assert_eq!(
-            member.direction,
-            dpd_client::types::Direction::Underlay,
-            "Underlay member should have Underlay direction"
-        );
-    }
-}
-
-/// Verify that inventory-based sled-to-switch-port mapping worked correctly.
+/// Verify that inventory-based sled-to-switch-port mapping is correct.
 ///
 /// This validates the entire flow:
 /// instance → sled → inventory → sp_slot → rear{N} → DPD underlay member
-///
-/// Asserts that the DPD underlay group contains a member with rear port matching
-/// the instance's sled's sp_slot from inventory. This confirms that the multicast
-/// reconciler correctly used inventory data to map the sled to the appropriate
-/// switch backplane port.
 pub(crate) async fn verify_inventory_based_port_mapping(
     cptestctx: &ControlPlaneTestContext,
     instance_uuid: &InstanceUuid,
-) {
+) -> Result<(), String> {
     let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let opctx =
@@ -832,41 +803,40 @@ pub(crate) async fn verify_inventory_based_port_mapping(
     let sled_id = nexus
         .active_instance_info(instance_uuid, None)
         .await
-        .expect("active_instance_info call succeeds")
-        .expect("Instance should be on a sled")
+        .map_err(|e| format!("active_instance_info failed: {e}"))?
+        .ok_or_else(|| "instance not on a sled".to_string())?
         .sled_id;
 
     // Get the multicast member for this instance to find its external_group_id
     let members = datastore
         .multicast_group_members_list_by_instance(&opctx, *instance_uuid, false)
         .await
-        .expect("list multicast members for instance");
+        .map_err(|e| format!("list members failed: {e}"))?;
 
     let member = members
         .first()
-        .expect("instance should have at least one multicast membership");
+        .ok_or_else(|| "no multicast membership found".to_string())?;
 
     let external_group_id = member.external_group_id;
 
     // Fetch the external multicast group to get underlay_group_id
-    use omicron_uuid_kinds::MulticastGroupUuid;
     let external_group = datastore
         .multicast_group_fetch(
             &opctx,
             MulticastGroupUuid::from_untyped_uuid(external_group_id),
         )
         .await
-        .expect("fetch external multicast group");
+        .map_err(|e| format!("fetch external group failed: {e}"))?;
 
     let underlay_group_id = external_group
         .underlay_group_id
-        .expect("external group should have underlay_group_id");
+        .ok_or_else(|| "external group has no underlay_group_id".to_string())?;
 
     // Fetch the underlay group to get its multicast IP
     let underlay_group = datastore
         .underlay_multicast_group_fetch(&opctx, underlay_group_id)
         .await
-        .expect("fetch underlay multicast group");
+        .map_err(|e| format!("fetch underlay group failed: {e}"))?;
 
     let underlay_multicast_ip = underlay_group.multicast_ip.ip();
 
@@ -874,16 +844,18 @@ pub(crate) async fn verify_inventory_based_port_mapping(
     let inventory = datastore
         .inventory_get_latest_collection(&opctx)
         .await
-        .expect("fetch latest inventory collection")
-        .expect("inventory collection should exist");
+        .map_err(|e| format!("fetch inventory failed: {e}"))?
+        .ok_or_else(|| "no inventory collection".to_string())?;
 
     // Get the sled record to find its baseboard info
     let sleds = datastore
         .sled_list_all_batched(&opctx, SledFilter::InService)
         .await
-        .expect("list in-service sleds");
-    let sled =
-        sleds.into_iter().find(|s| s.id() == sled_id).expect("found sled");
+        .map_err(|e| format!("list sleds failed: {e}"))?;
+    let sled = sleds
+        .into_iter()
+        .find(|s| s.id() == sled_id)
+        .ok_or_else(|| "sled not found".to_string())?;
 
     // Find SP for this sled using baseboard matching (serial + part number)
     let sp = inventory
@@ -901,7 +873,7 @@ pub(crate) async fn verify_inventory_based_port_mapping(
                 .find(|(bb, _)| bb.serial_number == sled.serial_number())
         })
         .map(|(_, sp)| sp)
-        .expect("found ServiceProcessor for sled");
+        .ok_or_else(|| "SP not found for sled".to_string())?;
 
     let expected_rear_port = sp.sp_slot;
 
@@ -910,7 +882,7 @@ pub(crate) async fn verify_inventory_based_port_mapping(
     let underlay_group_response = dpd_client
         .multicast_group_get(&underlay_multicast_ip)
         .await
-        .expect("DPD multicast_group_get succeeds")
+        .map_err(|e| format!("DPD query failed: {e}"))?
         .into_inner();
 
     // Extract underlay members from the response
@@ -919,26 +891,27 @@ pub(crate) async fn verify_inventory_based_port_mapping(
             members, ..
         } => members,
         dpd_client::types::MulticastGroupResponse::External { .. } => {
-            panic!("Expected Underlay group, got External");
+            return Err("Expected Underlay group, got External".to_string());
         }
     };
 
-    // Construct the expected PortId for comparison
+    // Construct the expected `PortId` for comparison
     let expected_port_id = dpd_client::types::PortId::Rear(
         dpd_client::types::Rear::try_from(format!("rear{expected_rear_port}"))
-            .expect("valid rear port string"),
+            .map_err(|e| format!("invalid rear port: {e}"))?,
     );
 
-    // Verify DPD has an underlay member with the expected rear port
+    // Check if DPD has an underlay member with the expected rear port
     let has_expected_member = members.iter().any(|m| {
         matches!(m.direction, dpd_client::types::Direction::Underlay)
             && m.port_id == expected_port_id
     });
 
-    assert!(
-        has_expected_member,
-        "Expected underlay member with rear{expected_rear_port} not found in DPD"
-    );
+    if has_expected_member {
+        Ok(())
+    } else {
+        Err(format!("DPD does not have member on rear{expected_rear_port}"))
+    }
 }
 
 /// Wait for a multicast group to have a specific number of members.

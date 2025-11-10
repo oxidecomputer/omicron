@@ -667,7 +667,9 @@ async fn test_multicast_with_floating_ip_basic(
     assert_eq!(members.len(), 1, "Should have one multicast member");
 
     // Verify that inventory-based mapping correctly mapped sled → switch port
-    verify_inventory_based_port_mapping(cptestctx, &instance_uuid).await;
+    verify_inventory_based_port_mapping(cptestctx, &instance_uuid)
+        .await
+        .expect("port mapping verification should succeed");
 
     // Attach floating IP to the same instance
     let attach_url = format!(

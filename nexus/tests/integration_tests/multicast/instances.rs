@@ -12,6 +12,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use http::{Method, StatusCode};
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_instance, create_project, object_create,
@@ -414,7 +415,7 @@ async fn test_multicast_group_attach_limits(
     .await;
 
     // Wait for members to reach "Left" state for each group
-    // (instance is stopped, so member starts in "Left" state with no sled_id)
+    // (instance is stopped, so member starts in "Left" state with no `sled_id`)
     for group_name in &multicast_group_names {
         wait_for_member_state(
             cptestctx,
@@ -1040,6 +1041,69 @@ async fn test_multicast_member_cleanup_instance_never_started(
         "Orphaned member should be cleaned up when instance is deleted without starting"
     );
 
+    // Verify that stale ports were removed from DPD
+    // Since the instance never started (never had a `sled_id`), there should be
+    // no rear/underlay ports in DPD for this group. This verifies the reconciler
+    // only removes ports when it has complete information about all "Joined" members.
+
+    // Get the underlay group IP from the database
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.clone(), datastore.clone());
+
+    // Fetch the external group to get its underlay_group_id
+    let external_group = datastore
+        .multicast_group_lookup_by_ip(&opctx, multicast_ip)
+        .await
+        .expect("Should lookup external multicast group by IP");
+
+    let underlay_group_id = external_group
+        .underlay_group_id
+        .expect("External group should have underlay_group_id");
+
+    // Fetch the underlay group to get its multicast IP
+    let underlay_group = datastore
+        .underlay_multicast_group_fetch(&opctx, underlay_group_id)
+        .await
+        .expect("Should fetch underlay multicast group");
+
+    let underlay_multicast_ip = underlay_group.multicast_ip.ip();
+
+    // Query DPD for the underlay group (where instance members are stored)
+    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
+    let dpd_group_response = dpd_client
+        .multicast_group_get(&underlay_multicast_ip)
+        .await
+        .expect("Should be able to query DPD for underlay multicast group");
+
+    // Extract underlay members from the response
+    let underlay_members = match dpd_group_response.into_inner() {
+        dpd_client::types::MulticastGroupResponse::Underlay {
+            members, ..
+        } => members,
+        dpd_client::types::MulticastGroupResponse::External { .. } => {
+            panic!(
+                "Expected underlay group when querying underlay IP, got external"
+            );
+        }
+    };
+
+    // Filter to only rear/underlay members (instance members on backplane)
+    let rear_underlay_members: Vec<_> = underlay_members
+        .iter()
+        .filter(|m| {
+            matches!(m.port_id, dpd_client::types::PortId::Rear(_))
+                && m.direction == dpd_client::types::Direction::Underlay
+        })
+        .collect();
+
+    assert_eq!(
+        rear_underlay_members.len(),
+        0,
+        "DPD should have no rear/underlay ports after instance deletion and reconciler run"
+    );
+
     // Cleanup
     cleanup_multicast_groups(client, &[group_name]).await;
 }
@@ -1276,7 +1340,9 @@ async fn test_multicast_group_membership_during_migration(
 
     // Verify inventory-based port mapping updated correctly after migration
     // This confirms the RPW reconciler correctly mapped the new sled to its rear port
-    verify_inventory_based_port_mapping(cptestctx, &instance_id).await;
+    verify_inventory_based_port_mapping(cptestctx, &instance_id)
+        .await
+        .expect("port mapping should be updated after migration");
 
     // Verify mvlan persisted in DPD after migration
     let post_migration_dpd_group = dpd_client

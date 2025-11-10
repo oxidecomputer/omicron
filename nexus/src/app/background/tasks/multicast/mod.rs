@@ -93,6 +93,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
@@ -179,6 +180,11 @@ pub(crate) struct MulticastGroupReconciler {
     group_concurrency_limit: usize,
     /// Whether multicast functionality is enabled (or not).
     enabled: bool,
+    /// Flag to signal cache invalidation on next activation.
+    ///
+    /// Set to `true` when topology changes occur (sled add/remove, inventory updates).
+    /// Checked and cleared at the start of each reconciliation pass.
+    invalidate_cache_on_next_run: Arc<AtomicBool>,
 }
 
 impl MulticastGroupReconciler {
@@ -189,8 +195,9 @@ impl MulticastGroupReconciler {
         enabled: bool,
         sled_cache_ttl: Duration,
         backplane_cache_ttl: Duration,
+        invalidate_cache_flag: Arc<AtomicBool>,
     ) -> Self {
-        // Use the configured underlay admin-local prefix (DEFAULT_UNDERLAY_MULTICAST_NET)
+        // Use the configured underlay admin-local prefix
         let underlay_admin_prefix: Ipv6Net = DEFAULT_UNDERLAY_MULTICAST_NET
             .to_string()
             .parse()
@@ -211,6 +218,7 @@ impl MulticastGroupReconciler {
             member_concurrency_limit: 100,
             group_concurrency_limit: 100,
             enabled,
+            invalidate_cache_on_next_run: invalidate_cache_flag,
         }
     }
 
@@ -405,6 +413,20 @@ impl MulticastGroupReconciler {
         let mut status = MulticastGroupReconcilerStatus::default();
 
         trace!(opctx.log, "starting multicast reconciliation pass");
+
+        // Check if cache invalidation was requested
+        if self
+            .invalidate_cache_on_next_run
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            info!(
+                opctx.log,
+                "invalidating multicast caches due to topology change"
+            );
+            self.invalidate_backplane_cache().await;
+            self.invalidate_sled_mapping_cache().await;
+        }
 
         // Create dataplane client (across switches) once for the entire
         // reconciliation pass (in case anything has changed)

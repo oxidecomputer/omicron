@@ -871,7 +871,18 @@ async fn test_multicast_group_member_operations(
     );
 
     // Assert all underlay members use rear (backplane) ports with Underlay direction
-    assert_underlay_members_use_rear_ports(&underlay_group.members);
+    for member in &underlay_group.members {
+        assert!(
+            matches!(member.port_id, dpd_client::types::PortId::Rear(_)),
+            "Underlay member should use rear (backplane) port, got: {:?}",
+            member.port_id
+        );
+        assert_eq!(
+            member.direction,
+            dpd_client::types::Direction::Underlay,
+            "Underlay member should have Underlay direction"
+        );
+    }
 
     // Test removing instance from multicast group using path-based DELETE
     let member_remove_url = format!(
@@ -1758,7 +1769,21 @@ fn validate_dpd_group_response(
             }
 
             // Assert all underlay members use rear (backplane) ports with Underlay direction
-            assert_underlay_members_use_rear_ports(members);
+            for member in members {
+                assert!(
+                    matches!(
+                        member.port_id,
+                        dpd_client::types::PortId::Rear(_)
+                    ),
+                    "Underlay member should use rear (backplane) port, got: {:?}",
+                    member.port_id
+                );
+                assert_eq!(
+                    member.direction,
+                    dpd_client::types::Direction::Underlay,
+                    "Underlay member should have Underlay direction"
+                );
+            }
 
             // Validate underlay group specific fields
             assert_ne!(

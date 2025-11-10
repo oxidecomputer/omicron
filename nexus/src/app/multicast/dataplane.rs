@@ -150,6 +150,22 @@ impl MulticastDataplaneClient {
         Ok(Self { dpd_clients, log })
     }
 
+    /// Select a single switch deterministically for read operations.
+    ///
+    /// Used when all switches should have identical state and we only need
+    /// to query one. Selects the first switch in sorted order by location
+    /// for consistency across invocations.
+    fn select_one_switch(
+        &self,
+    ) -> MulticastDataplaneResult<(&SwitchLocation, &dpd_client::Client)> {
+        let mut switches: Vec<_> = self.dpd_clients.iter().collect();
+        switches.sort_by_key(|(loc, _)| *loc);
+        switches
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::internal_error("no DPD clients available"))
+    }
+
     async fn dpd_ensure_underlay_created(
         &self,
         client: &dpd_client::Client,
@@ -984,10 +1000,7 @@ impl MulticastDataplaneClient {
             dpd_client::types::BackplaneLink,
         >,
     > {
-        let (switch_location, client) =
-            self.dpd_clients.iter().next().ok_or_else(|| {
-                Error::internal_error("no DPD clients available")
-            })?;
+        let (switch_location, client) = self.select_one_switch()?;
 
         debug!(
             self.log,
@@ -1041,6 +1054,72 @@ impl MulticastDataplaneClient {
                 );
                 Err(Error::internal_error(&format!(
                     "failed to fetch backplane map from DPD: {e}"
+                )))
+            }
+        }
+    }
+
+    /// Fetch current underlay group members from a single switch.
+    ///
+    /// Used by the reconciler to detect stale ports that need to be removed
+    /// when a member's physical location changes. Queries a single switch
+    /// since all switches should have identical underlay state.
+    ///
+    /// For determinism in drift checks, we select the first switch in sorted
+    /// order by switch location.
+    pub(crate) async fn fetch_underlay_members(
+        &self,
+        underlay_ip: IpAddr,
+    ) -> MulticastDataplaneResult<Option<Vec<MulticastGroupMember>>> {
+        let (switch_location, client) = self.select_one_switch()?;
+
+        debug!(
+            self.log,
+            "fetching underlay group members from DPD for drift detection";
+            "underlay_ip" => %underlay_ip,
+            "switch" => %switch_location,
+            "dpd_operation" => "fetch_underlay_members"
+        );
+
+        match client
+            .multicast_group_get_underlay(&underlay_ip.into_admin_scoped()?)
+            .await
+        {
+            Ok(response) => {
+                let members = response.into_inner().members;
+                debug!(
+                    self.log,
+                    "underlay group members fetched from DPD";
+                    "underlay_ip" => %underlay_ip,
+                    "switch" => %switch_location,
+                    "member_count" => members.len(),
+                    "dpd_operation" => "fetch_underlay_members"
+                );
+                Ok(Some(members))
+            }
+            Err(DpdError::ErrorResponse(resp))
+                if resp.status() == reqwest::StatusCode::NOT_FOUND =>
+            {
+                debug!(
+                    self.log,
+                    "underlay group not found on switch";
+                    "underlay_ip" => %underlay_ip,
+                    "switch" => %switch_location,
+                    "dpd_operation" => "fetch_underlay_members"
+                );
+                Ok(None)
+            }
+            Err(e) => {
+                error!(
+                    self.log,
+                    "underlay group fetch failed";
+                    "underlay_ip" => %underlay_ip,
+                    "switch" => %switch_location,
+                    "error" => %e,
+                    "dpd_operation" => "fetch_underlay_members"
+                );
+                Err(Error::internal_error(&format!(
+                    "failed to fetch underlay group from DPD: {e}"
                 )))
             }
         }
