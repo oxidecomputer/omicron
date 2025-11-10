@@ -4,28 +4,35 @@
 
 //! Types for manipulating networking probe zones.
 
+use iddqd::IdHashItem;
+use iddqd::IdHashMap;
+use iddqd::id_upcast;
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_uuid_kinds::ProbeUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::net::IpAddr;
-use uuid::Uuid;
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ProbePath {
-    /// The ID of the probe.
-    pub probe_id: Uuid,
-}
 
 /// Parameters used to create a probe.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct ProbeCreate {
     /// The ID for the probe.
-    pub id: Uuid,
+    pub id: ProbeUuid,
     /// The external IP addresses assigned to the probe.
     pub external_ips: Vec<ExternalIp>,
     /// The probe's networking interface.
     pub interface: NetworkInterface,
+}
+
+impl IdHashItem for ProbeCreate {
+    type Key<'a> = ProbeUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 /// An external IP address used by a probe.
@@ -54,5 +61,5 @@ pub enum IpKind {
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct ProbeSet {
     /// The exact set of probes to run.
-    pub probes: Vec<ProbeCreate>,
+    pub probes: IdHashMap<ProbeCreate>,
 }

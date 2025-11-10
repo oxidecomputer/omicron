@@ -829,6 +829,12 @@ impl BackgroundTasksInitializer {
         });
 
         // Background task: OPTE port route propagation
+        //
+        // This task is activated whenever we have new networking probe zones.
+        // Note that there's no real _data_ communicated between these tasks, so
+        // we're just using () to have the driver wake up the VPC route task
+        // when the probe task is activated.
+        let (vpc_route_manager_tx, vpc_route_manager_rx) = watch::channel(());
         {
             let watcher = vpc_routes::VpcRouteManager::new(datastore.clone());
             driver.register(TaskDefinition {
@@ -837,7 +843,7 @@ impl BackgroundTasksInitializer {
                 period: config.switch_port_settings_manager.period_secs,
                 task_impl: Box::new(watcher),
                 opctx: opctx.child(BTreeMap::new()),
-                watchers: vec![],
+                watchers: vec![Box::new(vpc_route_manager_rx)],
                 activator: task_vpc_route_manager,
             })
         };
@@ -1083,6 +1089,7 @@ impl BackgroundTasksInitializer {
             period: config.probe_distributor.period_secs,
             task_impl: Box::new(probe_distributor::ProbeDistributor::new(
                 datastore,
+                vpc_route_manager_tx,
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],

@@ -36,6 +36,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_uuid_kinds::GenericUuid as _;
+use omicron_uuid_kinds::ProbeUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
 use schemars::JsonSchema;
@@ -227,24 +228,19 @@ impl super::DataStore {
     }
 
     /// Add a probe to the data store.
-    ///
-    /// This also returns the create-params needed to notify the sled-agent
-    /// about this new probe. This is a little awkward, but that type is built
-    /// from a number of different tables, and doing so avoids another lookup,
-    /// one which requires a few joins.
     pub async fn probe_create(
         &self,
         opctx: &OpContext,
         authz_project: &authz::Project,
         probe: &Probe,
         ip_pool: Option<authz::IpPool>,
-    ) -> CreateResult<(Probe, ProbeCreate)> {
+    ) -> CreateResult<Probe> {
         // TODO-correctness: These need to be in a transaction.
         // See https://github.com/oxidecomputer/omicron/issues/9340.
         use nexus_db_schema::schema::probe::dsl;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let eip = self
+        let _eip = self
             .allocate_probe_ephemeral_ip(
                 opctx,
                 Uuid::new_v4(),
@@ -265,7 +261,6 @@ impl super::DataStore {
             .vpc_subnet_name(&internal_default_name)
             .fetch()
             .await?;
-        let ipv4_subnet = db_subnet.ipv4_block.0.into();
 
         let incomplete = IncompleteNetworkInterface::new_probe(
             Uuid::new_v4(),
@@ -282,7 +277,7 @@ impl super::DataStore {
             None, //Request MAC address assignment
         )?;
 
-        let ifx = self
+        let _ifx = self
             .probe_create_network_interface(opctx, incomplete)
             .await
             .map_err(|e| {
@@ -292,43 +287,12 @@ impl super::DataStore {
                     ),
                 }
             })?;
-
-        let result = diesel::insert_into(dsl::probe)
+        diesel::insert_into(dsl::probe)
             .values(probe.clone())
             .returning(Probe::as_returning())
             .get_result_async(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        // Construct create-time parameters for the sled-agent
-        //
-        // The `vpc_subnet` table has the VPC ID, but we always need the VNI to
-        // provide to OPTE. Look that up and store it now.
-        let vni = self.resolve_vpc_to_vni(opctx, ifx.vpc_id).await?.0;
-        let interface =
-            NetworkInterface { vni, ..ifx.into_internal(ipv4_subnet) };
-        let params = ProbeCreate {
-            id: result.id(),
-            external_ips: vec![sled_agent_client::types::ExternalIp {
-                first_port: eip.first_port.into(),
-                ip: eip.ip.ip(),
-                kind: match eip.kind {
-                    nexus_db_model::IpKind::SNat => {
-                        sled_agent_client::types::IpKind::Snat
-                    }
-                    nexus_db_model::IpKind::Ephemeral => {
-                        sled_agent_client::types::IpKind::Ephemeral
-                    }
-                    nexus_db_model::IpKind::Floating => {
-                        sled_agent_client::types::IpKind::Floating
-                    }
-                },
-                last_port: eip.last_port.into(),
-            }],
-            interface,
-        };
-
-        Ok((result, params))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List the ID and create-time parameters for probes on a seld.
@@ -343,10 +307,8 @@ impl super::DataStore {
         opctx: &OpContext,
         sled_id: SledUuid,
     ) -> ListResultVec<ProbeCreate> {
+        opctx.check_complex_operations_allowed()?;
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        // NOTE: This paginator _must_ use ascending order. See
-        // `list_probe_create_params_for_sled` for details.
         let mut paginator = Paginator::new(
             SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -360,7 +322,8 @@ impl super::DataStore {
                     &p.current_pagparams(),
                 )
                 .await?;
-            paginator = p.found_batch(&batch, &|probe| probe.id);
+            paginator =
+                p.found_batch(&batch, &|probe| probe.id.into_untyped_uuid());
             all_probes_for_sled.append(&mut batch);
         }
         Ok(all_probes_for_sled)
@@ -448,17 +411,7 @@ impl super::DataStore {
                             ipv4_block,
                             vni,
                         )| {
-                            let kind = match kind {
-                                nexus_db_model::IpKind::SNat => {
-                                    sled_agent_client::types::IpKind::Snat
-                                }
-                                nexus_db_model::IpKind::Ephemeral => {
-                                    sled_agent_client::types::IpKind::Ephemeral
-                                }
-                                nexus_db_model::IpKind::Floating => {
-                                    sled_agent_client::types::IpKind::Floating
-                                }
-                            };
+                            let kind = db_ip_kind_to_sled(kind);
                             let external_ips =
                                 vec![sled_agent_client::types::ExternalIp {
                                     first_port: first_port.into(),
@@ -471,7 +424,7 @@ impl super::DataStore {
                                 ..nic.into_internal((*ipv4_block).into())
                             };
                             ProbeCreate {
-                                id: probe_id,
+                                id: ProbeUuid::from_untyped_uuid(probe_id),
                                 external_ips,
                                 interface,
                             }
@@ -525,5 +478,19 @@ impl super::DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
+    }
+}
+
+const fn db_ip_kind_to_sled(
+    kind: nexus_db_model::IpKind,
+) -> sled_agent_client::types::IpKind {
+    match kind {
+        nexus_db_model::IpKind::SNat => sled_agent_client::types::IpKind::Snat,
+        nexus_db_model::IpKind::Ephemeral => {
+            sled_agent_client::types::IpKind::Ephemeral
+        }
+        nexus_db_model::IpKind::Floating => {
+            sled_agent_client::types::IpKind::Floating
+        }
     }
 }

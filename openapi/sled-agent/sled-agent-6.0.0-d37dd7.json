@@ -430,63 +430,6 @@
         }
       }
     },
-    "/probe": {
-      "post": {
-        "summary": "Add a \"probe\" zone to this sled.",
-        "description": "Probe zones are used to debug networking configuration. They look similar to instances, in that they have an OPTE port on a VPC subnet and external addresses, but no actual VM.",
-        "operationId": "probe_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProbeCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/probe/{probe_id}": {
-      "delete": {
-        "summary": "Delete an existing probe by ID.",
-        "operationId": "probe_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "probe_id",
-            "description": "The ID of the probe.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/probes": {
       "put": {
         "summary": "Update the entire set of probe zones on this sled.",
@@ -6783,8 +6726,11 @@
           },
           "id": {
             "description": "The ID for the probe.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProbeUuid"
+              }
+            ]
           },
           "interface": {
             "description": "The probe's networking interface.",
@@ -6806,16 +6752,37 @@
         "type": "object",
         "properties": {
           "probes": {
+            "title": "IdHashMap",
             "description": "The exact set of probes to run.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ProbeCreate"
+                }
+              ],
+              "path": "iddqd::IdHashMap",
+              "version": "*"
+            },
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ProbeCreate"
-            }
+            },
+            "uniqueItems": true
           }
         },
         "required": [
           "probes"
         ]
+      },
+      "ProbeUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ProbeUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "QemuPvpanic": {
         "type": "object",

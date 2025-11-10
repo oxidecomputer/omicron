@@ -2137,20 +2137,17 @@ fn print_task_probe_distributor(details: &serde_json::Value) {
             "warning: failed to interpret task details: {:?}: {:?}",
             error, details
         ),
-        Ok(status) => {
-            let n_total_probes: usize = status.probes_by_sled.values().sum();
+        Ok(ProbeDistributorStatus { probes_by_sled, errors }) => {
+            let n_total_probes: usize = probes_by_sled.values().sum();
             println!("    succesfully-pushed probes: {} total", n_total_probes);
-            for (sled_id, count) in status.probes_by_sled {
+            for (sled_id, count) in probes_by_sled {
                 if count == 0 {
                     continue;
                 }
                 println!("      sled_id={} n_probes={}", sled_id, count);
             }
-            println!(
-                "    errors while pushing probes: {} total",
-                status.errors.len()
-            );
-            for err in status.errors {
+            println!("    errors while pushing probes: {} total", errors.len());
+            for err in errors {
                 println!(
                     "      sled_id={} sled_ip={} error={}",
                     err.sled_id, err.sled_ip, err.error,

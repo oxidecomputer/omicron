@@ -7,28 +7,30 @@
 use crate::app::background::BackgroundTask;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use nexus_db_model::SledState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_networking::sled_client_from_address;
 use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::views::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ProbeError;
-use omicron_uuid_kinds::GenericUuid as _;
 use serde_json::json;
 use sled_agent_client::types::ProbeSet;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::watch;
 
 pub struct ProbeDistributor {
     datastore: Arc<DataStore>,
+    // Notify listeners when we're completed. There's currently no data to
+    // share, so this is an empty notification.
+    tx: watch::Sender<()>,
 }
 
 impl ProbeDistributor {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        Self { datastore }
+    pub fn new(datastore: Arc<DataStore>, tx: watch::Sender<()>) -> Self {
+        Self { datastore, tx }
     }
 }
 
@@ -48,16 +50,15 @@ impl BackgroundTask for ProbeDistributor {
             {
                 Ok(sleds) => sleds,
                 Err(e) => {
-                    let msg = format!("failed to enumerate sleds: {:#}", e);
+                    let msg = format!(
+                        "failed to enumerate sleds: {}",
+                        InlineErrorChain::new(&e)
+                    );
                     error!(&log, "{msg}");
                     return json!({"error": msg});
                 }
             }
-            .into_iter()
-            .filter(|sled| {
-                matches!(sled.state(), SledState::Active)
-                    && matches!(sled.policy(), SledPolicy::InService { .. })
-            });
+            .into_iter();
 
             // For each sled, list all the probes that it should have and notify
             // the sled-agent about them.
@@ -79,10 +80,11 @@ impl BackgroundTask for ProbeDistributor {
                     Err(e) => {
                         const MSG: &str = "failed to list or construct create \
                             parameters for networking probes";
-                        error!(log, "{MSG}"; "error" => ?e);
-                        let msg = format!("{MSG}: {e:?}");
+                        let ec = InlineErrorChain::new(&e);
+                        let msg = format!("{MSG}: {ec}");
+                        error!(log, "{MSG}"; "error" => ec);
                         status.errors.push(ProbeError {
-                            sled_id: sled.id().into_untyped_uuid(),
+                            sled_id: sled.id(),
                             sled_ip: *sled.address().ip(),
                             error: msg,
                         });
@@ -112,17 +114,16 @@ impl BackgroundTask for ProbeDistributor {
                             "sled_id" => %sled.id(),
                             "n_probes" => n_probes,
                         );
-                        status
-                            .probes_by_sled
-                            .insert(sled.id().into_untyped_uuid(), n_probes);
+                        status.probes_by_sled.insert(sled.id(), n_probes);
                         n_pushed_probes += n_probes;
                     }
                     Err(e) => {
                         const MSG: &str = "failed to update probes on sled";
-                        let msg = format!("{MSG}: {e:?}");
-                        error!(log, "{MSG}"; "error" => ?e);
+                        let ec = InlineErrorChain::new(&e);
+                        let msg = format!("{MSG}: {ec}");
+                        error!(log, "{MSG}"; "error" => ec);
                         status.errors.push(ProbeError {
-                            sled_id: sled.id().into_untyped_uuid(),
+                            sled_id: sled.id(),
                             sled_ip: sled.ip(),
                             error: msg,
                         });
@@ -134,6 +135,13 @@ impl BackgroundTask for ProbeDistributor {
                 "finished distributing probes to sleds";
                 "n_pushed_probes" => n_pushed_probes,
             );
+            if self.tx.send(()).is_err() {
+                error!(
+                    log,
+                    "failed to notify watching tasks, \
+                    all receivers have been droppped"
+                );
+            }
             serde_json::json!(status)
         }
         .boxed()

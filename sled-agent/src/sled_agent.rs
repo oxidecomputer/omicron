@@ -29,6 +29,7 @@ use derive_more::From;
 use dropshot::HttpError;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zpool::PathInPool;
@@ -1183,21 +1184,8 @@ impl SledAgent {
         sled_diagnostics::health_check().await
     }
 
-    /// Add a single probe to this sled.
-    pub(crate) fn add_probe(
-        &self,
-        params: ProbeCreate,
-    ) -> Result<(), crate::probe_manager::Error> {
-        self.inner.probes.add_probe(params)
-    }
-
-    /// Delete a probe by ID from this sled.
-    pub(crate) fn delete_probe(&self, id: Uuid) {
-        self.inner.probes.remove_probe(id);
-    }
-
     /// Completely replace the set of probes managed by this sled.
-    pub(crate) fn set_probes(&self, probes: Vec<ProbeCreate>) {
+    pub(crate) fn set_probes(&self, probes: IdHashMap<ProbeCreate>) {
         self.inner.probes.set_probes(probes);
     }
 }

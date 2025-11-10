@@ -785,7 +785,7 @@ pub enum SitrepLoadStatus {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProbeError {
     /// ID of the sled we failed to send a probe to.
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     /// IP address of the sled we failed to send a probe to.
     pub sled_ip: Ipv6Addr,
     /// Error message describing the failure.
@@ -795,7 +795,7 @@ pub struct ProbeError {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProbeDistributorStatus {
     /// Count of successfully sent probes to each sled.
-    pub probes_by_sled: HashMap<Uuid, usize>,
+    pub probes_by_sled: HashMap<SledUuid, usize>,
     /// Errors when sending a probe.
     pub errors: Vec<ProbeError>,
 }

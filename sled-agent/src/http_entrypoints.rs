@@ -35,8 +35,6 @@ use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse,
 };
-use sled_agent_types::probes::ProbeCreate;
-use sled_agent_types::probes::ProbePath;
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::zone_bundle::{
@@ -1089,25 +1087,6 @@ impl SledAgentApi for SledAgentImpl {
         }
         sa.hardware_monitor().set_switch_zone_policy(policy);
         Ok(HttpResponseUpdatedNoContent())
-    }
-
-    async fn probe_post(
-        request_context: RequestContext<Self::Context>,
-        body: TypedBody<ProbeCreate>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        request_context
-            .context()
-            .add_probe(body.into_inner())
-            .map(|_| HttpResponseUpdatedNoContent())
-            .map_err(HttpError::from)
-    }
-
-    async fn probe_delete(
-        request_context: RequestContext<Self::Context>,
-        path: Path<ProbePath>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        request_context.context().delete_probe(path.into_inner().probe_id);
-        Ok(HttpResponseDeleted())
     }
 
     async fn probes_put(

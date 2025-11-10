@@ -66,7 +66,7 @@ impl super::Nexus {
 
         let new_probe =
             Probe::from_create(new_probe_params, authz_project.id());
-        let (probe, probe_params) = self
+        let probe = self
             .db_datastore
             .probe_create(opctx, &authz_project, &new_probe, pool)
             .await?;
@@ -99,20 +99,7 @@ impl super::Nexus {
             )
             .await?;
         }
-
-        // Notify the target sled agent it has new probe to manage.
-        let client = nexus_networking::sled_client(
-            &self.db_datastore,
-            opctx,
-            probe.sled.into(),
-            &self.log,
-        )
-        .await?;
-        client.probe_post(&probe_params).await?;
-
-        // And kick the VPC route manager background task, to push any new
-        // routes for the probe zone onto the necessary sled agents.
-        self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_probe_distributor.activate();
 
         Ok(probe)
     }
@@ -128,25 +115,13 @@ impl super::Nexus {
         name_or_id: NameOrId,
     ) -> DeleteResult {
         let probe = self.probe_get(opctx, project_lookup, &name_or_id).await?;
-        let client = nexus_networking::sled_client(
-            &self.db_datastore,
-            opctx,
-            probe.sled,
-            &self.log,
-        )
-        .await?;
-        client.probe_delete(&probe.id).await?;
         self.probe_delete_dpd_config(opctx, probe.id).await?;
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
         self.db_datastore
             .probe_delete(opctx, &authz_project, &name_or_id)
             .await?;
-
-        // Kick the VPC route manager on delete too, to pull any routes that
-        // were needed for the now-deleted probe.
-        self.background_tasks.task_vpc_route_manager.activate();
-
+        self.background_tasks.task_probe_distributor.activate();
         Ok(())
     }
 }

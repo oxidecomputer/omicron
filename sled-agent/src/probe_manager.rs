@@ -8,6 +8,9 @@
 use crate::metrics::MetricsRequestQueue;
 use anyhow::{Result, anyhow};
 use dropshot::HttpError;
+use iddqd::IdHashItem;
+use iddqd::IdHashMap;
+use iddqd::id_upcast;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
@@ -20,7 +23,7 @@ use omicron_common::api::external::{
 use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule,
 };
-use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, ProbeUuid};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::{
@@ -31,7 +34,6 @@ use sled_agent_types::probes::ExternalIp;
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_zone_images::ramdisk_file_source;
 use slog::{Logger, error, warn};
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -72,7 +74,7 @@ impl From<Error> for HttpError {
 pub(crate) struct ProbeManager {
     _join_handle: JoinHandle<()>,
     // The set of probes we have been told to run.
-    expected_probes_tx: watch::Sender<HashMap<Uuid, ProbeState>>,
+    expected_probes_tx: watch::Sender<IdHashMap<ProbeState>>,
 }
 
 /// Worker object that actually reconciles the desired and actual probe zones.
@@ -82,7 +84,7 @@ pub(crate) struct ProbeManagerInner {
     port_manager: PortManager,
     metrics_queue: MetricsRequestQueue,
     // The set of probe zones we are actually running on this sled.
-    running_probes: HashMap<Uuid, RunningZone>,
+    running_probes: HashMap<ProbeUuid, RunningZone>,
     available_datasets_rx: AvailableDatasetsReceiver,
     zones_api: Arc<dyn illumos_utils::zone::Api>,
 }
@@ -97,7 +99,7 @@ impl ProbeManager {
         currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
     ) -> Self {
         let (expected_probes_tx, expected_probes_rx) =
-            watch::channel(HashMap::new());
+            watch::channel(IdHashMap::new());
         let inner = ProbeManagerInner {
             vnic_allocator: VnicAllocator::new(
                 VNIC_ALLOCATOR_SCOPE,
@@ -118,43 +120,10 @@ impl ProbeManager {
         }
     }
 
-    /// Add a probe to the manager.
-    ///
-    /// This will ensure that a corresponding zone is created, asynchronously.
-    /// An error is returned if the probe already exists.
-    pub(crate) fn add_probe(&self, params: ProbeCreate) -> Result<(), Error> {
-        let id = params.id;
-        if self.expected_probes_tx.send_if_modified(|expected| {
-            match expected.entry(id) {
-                Entry::Occupied(_) => false,
-                Entry::Vacant(entry) => {
-                    entry.insert(ProbeState::from(params));
-                    true
-                }
-            }
-        }) {
-            Ok(())
-        } else {
-            Err(Error::ProbeAlreadyExists(id))
-        }
-    }
-
-    /// Remove a probe from the manager.
-    ///
-    /// This will ensure that the requested zone will be removed,
-    /// asynchronously. Note that this is infallible, and doesn't fail if the
-    /// probe was already gone.
-    pub(crate) fn remove_probe(&self, id: Uuid) {
-        self.expected_probes_tx
-            .send_if_modified(|expected| expected.remove(&id).is_some());
-    }
-
     /// Completely replace the set of managed probes.
-    pub(crate) fn set_probes(&self, probes: Vec<ProbeCreate>) {
-        let probes = probes
-            .into_iter()
-            .map(|probe| (probe.id, ProbeState::from(probe)))
-            .collect();
+    pub(crate) fn set_probes(&self, probes: IdHashMap<ProbeCreate>) {
+        let probes =
+            probes.into_iter().map(|probe| ProbeState::from(probe)).collect();
         let _old = self.expected_probes_tx.send_replace(probes);
     }
 }
@@ -165,7 +134,7 @@ impl ProbeManager {
 #[derive(Debug, Clone)]
 struct ProbeState {
     /// Id as determined by nexus
-    id: Uuid,
+    id: ProbeUuid,
     /// Runtime state on this sled
     status: zone::State,
     /// The external IP addresses the probe has been assigned.
@@ -181,6 +150,16 @@ struct ProbeState {
     /// If we've built this object from a request through the sled-agent API,
     /// then we always have this.
     interface: Option<NetworkInterface>,
+}
+
+impl IdHashItem for ProbeState {
+    type Key<'a> = ProbeUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
 }
 
 impl From<ProbeCreate> for ProbeState {
@@ -230,7 +209,7 @@ impl ProbeManagerInner {
     /// Run the reconciler loop.
     fn reconciler(
         mut self,
-        mut expected_probes_rx: watch::Receiver<HashMap<Uuid, ProbeState>>,
+        mut expected_probes_rx: watch::Receiver<IdHashMap<ProbeState>>,
         mut currently_managed_zpools_rx: CurrentlyManagedZpoolsReceiver,
     ) -> JoinHandle<()> {
         tokio::spawn(async move {
@@ -252,8 +231,8 @@ impl ProbeManagerInner {
                         }
                         let expected_probes = expected_probes_rx
                             .borrow_and_update()
-                            .values()
-                            .cloned()
+                            .clone()
+                            .into_iter()
                             .collect();
                         self.do_reconcile(expected_probes).await;
                     }
@@ -385,7 +364,9 @@ impl ProbeManagerInner {
             .with_zone_root_path(zone_root_path)
             .with_file_source(&ramdisk_file_source("probe"))
             .with_zone_type("probe")
-            .with_unique_name(OmicronZoneUuid::from_untyped_uuid(probe.id))
+            .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
+                probe.id.into_untyped_uuid(),
+            ))
             .with_datasets(&[])
             .with_filesystems(&[])
             .with_data_links(&[])
@@ -439,7 +420,7 @@ impl ProbeManagerInner {
 
     /// Remove a probe from this sled. This tears down the zone and its
     /// network resources.
-    async fn remove_probe(&mut self, id: Uuid) {
+    async fn remove_probe(&mut self, id: ProbeUuid) {
         match self.running_probes.remove(&id) {
             Some(mut running_zone) => {
                 // TODO-correctness: There are no physical links in the zone, is
@@ -515,12 +496,11 @@ impl ProbeManagerInner {
 #[cfg(test)]
 mod test {
     use super::*;
-    use uuid::Uuid;
 
     #[test]
     fn probe_state_set_ops() {
         let a = ProbeState {
-            id: Uuid::new_v4(),
+            id: ProbeUuid::new_v4(),
             status: zone::State::Configured,
             external_ips: Vec::new(),
             interface: None,
