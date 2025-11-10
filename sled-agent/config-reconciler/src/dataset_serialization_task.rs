@@ -2018,13 +2018,11 @@ mod tests {
                 if in_config {
                     assert!(!datasets_not_in_config.contains(&name));
                     assert!(datasets_in_config.insert(name.clone()));
-                    dataset_configs
-                        .insert_overwrite(DatasetConfig {
-                            id: DatasetUuid::new_v4(),
-                            name,
-                            inner: SharedDatasetConfig::default(),
-                        })
-                        .expect("ids are all freshly generated and unique");
+                    dataset_configs.insert_overwrite(DatasetConfig {
+                        id: DatasetUuid::new_v4(),
+                        name,
+                        inner: SharedDatasetConfig::default(),
+                    });
                 } else {
                     assert!(!datasets_in_config.contains(&name));
                     assert!(datasets_not_in_config.insert(name));
