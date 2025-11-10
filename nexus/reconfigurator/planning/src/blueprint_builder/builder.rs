@@ -61,8 +61,10 @@ use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
 use omicron_common::address::DnsSubnet;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -648,17 +650,6 @@ impl<'a> BlueprintBuilder<'a> {
             sled_editors.insert(*sled_id, editor);
         }
 
-        // Add new, empty `SledEditor`s for any commissioned sleds in our input
-        // that weren't in the parent blueprint. (These are newly-added sleds.)
-        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
-            if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
-                slot.insert(SledEditor::for_new_active(
-                    Arc::new(details.baseboard_id.clone()),
-                    details.resources.subnet,
-                ));
-            }
-        }
-
         // Copy the Oximeter read policy from our parent blueprint so we can
         // track changes to it.
         let oximeter_read_policy = OximeterReadPolicy {
@@ -700,6 +691,58 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn new_blueprint_id(&self) -> BlueprintUuid {
         self.new_blueprint_id
+    }
+
+    /// Ensure a `SledEditor` exists for a given sled.
+    ///
+    /// If no editor exists, one will be created. If an editor exists but has a
+    /// different baseboard ID or subnet, returns an error. (Neither of those
+    /// pieces of information should ever change for a given sled.)
+    pub fn ensure_sled_editor_exists(
+        &mut self,
+        sled_id: SledUuid,
+        baseboard_id: &BaseboardId,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    ) -> Result<Ensure, Error> {
+        let existing_editor = match self.sled_editors.entry(sled_id) {
+            Entry::Vacant(entry) => {
+                entry.insert(SledEditor::for_new_active(
+                    Arc::new(baseboard_id.clone()),
+                    sled_subnet,
+                ));
+                return Ok(Ensure::Added);
+            }
+            Entry::Occupied(entry) => &*entry.into_mut(),
+        };
+
+        // If this sled already existed and is still active, ensure the
+        // baseboard ID and subnet we already had match what our caller
+        // specified. These properties should never change.
+        //
+        // (They should also never change if the sled is decommissioned;
+        // however, we currently throw away those bits of information for
+        // decommissioned sleds, causing the methods here to return `None`.
+        // Ignore that case.)
+        if let Some(existing_baseboard_id) = existing_editor.baseboard_id() {
+            if *baseboard_id != **existing_baseboard_id {
+                return Err(Error::Planner(anyhow!(
+                    "attempted to ensure active sled {sled_id} with baseboard \
+                     {baseboard_id}, but already have existing editor with \
+                     baseboard {existing_baseboard_id}",
+                )));
+            }
+        }
+        if let Some(existing_subnet) = existing_editor.subnet() {
+            if sled_subnet != existing_subnet {
+                return Err(Error::Planner(anyhow!(
+                    "attempted to ensure active sled {sled_id} with \
+                     subnet {sled_subnet}, but already have existing \
+                     editor with subnet {existing_subnet}",
+                )));
+            }
+        }
+
+        Ok(Ensure::NotNeeded)
     }
 
     /// Helper method to construct an empty [`ClickhouseClusterConfig`] using
@@ -2664,10 +2707,16 @@ pub mod test {
             rng.next_planner_rng(),
         )
         .expect("failed to create builder");
-        let new_sled_resources = &input
-            .sled_lookup(SledFilter::Commissioned, new_sled_id)
-            .unwrap()
-            .resources;
+        let new_sled_details =
+            &input.sled_lookup(SledFilter::Commissioned, new_sled_id).unwrap();
+        let new_sled_resources = &new_sled_details.resources;
+        builder
+            .ensure_sled_editor_exists(
+                new_sled_id,
+                &new_sled_details.baseboard_id,
+                new_sled_resources.subnet,
+            )
+            .unwrap();
         builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
         builder
             .sled_ensure_zone_ntp(

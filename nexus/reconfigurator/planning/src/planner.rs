@@ -183,13 +183,28 @@ impl<'a> Planner<'a> {
         inventory: &'a Collection,
         rng: PlannerRng,
     ) -> anyhow::Result<Planner<'a>> {
-        let blueprint = BlueprintBuilder::new_based_on(
+        // Construct a `BlueprintBuilder`, then update it in ways based on
+        // `input` that are not related to planning so much as just "update the
+        // view of the world".
+        let mut blueprint = BlueprintBuilder::new_based_on(
             &log,
             parent_blueprint,
             input,
             creator,
             rng,
         )?;
+
+        // The builder should know about all commissioned sleds. If it doesn't
+        // know about any of these sleds, it will create an empty sled-editor
+        // for them.
+        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
+            blueprint.ensure_sled_editor_exists(
+                sled_id,
+                &details.baseboard_id,
+                details.resources.subnet,
+            )?;
+        }
+
         Ok(Planner { log, input, blueprint, inventory })
     }
 

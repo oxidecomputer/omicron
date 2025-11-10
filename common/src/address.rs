@@ -245,6 +245,12 @@ impl<const N: u8> Ipv6Subnet<N> {
     }
 }
 
+impl<const N: u8> std::fmt::Display for Ipv6Subnet<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.net.fmt(f)
+    }
+}
+
 impl<const N: u8> From<Ipv6Network> for Ipv6Subnet<N> {
     fn from(net: Ipv6Network) -> Self {
         // Ensure the address is set to within-prefix only components.
