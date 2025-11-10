@@ -276,7 +276,7 @@ impl DataStore {
             .sql(dir)
             .sql(" LIMIT ")
             .param()
-            .bind::<sql_types::Int8, _>(pagparams.limit.get() as i64)
+            .bind::<sql_types::Int8, _>(i64::from(pagparams.limit.get()))
             .sql(") ");
 
         builder.sql(
