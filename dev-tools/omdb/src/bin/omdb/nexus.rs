@@ -67,6 +67,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
@@ -1239,6 +1240,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
+        }
+        "fm_sitrep_gc" => {
+            print_task_fm_sitrep_gc(details);
         }
         _ => {
             println!(
@@ -3140,6 +3144,41 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
+    let SitrepGcStatus {
+        orphaned_sitreps_found,
+        orphaned_sitreps_deleted,
+        errors,
+    } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    pub const ORPHANS_FOUND: &str = "orphaned sitreps found:";
+    pub const ORPHANS_DELETED: &str = "orphaned sitreps deleted:";
+    pub const ERRORS: &str = "errors:";
+    pub const WIDTH: usize =
+        const_max_len(&[ERRORS, ORPHANS_FOUND, ORPHANS_DELETED]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+    if !errors.is_empty() {
+        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        for error in errors {
+            println!("      > {error}")
+        }
+    }
+
+    println!("    {ORPHANS_FOUND:<WIDTH$}{orphaned_sitreps_found:>NUM_WIDTH$}");
+    println!(
+        "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+    );
 }
 
 const ERRICON: &str = "/!\\";
