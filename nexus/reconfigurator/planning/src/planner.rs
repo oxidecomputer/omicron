@@ -2676,7 +2676,7 @@ pub(crate) mod test {
         .expect("created planner");
         let child_blueprint =
             planner.plan().expect("planning should have succeded");
-        verify_blueprint(&child_blueprint);
+        verify_blueprint(&child_blueprint, &input);
         let summary = child_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
             "diff between blueprints (expected no changes):\n{}",
@@ -2700,7 +2700,7 @@ pub(crate) mod test {
             rng.next_system_rng(),
         )
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         let input = example
             .system
@@ -2740,7 +2740,7 @@ pub(crate) mod test {
         assert_eq!(summary.total_datasets_added(), 0);
         assert_eq!(summary.total_datasets_removed(), 0);
         assert_eq!(summary.total_datasets_modified(), 0);
-        verify_blueprint(&blueprint2);
+        verify_blueprint(&blueprint2, &input);
 
         // Now add a new sled.
         let mut sled_id_rng = rng.next_sled_id_rng();
@@ -2774,7 +2774,11 @@ pub(crate) mod test {
 
         assert_eq!(summary.diff.sleds.added.len(), 1);
         assert_eq!(summary.total_disks_added(), 10);
-        assert_eq!(summary.total_datasets_added(), 21);
+
+        // 10 disks added means 30 datasets (each disk adds a debug + zone root
+        //    + local storage), plus one transient zone root for the NTP zone
+        assert_eq!(summary.total_datasets_added(), 31);
+
         let (&sled_id, sled_added) =
             summary.diff.sleds.added.first_key_value().unwrap();
         // We have defined elsewhere that the first generation contains no
@@ -2789,7 +2793,7 @@ pub(crate) mod test {
         ));
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
-        verify_blueprint(&blueprint3);
+        verify_blueprint(&blueprint3, &input);
 
         // Check that with no change in inventory, the planner makes no changes.
         // It needs to wait for inventory to reflect the new NTP zone before
@@ -2810,7 +2814,7 @@ pub(crate) mod test {
         assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
-        verify_blueprint(&blueprint4);
+        verify_blueprint(&blueprint4, &input);
 
         // Now update the inventory to have the requested NTP zone.
         //
@@ -2872,7 +2876,7 @@ pub(crate) mod test {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             }
         }
-        verify_blueprint(&blueprint5);
+        verify_blueprint(&blueprint5, &input);
 
         // Check that there are no more steps.
         assert_planning_makes_no_changes(
@@ -3647,9 +3651,13 @@ pub(crate) mod test {
         assert_eq!(summary.total_disks_added(), NEW_IN_SERVICE_DISKS);
         assert_eq!(summary.total_disks_removed(), 0);
 
-        // 1 Zone, Crucible, Transient Crucible Zone, and Debug dataset created
-        // per disk.
-        assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 4);
+        // Five new datasets created per disk:
+        // - Zone Root
+        // - Debug
+        // - Local Storage
+        // - 1 for the Crucible Agent
+        // - Transient Crucible Zone Root
+        assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 5);
         assert_eq!(summary.total_datasets_removed(), 0);
         assert_eq!(summary.total_datasets_modified(), 0);
 
@@ -4033,9 +4041,10 @@ pub(crate) mod test {
         // "decommissioned_disk_cleaner" background task for more context.
         assert_eq!(summary.total_datasets_removed(), 0);
 
-        // The disposition has changed from `InService` to `Expunged` for the 4
-        // datasets on this sled.
-        assert_eq!(summary.total_datasets_modified(), 4);
+        // The disposition has changed from `InService` to `Expunged` for the 5
+        // datasets (debug, zone root, local storage, crucible zone root, and
+        // crucible agent) on this sled.
+        assert_eq!(summary.total_datasets_modified(), 5);
         // We don't know the expected name, other than the fact it's a crucible zone
         let test_transient_zone_kind = DatasetKind::TransientZone {
             name: "some-crucible-zone-name".to_string(),
@@ -4044,6 +4053,7 @@ pub(crate) mod test {
             DatasetKind::Crucible,
             DatasetKind::Debug,
             DatasetKind::TransientZoneRoot,
+            DatasetKind::LocalStorage,
             test_transient_zone_kind.clone(),
         ]);
         let mut modified_sled_configs = Vec::new();
@@ -5035,7 +5045,7 @@ pub(crate) mod test {
         let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let mut collection = example.collection;
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         // We shouldn't have a clickhouse cluster config, as we don't have a
         // clickhouse policy set yet
@@ -6327,7 +6337,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         // We should start with nothing to do.
         assert_planning_makes_no_changes(
@@ -6745,7 +6755,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &example.input);
 
         // Update the example system and blueprint, as a part of test set-up.
         //
@@ -7049,7 +7059,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &example.input);
 
         // The example system creates three internal NTP zones, and zero
         // boundary NTP zones. This is a little arbitrary, but we're checking it
@@ -7210,7 +7220,7 @@ pub(crate) mod test {
         )
         .expect("can't create planner");
         let new_blueprint = planner.plan().expect("planning succeeded");
-        verify_blueprint(&new_blueprint);
+        verify_blueprint(&new_blueprint, &example.input);
         {
             let summary = new_blueprint.diff_since_blueprint(&blueprint);
             assert_eq!(summary.total_zones_added(), 0);
@@ -7668,7 +7678,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &example.input);
 
         // All zones should be sourced from the initial TUF repo by default.
         assert!(
@@ -7859,7 +7869,7 @@ pub(crate) mod test {
             }
             blueprint = new_blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
-            verify_blueprint(&blueprint);
+            verify_blueprint(&blueprint, &example.input);
 
             // Next blueprint: Add an (updated) internal DNS zone back
 
@@ -7885,7 +7895,7 @@ pub(crate) mod test {
             }
             blueprint = new_blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
-            verify_blueprint(&blueprint);
+            verify_blueprint(&blueprint, &example.input);
 
             assert_eq!(
                 blueprint
@@ -7945,7 +7955,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         // All zones should be sourced from the 0.0.1 repo by default.
         assert!(
