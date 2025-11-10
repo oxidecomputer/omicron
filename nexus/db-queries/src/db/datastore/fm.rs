@@ -371,7 +371,7 @@ impl DataStore {
             .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
             .sql(
                 " AND parent_sitrep_id IS NOT NULL \
-                AND parent_sitrep_id = current_sitrep.sitrep_id \
+                  AND parent_sitrep_id = current_sitrep.sitrep_id \
                 ) ",
             );
 
@@ -379,8 +379,8 @@ impl DataStore {
         builder
             .sql(
                 "INSERT INTO omicron.public.fm_sitrep_history \
-             (version, sitrep_id, time_made_current) \
-             SELECT new_sitrep.new_version, ",
+                (version, sitrep_id, time_made_current) \
+                SELECT new_sitrep.new_version, ",
             )
             .param()
             .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
