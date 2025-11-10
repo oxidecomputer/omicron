@@ -1550,11 +1550,8 @@ mod test {
             alert_dispatcher.period_secs = 42
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
-<<<<<<< HEAD
-            probe_distributor.period_secs = 45
-=======
             fm.sitrep_load_period_secs = 45
->>>>>>> origin/main
+            probe_distributor.period_secs = 46
 
             [default_region_allocation_strategy]
             type = "random"
