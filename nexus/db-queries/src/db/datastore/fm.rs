@@ -319,10 +319,11 @@ impl DataStore {
             .sql(" CAST(")
             .param()
             .bind::<sql_types::Uuid, _>(sitrep_id.into_untyped_uuid())
-            .sql(" AS text), ")
+            // opening single quote for `PARENT_NOT_CURRENT` string literal
+            .sql(" AS text), '")
             .sql(Self::PARENT_NOT_CURRENT)
             .sql(
-                ") AS UUID \
+                "') AS UUID \
                 ) \
                 ), ",
             );
