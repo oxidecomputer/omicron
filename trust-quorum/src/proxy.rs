@@ -49,12 +49,6 @@ pub struct TrackableRequest {
     tx: oneshot::Sender<Result<WireValue, WireOp>>,
 }
 
-/// A handle given to a user for a proxied `Commit` operation
-pub struct CommitHandle {}
-
-/// A handle given to a user for a proxied `PrepareAndCommit` operation
-pub struct PrepareAndCommitHandle {}
-
 /// A mechanism for proxying requests
 pub struct Proxy {
     // A mechanism to send a `WireRequest` to our local task for proxying.
@@ -68,13 +62,65 @@ impl Proxy {
         rack_id: RackUuid,
         epoch: Epoch,
     ) -> oneshot::Receiver<Result<CommitStatus, ProxyError<CommitError>>> {
+        let op = WireOp::Commit { rack_id, epoch };
+        let destructure_fn = move |res| match res {
+            Ok(val) => {
+                let WireValue::Commit(cs) = val;
+                Ok(cs)
+            }
+            Err(err) => match err {
+                WireError::Commit(e) => Err(e.into()),
+                WireError::PrepareAndCommit(e) => {
+                    Err(ProxyError::InvalidResponse(e.to_string()))
+                }
+            },
+        };
+
+        self.send(destination, op, destructure_fn).await
+    }
+
+    pub async fn prepare_and_commit(
+        &self,
+        destination: BaseboardId,
+        config: Configuration,
+    ) -> oneshot::Receiver<
+        Result<CommitStatus, ProxyError<PrepareAndCommitError>>,
+    > {
+        let op = WireOp::PrepareAndCommit { config };
+        let destructure_fn = move |res| match res {
+            Ok(val) => {
+                let WireValue::Commit(cs) = val;
+                Ok(cs)
+            }
+            Err(err) => match err {
+                WireError::Commit(e) => {
+                    Err(ProxyError::InvalidResponse(e.to_string()))
+                }
+                WireError::PrepareAndCommit(e) => Err(e.into()),
+            },
+        };
+        self.send(destination, op, destructure_fn).await
+    }
+
+    /// Send a `WireRequest` to a task and destructure its response to the
+    /// appropriate type
+    async fn send<F, V, E>(
+        &self,
+        destination: BaseboardId,
+        op: WireOp,
+        f: F,
+    ) -> oneshot::Receiver<Result<V, ProxyError<E>>>
+    where
+        E: std::error::Error,
+        F: FnOnce(Result<WireValue, WireError>) -> Result<V, ProxyError<E>>,
+    {
         let request_id = Uuid::new_v4();
-        let wire_request =
-            WireRequest { request_id, op: WireOp::Commit { rack_id, epoch } };
+        let wire_request = WireRequest { request_id, op };
 
         // A wrapper for responses from the task
         let (task_tx, task_rx) = oneshot::channel();
 
+        // The message to send to the task
         let api_request =
             NodeApiRequest::Proxy { destination, wire_request, tx: task_tx };
 
@@ -98,31 +144,17 @@ impl Proxy {
             return rx;
         };
 
-        match res {
-            Ok(WireValue) => {
-                // TODO: destructure
-            }
-            Err(WireError) => {
-                // TODO: destructure
-            }
-        }
-
-        todo!();
-    }
-
-    pub fn prepare_and_commit(
-        &self,
-        destination: BaseboardId,
-        config: Configuration,
-    ) -> oneshot::Receiver<
-        Result<CommitStatus, ProxyError<PrepareAndCommitError>>,
-    > {
-        todo!()
+        let user_response = f(res);
+        tx.send(user_response);
+        rx
     }
 }
 
 /// The successful variant of a [`WireResponse`]
-pub enum WireValue {}
+pub enum WireValue {
+    /// The successful response value for a `commit` or `prepare_and_commit` operation.
+    Commit(CommitStatus),
+}
 
 /// The error variant of a [`WireResponse`]
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, From)]
