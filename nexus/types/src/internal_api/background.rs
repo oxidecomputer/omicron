@@ -780,6 +780,14 @@ pub enum SitrepLoadStatus {
     Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
 }
 
+/// The status of a `fm_sitrep_gc` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepGcStatus {
+    pub orphaned_sitreps_found: usize,
+    pub orphaned_sitreps_deleted: usize,
+    pub errors: Vec<String>,
+}
+
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;

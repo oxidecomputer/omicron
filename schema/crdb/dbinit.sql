@@ -6830,6 +6830,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     comment TEXT NOT NULL
 );
 
+-- Index for looking up all potential children of a given parent sitrep.
+CREATE INDEX IF NOT EXISTS
+    lookup_sitreps_by_parent_id
+ON omicron.public.fm_sitrep (parent_sitrep_id);
+
 -- The history of current sitreps.
 --
 -- The sitrep with the highest `version` in this table is the current sitrep.
@@ -7026,7 +7031,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '206.0.0', NULL)
+    (TRUE, NOW(), NOW(), '207.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

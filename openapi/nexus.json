@@ -18236,27 +18236,18 @@
           },
           "p50": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "type": "number",
@@ -18305,27 +18296,18 @@
           },
           "p50": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "type": "number",

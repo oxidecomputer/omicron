@@ -334,6 +334,10 @@ task: "external_endpoints"
     on each one
 
 
+task: "fm_sitrep_gc"
+    garbage collects fault management situation reports
+
+
 task: "fm_sitrep_loader"
     loads the current fault management situation report from the database
 
@@ -618,6 +622,13 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "fm_sitrep_gc"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    orphaned sitreps found:      0
+    orphaned sitreps deleted:    0
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s
@@ -1165,6 +1176,13 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "fm_sitrep_gc"
+  configured period: every <REDACTED_DURATION>s
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    orphaned sitreps found:      0
+    orphaned sitreps deleted:    0
 
 task: "fm_sitrep_loader"
   configured period: every <REDACTED_DURATION>s

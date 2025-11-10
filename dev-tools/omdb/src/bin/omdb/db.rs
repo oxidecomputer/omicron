@@ -1310,7 +1310,7 @@ impl DbArgs {
                         sitrep::cmd_db_sitrep(&opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::Sitreps(args) => {
-                        sitrep::cmd_db_sitrep_history(&datastore, &fetch_opts, args).await
+                        sitrep::cmd_db_sitrep_history(&opctx, &datastore, &fetch_opts, args).await
                     }
                     DbCommands::Sleds(args) => {
                         cmd_db_sleds(&opctx, &datastore, &fetch_opts, args).await

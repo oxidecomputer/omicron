@@ -3127,7 +3127,7 @@ fn after_188_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn before_206_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .execute(
@@ -3217,7 +3217,7 @@ fn before_206_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_206_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         // first disk
 
@@ -3582,8 +3582,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new().before(before_188_0_0).after(after_188_0_0),
     );
     map.insert(
-        Version::new(206, 0, 0),
-        DataMigrationFns::new().before(before_206_0_0).after(after_206_0_0),
+        Version::new(207, 0, 0),
+        DataMigrationFns::new().before(before_207_0_0).after(after_207_0_0),
     );
     map
 }
