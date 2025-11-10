@@ -29,6 +29,7 @@ use crate::bootstrap::early_networking::{
 use crate::config::SidecarRevision;
 use crate::ddm_reconciler::DdmReconciler;
 use crate::metrics::MetricsRequestQueue;
+use crate::port_manager::SledAgentPortManager;
 use crate::profile::*;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -44,9 +45,7 @@ use illumos_utils::dladm::{
     Dladm, Etherstub, EtherstubVnic, GetSimnetError, PhysicalLink,
 };
 use illumos_utils::link::{Link, VnicAllocator};
-use illumos_utils::opte::{
-    DhcpCfg, Port, PortCreateParams, PortManager, PortTicket,
-};
+use illumos_utils::opte::{DhcpCfg, Port, PortCreateParams, PortTicket};
 use illumos_utils::running_zone::{
     EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
     ZoneBuilderFactory,
@@ -586,7 +585,7 @@ pub struct ServiceManagerInner {
 // operational.
 struct SledAgentInfo {
     config: Config,
-    port_manager: PortManager,
+    port_manager: SledAgentPortManager,
     resolver: Resolver,
     underlay_address: Ipv6Addr,
     rack_id: Uuid,
@@ -785,10 +784,10 @@ impl ServiceManager {
     /// Sets up "Sled Agent" information, including underlay info.
     ///
     /// Any subsequent calls after the first invocation return an error.
-    pub async fn sled_agent_started(
+    pub(crate) async fn sled_agent_started(
         &self,
         config: Config,
-        port_manager: PortManager,
+        port_manager: SledAgentPortManager,
         underlay_address: Ipv6Addr,
         rack_id: Uuid,
         rack_network_config: Option<RackNetworkConfig>,
