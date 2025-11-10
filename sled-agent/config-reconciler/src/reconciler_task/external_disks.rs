@@ -1323,7 +1323,7 @@ mod tests {
         // Change the firmware on some subset of disks.
         for id in should_mutate_firmware {
             let mut entry = raw_disks.get_mut(&id).unwrap();
-            let mut raw_disk = RawDisk::from(entry.clone());
+            let mut raw_disk = entry.clone();
             let new_firmware = DiskFirmware::new(
                 raw_disk.firmware().active_slot().wrapping_add(1),
                 None,
@@ -1332,7 +1332,7 @@ mod tests {
                 Vec::new(),
             );
             *raw_disk.firmware_mut() = new_firmware;
-            *entry = raw_disk.into();
+            *entry = raw_disk;
         }
 
         // Attempt to adopt all the config disks again; we should pick up the

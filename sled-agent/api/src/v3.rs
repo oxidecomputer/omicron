@@ -455,7 +455,7 @@ pub enum ConfigReconcilerInventoryStatus {
     NotYetRun,
     /// The reconciler task is actively running.
     Running {
-        config: OmicronSledConfig,
+        config: Box<OmicronSledConfig>,
         started_at: DateTime<Utc>,
         running_for: Duration,
     },
@@ -480,9 +480,11 @@ impl From<inventory::ConfigReconcilerInventoryStatus>
                 config,
                 started_at,
                 running_for,
-            } => {
-                Self::Running { config: config.into(), started_at, running_for }
-            }
+            } => Self::Running {
+                config: Box::new((*config).into()),
+                started_at,
+                running_for,
+            },
             inventory::ConfigReconcilerInventoryStatus::Idle {
                 completed_at,
                 ran_for,

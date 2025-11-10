@@ -49,8 +49,7 @@ impl RawDisksSender {
     where
         I: Iterator<Item = RawDisk>,
     {
-        let mut new_disks =
-            raw_disks.map(From::from).collect::<IdOrdMap<RawDisk>>();
+        let mut new_disks = raw_disks.collect::<IdOrdMap<RawDisk>>();
         self.0.send_if_modified(|disks| {
             // We can't just set `*disks = new_disks` here because we may have
             // disks that shouldn't be removed even if they're not present in

@@ -4302,11 +4302,11 @@ impl ConfigReconcilerRows {
                 // If this config exactly matches the ledgered or
                 // most-recently-reconciled configs, we can reuse those IDs.
                 // Otherwise, accumulate a new one.
-                let reconciler_status_sled_config = if Some(config)
+                let reconciler_status_sled_config = if Some(&**config)
                     == sled_agent.ledgered_sled_config.as_ref()
                 {
                     ledgered_sled_config
-                } else if Some(config)
+                } else if Some(&**config)
                     == sled_agent
                         .last_reconciliation
                         .as_ref()
@@ -5255,7 +5255,7 @@ mod test {
             sa1.last_reconciliation = None;
 
             sa2.reconciler_status = ConfigReconcilerInventoryStatus::Running {
-                config: sa2.ledgered_sled_config.clone().unwrap(),
+                config: Box::new(sa2.ledgered_sled_config.clone().unwrap()),
                 started_at: now_db_precision(),
                 running_for: Duration::from_secs(1),
             };

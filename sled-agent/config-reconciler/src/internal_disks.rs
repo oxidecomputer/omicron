@@ -795,7 +795,7 @@ impl InternalDisksTask {
             // This is a new disk: attempt to adopt it.
             let identity = raw_disk.identity().clone();
             let adopt_result = disk_adopter
-                .adopt_disk(raw_disk.into(), &self.mount_config, &self.log)
+                .adopt_disk(raw_disk, &self.mount_config, &self.log)
                 .await;
 
             match adopt_result {
@@ -901,6 +901,7 @@ impl DiskAdopter for RealDiskAdopter {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use iddqd::id_ord_map;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_watch_channel_condition;
@@ -1060,7 +1061,7 @@ mod tests {
                 new_raw_test_disk(DiskVariant::M2, "m2-1"),
                 new_raw_test_disk(DiskVariant::U2, "u2-1"),
             ] {
-                disks.insert_overwrite(disk.into());
+                disks.insert_overwrite(disk);
             }
         });
 
@@ -1100,9 +1101,8 @@ mod tests {
 
         // Setup: one disk.
         let mut raw_disk = new_raw_test_disk(DiskVariant::M2, "test-m2");
-        let (raw_disks_tx, raw_disks_rx) = watch::channel(Arc::new(
-            [raw_disk.clone().into()].into_iter().collect(),
-        ));
+        let (raw_disks_tx, raw_disks_rx) =
+            watch::channel(Arc::new(id_ord_map! { raw_disk.clone() }));
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         let mut disks_rx = InternalDisksReceiver::spawn_with_disk_adopter(
             Arc::new(any_mount_config()),
@@ -1128,7 +1128,7 @@ mod tests {
         );
         *raw_disk.firmware_mut() = new_firmware;
         raw_disks_tx.send_modify(|disks| {
-            Arc::make_mut(disks).insert_overwrite(raw_disk.clone().into());
+            Arc::make_mut(disks).insert_overwrite(raw_disk.clone());
         });
 
         // Wait for the change to be noticed.
@@ -1158,13 +1158,11 @@ mod tests {
         // Setup: two disks.
         let raw_disk1 = new_raw_test_disk(DiskVariant::M2, "m2-1");
         let raw_disk2 = new_raw_test_disk(DiskVariant::M2, "m2-2");
-        let (raw_disks_tx, raw_disks_rx) = watch::channel(Arc::new(
-            [&raw_disk1, &raw_disk2]
-                .into_iter()
-                .cloned()
-                .map(From::from)
-                .collect(),
-        ));
+        let (raw_disks_tx, raw_disks_rx) =
+            watch::channel(Arc::new(id_ord_map! {
+                raw_disk1.clone(),
+                raw_disk2.clone(),
+            }));
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         let mut disks_rx = InternalDisksReceiver::spawn_with_disk_adopter(
             Arc::new(any_mount_config()),
@@ -1208,7 +1206,7 @@ mod tests {
         // Setup: one disk, and configure the disk adopter to fail.
         let raw_disk = new_raw_test_disk(DiskVariant::M2, "test-m2");
         let (_raw_disks_tx, raw_disks_rx) = watch::channel(Arc::new(
-            [&raw_disk].into_iter().cloned().map(From::from).collect(),
+            [&raw_disk].into_iter().cloned().collect(),
         ));
         let disk_adopter = Arc::new(TestDiskAdopter::default());
         disk_adopter.inner.lock().unwrap().should_fail_requests.insert(

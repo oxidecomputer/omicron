@@ -2334,6 +2334,7 @@ mod illumos_tests {
     use crate::CurrentlyManagedZpoolsReceiver;
     use assert_matches::assert_matches;
     use camino_tempfile::Utf8TempDir;
+    use iddqd::id_ord_map;
     use illumos_utils::zpool::Zpool;
     use key_manager::KeyManager;
     use key_manager::SecretRetriever;
@@ -2737,12 +2738,10 @@ mod illumos_tests {
 
         // Because `dataset` has kind `TransientZone { .. }`, we also need to
         // supply its parent root.
-        let dataset_configs: IdMap<_> = [
+        let dataset_configs = id_ord_map! {
             dataset.clone(),
             make_dataset_config(zpool, DatasetKind::TransientZoneRoot),
-        ]
-        .into_iter()
-        .collect();
+        };
 
         // Create the datasets.
         let result = task_handle
@@ -2813,12 +2812,21 @@ mod illumos_tests {
         // Build configs for a few datasets on each zpool
         let mut datasets = IdOrdMap::new();
         for &zpool in &zpools {
-            datasets.insert(make_dataset_config(zpool, DatasetKind::Crucible));
-            datasets.insert(make_dataset_config(zpool, DatasetKind::Debug));
-            datasets.insert(make_dataset_config(
-                zpool,
-                DatasetKind::TransientZoneRoot,
-            ));
+            datasets
+                .insert_unique(make_dataset_config(
+                    zpool,
+                    DatasetKind::Crucible,
+                ))
+                .unwrap();
+            datasets
+                .insert_unique(make_dataset_config(zpool, DatasetKind::Debug))
+                .unwrap();
+            datasets
+                .insert(make_dataset_config(
+                    zpool,
+                    DatasetKind::TransientZoneRoot,
+                ))
+                .unwrap();
         }
 
         // Create the datasets.

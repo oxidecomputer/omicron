@@ -404,7 +404,7 @@ pub enum ConfigReconcilerInventoryStatus {
     NotYetRun,
     /// The reconciler task is actively running.
     Running {
-        config: OmicronSledConfig,
+        config: Box<OmicronSledConfig>,
         started_at: DateTime<Utc>,
         running_for: Duration,
     },
