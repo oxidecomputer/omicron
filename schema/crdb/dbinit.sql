@@ -638,7 +638,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'zone_root',
   'zone',
   'debug',
-  'update'
+  'update',
+  'local_storage'
 );
 
 /*
@@ -6780,6 +6781,161 @@ ON omicron.public.host_ereport (
 ) WHERE
     time_deleted IS NULL;
 
+/*
+    * Fault management situation reports (and accessories)
+    *
+    * See RFD 603 for details:
+    * https://rfd.shared.oxide.computer/rfd/603
+*/
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
+    -- The ID of this sitrep.
+    id UUID PRIMARY KEY,
+    --  The ID of the parent sitrep.
+    --
+    -- A sitrep's _parent_ is the sitrep that was current when the planning
+    -- phase that produced that sitrep ran. The parent sitrep is a planning
+    -- input that produced this sitrep.
+    --
+    -- This is effectively a foreign key back to this table; however, it is
+    -- allowed to be NULL: the initial sitrep has no parent. Additionally,
+    -- it may be non-NULL but no longer reference a row in this table: once a
+    -- child sitrep has been created from a parent, it's possible for the
+    -- parent to be deleted. We do not NULL out this field on such a deletion,
+    -- so we can always see that there had been a particular parent even if
+    -- it's now gone.
+    parent_sitrep_id UUID,
+    -- The ID of the inventory collection that was used as input to this
+    -- sitrep.
+    --
+    -- This is a foreign key that references a row in the `inv_collection`
+    -- table (and other inventory records associated with that collection).
+    --
+    -- Note that inventory collections are pruned on a separate schedule
+    -- from sitreps, so the inventory collection records may not exist.
+    inv_collection_id UUID NOT NULL,
+
+    -- These fields are not semantically meaningful and are intended
+    -- debugging purposes.
+
+    -- The time at which this sitrep was created.
+    time_created TIMESTAMPTZ NOT NULL,
+    -- The Omicron zone UUID of the Nexus instance that created this
+    -- sitrep.
+    creator_id UUID NOT NULL,
+    -- A human-readable description of the changes represented by this
+    -- sitrep.
+    comment TEXT NOT NULL
+);
+
+-- The history of current sitreps.
+--
+-- The sitrep with the highest `version` in this table is the current sitrep.
+CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep_history (
+    -- Monotonically increasing version for all FM sitreps.
+    version INT8 PRIMARY KEY,
+
+    -- Effectively a foreign key into the `fm_sitrep` table, but may
+    -- reference a fm_sitrep that has been deleted (if this sitrep is
+    --  no longer current; the current sitrep must not be deleted).
+    sitrep_id UUID NOT NULL,
+
+    -- Timestamp for when this sitrep was made current.
+    time_made_current TIMESTAMPTZ NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS
+    lookup_sitrep_version_by_id
+ON omicron.public.fm_sitrep_history (sitrep_id);
+
+/*
+ * List of datasets available to be sliced up and passed to VMMs for instance
+ * local storage.
+ *
+ * This is a Reconfigurator rendezvous table: it reflects resources that
+ * Reconfigurator has ensured exist. It is always possible that a resource
+ * chosen from this table could be deleted after it's selected, but any
+ * non-deleted row in this table is guaranteed to have been created.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.rendezvous_local_storage_dataset (
+    /* ID of dataset */
+    id UUID PRIMARY KEY,
+
+    /* Time this dataset was added to the table */
+    time_created TIMESTAMPTZ NOT NULL,
+
+    /*
+     * If not NULL, indicates this dataset has been expunged in a blueprint.
+     * Multiple Nexus instances operate concurrently, and it's possible any
+     * given Nexus is operating on an old blueprint. We need to avoid a Nexus
+     * operating on an old blueprint from inserting a dataset that has already
+     * been expunged and removed from this table by a later blueprint, so
+     * instead of hard deleting, we tombstone rows via this column.
+     *
+     * Hard deletion of tombstoned datasets will require some care with respect
+     * to the problem above. For now we keep tombstoned datasets around forever.
+     */
+    time_tombstoned TIMESTAMPTZ,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was created.
+     *
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was added, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is still in service).
+     */
+    blueprint_id_when_created UUID NOT NULL,
+
+    /*
+     * ID of the target blueprint the Reconfigurator reconciliation RPW was
+     * acting on when this row was tombstoned.
+     *
+     * In practice, this will often be the same blueprint ID in which this
+     * dataset was expunged, but it's not guaranteed to be (it could be any
+     * descendent blueprint in which this dataset is expunged and not yet
+     * pruned).
+     */
+    blueprint_id_when_tombstoned UUID,
+
+    /* ID of the zpool on which this dataset is placed */
+    pool_id UUID NOT NULL,
+
+    /*
+     * An upper bound on the amount of space that might be in-use
+     *
+     * This field is owned by Nexus. When a new row is inserted during the
+     * Reconfigurator rendezvous process, this field is set to 0. Reconfigurator
+     * otherwise ignores this field. It's updated by Nexus as vmm allocations
+     * and deletions are performed using this dataset.
+     */
+    size_used INT NOT NULL,
+
+    /* Do not consider this dataset during local storage allocation */
+    no_provision BOOL NOT NULL,
+
+    /*
+     * Either both `*_tombstoned` columns should be set (if this row has been
+     * tombstoned) or neither should (if it has not).
+     */
+    CONSTRAINT tombstoned_consistency CHECK (
+        (time_tombstoned IS NULL
+            AND blueprint_id_when_tombstoned IS NULL)
+        OR
+        (time_tombstoned IS NOT NULL
+            AND blueprint_id_when_tombstoned IS NOT NULL)
+    )
+);
+
+/* Create an index on the size usage for any local storage dataset */
+CREATE INDEX IF NOT EXISTS lookup_local_storage_dataset_by_size_used ON
+    omicron.public.rendezvous_local_storage_dataset (size_used)
+  WHERE time_tombstoned IS NULL;
+
+/* Create an index on the zpool id */
+CREATE INDEX IF NOT EXISTS lookup_local_storage_dataset_by_zpool ON
+    omicron.public.rendezvous_local_storage_dataset (pool_id, id)
+  WHERE time_tombstoned IS NULL;
+
 -- Metadata for the schema itself.
 --
 -- This table may be read by Nexuses with different notions of "what the schema should be".
@@ -6867,7 +7023,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '203.0.0', NULL)
+    (TRUE, NOW(), NOW(), '205.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

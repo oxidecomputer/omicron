@@ -92,6 +92,7 @@ async fn test_omdb_usage_errors() {
         &["db", "ereport", "reporters", "--help"],
         &["db", "ereport", "info", "--help"],
         &["db", "sleds", "--help"],
+        &["db", "sitrep", "--help"],
         &["db", "saga"],
         &["db", "snapshots"],
         &["db", "network"],
