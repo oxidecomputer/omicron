@@ -696,7 +696,7 @@ mod tests {
 
         let query = InsertSitrepVersionQuery { sitrep_id: SitrepUuid::nil() };
 
-        // Before trying to explain the query, elt's start by making sure it's
+        // Before trying to explain the query, let's start by making sure it's
         // valid SQL...
         let q = diesel::debug_query::<Pg, _>(&query).to_string();
         match dev::db::format_sql(&q).await {
