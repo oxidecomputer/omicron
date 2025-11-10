@@ -161,8 +161,12 @@ pub(super) async fn cmd_db_sitrep_history(
             match datastore.fm_sitrep_metadata_read(&opctx, v.id).await {
                 Ok(s) => (s.comment, Some(s.time_created)),
                 Err(e) => {
+                    // If the sitrep has an entry in the history table, we
+                    // expect that it will not yet have been archived and
+                    // deleted, so this is an error rather a case of it just
+                    // no longer existing.
                     eprintln!(
-                        "failed to get fetch metadata for sitrep {} (v{}): {e}",
+                        "failed to fetch metadata for sitrep {} (v{}): {e}",
                         v.id, v.version
                     );
                     ("<ERROR>".to_string(), None)
