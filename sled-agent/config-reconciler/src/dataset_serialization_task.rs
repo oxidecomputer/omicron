@@ -2822,7 +2822,7 @@ mod illumos_tests {
                 .insert_unique(make_dataset_config(zpool, DatasetKind::Debug))
                 .unwrap();
             datasets
-                .insert(make_dataset_config(
+                .insert_unique(make_dataset_config(
                     zpool,
                     DatasetKind::TransientZoneRoot,
                 ))
