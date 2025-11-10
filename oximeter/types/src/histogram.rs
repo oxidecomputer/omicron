@@ -299,14 +299,6 @@ pub struct Bin<T> {
 /// implement conversion(s).
 struct Bins<T>(Vec<Bin<T>>);
 
-/// Simplify quantiles to an estimate to abstract the details of the algorithm from the user.
-fn serialize_quantile<S>(q: &Quantile, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    q.estimate().ok().serialize(serializer)
-}
-
 /// Histogram metric
 ///
 /// A histogram maintains the count of any number of samples, over a set of bins. Bins are
@@ -390,16 +382,10 @@ where
     /// for more information on the algorithm.
     squared_mean: f64,
     /// p50 Quantile
-    #[serde(serialize_with = "serialize_quantile")]
-    #[schemars(with = "Option<f64>")]
     p50: Quantile,
     /// p95 Quantile
-    #[serde(serialize_with = "serialize_quantile")]
-    #[schemars(with = "Option<f64>")]
     p90: Quantile,
     /// p99 Quantile
-    #[serde(serialize_with = "serialize_quantile")]
-    #[schemars(with = "Option<f64>")]
     p99: Quantile,
 }
 
