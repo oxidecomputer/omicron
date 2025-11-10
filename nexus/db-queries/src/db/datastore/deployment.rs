@@ -2939,7 +2939,6 @@ impl InsertTargetQuery {
     fn to_query(self) -> TypedSqlQuery<()> {
         let mut builder = QueryBuilder::new();
 
-        // Capture values into owned variables to satisfy 'static lifetime requirements
         let target_id = *self.target_id.as_untyped_uuid();
         let enabled = self.enabled;
         let time_made_target = self.time_made_target;
@@ -4808,7 +4807,7 @@ mod tests {
 
         expectorate_query_contents(
             &query.to_query(),
-            "tests/output/insert_target_query.sql",
+            "tests/output/insert_target_blueprint_query.sql",
         )
         .await;
     }
