@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20251008.0.0"
+    "version": "20251208.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -10431,36 +10431,6 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
-      "delete": {
-        "tags": [
-          "system/silos"
-        ],
-        "summary": "Delete all SCIM tokens",
-        "description": "Specify the silo by name or ID using the `silo` query parameter.",
-        "operationId": "scim_token_delete_all",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "silo",
-            "description": "Name or ID of the silo",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
       }
     },
     "/v1/system/scim/tokens/{token_id}": {
@@ -11214,7 +11184,7 @@
         "tags": [
           "system/update"
         ],
-        "summary": "Fetch system release repository description by version",
+        "summary": "Fetch system release repository by version",
         "operationId": "system_update_repository_view",
         "parameters": [
           {
@@ -14957,6 +14927,25 @@
               "kind",
               "silo_id",
               "silo_user_id"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "scim"
+                ]
+              },
+              "silo_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "kind",
+              "silo_id"
             ]
           },
           {
@@ -23067,6 +23056,7 @@
         "enum": [
           "admin",
           "collaborator",
+          "limited_collaborator",
           "viewer"
         ]
       },
@@ -24310,6 +24300,7 @@
         "enum": [
           "admin",
           "collaborator",
+          "limited_collaborator",
           "viewer"
         ]
       },

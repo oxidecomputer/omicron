@@ -575,7 +575,11 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        // NOTE: This is the IPv4 address, despite the name. We kept the
+        // original name of `ip` because renaming columns is not idempotent in
+        // CRDB as of today.
+        ip -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
         transit_ips -> Array<Inet>,
@@ -594,7 +598,8 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
         transit_ips -> Array<Inet>,
@@ -614,7 +619,8 @@ table! {
         vpc_id -> Uuid,
         subnet_id -> Uuid,
         mac -> Int8,
-        ip -> Inet,
+        ipv4 -> Nullable<Inet>,
+        ipv6 -> Nullable<Inet>,
         slot -> Int2,
         is_primary -> Bool,
     }
@@ -2792,3 +2798,64 @@ table! {
         result_kind -> crate::enums::AuditLogResultKindEnum,
     }
 }
+
+table! {
+    scim_client_bearer_token (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        time_expires -> Nullable<Timestamptz>,
+
+        silo_id -> Uuid,
+
+        bearer_token -> Text,
+    }
+}
+
+table! {
+    rendezvous_local_storage_dataset (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_tombstoned -> Nullable<Timestamptz>,
+
+        blueprint_id_when_created -> Uuid,
+        blueprint_id_when_tombstoned -> Nullable<Uuid>,
+
+        pool_id -> Uuid,
+
+        size_used -> Int8,
+
+        no_provision -> Bool,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(zpool, rendezvous_local_storage_dataset);
+allow_tables_to_appear_in_same_query!(
+    physical_disk,
+    rendezvous_local_storage_dataset
+);
+
+table! {
+    fm_sitrep (id) {
+        id -> Uuid,
+        parent_sitrep_id -> Nullable<Uuid>,
+        inv_collection_id -> Uuid,
+        time_created -> Timestamptz,
+        creator_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, inv_collection);
+
+table! {
+    fm_sitrep_history (version) {
+        version -> Int8,
+        sitrep_id -> Uuid,
+        time_made_current -> Timestamptz,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);

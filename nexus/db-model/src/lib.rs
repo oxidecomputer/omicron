@@ -51,10 +51,12 @@ mod internet_gateway;
 mod inventory;
 mod ip_pool;
 mod ipnet;
+pub mod ipv4;
 mod ipv4net;
 pub mod ipv6;
 mod ipv6net;
 mod l4_port_range;
+mod local_storage;
 mod macaddr;
 mod migration;
 mod migration_state;
@@ -71,6 +73,7 @@ mod producer_endpoint;
 mod project;
 mod reconfigurator_config;
 mod rendezvous_debug_dataset;
+mod scim_client_bearer_token;
 mod semver_version;
 mod serde_time_delta;
 mod silo_auth_settings;
@@ -87,6 +90,7 @@ mod webhook_rx;
 // for join-based marker trait generation.
 mod deployment;
 mod ereport;
+pub mod fm;
 pub mod nat_entry;
 mod omicron_zone_config;
 mod quota;
@@ -179,6 +183,7 @@ pub use dns::*;
 pub use downstairs::*;
 pub use ereport::*;
 pub use external_ip::*;
+pub use fm::*;
 pub use generation::*;
 pub use identity_provider::*;
 pub use image::*;
@@ -192,10 +197,12 @@ pub use internet_gateway::*;
 pub use inventory::*;
 pub use ip_pool::*;
 pub use ipnet::*;
+pub use ipv4::*;
 pub use ipv4net::*;
 pub use ipv6::*;
 pub use ipv6net::*;
 pub use l4_port_range::*;
+pub use local_storage::*;
 pub use migration::*;
 pub use migration_state::*;
 pub use name::*;
@@ -223,6 +230,7 @@ pub use rendezvous_debug_dataset::*;
 pub use role_assignment::*;
 pub use saga_types::*;
 pub use schema_versions::*;
+pub use scim_client_bearer_token::*;
 pub use semver_version::*;
 pub use service_kind::*;
 pub use silo::*;
@@ -480,6 +488,7 @@ impl DatabaseString for SiloRole {
         match self {
             SiloRole::Admin => "admin",
             SiloRole::Collaborator => "collaborator",
+            SiloRole::LimitedCollaborator => "limited-collaborator",
             SiloRole::Viewer => "viewer",
         }
         .into()
@@ -492,6 +501,7 @@ impl DatabaseString for SiloRole {
         match s {
             "admin" => Ok(SiloRole::Admin),
             "collaborator" => Ok(SiloRole::Collaborator),
+            "limited-collaborator" => Ok(SiloRole::LimitedCollaborator),
             "viewer" => Ok(SiloRole::Viewer),
             _ => Err(anyhow!("unsupported Silo role from database: {:?}", s)),
         }
@@ -505,6 +515,7 @@ impl DatabaseString for ProjectRole {
         match self {
             ProjectRole::Admin => "admin",
             ProjectRole::Collaborator => "collaborator",
+            ProjectRole::LimitedCollaborator => "limited-collaborator",
             ProjectRole::Viewer => "viewer",
         }
         .into()
@@ -517,6 +528,7 @@ impl DatabaseString for ProjectRole {
         match s {
             "admin" => Ok(ProjectRole::Admin),
             "collaborator" => Ok(ProjectRole::Collaborator),
+            "limited-collaborator" => Ok(ProjectRole::LimitedCollaborator),
             "viewer" => Ok(ProjectRole::Viewer),
             _ => {
                 Err(anyhow!("unsupported Project role from database: {:?}", s))

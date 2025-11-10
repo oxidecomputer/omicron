@@ -135,7 +135,7 @@ use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::collections::{BTreeMap, BTreeSet, btree_map};
 use std::collections::{HashMap, HashSet};
 use std::iter;
@@ -161,19 +161,19 @@ impl RssProgress {
 }
 
 /// Describes errors which may occur while operating the setup service.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, SlogInlineError)]
 pub enum SetupServiceError {
-    #[error("I/O error while {message}: {err}")]
+    #[error("I/O error while {message}")]
     Io {
         message: String,
         #[source]
         err: std::io::Error,
     },
 
-    #[error("Failed to access ledger: {0}")]
+    #[error("Failed to access ledger")]
     Ledger(#[from] ledger::Error),
 
-    #[error("Cannot create plan for sled services: {0}")]
+    #[error("Cannot create plan for sled services")]
     ServicePlan(#[from] ServicePlanError),
 
     #[error("Bad configuration for setting up rack: {0}")]
@@ -203,37 +203,37 @@ pub enum SetupServiceError {
     #[error("Error resetting sled: {0}")]
     SledReset(String),
 
-    #[error("Error making HTTP request to Sled Agent: {0}")]
+    #[error("Error making HTTP request to Sled Agent")]
     SledApi(#[from] SledAgentError<SledAgentTypes::Error>),
 
     #[error("Sled config not yet reconciled: {0}")]
     ConfigNotYetReconciled(String),
 
-    #[error("Error making HTTP request to Nexus: {0}")]
+    #[error("Error making HTTP request to Nexus")]
     NexusApi(#[from] NexusError<NexusTypes::Error>),
 
     #[error("Error making HTTP request to NTP Admin Server")]
     NtpAdminApi(#[from] NtpAdminError<ntp_admin_client::types::Error>),
 
-    #[error("Error contacting ddmd: {0}")]
+    #[error("Error contacting ddmd")]
     DdmError(#[from] DdmError),
 
-    #[error("Failed to monitor for peers: {0}")]
+    #[error("Failed to monitor for peers")]
     PeerMonitor(#[from] tokio::sync::broadcast::error::RecvError),
 
-    #[error("Failed to construct an HTTP client: {0}")]
-    HttpClient(reqwest::Error),
+    #[error("Failed to construct an HTTP client")]
+    HttpClient(#[from] reqwest::Error),
 
-    #[error("Failed to access DNS servers: {0}")]
+    #[error("Failed to access DNS servers")]
     Dns(#[from] DnsError),
 
     #[error("Error during request to Dendrite: {0}")]
     Dendrite(String),
 
-    #[error("Error during DNS lookup: {0}")]
+    #[error("Error during DNS lookup")]
     DnsResolver(#[from] internal_dns_resolver::ResolveError),
 
-    #[error("Bootstore error: {0}")]
+    #[error("Bootstore error")]
     Bootstore(#[from] bootstore::NodeRequestError),
 
     #[error("Failed to convert setup plan to blueprint: {0:#}")]
@@ -417,11 +417,11 @@ impl ServiceInner {
                 error,
             )));
         };
-        let log_failure = |error, delay| {
+        let log_failure = |error: SetupServiceError, delay| {
             warn!(
                 log,
                 "failed to set sled Omicron config";
-                "error" => #%error,
+                &error,
                 "retry_after" => ?delay,
             );
         };
@@ -541,11 +541,11 @@ impl ServiceInner {
                 ))
             }
         };
-        let log_failure = |error, delay| {
+        let log_failure = |error: SetupServiceError, delay| {
             warn!(
                 log,
                 "sled config not yet reconciled";
-                "error" => #%error,
+                &error,
                 "retry_after" => ?delay,
             );
         };
@@ -1994,8 +1994,8 @@ mod test {
         )
         .expect("built blueprint");
 
-        let report =
-            Blippy::new(&blueprint).into_report(BlippyReportSortKey::Kind);
+        let report = Blippy::new_blueprint_only(&blueprint)
+            .into_report(BlippyReportSortKey::Kind);
 
         if !report.notes().is_empty() {
             eprintln!("{}", report.display());

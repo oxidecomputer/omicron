@@ -53,6 +53,7 @@ use parallel_task_set::ParallelTaskSet;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -176,12 +177,16 @@ impl SupportBundleCollector {
                 return Ok(SledAgentBundleCleanupResult::Deleted);
             }
             Err(progenitor_client::Error::ErrorResponse(err))
-                if err.status() == http::StatusCode::NOT_FOUND =>
+                if err.status() == http::StatusCode::NOT_FOUND
+                    && err.error_code.as_ref().is_some_and(|code| {
+                        code.contains(NESTED_DATASET_NOT_FOUND)
+                    }) =>
             {
                 warn!(
                     &opctx.log,
                     "SupportBundleCollector could not delete bundle (not found)";
-                    "id" => %bundle.id
+                    "id" => %bundle.id,
+                    "err" => ?err
                 );
 
                 return Ok(SledAgentBundleCleanupResult::NotFound);
@@ -502,51 +507,64 @@ impl BundleCollection {
         self: &Arc<Self>,
         dir: &Utf8TempDir,
     ) -> anyhow::Result<SupportBundleCollectionReport> {
-        let mut collection = Box::pin(self.collect_bundle_as_file(&dir));
+        // TL;DR: This `tokio::select` is allowed to poll multiple futures, but
+        // should not do any async work within the body of any chosen branch. A
+        // previous iteration of this code polled the "collection" as "&mut
+        // collection", and checked the status of the support bundle within a
+        // branch of the "select" polling "yield_interval.tick()".
+        //
+        // We organize this work to "check for cancellation" as a whole future
+        // for a critical, but subtle reason: After the tick timer yields,
+        // we may then try to `await` a database function.
+        //
+        // This, at a surface-level glance seems innocent enough. However, there
+        // is something potentially insidious here: if calling a datastore
+        // function - such as "support_bundle_get" - awaits acquiring access
+        // to a connection from the connection pool, while creating the
+        // collection ALSO potentially awaits acquiring access to the
+        // connection pool, it is possible for:
+        //
+        // 1. The `&mut collection` arm to have created a future, currently
+        //    yielded, which wants access to this underlying resource.
+        // 2. The current operation executing in `support_bundle_get` to
+        //    be awaiting access to this same underlying resource.
+        //
+        // In this specific case, the connection pool would be attempting to
+        // yield to the `&mut collection` arm, which cannot run, if we were
+        // awaiting in the body of a different async select arm. This would
+        // result in a deadlock.
+        //
+        // In the future, we may attempt to make access to the connection pool
+        // safer from concurrent asynchronous access - it is unsettling that
+        // multiple concurrent `.claim()` functions can cause this behavior -
+        // but in the meantime, we perform this cancellation check in a single
+        // future that always is polled concurrently with the collection work.
+        // Because of this separation, each future is polled until one
+        // completes, at which point we deterministically exit.
+        //
+        // For more details, see:
+        // https://github.com/oxidecomputer/omicron/issues/9259
 
-        // We periodically check the state of the support bundle - if a user
-        // explicitly cancels it, we should stop the collection process and
-        // return.
-        let work_duration = tokio::time::Duration::from_secs(5);
-        let mut yield_interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + work_duration,
-            work_duration,
-        );
-
-        loop {
-            tokio::select! {
-                // Timer fired mid-collection - let's check if we should stop.
-                _ = yield_interval.tick() => {
-                    trace!(
-                        &self.log,
-                        "Checking if Bundle Collection cancelled";
-                        "bundle" => %self.bundle.id
-                    );
-
-                    let bundle = self.datastore.support_bundle_get(
-                        &self.opctx,
-                        self.bundle.id.into()
-                    ).await?;
-                    if !matches!(bundle.state, SupportBundleState::Collecting) {
-                        warn!(
-                            &self.log,
-                            "Support Bundle cancelled - stopping collection";
-                            "bundle" => %self.bundle.id,
-                            "state" => ?self.bundle.state
-                        );
-                        anyhow::bail!("Support Bundle Cancelled");
-                    }
-                },
-                // Otherwise, keep making progress on the collection itself.
-                report = &mut collection => {
-                    info!(
-                        &self.log,
-                        "Bundle Collection completed";
-                        "bundle" => %self.bundle.id
-                    );
-                    return report;
-                },
-            }
+        tokio::select! {
+            // Returns if the bundle should no longer be collected.
+            why = self.check_for_cancellation() => {
+                warn!(
+                    &self.log,
+                    "Support Bundle cancelled - stopping collection";
+                    "bundle" => %self.bundle.id,
+                    "state" => ?self.bundle.state
+                );
+                return Err(why);
+            },
+            // Otherwise, keep making progress on the collection itself.
+            report = self.collect_bundle_as_file(&dir) => {
+                info!(
+                    &self.log,
+                    "Bundle Collection completed";
+                    "bundle" => %self.bundle.id
+                );
+                return report;
+            },
         }
     }
 
@@ -654,6 +672,65 @@ impl BundleCollection {
         // Returning from this method should drop all temporary storage
         // allocated locally for this support bundle.
         Ok(())
+    }
+
+    // Indefinitely perform periodic checks about whether or not we should
+    // cancel the bundle.
+    //
+    // Returns an error if:
+    // - The bundle state is no longer SupportBundleState::Collecting
+    // (which happens if the bundle has been explicitly cancelled, or
+    // if the backing storage has been expunged).
+    // - The bundle has been deleted
+    //
+    // Otherwise, keeps checking indefinitely while polled.
+    async fn check_for_cancellation(&self) -> anyhow::Error {
+        let work_duration = tokio::time::Duration::from_secs(5);
+        let mut yield_interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + work_duration,
+            work_duration,
+        );
+
+        loop {
+            // Timer fired mid-collection - check if we should stop.
+            yield_interval.tick().await;
+            trace!(
+                self.log,
+                "Checking if Bundle Collection cancelled";
+                "bundle" => %self.bundle.id
+            );
+
+            match self
+                .datastore
+                .support_bundle_get(&self.opctx, self.bundle.id.into())
+                .await
+            {
+                Ok(SupportBundle {
+                    state: SupportBundleState::Collecting,
+                    ..
+                }) => {
+                    // Bundle still collecting; continue...
+                    continue;
+                }
+                Ok(_) => {
+                    // Not collecting, for any reason: Time to exit
+                    return anyhow::anyhow!("Support Bundle Cancelled");
+                }
+                Err(Error::ObjectNotFound { .. } | Error::NotFound { .. }) => {
+                    return anyhow::anyhow!("Support Bundle Deleted");
+                }
+                Err(err) => {
+                    warn!(
+                        self.log,
+                        "Database error checking bundle cancellation";
+                        InlineErrorChain::new(&err)
+                    );
+
+                    // If we cannot contact the database, retry later
+                    continue;
+                }
+            }
+        }
     }
 
     // Perform the work of collecting the support bundle into a temporary directory

@@ -11,7 +11,6 @@ use crate::blueprint_editor::EditedSled;
 use crate::blueprint_editor::ExternalNetworkingChoice;
 use crate::blueprint_editor::ExternalNetworkingError;
 use crate::blueprint_editor::ExternalSnatNetworkingChoice;
-use crate::blueprint_editor::NoAvailableDnsSubnets;
 use crate::blueprint_editor::SledEditError;
 use crate::blueprint_editor::SledEditor;
 use crate::mgs_updates::PendingHostPhase2Changes;
@@ -65,6 +64,7 @@ use nexus_types::inventory::Collection;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
+use omicron_common::address::DnsSubnet;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::api::external::Generation;
@@ -137,8 +137,10 @@ pub enum Error {
     },
     #[error("error constructing resource allocator")]
     AllocatorInput(#[from] BlueprintResourceAllocatorInputError),
-    #[error("error allocating internal DNS subnet")]
-    AllocateInternalDnsSubnet(#[from] NoAvailableDnsSubnets),
+    #[error("no commissioned sleds - rack subnet is unknown")]
+    RackSubnetUnknownNoSleds,
+    #[error("no reserved subnets available for internal DNS")]
+    NoAvailableDnsSubnets,
     #[error("error allocating external networking resources")]
     AllocateExternalNetworking(#[from] ExternalNetworkingError),
     #[error("zone is already up-to-date and should not be updated")]
@@ -693,6 +695,40 @@ impl<'a> BlueprintBuilder<'a> {
         self.new_blueprint_id
     }
 
+    pub fn available_internal_dns_subnets(
+        &self,
+    ) -> Result<impl Iterator<Item = DnsSubnet>, Error> {
+        // TODO-multirack We need the rack subnet to know what the reserved
+        // internal DNS subnets are. Pick any sled; this isn't right in
+        // multirack (either DNS will be on a wider subnet or we need to pick a
+        // particular rack subnet here?).
+        let any_sled_subnet = self
+            .input
+            .all_sled_resources(SledFilter::Commissioned)
+            .map(|(_sled_id, resources)| resources.subnet)
+            .next()
+            .ok_or(Error::RackSubnetUnknownNoSleds)?;
+        let rack_subnet = ReservedRackSubnet::from_subnet(any_sled_subnet);
+
+        // Compute the "in use" subnets; this includes all in-service internal
+        // DNS zones _and_ any "expunged but not yet confirmed to be gone"
+        // zones, so we use the somewhat unusual `could_be_running` filter
+        // instead of the more typical `is_in_service`.
+        let internal_dns_subnets_in_use = self
+            .current_zones(BlueprintZoneDisposition::could_be_running)
+            .filter_map(|(_sled_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::InternalDns(internal_dns) => {
+                    Some(DnsSubnet::from_addr(*internal_dns.dns_address.ip()))
+                }
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+
+        Ok(rack_subnet.get_dns_subnets().into_iter().filter(move |subnet| {
+            !internal_dns_subnets_in_use.contains(&subnet)
+        }))
+    }
+
     pub fn planning_input(&self) -> &PlanningInput {
         &self.input
     }
@@ -715,7 +751,7 @@ impl<'a> BlueprintBuilder<'a> {
 
             let allocator = BlueprintResourceAllocator::new(
                 self.sled_editors.values(),
-                self.input.service_ip_pool_ranges().to_vec(),
+                self.input.external_ip_policy(),
             )?;
 
             Ok::<_, Error>(allocator)
@@ -1381,12 +1417,9 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        dns_subnet: DnsSubnet,
     ) -> Result<(), Error> {
         let gz_address_index = self.next_internal_dns_gz_address_index(sled_id);
-        let sled_subnet = self.sled_resources(sled_id)?.subnet;
-        let rack_subnet = ReservedRackSubnet::from_subnet(sled_subnet);
-        let dns_subnet =
-            self.resource_allocator()?.next_internal_dns_subnet(rack_subnet)?;
         let address = dns_subnet.dns_address();
         let zpool = self.sled_select_zpool(sled_id, ZoneKind::InternalDns)?;
         let zone_type =
@@ -2240,20 +2273,6 @@ impl<'a> BlueprintBuilder<'a> {
         });
     }
 
-    /// Allow a test to manually add an external DNS address, which could
-    /// ordinarily only come from RSS.
-    ///
-    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    // This can't be `#[cfg(test)]` because it's used by the `ExampleSystem`
-    // helper (which itself is used by reconfigurator-cli and friends). We give
-    // it a scary name instead.
-    pub(crate) fn inject_untracked_external_dns_ip(
-        &mut self,
-        addr: IpAddr,
-    ) -> Result<(), Error> {
-        Ok(self.resource_allocator()?.inject_untracked_external_dns_ip(addr)?)
-    }
-
     pub fn pending_mgs_updates_replace_all(
         &mut self,
         updates: nexus_types::deployment::PendingMgsUpdates,
@@ -2770,6 +2789,7 @@ pub mod test {
     use nexus_reconfigurator_blippy::BlippyReportSortKey;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintDatasetDisposition;
+    use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
@@ -2783,9 +2803,12 @@ pub mod test {
 
     /// Checks various conditions that should be true for all blueprints
     #[track_caller]
-    pub fn verify_blueprint(blueprint: &Blueprint) {
-        let blippy_report =
-            Blippy::new(blueprint).into_report(BlippyReportSortKey::Kind);
+    pub fn verify_blueprint(
+        blueprint: &Blueprint,
+        planning_input: &PlanningInput,
+    ) {
+        let blippy_report = Blippy::new(blueprint, planning_input)
+            .into_report(BlippyReportSortKey::Kind);
         if !blippy_report.notes().is_empty() {
             eprintln!("{}", blueprint.display());
             eprintln!("---");
@@ -2804,7 +2827,7 @@ pub mod test {
             rng.next_system_rng(),
         )
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -2841,7 +2864,7 @@ pub mod test {
         }
 
         let blueprint2 = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint2);
+        verify_blueprint(&blueprint2, &example.input);
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
@@ -2890,7 +2913,7 @@ pub mod test {
         builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
 
         let blueprint3 = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint3);
+        verify_blueprint(&blueprint3, &input);
         let summary = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
             "expecting new NTP and Crucible zones:\n{}",
@@ -2985,7 +3008,7 @@ pub mod test {
         let mut rng = SimRngState::from_seed(TEST_NAME);
         let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME);
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &input);
 
         // Mark one sled as having a desired state of decommissioned.
         let decommision_sled_id =
@@ -3037,7 +3060,7 @@ pub mod test {
         )
         .expect("created builder")
         .build(BlueprintSource::Test);
-        verify_blueprint(&blueprint2);
+        verify_blueprint(&blueprint2, &input);
 
         // We carried forward the desired state.
         assert_eq!(
@@ -3075,7 +3098,7 @@ pub mod test {
         )
         .expect("created builder")
         .build(BlueprintSource::Test);
-        verify_blueprint(&blueprint3);
+        verify_blueprint(&blueprint3, &input);
         assert_eq!(
             blueprint3.sleds.get(&decommision_sled_id).map(|c| c.state),
             Some(SledState::Decommissioned),
@@ -3142,11 +3165,11 @@ pub mod test {
                     }
                 );
                 // Each disk addition should also result in a debug + zone root
-                // dataset addition.
+                // + local storage dataset addition.
                 assert_eq!(
                     edits.datasets,
                     EditCounts {
-                        added: 2 * usize::from(SledBuilder::DEFAULT_NPOOLS),
+                        added: 3 * usize::from(SledBuilder::DEFAULT_NPOOLS),
                         updated: 0,
                         expunged: 0,
                         removed: 0
@@ -3201,7 +3224,7 @@ pub mod test {
         // `sled_ensure_datasets`.
         //
         // Verify that it has created the datasets we expect to exist.
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -3256,7 +3279,7 @@ pub mod test {
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
@@ -3274,7 +3297,7 @@ pub mod test {
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
 
         // Find the datasets we've expunged in the blueprint
         let expunged_datasets = blueprint
@@ -3508,7 +3531,13 @@ pub mod test {
             assert!(!used_ip_ranges.is_empty());
             let input = {
                 let mut builder = input.into_builder();
-                builder.policy_mut().service_ip_pool_ranges = used_ip_ranges;
+                builder.policy_mut().external_ips = {
+                    let mut ip_policy = ExternalIpPolicy::builder();
+                    for r in used_ip_ranges {
+                        ip_policy.push_service_pool_range(r).unwrap();
+                    }
+                    ip_policy.build()
+                };
                 builder.build()
             };
 
@@ -3610,7 +3639,7 @@ pub mod test {
         builder.sled_ensure_zone_datasets(target_sled_id).unwrap();
 
         let blueprint = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
         assert_eq!(
             blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)

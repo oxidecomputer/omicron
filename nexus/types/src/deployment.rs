@@ -102,6 +102,9 @@ pub use planning_input::CockroachDbClusterVersion;
 pub use planning_input::CockroachDbPreserveDowngrade;
 pub use planning_input::CockroachDbSettings;
 pub use planning_input::DiskFilter;
+pub use planning_input::ExternalIpPolicy;
+pub use planning_input::ExternalIpPolicyBuilder;
+pub use planning_input::ExternalIpPolicyError;
 pub use planning_input::OximeterReadMode;
 pub use planning_input::OximeterReadPolicy;
 pub use planning_input::PlanningInput;
@@ -479,7 +482,7 @@ impl Blueprint {
         nexus_id: OmicronZoneUuid,
     ) -> Result<Generation, Error> {
         for (_sled_id, zone_config, nexus_config) in
-            self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+            self.all_nexus_zones(BlueprintZoneDisposition::could_be_running)
         {
             if zone_config.id == nexus_id {
                 return Ok(nexus_config.nexus_generation);
@@ -1612,7 +1615,11 @@ impl PendingMgsUpdate {
             PendingMgsUpdateDetails::Sp { .. } => "SP",
             PendingMgsUpdateDetails::Rot { .. } => "RoT",
             PendingMgsUpdateDetails::RotBootloader { .. } => "RoT bootloader",
-            PendingMgsUpdateDetails::HostPhase1(_) => "host phase 1",
+            // While the `PendingMgsUpdate` technically describes a host phase 1
+            // update, the human-useful description is that it describes a "host
+            // OS" update: it embeds a dependency that the phase 2 is updated
+            // too, and once it's enacted the full OS will be updated.
+            PendingMgsUpdateDetails::HostPhase1(_) => "host OS",
         };
         format!("update {sp_type:?} {slot_id} ({serial}) {kind} to {version}")
     }

@@ -576,8 +576,8 @@ source.type = "prebuilt"
 source.repo = "management-gateway-service"
 # In general, this commit should match the pinned revision of `gateway-sp-comms`
 # in `Cargo.toml`.
-source.commit = "6bd2660d651332f38949cdfd3d23d751ca54b120"
-source.sha256 = "bf38d83d61ea7b2923fc7bd3aa563627e1f270b4bf18b1fc7bc744ddedc3b8bc"
+source.commit = "669fe557b66f44aed3c622bd17bc092f08797e0c"
+source.sha256 = "a32b40a0581bab2d90f6f691ef17fcfb1c5925798afb7f8ab86e6ece168e637d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -595,10 +595,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "102b0bb8305cfbc3fa74c52d643d716653756372"
+source.commit = "75ea3408643664877aa603ffc65996ed6dc34c0a"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "5edb5f8b85002115bdf81bcfbbf3bb233b8ee560e1d315a8e2b9989ec9dc43fc"
+source.sha256 = "fd0e150de5792a1d04b2cf4c4754d828284227ee4526ea5d08b01cfa71e2dd6a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -607,10 +607,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "102b0bb8305cfbc3fa74c52d643d716653756372"
+source.commit = "75ea3408643664877aa603ffc65996ed6dc34c0a"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "d0ec6e365cf9e918d7aa4711dc48b4eec9362b37d5becfa3133895dff801ceca"
+source.sha256 = "096b56c0db4e28a8bb216ee3bf96c06040a764101d8a3f497a175cf790613bd2"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -624,10 +624,10 @@ service_name = "crucible_dtrace"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "102b0bb8305cfbc3fa74c52d643d716653756372"
+source.commit = "75ea3408643664877aa603ffc65996ed6dc34c0a"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-dtrace.sha256.txt
-source.sha256 = "580fc58e717e245ea8a8171e25d7765edf58d57d3d9d190cdf61a4a1cae474be"
+source.sha256 = "46d1ec24e068124f33d3fbc2bcb4246c886089da95ba76a0a69a8facee1dc8ec"
 output.type = "tarball"
 
 # Refer to
@@ -638,10 +638,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "8e9252917993e36d43dce96b4409ef151b7d4442"
+source.commit = "aaa51291b747928a1d69e4b6059a54163d4d2e6d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "1fd3dbec9d7ba89a8805e0c759c770d2b90a4c35a677dca43171ba866d6675bf"
+source.sha256 = "9c5aee66f1b70d63cc0cbc02ad15821614691678563c5f9375632c72b1696761"
 output.type = "zone"
 
 [package.mg-ddm-gz]
