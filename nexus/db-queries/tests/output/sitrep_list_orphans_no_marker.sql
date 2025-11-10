@@ -19,7 +19,7 @@ WHERE
       WHERE
         h.sitrep_id IS NULL
         AND (
-            b.parent_sitrep_id IS NULL
+            (b.parent_sitrep_id IS NULL AND (SELECT sitrep_id FROM current_sitrep_id) IS NOT NULL)
             OR b.parent_sitrep_id != (SELECT sitrep_id FROM current_sitrep_id)
           )
     )
