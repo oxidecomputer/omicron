@@ -10,13 +10,11 @@ use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
 use crate::db::model::DbEna;
 use crate::db::model::Ereport;
-use crate::db::model::HostEreport;
-use crate::db::model::Reporter;
-use crate::db::model::SpEreport;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
 use crate::db::model::SqlU32;
+use crate::db::model::ereport as model;
 use crate::db::pagination::{paginated, paginated_multicolumn};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
@@ -26,8 +24,8 @@ use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
-use nexus_db_schema::schema::host_ereport::dsl as host_dsl;
-use nexus_db_schema::schema::sp_ereport::dsl as sp_dsl;
+use nexus_db_schema::schema::ereport::dsl;
+use nexus_types::fm::ereport::{self as fm, EreportId, Reporter};
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -95,76 +93,62 @@ impl DataStore {
     pub async fn ereport_fetch(
         &self,
         opctx: &OpContext,
-        id: ereport_types::EreportId,
+        id: fm::EreportId,
     ) -> LookupResult<Ereport> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         let restart_id = id.restart_id.into_untyped_uuid();
         let ena = DbEna::from(id.ena);
 
-        if let Some(report) = sp_dsl::sp_ereport
-            .filter(sp_dsl::restart_id.eq(restart_id))
-            .filter(sp_dsl::ena.eq(ena))
-            .filter(sp_dsl::time_deleted.is_null())
-            .select(SpEreport::as_select())
+        let ereport = dsl::ereport
+            .filter(dsl::restart_id.eq(restart_id))
+            .filter(dsl::ena.eq(ena))
+            .filter(dsl::time_deleted.is_null())
+            .select(Ereport::as_select())
             .first_async(&*conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        {
-            return Ok(report.into());
-        }
-
-        if let Some(report) = host_dsl::host_ereport
-            .filter(host_dsl::restart_id.eq(restart_id))
-            .filter(host_dsl::ena.eq(ena))
-            .filter(host_dsl::time_deleted.is_null())
-            .select(HostEreport::as_select())
-            .first_async(&*conn)
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-        {
-            return Ok(report.into());
-        }
-
-        Err(Error::non_resourcetype_not_found(format!("ereport {id}")))
+            .ok_or_else(|| {
+                Error::non_resourcetype_not_found(format!("ereport {id}"))
+            })?;
+        Ok(ereport.into())
     }
 
-    pub async fn host_ereports_fetch_matching(
+    pub async fn ereport_fetch_matching(
         &self,
         opctx: &OpContext,
         filters: &EreportFilters,
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
-    ) -> ListResultVec<HostEreport> {
+    ) -> ListResultVec<Ereport> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         filters.check_time_range()?;
 
         let mut query = paginated_multicolumn(
-            host_dsl::host_ereport,
-            (host_dsl::restart_id, host_dsl::ena),
+            dsl::ereport,
+            (dsl::restart_id, dsl::ena),
             pagparams,
         )
-        .filter(host_dsl::time_deleted.is_null())
-        .select(HostEreport::as_select());
+        .filter(dsl::time_deleted.is_null())
+        .select(model::Ereport::as_select());
 
         if let Some(start) = filters.start_time {
-            query = query.filter(host_dsl::time_collected.ge(start));
+            query = query.filter(dsl::time_collected.ge(start));
         }
 
         if let Some(end) = filters.end_time {
-            query = query.filter(host_dsl::time_collected.le(end));
+            query = query.filter(dsl::time_collected.le(end));
         }
 
         if !filters.only_serials.is_empty() {
             query = query.filter(
-                host_dsl::sled_serial.eq_any(filters.only_serials.clone()),
+                dsl::serial_number.eq_any(filters.only_serials.clone()),
             );
         }
 
         if !filters.only_classes.is_empty() {
-            query = query
-                .filter(host_dsl::class.eq_any(filters.only_classes.clone()));
+            query =
+                query.filter(dsl::class.eq_any(filters.only_classes.clone()));
         }
 
         query
@@ -173,60 +157,18 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    pub async fn sp_ereports_fetch_matching(
-        &self,
-        opctx: &OpContext,
-        filters: &EreportFilters,
-        pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
-    ) -> ListResultVec<SpEreport> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        filters.check_time_range()?;
-
-        let mut query = paginated_multicolumn(
-            sp_dsl::sp_ereport,
-            (sp_dsl::restart_id, sp_dsl::ena),
-            pagparams,
-        )
-        .filter(sp_dsl::time_deleted.is_null())
-        .select(SpEreport::as_select());
-
-        if let Some(start) = filters.start_time {
-            query = query.filter(sp_dsl::time_collected.ge(start));
-        }
-
-        if let Some(end) = filters.end_time {
-            query = query.filter(sp_dsl::time_collected.le(end));
-        }
-
-        if !filters.only_serials.is_empty() {
-            query = query.filter(
-                sp_dsl::serial_number.eq_any(filters.only_serials.clone()),
-            );
-        }
-
-        if !filters.only_classes.is_empty() {
-            query = query
-                .filter(sp_dsl::class.eq_any(filters.only_classes.clone()));
-        }
-
-        query
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// List ereports from the SP with the given restart ID.
-    pub async fn sp_ereport_list_by_restart(
+    /// List ereports from the reporter with the given restart ID.
+    pub async fn ereport_list_by_restart(
         &self,
         opctx: &OpContext,
         restart_id: EreporterRestartUuid,
         pagparams: &DataPageParams<'_, DbEna>,
-    ) -> ListResultVec<SpEreport> {
+    ) -> ListResultVec<Ereport> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        paginated(sp_dsl::sp_ereport, sp_dsl::ena, pagparams)
-            .filter(sp_dsl::restart_id.eq(restart_id.into_untyped_uuid()))
-            .filter(sp_dsl::time_deleted.is_null())
-            .select(SpEreport::as_select())
+        paginated(dsl::ereport, dsl::ena, pagparams)
+            .filter(dsl::restart_id.eq(restart_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
+            .select(model::Ereport::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -241,123 +183,99 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
 
         let conn = &*self.pool_connection_authorized(opctx).await?;
-        let sp_rows = Self::sp_restart_list_by_serial_query(serial.clone())
-            .load_async::<(Uuid, SpType, SqlU16, Option<DateTime<Utc>>, SqlU32)>(
-                conn,
-            )
+        let rows = Self::restart_list_by_serial_query(serial.clone())
+            .load_async::<(
+                Uuid,
+                model::ereport::Reporter,
+                Option<DateTime<Utc>>,
+                SqlU32,
+            )>(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        let host_os_rows =
-            Self::host_restart_list_by_serial_query(serial.clone())
-                .load_async::<(Uuid, Uuid, Option<DateTime<Utc>>, SqlU32)>(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                        .internal_context("listing SP ereports")
-                })?;
 
-        const FIRST_SEEN_NOT_NULL: &str = "`min(time_collected)` should never \
-            return `NULL`, since the `time_collected` column is not nullable, \
-            and the `SELECT` clause should return nothing if the result set \
-            is empty";
+        let restarts = rows.into_iter().map(|(restart_id, reporter, first_seen, ereports)| {
+            let first_seen_at = first_seen.expect(
+                "`min(time_collected)` should never  return `NULL`, since the \
+                 `time_collected` column is not nullable, and the `SELECT` clause \
+                  should return nothing if the result set is empty"
+            );
+            EreporterRestartBySerial {
+                id: EreporterRestartUuid::from_untyped_uuid(restart_id),
+                reporter_kind: reporter.try_into().unwrap(),
+                first_seen_at,
+                ereports: ereports.into(),
+            }
+        }).collect();
 
-        let sp_reporters = sp_rows.into_iter().map(
-            |(restart_id, sp_type, sp_slot, first_seen, ereports)| {
-                EreporterRestartBySerial {
-                    id: EreporterRestartUuid::from_untyped_uuid(restart_id),
-                    reporter_kind: Reporter::Sp {
-                        sp_type: sp_type.into(),
-                        slot: sp_slot.into(),
-                    },
-                    first_seen_at: first_seen.expect(FIRST_SEEN_NOT_NULL),
-                    ereports: ereports.into(),
-                }
-            },
-        );
-        let host_reporters = host_os_rows.into_iter().map(
-            |(restart_id, sled_id, first_seen, ereports)| {
-                EreporterRestartBySerial {
-                    id: EreporterRestartUuid::from_untyped_uuid(restart_id),
-                    reporter_kind: Reporter::HostOs {
-                        sled: SledUuid::from_untyped_uuid(sled_id),
-                    },
-                    first_seen_at: first_seen.expect(FIRST_SEEN_NOT_NULL),
-                    ereports: ereports.into(),
-                }
-            },
-        );
-        Ok(sp_reporters.chain(host_reporters).collect::<Vec<_>>())
+        Ok(restarts)
     }
 
-    fn sp_restart_list_by_serial_query(
+    fn restart_list_by_serial_query(
         serial: String,
-    ) -> impl RunnableQuery<(Uuid, SpType, SqlU16, Option<DateTime<Utc>>, SqlU32)>
-    {
-        sp_dsl::sp_ereport
-            .filter(
-                sp_dsl::serial_number
-                    .eq(serial.clone())
-                    .and(sp_dsl::time_deleted.is_null()),
-            )
-            .group_by((sp_dsl::restart_id, sp_dsl::sp_slot, sp_dsl::sp_type))
-            .select((
-                sp_dsl::restart_id,
-                sp_dsl::sp_type,
-                sp_dsl::sp_slot,
-                min(sp_dsl::time_collected),
-                count_distinct(sp_dsl::ena),
+    ) -> impl RunnableQuery<(
+        Uuid,
+        model::ereport::Reporter,
+        Option<DateTime<Utc>>,
+        SqlU32,
+    )> {
+        dsl::ereport
+            .filter(dsl::serial_number.eq(serial.clone()))
+            .filter(dsl::time_deleted.is_null())
+            .group_by((
+                dsl::restart_id,
+                dsl::reporter,
+                dsl::sp_slot,
+                dsl::sp_type,
+                dsl::sled_id,
             ))
-            .order_by(sp_dsl::restart_id)
+            .select((
+                dsl::restart_id,
+                model::ereport::Reporter::as_select(),
+                min(dsl::time_collected),
+                count_distinct(dsl::ena),
+            ))
+            .order_by(dsl::restart_id)
     }
 
-    fn host_restart_list_by_serial_query(
-        serial: String,
-    ) -> impl RunnableQuery<(Uuid, Uuid, Option<DateTime<Utc>>, SqlU32)> {
-        host_dsl::host_ereport
-            .filter(
-                host_dsl::sled_serial
-                    .eq(serial)
-                    .and(host_dsl::time_deleted.is_null()),
-            )
-            .group_by((host_dsl::restart_id, host_dsl::sled_id))
-            .select((
-                host_dsl::restart_id,
-                host_dsl::sled_id,
-                min(host_dsl::time_collected),
-                count_distinct(host_dsl::ena),
-            ))
-            .order_by(host_dsl::restart_id)
-    }
-
-    pub async fn sp_latest_ereport_id(
+    pub async fn latest_ereport_id(
         &self,
         opctx: &OpContext,
-        sp_type: impl Into<SpType>,
-        slot: u16,
-    ) -> Result<Option<ereport_types::EreportId>, Error> {
+        reporter: Reporter,
+    ) -> Result<Option<EreportId>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        self.sp_latest_ereport_id_on_conn(
+        self.latest_ereport_id_on_conn(
             &*self.pool_connection_authorized(opctx).await?,
-            sp_type,
-            slot,
+            reporter,
         )
         .await
     }
 
-    async fn sp_latest_ereport_id_on_conn(
+    async fn latest_ereport_id_on_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        sp_type: impl Into<SpType>,
-        slot: u16,
+        reporter: Reporter,
     ) -> Result<Option<ereport_types::EreportId>, Error> {
-        let sp_type = sp_type.into();
-        let slot = SpMgsSlot::from(SqlU16::new(slot));
-        let id = Self::sp_latest_ereport_id_query(sp_type, slot)
-            .get_result_async(conn)
-            .await
+        let result = match reporter {
+            Reporter::Sp { sp_type, slot } => {
+                let sp_type = sp_type.into();
+                let slot = SpMgsSlot::from(SqlU16::new(slot));
+                Self::sp_latest_ereport_id_query(sp_type, slot)
+                    .get_result_async(conn)
+                    .await
+            }
+            Reporter::HostOs { sled } => {
+                Self::host_latest_ereport_id_query(sled)
+                    .get_result_async(conn)
+                    .await
+            }
+        };
+        let id = result
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            .map(id_from_tuple);
+            .map(|(restart_id, DbEna(ena))| EreportId {
+                restart_id: EreporterRestartUuid::from_untyped_uuid(restart_id),
+                ena,
+            });
         Ok(id)
     }
 
@@ -365,101 +283,47 @@ impl DataStore {
         sp_type: SpType,
         slot: SpMgsSlot,
     ) -> impl RunnableQuery<EreportIdTuple> {
-        sp_dsl::sp_ereport
+        dsl::ereport
             .filter(
-                sp_dsl::sp_type
+                dsl::sp_type
                     .eq(sp_type)
-                    .and(sp_dsl::sp_slot.eq(slot))
-                    .and(sp_dsl::time_deleted.is_null()),
+                    .and(dsl::sp_slot.eq(slot))
+                    .and(dsl::time_deleted.is_null()),
             )
-            .order_by((sp_dsl::time_collected.desc(), sp_dsl::ena.desc()))
+            .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
             .limit(1)
-            .select((sp_dsl::restart_id, sp_dsl::ena))
-    }
-
-    pub async fn host_latest_ereport_id(
-        &self,
-        opctx: &OpContext,
-        sled_id: SledUuid,
-    ) -> Result<Option<ereport_types::EreportId>, Error> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-        self.host_latest_ereport_id_on_conn(
-            &*self.pool_connection_authorized(opctx).await?,
-            sled_id,
-        )
-        .await
-    }
-
-    async fn host_latest_ereport_id_on_conn(
-        &self,
-        conn: &async_bb8_diesel::Connection<DbConnection>,
-        sled_id: SledUuid,
-    ) -> Result<Option<ereport_types::EreportId>, Error> {
-        let id = Self::host_latest_ereport_id_query(sled_id)
-            .get_result_async(conn)
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            .map(id_from_tuple);
-        Ok(id)
+            .select((dsl::restart_id, dsl::ena))
     }
 
     fn host_latest_ereport_id_query(
         sled_id: SledUuid,
     ) -> impl RunnableQuery<EreportIdTuple> {
-        host_dsl::host_ereport
+        dsl::ereport
             .filter(
-                host_dsl::sled_id
+                dsl::sled_id
                     .eq(sled_id.into_untyped_uuid())
-                    .and(host_dsl::time_deleted.is_null()),
+                    .and(dsl::time_deleted.is_null()),
             )
-            .order_by((host_dsl::time_collected.desc(), host_dsl::ena.desc()))
+            .order_by((dsl::time_collected.desc(), dsl::ena.desc()))
             .limit(1)
-            .select((host_dsl::restart_id, host_dsl::ena))
+            .select((dsl::restart_id, dsl::ena))
     }
 
-    pub async fn sp_ereports_insert(
+    pub async fn ereports_insert(
         &self,
         opctx: &OpContext,
-        sp_type: impl Into<SpType>,
-        slot: u16,
-        ereports: Vec<SpEreport>,
-    ) -> CreateResult<(usize, Option<ereport_types::EreportId>)> {
+        reporter: Reporter,
+        ereports: impl IntoIterator<Item = fm::EreportData>,
+    ) -> CreateResult<(usize, Option<EreportId>)> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        let created = diesel::insert_into(sp_dsl::sp_ereport)
+        let ereports = ereports
+            .into_iter()
+            .map(|data| Ereport::new(data, reporter))
+            .collect::<Vec<_>>();
+        let created = diesel::insert_into(dsl::ereport)
             .values(ereports)
-            .on_conflict((sp_dsl::restart_id, sp_dsl::ena))
-            .do_nothing()
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-                    .internal_context("failed to insert ereports")
-            })?;
-        let sp_type = sp_type.into();
-        let latest = self
-            .sp_latest_ereport_id_on_conn(&conn, sp_type, slot)
-            .await
-            .map_err(|e| {
-                e.internal_context(format!(
-                    "failed to refresh latest ereport ID for {sp_type:?} {slot}"
-                ))
-            })?;
-        Ok((created, latest))
-    }
-
-    pub async fn host_ereports_insert(
-        &self,
-        opctx: &OpContext,
-        sled_id: SledUuid,
-        ereports: Vec<HostEreport>,
-    ) -> CreateResult<(usize, Option<ereport_types::EreportId>)> {
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-        let conn = self.pool_connection_authorized(opctx).await?;
-        let created = diesel::insert_into(host_dsl::host_ereport)
-            .values(ereports)
-            .on_conflict((host_dsl::restart_id, host_dsl::ena))
+            .on_conflict((dsl::restart_id, dsl::ena))
             .do_nothing()
             .execute_async(&*conn)
             .await
@@ -468,23 +332,14 @@ impl DataStore {
                     .internal_context("failed to insert ereports")
             })?;
         let latest = self
-            .host_latest_ereport_id_on_conn(&conn, sled_id)
+            .latest_ereport_id_on_conn(&conn, reporter)
             .await
             .map_err(|e| {
                 e.internal_context(format!(
-                    "failed to refresh latest ereport ID for {sled_id}"
+                    "failed to refresh latest ereport ID for {reporter}"
                 ))
             })?;
         Ok((created, latest))
-    }
-}
-
-fn id_from_tuple(
-    (restart_id, DbEna(ena)): EreportIdTuple,
-) -> ereport_types::EreportId {
-    ereport_types::EreportId {
-        restart_id: EreporterRestartUuid::from_untyped_uuid(restart_id),
-        ena,
     }
 }
 
@@ -549,38 +404,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explain_host_restart_list_by_serial() {
-        let logctx = dev::test_setup_log("explain_host_restart_list_by_serial");
+    async fn explain_restart_list_by_serial() {
+        let logctx = dev::test_setup_log("explain_restart_list_by_serial");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query = DataStore::host_restart_list_by_serial_query(String::new());
-        let explanation = query
-            .explain_async(&conn)
-            .await
-            .expect("Failed to explain query - is it valid SQL?");
-
-        eprintln!("{explanation}");
-
-        assert!(
-            !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {}",
-            explanation
-        );
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn explain_sp_restart_list_by_serial() {
-        let logctx = dev::test_setup_log("explain_sp_restart_list_by_serial");
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        let query = DataStore::sp_restart_list_by_serial_query(String::new());
+        let query = DataStore::restart_list_by_serial_query(String::new());
         let explanation = query
             .explain_async(&conn)
             .await

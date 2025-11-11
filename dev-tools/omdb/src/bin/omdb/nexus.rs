@@ -2612,8 +2612,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 listed_in_service_sleds,
                 listed_sps,
                 activated_in_db_ok,
-                sp_ereports,
-                host_ereports,
+                ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
@@ -2627,26 +2626,24 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
-                print_ereport_status("SP", &sp_ereports);
-                print_ereport_status("Host OS", &host_ereports);
-            }
-        }
-    }
-
-    fn print_ereport_status(which: &str, status: &SupportBundleEreportStatus) {
-        match status {
-            SupportBundleEreportStatus::NotRequested => {
-                println!("      {which} ereport collection was not requested");
-            }
-            SupportBundleEreportStatus::Failed { error, n_collected } => {
-                println!("      {which} ereport collection failed:");
-                println!(
-                    "        ereports collected successfully: {n_collected}"
-                );
-                println!("        error: {error}");
-            }
-            SupportBundleEreportStatus::Collected { n_collected } => {
-                println!("      {which} ereports collected: {n_collected}");
+                match ereports {
+                    SupportBundleEreportStatus::NotRequested => {
+                        println!("      ereport collection was not requested");
+                    }
+                    SupportBundleEreportStatus::Failed {
+                        error,
+                        n_collected,
+                    } => {
+                        println!("      ereport collection failed:");
+                        println!(
+                            "        ereports collected successfully: {n_collected}"
+                        );
+                        println!("        error: {error}");
+                    }
+                    SupportBundleEreportStatus::Collected { n_collected } => {
+                        println!("      ereports collected: {n_collected}");
+                    }
+                }
             }
         }
     }

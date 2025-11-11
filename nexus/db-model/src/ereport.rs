@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::EreporterType;
 use crate::SpMgsSlot;
 use crate::SpType;
 use crate::typed_uuid::DbTypedUuid;
@@ -12,14 +13,11 @@ use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
-use ereport_types::{Ena, EreportId};
-use nexus_db_schema::schema::{host_ereport, sp_ereport};
-use omicron_uuid_kinds::{
-    EreporterRestartKind, OmicronZoneKind, OmicronZoneUuid, SledKind, SledUuid,
-};
+use nexus_db_schema::schema::ereport;
+use nexus_types::fm::ereport::{self as types, Ena, EreportId};
+use omicron_uuid_kinds::{EreporterRestartKind, OmicronZoneKind, SledKind};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use std::fmt;
 
 #[derive(
     Copy,
@@ -63,201 +61,203 @@ where
     }
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Ereport {
-    #[serde(flatten)]
-    pub id: EreportId,
-    #[serde(flatten)]
-    pub metadata: EreportMetadata,
-    pub reporter: Reporter,
-    #[serde(flatten)]
-    pub report: serde_json::Value,
-}
-
-impl From<SpEreport> for Ereport {
-    fn from(sp_report: SpEreport) -> Self {
-        let SpEreport {
-            restart_id,
-            ena,
-            time_collected,
-            time_deleted,
-            collector_id,
-            part_number,
-            serial_number,
-            sp_type,
-            sp_slot,
-            class,
-            report,
-        } = sp_report;
-        Ereport {
-            id: EreportId { restart_id: restart_id.into(), ena: ena.into() },
-            metadata: EreportMetadata {
-                time_collected,
-                time_deleted,
-                collector_id: collector_id.into(),
-                part_number,
-                serial_number,
-                class,
-            },
-            reporter: Reporter::Sp { sp_type: sp_type.into(), slot: sp_slot.0 },
-            report,
-        }
-    }
-}
-
-impl From<HostEreport> for Ereport {
-    fn from(host_report: HostEreport) -> Self {
-        let HostEreport {
-            restart_id,
-            ena,
-            time_collected,
-            time_deleted,
-            collector_id,
-            sled_serial,
-            sled_id,
-            class,
-            report,
-            part_number,
-        } = host_report;
-        Ereport {
-            id: EreportId { restart_id: restart_id.into(), ena: ena.into() },
-            metadata: EreportMetadata {
-                time_collected,
-                time_deleted,
-                collector_id: collector_id.into(),
-                part_number,
-                serial_number: Some(sled_serial),
-                class,
-            },
-            reporter: Reporter::HostOs { sled: sled_id.into() },
-            report,
-        }
-    }
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct EreportMetadata {
-    pub time_collected: DateTime<Utc>,
-    pub time_deleted: Option<DateTime<Utc>>,
-    pub collector_id: OmicronZoneUuid,
-    pub part_number: Option<String>,
-    pub serial_number: Option<String>,
-    pub class: Option<String>,
-}
-
-#[derive(
-    Clone,
-    Debug,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-pub enum Reporter {
-    Sp { sp_type: nexus_types::inventory::SpType, slot: u16 },
-    HostOs { sled: SledUuid },
-}
-
-impl std::fmt::Display for Reporter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Sp {
-                sp_type: nexus_types::inventory::SpType::Sled,
-                slot,
-            } => {
-                write!(f, "Sled (SP) {slot:02}")
-            }
-            Self::Sp {
-                sp_type: nexus_types::inventory::SpType::Switch,
-                slot,
-            } => {
-                write!(f, "Switch {slot}")
-            }
-            Self::Sp {
-                sp_type: nexus_types::inventory::SpType::Power,
-                slot,
-            } => {
-                write!(f, "PSC {slot}")
-            }
-            Self::HostOs { sled } => {
-                write!(f, "Sled (OS) {sled:?}")
-            }
-        }
-    }
-}
-
 #[derive(Clone, Debug, Insertable, Queryable, Selectable)]
-#[diesel(table_name = sp_ereport)]
-pub struct SpEreport {
+#[diesel(table_name = ereport)]
+pub struct Ereport {
     pub restart_id: DbTypedUuid<EreporterRestartKind>,
     pub ena: DbEna,
     pub time_deleted: Option<DateTime<Utc>>,
 
     pub time_collected: DateTime<Utc>,
     pub collector_id: DbTypedUuid<OmicronZoneKind>,
+
+    /// SP VPD identity: the baseboard part number of the reporter.
+    ///
+    /// This is nullable, as the ereport may have been generated in a condition
+    /// where the SP was unable to determine its own part number, or the host OS
+    /// was unable to ask the SP for it. Consider that "I don't know what I am!"
+    /// is an error condition for which we might want to generate an ereport!
+    pub part_number: Option<String>,
+    /// VPD identity: the baseboard serial number of the reporter.
+    ///
+    /// This is nullable, as the ereport may have been generated in a condition
+    /// where the SP was unable to determine its own serial number, or the host
+    /// system was unable to ask the SP for it. Consider that "I don't know who
+    /// I am!" is an error condition for which we might want to generate an
+    /// ereport!
+    pub serial_number: Option<String>,
+
+    /// The ereport class, which indicates the category of event reported.
+    ///
+    /// This is nullable, as it is extracted from the report JSON, and reports
+    /// missing class information must still be ingested.
+    pub class: Option<String>,
+    pub report: serde_json::Value,
+
+    #[diesel(embed)]
+    pub reporter: Reporter,
+}
+
+#[derive(Copy, Clone, Debug, Insertable, Queryable, Selectable)]
+#[diesel(table_name = ereport)]
+pub struct Reporter {
+    pub reporter: EreporterType,
 
     //
     // The physical location of the reporting SP.
     //
     /// SP location: the type of SP slot (sled, switch, power shelf).
     ///
-    /// This is always known, as SPs are indexed by physical location when
-    /// collecting ereports from MGS.
-    pub sp_type: SpType,
+    /// For SP ereports (i.e. those with `reporter == EreporterType::Sp`) this
+    /// is never NULL, which is enforced by the `reporter_identity_validity`
+    /// CHECK constraint. This is because SPs are indexed by their physical
+    /// location when requesting ereports through MGS.
+    pub sp_type: Option<SpType>,
     /// SP location: the slot number.
     ///
-    /// This is always known, as SPs are indexed by physical location when
-    /// collecting ereports from MGS.
-    pub sp_slot: SpMgsSlot,
+    /// For SP ereports (i.e. those with `reporter == EreporterType::Sp`) this
+    /// is never NULL, which is enforced by the `reporter_identity_validity`
+    /// CHECK constraint. This is because SPs are indexed by their physical
+    /// location when requesting ereports through MGS.
+    pub sp_slot: Option<SpMgsSlot>,
 
-    /// SP VPD identity: the baseboard part number of the reporting SP.
+    /// For host OS ereports ,the sled UUID of the sled-agent from which this
+    /// ereport was received.
     ///
-    /// This is nullable, as the ereport may have been generated in a condition
-    /// where the SP was unable to determine its own part number. Consider that
-    /// "I don't know what I am!" is an error condition for which we might want
-    /// to generate an ereport!
-    pub part_number: Option<String>,
-    /// SP VPD identity: the baseboard serial number of the reporting SP.
-    ///
-    /// This is nullable, as the ereport may have been generated in a condition
-    /// where the SP was unable to determine its own serial number. Consider that
-    /// "I don't know who I am!" is an error condition for which we might want
-    /// to generate an ereport!
-    pub serial_number: Option<String>,
-    /// The ereport class, which indicates the category of event reported.
-    ///
-    /// This is nullable, as it is extracted from the report JSON, and reports
-    /// missing class information must still be ingested.
-    pub class: Option<String>,
-
-    pub report: serde_json::Value,
+    /// This is never NULL for host OS ereports (i.e. those with `reporter ==
+    /// EreporterType::Host`). This is enforced by the
+    /// `reporter_identity_validity` CHECK constraint.
+    pub sled_id: Option<DbTypedUuid<SledKind>>,
 }
 
-#[derive(Clone, Debug, Insertable, Queryable, Selectable)]
-#[diesel(table_name = host_ereport)]
-pub struct HostEreport {
-    pub restart_id: DbTypedUuid<EreporterRestartKind>,
-    pub ena: DbEna,
-    pub time_deleted: Option<DateTime<Utc>>,
+impl Ereport {
+    pub fn id(&self) -> EreportId {
+        EreportId { ena: self.ena.into(), restart_id: self.restart_id.into() }
+    }
 
-    pub time_collected: DateTime<Utc>,
-    pub collector_id: DbTypedUuid<OmicronZoneKind>,
+    pub fn reporter(&self) -> types::Reporter {
+        self.reporter.try_into().unwrap()
+    }
 
-    pub sled_id: DbTypedUuid<SledKind>,
-    pub sled_serial: String,
-    /// The ereport class, which indicates the category of event reported.
-    ///
-    /// This is nullable, as it is extracted from the report JSON, and reports
-    /// missing class information must still be ingested.
-    pub class: Option<String>,
+    pub fn new(
+        data: types::EreportData,
+        reporter: impl Into<Reporter>,
+    ) -> Self {
+        let types::EreportData {
+            id: EreportId { ena, restart_id },
+            collector_id,
+            time_collected,
+            serial_number,
+            part_number,
+            class,
+            report,
+        } = data;
 
-    pub report: serde_json::Value,
+        Self {
+            ena: ena.into(),
+            restart_id: restart_id.into(),
+            collector_id: collector_id.into(),
+            time_collected,
+            time_deleted: None,
+            serial_number,
+            part_number,
+            class,
+            report,
+            reporter: reporter.into(),
+        }
+    }
+}
 
-    // It's a shame this has to be nullable, while the serial is not. However,
-    // this field was added in a migration, and we have to be able to handle the
-    // case where a sled record was hard-deleted when backfilling the ereport
-    // table's part_number column. Sad.
-    pub part_number: Option<String>,
+impl From<types::Ereport> for Ereport {
+    fn from(types::Ereport { data, reporter }: types::Ereport) -> Self {
+        Self::new(data, reporter)
+    }
+}
+
+impl From<Ereport> for types::Ereport {
+    fn from(ereport: Ereport) -> Self {
+        let id = ereport.id();
+        let Ereport {
+            collector_id,
+            time_collected,
+            serial_number,
+            part_number,
+            class,
+            report,
+            reporter,
+            ..
+        } = ereport;
+        types::Ereport {
+            data: types::EreportData {
+                id,
+                time_collected,
+                collector_id: collector_id.into(),
+                serial_number,
+                part_number,
+                class,
+                report,
+            },
+            reporter: reporter.try_into().unwrap(),
+        }
+    }
+}
+
+impl From<types::Reporter> for Reporter {
+    fn from(reporter: types::Reporter) -> Self {
+        match reporter {
+            types::Reporter::HostOs { sled } => Self {
+                reporter: EreporterType::Host,
+                sled_id: Some(sled.into()),
+                sp_type: None,
+                sp_slot: None,
+            },
+            types::Reporter::Sp { sp_type, slot } => Self {
+                reporter: EreporterType::Sp,
+                sp_type: Some(sp_type.into()),
+                sp_slot: Some(slot.into()),
+                sled_id: None,
+            },
+        }
+    }
+}
+
+impl TryFrom<Reporter> for types::Reporter {
+    type Error = anyhow::Error;
+    fn try_from(reporter: Reporter) -> Result<Self, Self::Error> {
+        Ok(match reporter {
+            Reporter {
+                reporter: EreporterType::Sp,
+                sp_type: Some(sp_type),
+                sp_slot: Some(slot),
+                ..
+            } => Self::Sp {
+                sp_type: sp_type.into(),
+                slot: crate::SqlU16::from(slot).0,
+            },
+            Reporter {
+                reporter: EreporterType::Sp, sp_type, sp_slot, ..
+            } => {
+                anyhow::bail!(
+                    "the 'reporter_identity_validity' CHECK constraint \
+                     should enforce that ereports with reporter='sp' have \
+                     a non-NULL SP type and slot, but this ereport has \
+                     sp_type={sp_type:?} and sp_slot={sp_slot:?}",
+                )
+            }
+            Reporter {
+                reporter: EreporterType::Host,
+                sled_id: Some(id),
+                ..
+            } => Self::HostOs { sled: id.into() },
+            Reporter {
+                reporter: EreporterType::Host, sled_id: None, ..
+            } => {
+                anyhow::bail!(
+                    "the 'reporter_identity_validity' CHECK constraint \
+                     should enforce that ereports with reporter='host' \
+                     have a non-NULL sled_id, but this ereport does not",
+                )
+            }
+        })
+    }
 }
