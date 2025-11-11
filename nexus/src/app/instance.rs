@@ -1443,7 +1443,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::Disk> {
+    ) -> ListResultVec<db::datastore::Disk> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore
@@ -1457,9 +1457,10 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         disk: NameOrId,
-    ) -> UpdateResult<db::model::Disk> {
+    ) -> UpdateResult<db::datastore::Disk> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
+
         let (.., authz_project_disk, authz_disk) = self
             .disk_lookup(
                 opctx,
@@ -1508,6 +1509,7 @@ impl super::Nexus {
                 MAX_DISKS_PER_INSTANCE,
             )
             .await?;
+
         Ok(disk)
     }
 
@@ -1517,7 +1519,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         disk: NameOrId,
-    ) -> UpdateResult<db::model::Disk> {
+    ) -> UpdateResult<db::datastore::Disk> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
         let (.., authz_disk) = self

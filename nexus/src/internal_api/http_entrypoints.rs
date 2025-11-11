@@ -439,23 +439,11 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn probes_get(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<ProbePathParam>,
-        query_params: Query<PaginatedById>,
+        _path_params: Path<ProbePathParam>,
+        _query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError> {
         let apictx = &rqctx.context().context;
-        let handler = async {
-            let query = query_params.into_inner();
-            let path = path_params.into_inner();
-            let nexus = &apictx.nexus;
-            let opctx =
-                crate::context::op_context_for_internal_api(&rqctx).await;
-            let pagparams = data_page_params_for(&rqctx, &query)?;
-            Ok(HttpResponseOk(
-                nexus
-                    .probe_list_for_sled(&opctx, &pagparams, path.sled)
-                    .await?,
-            ))
-        };
+        let handler = async { Err(deprecated_endpoint_error()) };
         apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
@@ -466,13 +454,20 @@ impl NexusInternalApi for NexusInternalApiImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
-        let handler = async {
-            apictx.nexus.refresh_vpc_routes();
-            Ok(HttpResponseUpdatedNoContent())
-        };
+        let handler = async { Err(deprecated_endpoint_error()) };
         apictx
             .internal_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
+}
+
+fn deprecated_endpoint_error() -> HttpError {
+    HttpError::for_client_error(
+        None,
+        dropshot::ClientErrorStatusCode::GONE,
+        String::from(
+            "This endpoint is deprecated and will be removed in future versions",
+        ),
+    )
 }

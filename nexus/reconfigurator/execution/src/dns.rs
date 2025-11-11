@@ -330,9 +330,9 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -1562,12 +1562,10 @@ mod test {
         }
         .build()
         .unwrap();
-        let collection = CollectionBuilder::new("test").build();
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
             &planning_input,
-            &collection,
             "test suite",
             PlannerRng::from_entropy(),
         )
@@ -1584,13 +1582,22 @@ mod test {
         // * 127.0.0.1 (Nexus)
         // * ::1 (external DNS)
         //
-        // However, when the builder compiles its list of "IPs already in use",
-        // it _ignores_ loopback addresses, meaning we still have two external
-        // IPs available for new zones (127.0.0.1 and ::1).
+        // However, when the allocator compiles its list of "IPs already in
+        // use", it _ignores_ loopback addresses, meaning we still have two
+        // external IPs available for new zones (127.0.0.1 and ::1).
+        let new_nexus_external_ip =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator")
+            .for_new_nexus()
+            .expect("found external IP for Nexus");
         builder
             .sled_add_zone_nexus(
                 sled_id,
                 BlueprintZoneImageSource::InstallDataset,
+                new_nexus_external_ip,
                 blueprint.nexus_generation,
             )
             .unwrap();

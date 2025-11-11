@@ -35,6 +35,7 @@ use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse,
 };
+use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -1085,6 +1086,14 @@ impl SledAgentApi for SledAgentImpl {
             }
         }
         sa.hardware_monitor().set_switch_zone_policy(policy);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        request_context.context().set_probes(body.into_inner().probes);
         Ok(HttpResponseUpdatedNoContent())
     }
 }

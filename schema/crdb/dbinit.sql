@@ -1475,6 +1475,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.block_size AS ENUM (
   '4096'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.disk_type AS ENUM (
+  'crucible'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.disk (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1492,13 +1496,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk (
     /* Every Disk is in exactly one Project at a time. */
     project_id UUID NOT NULL,
 
-    /* Every disk consists of a root volume */
-    volume_id UUID NOT NULL,
-
-    /*
-     * TODO Would it make sense for the runtime state to live in a separate
-     * table?
-     */
     /* Runtime state */
     -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
     disk_state STRING(32) NOT NULL,
@@ -1514,10 +1511,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk (
     /* Disk configuration */
     size_bytes INT NOT NULL,
     block_size omicron.public.block_size NOT NULL,
-    origin_snapshot UUID,
-    origin_image UUID,
 
-    pantry_address TEXT
+    disk_type omicron.public.disk_type NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_project ON omicron.public.disk (
@@ -1537,10 +1532,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_deleted_disk ON omicron.public.disk (
 ) WHERE
     time_deleted IS NOT NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_volume_id ON omicron.public.disk (
+CREATE TABLE IF NOT EXISTS omicron.public.disk_type_crucible (
+    disk_id UUID PRIMARY KEY,
+
+    /* Every Crucible disk consists of a root volume */
+    volume_id UUID NOT NULL,
+
+    origin_snapshot UUID,
+    origin_image UUID,
+
+    pantry_address TEXT
+);
+
+/* Multiple disks cannot share volumes */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_volume_id ON omicron.public.disk_type_crucible (
     volume_id
-) WHERE
-    time_deleted IS NULL;
+);
 
 CREATE TABLE IF NOT EXISTS omicron.public.image (
     /* Identity metadata (resource) */
@@ -5794,10 +5801,6 @@ CREATE INDEX IF NOT EXISTS step_time_order on omicron.public.region_replacement_
 
 CREATE INDEX IF NOT EXISTS search_for_repair_notifications ON omicron.public.upstairs_repair_notification (region_id, notification_type);
 
-CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
-    volume_id
-);
-
 CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS ENUM (
   'requested',
   'allocating',
@@ -6827,6 +6830,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     comment TEXT NOT NULL
 );
 
+-- Index for looking up all potential children of a given parent sitrep.
+CREATE INDEX IF NOT EXISTS
+    lookup_sitreps_by_parent_id
+ON omicron.public.fm_sitrep (parent_sitrep_id);
+
 -- The history of current sitreps.
 --
 -- The sitrep with the highest `version` in this table is the current sitrep.
@@ -7023,7 +7031,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '205.0.0', NULL)
+    (TRUE, NOW(), NOW(), '207.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

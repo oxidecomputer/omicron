@@ -309,15 +309,17 @@ impl Blueprint {
     /// that match the provided filter, along with the associated sled id.
     pub fn all_omicron_zones<F>(
         &self,
-        filter: F,
+        mut filter: F,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
     where
         F: FnMut(BlueprintZoneDisposition) -> bool,
     {
-        Blueprint::filtered_zones(
-            self.sleds.iter().map(|(sled_id, config)| (*sled_id, config)),
-            filter,
-        )
+        self.sleds
+            .iter()
+            .flat_map(move |(sled_id, config)| {
+                config.zones.iter().map(move |z| (*sled_id, z))
+            })
+            .filter(move |(_, z)| filter(z.disposition))
     }
 
     /// Iterate over all Nexus zones that match the provided filter.
@@ -337,26 +339,6 @@ impl Blueprint {
                 None
             }
         })
-    }
-
-    /// Iterate over the [`BlueprintZoneConfig`] instances that match the
-    /// provided filter, along with the associated sled id.
-    //
-    // This is a scoped function so that it can be used in the
-    // `BlueprintBuilder` during planning as well as in the `Blueprint`.
-    pub fn filtered_zones<'a, I, F>(
-        zones_by_sled_id: I,
-        mut filter: F,
-    ) -> impl Iterator<Item = (SledUuid, &'a BlueprintZoneConfig)>
-    where
-        I: Iterator<Item = (SledUuid, &'a BlueprintSledConfig)>,
-        F: FnMut(BlueprintZoneDisposition) -> bool,
-    {
-        zones_by_sled_id
-            .flat_map(move |(sled_id, config)| {
-                config.zones.iter().map(move |z| (sled_id, z))
-            })
-            .filter(move |(_, z)| filter(z.disposition))
     }
 
     /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the

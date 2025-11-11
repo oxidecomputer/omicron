@@ -20,6 +20,7 @@ use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_planning::example::{
     ExampleSystemBuilder, extract_tuf_repo_description, tuf_assemble,
 };
@@ -2226,7 +2227,6 @@ fn cmd_blueprint_edit(
         &sim.log,
         blueprint,
         &planning_input,
-        &latest_collection,
         creator,
         rng,
     )
@@ -2248,8 +2248,20 @@ fn cmd_blueprint_edit(
                 &planning_input,
                 ZoneKind::Nexus,
             )?;
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .context("failed to construct external networking allocator")?
+            .for_new_nexus()
+            .context("failed to pick an external IP for Nexus")?;
             builder
-                .sled_add_zone_nexus(sled_id, image_source, nexus_generation)
+                .sled_add_zone_nexus(
+                    sled_id,
+                    image_source,
+                    external_ip,
+                    nexus_generation,
+                )
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }

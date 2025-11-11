@@ -60,6 +60,7 @@ use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionReplacementStatus;
@@ -67,6 +68,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
@@ -1192,6 +1194,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
+        "probe_distributor" => {
+            print_task_probe_distributor(details);
+        }
         "read_only_region_replacement_start" => {
             print_task_read_only_region_replacement_start(details);
         }
@@ -1239,6 +1244,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
+        }
+        "fm_sitrep_gc" => {
+            print_task_fm_sitrep_gc(details);
         }
         _ => {
             println!(
@@ -2123,6 +2131,32 @@ fn print_task_phantom_disks(details: &serde_json::Value) {
                 "    number of phantom disk delete errors: {}",
                 success.phantom_disk_deleted_err
             );
+        }
+    };
+}
+
+fn print_task_probe_distributor(details: &serde_json::Value) {
+    match serde_json::from_value::<ProbeDistributorStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(ProbeDistributorStatus { probes_by_sled, errors }) => {
+            let n_total_probes: usize = probes_by_sled.values().sum();
+            println!("    succesfully-pushed probes: {} total", n_total_probes);
+            for (sled_id, count) in probes_by_sled {
+                if count == 0 {
+                    continue;
+                }
+                println!("      sled_id={} n_probes={}", sled_id, count);
+            }
+            println!("    errors while pushing probes: {} total", errors.len());
+            for err in errors {
+                println!(
+                    "      sled_id={} sled_ip={} error={}",
+                    err.sled_id, err.sled_ip, err.error,
+                );
+            }
         }
     };
 }
@@ -3140,6 +3174,41 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
+    let SitrepGcStatus {
+        orphaned_sitreps_found,
+        orphaned_sitreps_deleted,
+        errors,
+    } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    pub const ORPHANS_FOUND: &str = "orphaned sitreps found:";
+    pub const ORPHANS_DELETED: &str = "orphaned sitreps deleted:";
+    pub const ERRORS: &str = "errors:";
+    pub const WIDTH: usize =
+        const_max_len(&[ERRORS, ORPHANS_FOUND, ORPHANS_DELETED]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+    if !errors.is_empty() {
+        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        for error in errors {
+            println!("      > {error}")
+        }
+    }
+
+    println!("    {ORPHANS_FOUND:<WIDTH$}{orphaned_sitreps_found:>NUM_WIDTH$}");
+    println!(
+        "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+    );
 }
 
 const ERRICON: &str = "/!\\";

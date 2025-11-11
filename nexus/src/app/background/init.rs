@@ -103,6 +103,7 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
+use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
 use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
@@ -114,6 +115,7 @@ use super::tasks::metrics_producer_gc;
 use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
+use super::tasks::probe_distributor;
 use super::tasks::read_only_region_replacement_start::*;
 use super::tasks::reconfigurator_config::ReconfiguratorConfigLoader;
 use super::tasks::region_replacement;
@@ -257,6 +259,8 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
+            task_fm_sitrep_gc: Activator::new(),
+            task_probe_distributor: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -338,6 +342,8 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
             task_fm_sitrep_loader,
+            task_fm_sitrep_gc,
+            task_probe_distributor,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -826,6 +832,12 @@ impl BackgroundTasksInitializer {
         });
 
         // Background task: OPTE port route propagation
+        //
+        // This task is activated whenever we have new networking probe zones.
+        // Note that there's no real _data_ communicated between these tasks, so
+        // we're just using () to have the driver wake up the VPC route task
+        // when the probe task is activated.
+        let (vpc_route_manager_tx, vpc_route_manager_rx) = watch::channel(());
         {
             let watcher = vpc_routes::VpcRouteManager::new(datastore.clone());
             driver.register(TaskDefinition {
@@ -834,7 +846,7 @@ impl BackgroundTasksInitializer {
                 period: config.switch_port_settings_manager.period_secs,
                 task_impl: Box::new(watcher),
                 opctx: opctx.child(BTreeMap::new()),
-                watchers: vec![],
+                watchers: vec![Box::new(vpc_route_manager_rx)],
                 activator: task_vpc_route_manager,
             })
         };
@@ -1059,19 +1071,44 @@ impl BackgroundTasksInitializer {
             activator: task_sp_ereport_ingester,
         });
 
+        let sitrep_loader = fm_sitrep_load::SitrepLoader::new(
+            datastore.clone(),
+            args.sitrep_load_tx,
+        );
+        let sitrep_watcher = sitrep_loader.watcher();
         driver.register(TaskDefinition {
             name: "fm_sitrep_loader",
             description:
                 "loads the current fault management situation report from \
                  the database",
             period: config.fm.sitrep_load_period_secs,
-            task_impl: Box::new(fm_sitrep_load::SitrepLoader::new(
-                datastore,
-                args.sitrep_load_tx,
-            )),
+            task_impl: Box::new(sitrep_loader),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_fm_sitrep_loader,
+        });
+
+        driver.register(TaskDefinition {
+            name: "fm_sitrep_gc",
+            description: "garbage collects fault management situation reports",
+            period: config.fm.sitrep_load_period_secs,
+            task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(datastore.clone())),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(sitrep_watcher)],
+            activator: task_fm_sitrep_gc,
+        });
+
+        driver.register(TaskDefinition {
+            name: "probe_distributor",
+            description: "distributes networking probe zones to sleds",
+            period: config.probe_distributor.period_secs,
+            task_impl: Box::new(probe_distributor::ProbeDistributor::new(
+                datastore,
+                vpc_route_manager_tx,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_probe_distributor,
         });
 
         driver
