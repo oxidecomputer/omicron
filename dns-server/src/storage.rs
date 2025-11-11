@@ -96,6 +96,7 @@ use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
 use hickory_proto::{op::LowerQuery, rr::LowerName};
 use hickory_resolver::Name;
+use hickory_server::authority::Catalog;
 use internal_dns_types::{
     config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
     names::ZONE_APEX_NAME,
@@ -130,6 +131,7 @@ pub struct Store {
     keep: usize,
     updating: Arc<Mutex<Option<UpdateInfo>>>,
     poisoned: Arc<AtomicBool>,
+    catalog_tx: tokio::sync::watch::Sender<Arc<Catalog>>,
 }
 
 /// A temporary schema for DNS configurations from before the presence of the
@@ -255,6 +257,41 @@ pub enum UpdateError {
 }
 
 impl Store {
+    /// Build a Catalog from the current DNS configuration
+    ///
+    /// This creates a hickory-server Catalog with one Authority for each zone
+    /// we're authoritative for.
+    fn build_catalog(&self) -> Result<Catalog, anyhow::Error> {
+        use crate::authority::OmicronAuthority;
+        use hickory_server::authority::ZoneType;
+
+        let config = self.read_config()?;
+        let mut catalog = Catalog::new();
+
+        for zone_name in &config.zones {
+            let origin = Name::from_str(zone_name)
+                .with_context(|| format!("parsing zone name {:?}", zone_name))?;
+            let authority = Arc::new(OmicronAuthority::new(
+                self.clone(),
+                origin.clone(),
+                ZoneType::Primary,
+                self.log.new(o!("zone" => zone_name.clone())),
+            ));
+
+            catalog.upsert(origin.into(), vec![authority as Arc<_>]);
+        }
+
+        Ok(catalog)
+    }
+
+    /// Get a receiver for catalog updates
+    ///
+    /// This returns a watch channel receiver that will be notified whenever
+    /// the DNS configuration changes and the catalog is rebuilt.
+    pub fn catalog_receiver(&self) -> tokio::sync::watch::Receiver<Arc<Catalog>> {
+        self.catalog_tx.subscribe()
+    }
+
     pub fn new(
         log: slog::Logger,
         config: &Config,
@@ -276,13 +313,19 @@ impl Store {
         db: Arc<sled::Db>,
         config: &Config,
     ) -> Result<Self, anyhow::Error> {
+        // Create initial empty catalog and watch channel
+        let initial_catalog = Catalog::new();
+        let (catalog_tx, _catalog_rx) = tokio::sync::watch::channel(Arc::new(initial_catalog));
+
         let store = Store {
             log,
             db,
             keep: config.keep_old_generations,
             updating: Arc::new(Mutex::new(None)),
             poisoned: Arc::new(AtomicBool::new(false)),
+            catalog_tx,
         };
+
         if store.read_config_optional()?.is_none() {
             let now = chrono::Utc::now();
             let initial_config_bytes = serde_json::to_vec(&CurrentConfig {
@@ -299,9 +342,20 @@ impl Store {
                 .context("inserting initial config")?;
         }
 
-        let config = store.read_config()?;
-        store.prune_newer(&config);
-        store.prune_older(&config);
+        let current_config = store.read_config()?;
+        store.prune_newer(&current_config);
+        store.prune_older(&current_config);
+
+        // Build and broadcast initial catalog
+        match store.build_catalog() {
+            Ok(catalog) => {
+                let _ = store.catalog_tx.send(Arc::new(catalog));
+            }
+            Err(e) => {
+                warn!(&store.log, "failed to build initial catalog"; "error" => ?e);
+            }
+        }
+
         Ok(store)
     }
 
@@ -657,6 +711,19 @@ impl Store {
         self.db.flush_async().await.context("flush")?;
 
         self.prune_older(&new_config);
+
+        // Rebuild and broadcast the catalog with the new zone configuration
+        match self.build_catalog() {
+            Ok(catalog) => {
+                debug!(&log, "rebuilt catalog after update");
+                let _ = self.catalog_tx.send(Arc::new(catalog));
+            }
+            Err(e) => {
+                warn!(&log, "failed to rebuild catalog after update"; "error" => ?e);
+                // Don't fail the update if catalog rebuild fails
+            }
+        }
+
         Ok(())
     }
 

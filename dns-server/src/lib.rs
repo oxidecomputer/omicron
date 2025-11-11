@@ -51,6 +51,7 @@
 //! 3. A Dropshot server that serves HTTP endpoints for reading and modifying
 //!    the persistent DNS data
 
+pub mod authority;
 pub mod dns_server;
 pub mod http_server;
 pub mod storage;
