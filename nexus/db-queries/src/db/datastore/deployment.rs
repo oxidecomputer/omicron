@@ -3176,6 +3176,7 @@ mod tests {
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::M2Slot;
     use omicron_common::update::ArtifactId;
@@ -3188,12 +3189,10 @@ mod tests {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::Rng;
     use std::collections::BTreeSet;
     use std::mem;
-    use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -4329,6 +4328,11 @@ mod tests {
             .await
             .expect("add range to service ip pool");
         let zone_id = OmicronZoneUuid::new_v4();
+        let ip_config = PrivateIpConfig::new_ipv4(
+            Ipv4Addr::new(172, 30, 2, 6),
+            oxnet::Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap(),
+        )
+        .unwrap();
         blueprint
             .sleds
             .get_mut(&sled_id)
@@ -4357,15 +4361,11 @@ mod tests {
                                 id: *zone_id.as_untyped_uuid(),
                             },
                             name: Name::from_str("mynic").unwrap(),
-                            ip: "172.30.2.6".parse().unwrap(),
+                            ip_config,
                             mac: MacAddr::random_system(),
-                            subnet: IpNet::host_net(IpAddr::V6(
-                                Ipv6Addr::LOCALHOST,
-                            )),
                             vni: Vni::random(),
                             primary: true,
                             slot: 1,
-                            transit_ips: vec![],
                         },
                         external_tls: false,
                         external_dns_servers: vec![],

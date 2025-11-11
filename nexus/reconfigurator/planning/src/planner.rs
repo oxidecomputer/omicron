@@ -2607,6 +2607,7 @@ pub(crate) mod test {
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
@@ -2620,6 +2621,7 @@ pub(crate) mod test {
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use oxnet::Ipv6Net;
     use semver::Version;
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeMap;
@@ -7101,6 +7103,11 @@ pub(crate) mod test {
                 ) => address,
                 _ => panic!("should be internal NTP?"),
             };
+            let ip_config = PrivateIpConfig::new_ipv6(
+                Ipv6Addr::LOCALHOST,
+                Ipv6Net::new(Ipv6Addr::LOCALHOST, 64).unwrap(),
+            )
+            .unwrap();
 
             // The contents here are all lies, but it's just stored
             // as plain-old-data for the purposes of this test, so
@@ -7117,17 +7124,11 @@ pub(crate) mod test {
                             id: Uuid::new_v4(),
                         },
                         name: "ntp-0".parse().unwrap(),
-                        ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                        ip_config,
                         mac: MacAddr::random_system(),
-                        subnet: oxnet::IpNet::new(
-                            IpAddr::V6(Ipv6Addr::LOCALHOST),
-                            8,
-                        )
-                        .unwrap(),
                         vni: Vni::SERVICES_VNI,
                         primary: true,
                         slot: 0,
-                        transit_ips: vec![],
                     },
                     external_ip: OmicronZoneExternalSnatIp {
                         id: ExternalIpUuid::new_v4(),

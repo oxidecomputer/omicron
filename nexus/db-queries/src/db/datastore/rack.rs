@@ -69,14 +69,13 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::UserId;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog_error_chain::InlineErrorChain;
-use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
@@ -551,18 +550,24 @@ impl DataStore {
         let zone_type = &zone_config.zone_type;
         let zone_report_str = zone_type.kind().report_str();
 
-        // Extract an IPv4 address from the `shared::NetworkInterface` object.
-        //
-        // TODO-completeness: Handle IPv6 interface addresses. See
-        // https://github.com/oxidecomputer/omicron/issues/9246.
-        let extract_ipv4 = |nic: &NetworkInterface| -> Result<Ipv4Addr, Error> {
-            let IpAddr::V4(ipv4) = nic.ip else {
-                return Err(Error::invalid_request(
-                    "IPv6 addresses are not yet supported",
-                ));
+        // TODO-completeness: Support dual-stack NICs for services. See
+        // https://github.com/oxidecomputer/omicron/issues/9313.
+        let extract_ip_config =
+            |nic: &NetworkInterface| -> Result<IpConfig, Error> {
+                match &nic.ip_config {
+                    PrivateIpConfig::V4(ipv4) => {
+                        Ok(IpConfig::from_ipv4(*ipv4.ip()))
+                    }
+                    PrivateIpConfig::V6(ipv6) => {
+                        Ok(IpConfig::from_ipv6(*ipv6.ip()))
+                    }
+                    PrivateIpConfig::DualStack { .. } => {
+                        Err(Error::invalid_request(
+                            "Dual-stack service NICs are not yet supported",
+                        ))
+                    }
+                }
             };
-            Ok(ipv4)
-        };
 
         let service_ip_nic = match zone_type {
             BlueprintZoneType::ExternalDns(
@@ -570,7 +575,8 @@ impl DataStore {
             ) => {
                 let external_ip =
                     OmicronZoneExternalIp::Floating(dns_address.into_ip());
-                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
+                let ip_config =
+                    extract_ip_config(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -582,7 +588,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    IpConfig::from_ipv4(ip),
+                    ip_config,
                     nic.mac,
                     nic.slot,
                 )
@@ -595,7 +601,8 @@ impl DataStore {
                 ..
             }) => {
                 let external_ip = OmicronZoneExternalIp::Floating(*external_ip);
-                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
+                let ip_config =
+                    extract_ip_config(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -607,7 +614,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    IpConfig::from_ipv4(ip),
+                    ip_config,
                     nic.mac,
                     nic.slot,
                 )
@@ -618,7 +625,8 @@ impl DataStore {
                 blueprint_zone_type::BoundaryNtp { external_ip, nic, .. },
             ) => {
                 let external_ip = OmicronZoneExternalIp::Snat(*external_ip);
-                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
+                let ip_config =
+                    extract_ip_config(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -630,7 +638,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    IpConfig::from_ipv4(ip),
+                    ip_config,
                     nic.mac,
                     nic.slot,
                 )
@@ -1108,7 +1116,6 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use oxnet::IpNet;
     use std::collections::{BTreeMap, HashMap};
     use std::net::Ipv6Addr;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -1434,21 +1441,31 @@ mod test {
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let external_dns_pip_config =
+            PrivateIpConfig::new_ipv4(external_dns_pip, *DNS_OPTE_IPV4_SUBNET)
+                .unwrap();
         let external_dns_id = OmicronZoneUuid::new_v4();
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 6));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let nexus_pip_config =
+            PrivateIpConfig::new_ipv4(nexus_pip, *NEXUS_OPTE_IPV4_SUBNET)
+                .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let ntp1_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp1_pip = NTP_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let ntp1_pip_config =
+            PrivateIpConfig::new_ipv4(ntp1_pip, *NTP_OPTE_IPV4_SUBNET).unwrap();
         let ntp1_id = OmicronZoneUuid::new_v4();
         let ntp2_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 5));
         let ntp2_pip = NTP_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 2)
             .unwrap();
+        let ntp2_pip_config =
+            PrivateIpConfig::new_ipv4(ntp2_pip, *NTP_OPTE_IPV4_SUBNET).unwrap();
         let ntp2_id = OmicronZoneUuid::new_v4();
         let ntp3_id = OmicronZoneUuid::new_v4();
         let mut macs = MacAddr::iter_system();
@@ -1476,13 +1493,11 @@ mod test {
                                     id: external_dns_id.into_untyped_uuid(),
                                 },
                                 name: "external-dns".parse().unwrap(),
-                                ip: external_dns_pip.into(),
+                                ip_config: external_dns_pip_config,
                                 mac: macs.next().unwrap(),
-                                subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
-                                transit_ips: vec![],
                             },
                         },
                     ),
@@ -1504,13 +1519,11 @@ mod test {
                                     id: ntp1_id.into_untyped_uuid(),
                                 },
                                 name: "ntp1".parse().unwrap(),
-                                ip: ntp1_pip.into(),
+                                ip_config: ntp1_pip_config,
                                 mac: macs.next().unwrap(),
-                                subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
-                                transit_ips: vec![],
                             },
                             external_ip: OmicronZoneExternalSnatIp {
                                 id: ExternalIpUuid::new_v4(),
@@ -1551,13 +1564,11 @@ mod test {
                                     id: nexus_id.into_untyped_uuid(),
                                 },
                                 name: "nexus".parse().unwrap(),
-                                ip: nexus_pip.into(),
+                                ip_config: nexus_pip_config,
                                 mac: macs.next().unwrap(),
-                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
-                                transit_ips: vec![],
                             },
                             nexus_generation: *Generation::new(),
                         },
@@ -1580,13 +1591,11 @@ mod test {
                                     id: ntp2_id.into_untyped_uuid(),
                                 },
                                 name: "ntp2".parse().unwrap(),
-                                ip: ntp2_pip.into(),
+                                ip_config: ntp2_pip_config,
                                 mac: macs.next().unwrap(),
-                                subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
-                                transit_ips: vec![],
                             },
                             external_ip: OmicronZoneExternalSnatIp {
                                 id: ExternalIpUuid::new_v4(),
@@ -1781,9 +1790,15 @@ mod test {
         let nexus_pip1 = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let nexus_pip1_config =
+            PrivateIpConfig::new_ipv4(nexus_pip1, *NEXUS_OPTE_IPV4_SUBNET)
+                .unwrap();
         let nexus_pip2 = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 2)
             .unwrap();
+        let nexus_pip2_config =
+            PrivateIpConfig::new_ipv4(nexus_pip2, *NEXUS_OPTE_IPV4_SUBNET)
+                .unwrap();
         let mut macs = MacAddr::iter_system();
 
         let mut blueprint_zones = BTreeMap::new();
@@ -1811,13 +1826,11 @@ mod test {
                                     id: nexus_id1.into_untyped_uuid(),
                                 },
                                 name: "nexus1".parse().unwrap(),
-                                ip: nexus_pip1.into(),
+                                ip_config: nexus_pip1_config,
                                 mac: macs.next().unwrap(),
-                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
-                                transit_ips: vec![],
                             },
                             nexus_generation: *Generation::new(),
                         },
@@ -1845,15 +1858,11 @@ mod test {
                                     id: nexus_id2.into_untyped_uuid(),
                                 },
                                 name: "nexus2".parse().unwrap(),
-                                ip: nexus_pip2.into(),
+                                ip_config: nexus_pip2_config,
                                 mac: macs.next().unwrap(),
-                                subnet: oxnet::IpNet::from(
-                                    *NEXUS_OPTE_IPV4_SUBNET,
-                                ),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
-                                transit_ips: vec![],
                             },
                             nexus_generation: *Generation::new(),
                         },
@@ -2073,6 +2082,9 @@ mod test {
         let nexus_pip = NEXUS_OPTE_IPV6_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u128 + 1)
             .unwrap();
+        let nexus_pip_config =
+            PrivateIpConfig::new_ipv6(nexus_pip, *NEXUS_OPTE_IPV6_SUBNET)
+                .unwrap();
         let mut macs = MacAddr::iter_system();
 
         let mut blueprint_zones = BTreeMap::new();
@@ -2099,13 +2111,11 @@ mod test {
                                 id: nexus_id.into_untyped_uuid(),
                             },
                             name: "nexus1".parse().unwrap(),
-                            ip: nexus_pip.into(),
+                            ip_config: nexus_pip_config,
                             mac: macs.next().unwrap(),
-                            subnet: IpNet::from(*NEXUS_OPTE_IPV6_SUBNET),
                             vni: Vni::SERVICES_VNI,
                             primary: true,
                             slot: 0,
-                            transit_ips: vec![],
                         },
                         nexus_generation: *Generation::new(),
                     },
@@ -2174,28 +2184,8 @@ mod test {
                     ..Default::default()
                 },
             )
-            .await;
-
-        // IPv6 addresses aren't fully supported right now. See
-        // https://github.com/oxidecomputer/omicron/issues/1716. When that is
-        // fully-addressed, this will start to fail and we can remove this
-        // block to restore the previous test coverage.
-        let Err(Error::InvalidRequest { message }) = &rack else {
-            panic!(
-                "Expected an error initializing a rack with an IPv6 address, \
-                until they are fully-supported. Found {rack:#?}"
-            );
-        };
-        assert_eq!(
-            message.external_message(),
-            "IPv6 addresses are not yet supported"
-        );
-        let Ok(rack) = rack else {
-            db.terminate().await;
-            logctx.cleanup_successful();
-            return;
-        };
-
+            .await
+            .expect("an initialized rack");
         assert_eq!(rack.id(), rack_id());
         assert!(rack.initialized);
 
@@ -2318,6 +2308,9 @@ mod test {
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let nexus_pip_config =
+            PrivateIpConfig::new_ipv4(nexus_pip, *NEXUS_OPTE_IPV4_SUBNET)
+                .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let mut macs = MacAddr::iter_system();
         let mut blueprint_zones = BTreeMap::new();
@@ -2344,13 +2337,11 @@ mod test {
                                 id: nexus_id.into_untyped_uuid(),
                             },
                             name: "nexus".parse().unwrap(),
-                            ip: nexus_pip.into(),
+                            ip_config: nexus_pip_config,
                             mac: macs.next().unwrap(),
-                            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                             vni: Vni::SERVICES_VNI,
                             primary: true,
                             slot: 0,
-                            transit_ips: vec![],
                         },
                         nexus_generation: *Generation::new(),
                     },
@@ -2426,10 +2417,16 @@ mod test {
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let external_dns_pip_config =
+            PrivateIpConfig::new_ipv4(external_dns_pip, *DNS_OPTE_IPV4_SUBNET)
+                .unwrap();
         let nexus_id = OmicronZoneUuid::new_v4();
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let nexus_pip_config =
+            PrivateIpConfig::new_ipv4(nexus_pip, *NEXUS_OPTE_IPV4_SUBNET)
+                .unwrap();
         let mut macs = MacAddr::iter_system();
 
         let mut blueprint_zones = BTreeMap::new();
@@ -2455,13 +2452,11 @@ mod test {
                                     id: external_dns_id.into_untyped_uuid(),
                                 },
                                 name: "external-dns".parse().unwrap(),
-                                ip: external_dns_pip.into(),
+                                ip_config: external_dns_pip_config,
                                 mac: macs.next().unwrap(),
-                                subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
-                                transit_ips: vec![],
                             },
                         },
                     ),
@@ -2488,13 +2483,11 @@ mod test {
                                     id: nexus_id.into_untyped_uuid(),
                                 },
                                 name: "nexus".parse().unwrap(),
-                                ip: nexus_pip.into(),
+                                ip_config: nexus_pip_config,
                                 mac: macs.next().unwrap(),
-                                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                                 vni: Vni::SERVICES_VNI,
                                 primary: true,
                                 slot: 0,
-                                transit_ips: vec![],
                             },
                             nexus_generation: *Generation::new(),
                         },

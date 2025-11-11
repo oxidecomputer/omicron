@@ -71,6 +71,7 @@ use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
+use std::net::IpAddr;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use swrite::{SWrite, swrite, swriteln};
@@ -162,11 +163,32 @@ impl ReconfiguratorSim {
                 builder
                     .add_omicron_zone_external_ip(zone.id, external_ip)
                     .context("adding omicron zone external IP")?;
+
+                // TODO-completeness: This needs to support dual-stack zones.
+                // See https://github.com/oxidecomputer/omicron/issues/9288 and
+                // related issues.
+                let maybe_ip = if matches!(external_ip.ip(), IpAddr::V4(_)) {
+                    nic.ip_config.ipv4_addr().copied().map(IpAddr::V4)
+                } else {
+                    nic.ip_config.ipv6_addr().copied().map(IpAddr::V6)
+                };
+                let ip = maybe_ip.with_context(|| {
+                    format!(
+                        "Omicron zone has an external and private IP \
+                        configurations of different IP versions. \
+                        zone_id={} zone_kind={} \
+                        external_ip={} private_ip_config={:?}",
+                        zone.id,
+                        zone.zone_type.kind().report_str(),
+                        external_ip.ip(),
+                        nic.ip_config,
+                    )
+                })?;
                 let nic = OmicronZoneNic {
                     // TODO-cleanup use `TypedUuid` everywhere
                     id: VnicUuid::from_untyped_uuid(nic.id),
                     mac: nic.mac,
-                    ip: nic.ip,
+                    ip,
                     slot: nic.slot,
                     primary: nic.primary,
                 };

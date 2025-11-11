@@ -5608,8 +5608,7 @@
             "format": "uuid"
           },
           "ip": {
-            "type": "string",
-            "format": "ip"
+            "$ref": "#/components/schemas/PrivateIpConfig"
           },
           "kind": {
             "$ref": "#/components/schemas/NetworkInterfaceKind"
@@ -5628,16 +5627,6 @@
             "format": "uint8",
             "minimum": 0
           },
-          "subnet": {
-            "$ref": "#/components/schemas/IpNet"
-          },
-          "transit_ips": {
-            "default": [],
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/IpNet"
-            }
-          },
           "vni": {
             "$ref": "#/components/schemas/Vni"
           }
@@ -5650,7 +5639,6 @@
           "name",
           "primary",
           "slot",
-          "subnet",
           "vni"
         ]
       },
@@ -7385,6 +7373,134 @@
           "speed100_g",
           "speed200_g",
           "speed400_g"
+        ]
+      },
+      "PrivateIpConfig": {
+        "description": "VPC-private IP address configuration for a network interface.",
+        "oneOf": [
+          {
+            "description": "The interface has only an IPv4 configuration.",
+            "type": "object",
+            "properties": {
+              "v4": {
+                "$ref": "#/components/schemas/PrivateIpv4Config"
+              }
+            },
+            "required": [
+              "v4"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "The interface has only an IPv6 configuration.",
+            "type": "object",
+            "properties": {
+              "v6": {
+                "$ref": "#/components/schemas/PrivateIpv6Config"
+              }
+            },
+            "required": [
+              "v6"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "The interface is dual-stack.",
+            "type": "object",
+            "properties": {
+              "dual_stack": {
+                "type": "object",
+                "properties": {
+                  "v4": {
+                    "description": "The interface's IPv4 configuration.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/PrivateIpv4Config"
+                      }
+                    ]
+                  },
+                  "v6": {
+                    "description": "The interface's IPv6 configuration.",
+                    "allOf": [
+                      {
+                        "$ref": "#/components/schemas/PrivateIpv6Config"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "v4",
+                  "v6"
+                ]
+              }
+            },
+            "required": [
+              "dual_stack"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "PrivateIpv4Config": {
+        "description": "VPC-private IPv4 configuration for a network interface.",
+        "type": "object",
+        "properties": {
+          "ip": {
+            "description": "VPC-private IP address.",
+            "type": "string",
+            "format": "ipv4"
+          },
+          "subnet": {
+            "description": "The IP subnet.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
+          },
+          "transit_ips": {
+            "description": "Additional networks on which the interface can send / receive traffic.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv4Net"
+            }
+          }
+        },
+        "required": [
+          "ip",
+          "subnet"
+        ]
+      },
+      "PrivateIpv6Config": {
+        "description": "VPC-private IPv6 configuration for a network interface.",
+        "type": "object",
+        "properties": {
+          "ip": {
+            "description": "VPC-private IP address.",
+            "type": "string",
+            "format": "ipv6"
+          },
+          "subnet": {
+            "description": "The IP subnet.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
+          },
+          "transit_ips": {
+            "description": "Additional networks on which the interface can send / receive traffic.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Ipv6Net"
+            }
+          }
+        },
+        "required": [
+          "ip",
+          "subnet",
+          "transit_ips"
         ]
       },
       "QuiesceState": {

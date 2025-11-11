@@ -2,32 +2,49 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::time::Duration;
-
-use chrono::{DateTime, Utc};
-use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_sled_agent_shared::inventory::{
-    self, BootPartitionContents, ConfigReconcilerInventoryResult,
-    HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
-    OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
-    RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
-};
+use chrono::DateTime;
+use chrono::Utc;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use nexus_sled_agent_shared::inventory;
+use nexus_sled_agent_shared::inventory::BootPartitionContents;
+use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
+use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
+use nexus_sled_agent_shared::inventory::OrphanedDataset;
+use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
+use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
-use omicron_common::{
-    api::external::{ByteCount, Generation},
-    api::internal::shared::{NetworkInterface, SourceNatConfig},
-    disk::{DatasetConfig, OmicronPhysicalDiskConfig},
-    zpool_name::ZpoolName,
-};
-use omicron_uuid_kinds::{
-    DatasetUuid, MupdateOverrideUuid, OmicronZoneUuid, PhysicalDiskUuid,
-    SledUuid,
-};
+use omicron_common::api::external;
+use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
+use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::OmicronPhysicalDiskConfig;
+use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use serde::Deserialize;
+use serde::Serialize;
+use sled_hardware_types::Baseboard;
+use sled_hardware_types::SledCpuFamily;
+use std::collections::BTreeMap;
+use std::net::IpAddr;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
+use std::time::Duration;
 
 /// Identity and basic status information about this sled agent
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -49,9 +66,20 @@ pub struct Inventory {
     pub zone_image_resolver: ZoneImageResolverInventory,
 }
 
-impl From<inventory::Inventory> for Inventory {
-    fn from(value: inventory::Inventory) -> Self {
-        Self {
+impl TryFrom<inventory::Inventory> for Inventory {
+    type Error = external::Error;
+
+    fn try_from(value: inventory::Inventory) -> Result<Self, Self::Error> {
+        let ledgered_sled_config = value
+            .ledgered_sled_config
+            .map(OmicronSledConfig::try_from)
+            .transpose()?;
+        let reconciler_status = value.reconciler_status.try_into()?;
+        let last_reconciliation = value
+            .last_reconciliation
+            .map(ConfigReconcilerInventory::try_from)
+            .transpose()?;
+        Ok(Self {
             sled_id: value.sled_id,
             sled_agent_address: value.sled_agent_address,
             sled_role: value.sled_role,
@@ -63,11 +91,11 @@ impl From<inventory::Inventory> for Inventory {
             disks: value.disks,
             zpools: value.zpools,
             datasets: value.datasets,
-            ledgered_sled_config: value.ledgered_sled_config.map(Into::into),
-            reconciler_status: value.reconciler_status.into(),
-            last_reconciliation: value.last_reconciliation.map(Into::into),
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
             zone_image_resolver: value.zone_image_resolver,
-        }
+        })
     }
 }
 
@@ -88,29 +116,45 @@ pub struct OmicronSledConfig {
     pub host_phase_2: HostPhase2DesiredSlots,
 }
 
-impl From<OmicronSledConfig> for inventory::OmicronSledConfig {
-    fn from(value: OmicronSledConfig) -> Self {
-        Self {
+impl TryFrom<OmicronSledConfig> for inventory::OmicronSledConfig {
+    type Error = external::Error;
+
+    fn try_from(value: OmicronSledConfig) -> Result<Self, Self::Error> {
+        let zones = value
+            .zones
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
             generation: value.generation,
             disks: value.disks,
             datasets: value.datasets,
-            zones: value.zones.into_iter().map(Into::into).collect(),
+            zones,
             remove_mupdate_override: value.remove_mupdate_override,
             host_phase_2: value.host_phase_2,
-        }
+        })
     }
 }
 
-impl From<inventory::OmicronSledConfig> for OmicronSledConfig {
-    fn from(value: inventory::OmicronSledConfig) -> Self {
-        Self {
+impl TryFrom<inventory::OmicronSledConfig> for OmicronSledConfig {
+    type Error = external::Error;
+
+    fn try_from(
+        value: inventory::OmicronSledConfig,
+    ) -> Result<Self, Self::Error> {
+        let zones = value
+            .zones
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()?;
+        Ok(Self {
             generation: value.generation,
             disks: value.disks,
             datasets: value.datasets,
-            zones: value.zones.into_iter().map(Into::into).collect(),
+            zones,
             remove_mupdate_override: value.remove_mupdate_override,
             host_phase_2: value.host_phase_2,
-        }
+        })
     }
 }
 
@@ -141,25 +185,31 @@ impl IdOrdItem for OmicronZoneConfig {
     id_upcast!();
 }
 
-impl From<OmicronZoneConfig> for inventory::OmicronZoneConfig {
-    fn from(value: OmicronZoneConfig) -> Self {
-        Self {
+impl TryFrom<OmicronZoneConfig> for inventory::OmicronZoneConfig {
+    type Error = external::Error;
+
+    fn try_from(value: OmicronZoneConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
             id: value.id,
             filesystem_pool: value.filesystem_pool,
-            zone_type: value.zone_type.into(),
+            zone_type: value.zone_type.try_into()?,
             image_source: value.image_source,
-        }
+        })
     }
 }
 
-impl From<inventory::OmicronZoneConfig> for OmicronZoneConfig {
-    fn from(value: inventory::OmicronZoneConfig) -> Self {
-        Self {
+impl TryFrom<inventory::OmicronZoneConfig> for OmicronZoneConfig {
+    type Error = external::Error;
+
+    fn try_from(
+        value: inventory::OmicronZoneConfig,
+    ) -> Result<Self, Self::Error> {
+        Ok(Self {
             id: value.id,
             filesystem_pool: value.filesystem_pool,
-            zone_type: value.zone_type.into(),
+            zone_type: value.zone_type.try_into()?,
             image_source: value.image_source,
-        }
+        })
     }
 }
 
@@ -256,8 +306,10 @@ pub enum OmicronZoneType {
     },
 }
 
-impl From<OmicronZoneType> for inventory::OmicronZoneType {
-    fn from(value: OmicronZoneType) -> Self {
+impl TryFrom<OmicronZoneType> for inventory::OmicronZoneType {
+    type Error = external::Error;
+
+    fn try_from(value: OmicronZoneType) -> Result<Self, Self::Error> {
         match value {
             OmicronZoneType::BoundaryNtp {
                 address,
@@ -266,53 +318,58 @@ impl From<OmicronZoneType> for inventory::OmicronZoneType {
                 domain,
                 nic,
                 snat_cfg,
-            } => Self::BoundaryNtp {
+            } => Ok(Self::BoundaryNtp {
                 address,
                 ntp_servers,
                 dns_servers,
                 domain,
-                nic,
+                nic: nic.try_into()?,
                 snat_cfg,
-            },
+            }),
             OmicronZoneType::Clickhouse { address, dataset } => {
-                Self::Clickhouse { address, dataset }
+                Ok(Self::Clickhouse { address, dataset })
             }
             OmicronZoneType::ClickhouseKeeper { address, dataset } => {
-                Self::ClickhouseKeeper { address, dataset }
+                Ok(Self::ClickhouseKeeper { address, dataset })
             }
             OmicronZoneType::ClickhouseServer { address, dataset } => {
-                Self::ClickhouseServer { address, dataset }
+                Ok(Self::ClickhouseServer { address, dataset })
             }
             OmicronZoneType::CockroachDb { address, dataset } => {
-                Self::CockroachDb { address, dataset }
+                Ok(Self::CockroachDb { address, dataset })
             }
             OmicronZoneType::Crucible { address, dataset } => {
-                Self::Crucible { address, dataset }
+                Ok(Self::Crucible { address, dataset })
             }
             OmicronZoneType::CruciblePantry { address } => {
-                Self::CruciblePantry { address }
+                Ok(Self::CruciblePantry { address })
             }
             OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 nic,
-            } => Self::ExternalDns { dataset, http_address, dns_address, nic },
+            } => Ok(Self::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic: nic.try_into()?,
+            }),
             OmicronZoneType::InternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 gz_address,
                 gz_address_index,
-            } => Self::InternalDns {
+            } => Ok(Self::InternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 gz_address,
                 gz_address_index,
-            },
+            }),
             OmicronZoneType::InternalNtp { address } => {
-                Self::InternalNtp { address }
+                Ok(Self::InternalNtp { address })
             }
             OmicronZoneType::Nexus {
                 internal_address,
@@ -320,21 +377,27 @@ impl From<OmicronZoneType> for inventory::OmicronZoneType {
                 nic,
                 external_tls,
                 external_dns_servers,
-            } => Self::Nexus {
+            } => Ok(Self::Nexus {
                 internal_address,
                 lockstep_port: NEXUS_LOCKSTEP_PORT,
                 external_ip,
-                nic,
+                nic: nic.try_into()?,
                 external_tls,
                 external_dns_servers,
-            },
-            OmicronZoneType::Oximeter { address } => Self::Oximeter { address },
+            }),
+            OmicronZoneType::Oximeter { address } => {
+                Ok(Self::Oximeter { address })
+            }
         }
     }
 }
 
-impl From<inventory::OmicronZoneType> for OmicronZoneType {
-    fn from(value: inventory::OmicronZoneType) -> Self {
+impl TryFrom<inventory::OmicronZoneType> for OmicronZoneType {
+    type Error = external::Error;
+
+    fn try_from(
+        value: inventory::OmicronZoneType,
+    ) -> Result<Self, Self::Error> {
         match value {
             inventory::OmicronZoneType::BoundaryNtp {
                 address,
@@ -343,55 +406,60 @@ impl From<inventory::OmicronZoneType> for OmicronZoneType {
                 domain,
                 nic,
                 snat_cfg,
-            } => Self::BoundaryNtp {
+            } => Ok(Self::BoundaryNtp {
                 address,
                 ntp_servers,
                 dns_servers,
                 domain,
-                nic,
+                nic: nic.try_into()?,
                 snat_cfg,
-            },
+            }),
             inventory::OmicronZoneType::Clickhouse { address, dataset } => {
-                Self::Clickhouse { address, dataset }
+                Ok(Self::Clickhouse { address, dataset })
             }
             inventory::OmicronZoneType::ClickhouseKeeper {
                 address,
                 dataset,
-            } => Self::ClickhouseKeeper { address, dataset },
+            } => Ok(Self::ClickhouseKeeper { address, dataset }),
             inventory::OmicronZoneType::ClickhouseServer {
                 address,
                 dataset,
-            } => Self::ClickhouseServer { address, dataset },
+            } => Ok(Self::ClickhouseServer { address, dataset }),
             inventory::OmicronZoneType::CockroachDb { address, dataset } => {
-                Self::CockroachDb { address, dataset }
+                Ok(Self::CockroachDb { address, dataset })
             }
             inventory::OmicronZoneType::Crucible { address, dataset } => {
-                Self::Crucible { address, dataset }
+                Ok(Self::Crucible { address, dataset })
             }
             inventory::OmicronZoneType::CruciblePantry { address } => {
-                Self::CruciblePantry { address }
+                Ok(Self::CruciblePantry { address })
             }
             inventory::OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 nic,
-            } => Self::ExternalDns { dataset, http_address, dns_address, nic },
+            } => Ok(Self::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic: nic.try_into()?,
+            }),
             inventory::OmicronZoneType::InternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 gz_address,
                 gz_address_index,
-            } => Self::InternalDns {
+            } => Ok(Self::InternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 gz_address,
                 gz_address_index,
-            },
+            }),
             inventory::OmicronZoneType::InternalNtp { address } => {
-                Self::InternalNtp { address }
+                Ok(Self::InternalNtp { address })
             }
             inventory::OmicronZoneType::Nexus {
                 internal_address,
@@ -400,15 +468,15 @@ impl From<inventory::OmicronZoneType> for OmicronZoneType {
                 nic,
                 external_tls,
                 external_dns_servers,
-            } => Self::Nexus {
+            } => Ok(Self::Nexus {
                 internal_address,
                 external_ip,
-                nic,
+                nic: nic.try_into()?,
                 external_tls,
                 external_dns_servers,
-            },
+            }),
             inventory::OmicronZoneType::Oximeter { address } => {
-                Self::Oximeter { address }
+                Ok(Self::Oximeter { address })
             }
         }
     }
@@ -432,17 +500,23 @@ pub struct ConfigReconcilerInventory {
     pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
 }
 
-impl From<inventory::ConfigReconcilerInventory> for ConfigReconcilerInventory {
-    fn from(value: inventory::ConfigReconcilerInventory) -> Self {
-        Self {
-            last_reconciled_config: value.last_reconciled_config.into(),
+impl TryFrom<inventory::ConfigReconcilerInventory>
+    for ConfigReconcilerInventory
+{
+    type Error = external::Error;
+
+    fn try_from(
+        value: inventory::ConfigReconcilerInventory,
+    ) -> Result<Self, Self::Error> {
+        Ok(Self {
+            last_reconciled_config: value.last_reconciled_config.try_into()?,
             external_disks: value.external_disks,
             datasets: value.datasets,
             orphaned_datasets: value.orphaned_datasets,
             zones: value.zones,
             boot_partitions: value.boot_partitions,
             remove_mupdate_override: value.remove_mupdate_override,
-        }
+        })
     }
 }
 
@@ -468,27 +542,31 @@ pub enum ConfigReconcilerInventoryStatus {
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
 }
 
-impl From<inventory::ConfigReconcilerInventoryStatus>
+impl TryFrom<inventory::ConfigReconcilerInventoryStatus>
     for ConfigReconcilerInventoryStatus
 {
-    fn from(value: inventory::ConfigReconcilerInventoryStatus) -> Self {
+    type Error = external::Error;
+
+    fn try_from(
+        value: inventory::ConfigReconcilerInventoryStatus,
+    ) -> Result<Self, Self::Error> {
         match value {
             inventory::ConfigReconcilerInventoryStatus::NotYetRun => {
-                Self::NotYetRun
+                Ok(Self::NotYetRun)
             }
             inventory::ConfigReconcilerInventoryStatus::Running {
                 config,
                 started_at,
                 running_for,
-            } => Self::Running {
-                config: Box::new((*config).into()),
+            } => Ok(Self::Running {
+                config: Box::new((*config).try_into()?),
                 started_at,
                 running_for,
-            },
+            }),
             inventory::ConfigReconcilerInventoryStatus::Idle {
                 completed_at,
                 ran_for,
-            } => Self::Idle { completed_at, ran_for },
+            } => Ok(Self::Idle { completed_at, ran_for }),
         }
     }
 }

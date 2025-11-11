@@ -2,13 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Module for converting the legacy triple of sled config files (disks,
-//! datasets, and zones) into the current unified [`OmicronSledConfig`].
+//! Module for converting older formats of the sled configuration files.
 
 use camino::Utf8PathBuf;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
@@ -16,6 +14,8 @@ use omicron_common::ledger::Ledger;
 use omicron_common::ledger::Ledgerable;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_types::inventory::v6::OmicronSledConfig as OmicronSledConfigV6;
+use sled_agent_types::inventory::v6::OmicronZoneConfig as OmicronZoneConfigV6;
 use slog::Logger;
 use slog::error;
 use slog::warn;
@@ -27,6 +27,38 @@ const LEGACY_DISKS_LEDGER_FILENAME: &str = "omicron-physical-disks.json";
 const LEGACY_DATASETS_LEDGER_FILENAME: &str = "omicron-datasets.json";
 const LEGACY_ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 
+/// Convert from version 6 of the sled-configuration to the current, if
+/// possible. The later version includes dual-stack private IP configuration in
+/// our internal network interface types.
+///
+/// # Panics
+///
+/// This panics if the conversion fails. That might happen if we somehow
+/// serialized a NIC with an IPv4 address, but on an IPv6 subnet. That should
+/// not be possible, but we have no way of recovering into the current format if
+/// we do encounter that.
+pub(super) async fn try_convert_v6_sled_config(
+    log: &Logger,
+    datasets: Vec<Utf8PathBuf>,
+) -> Option<OmicronSledConfig> {
+    let old =
+        Ledger::<OmicronSledConfigLocal>::new(log, datasets.clone()).await?;
+    let new_config = old.into_inner().0.try_into().unwrap_or_else(|e| {
+        panic!(
+            "Failed to convert OmicronSledConfigV6 to the current version: {e}"
+        )
+    });
+    write_converted_ledger(
+        log,
+        datasets,
+        new_config,
+        LegacyKind::SingleStackNic,
+    )
+    .await
+}
+
+/// Convert the legacy triple of sled config files (disks, datasets, and zones)
+/// into the current unified [`OmicronSledConfig`].
 pub(super) async fn convert_legacy_ledgers(
     config_datasets: &[Utf8PathBuf],
     log: &Logger,
@@ -95,13 +127,69 @@ pub(super) async fn convert_legacy_ledgers(
     // Perform the actual merge; this is infallible.
     let sled_config = merge_old_configs(disks, datasets, zones);
 
+    // At this point, we've converted from the old, 3-config world into the
+    // 1-config world, but we've also converted into an older version of the
+    // configuration type itself. The 3-file format predates support for
+    // dual-stack network interfaces.
+    //
+    // Convert the merged configuration into this new format, and write that out
+    // instead. This conversion _is_ fallible. Unfortunately, if it fails,
+    // there's nothing we can do. That conversion is determinstic, so doing it
+    // again won't change the result.
+    let sled_config = OmicronSledConfig::try_from(sled_config)
+        .unwrap_or_else(|e| panic!(
+            "Failed to convert OmicronSledConfigV6 to the current version: {e}"
+        ));
+
     // Write the newly-merged config to disk.
     let new_config_paths = config_datasets
         .iter()
         .map(|p| p.join(CONFIG_LEDGER_FILENAME))
         .collect::<Vec<_>>();
-    let mut config_ledger =
-        Ledger::new_with(log, new_config_paths.clone(), sled_config);
+    let new_ledger = write_converted_ledger(
+        log,
+        new_config_paths,
+        sled_config,
+        LegacyKind::ThreeLedgerFormat,
+    )
+    .await?;
+
+    // We've successfully written and reread our new combined config; remove the
+    // old legacy ledgers.
+    for old_ledger_path in
+        disk_paths.iter().chain(dataset_paths.iter()).chain(zone_paths.iter())
+    {
+        if let Err(err) = tokio::fs::remove_file(old_ledger_path).await {
+            // There isn't really anything we can do other than warn here;
+            // future attempts to read the ledger will find the combined config
+            // we wrote above, so we'll just leak the legacy configs here and
+            // rely on support procedures to confirm we don't hit this during
+            // the transition period.
+            warn!(
+                log,
+                "Failed to remove legacy ledger";
+                "path" => %old_ledger_path,
+                InlineErrorChain::new(&err),
+            );
+        }
+    }
+
+    Some(new_ledger)
+}
+
+#[derive(Debug)]
+enum LegacyKind {
+    ThreeLedgerFormat,
+    SingleStackNic,
+}
+
+async fn write_converted_ledger(
+    log: &Logger,
+    paths: Vec<Utf8PathBuf>,
+    sled_config: OmicronSledConfig,
+    kind: LegacyKind,
+) -> Option<OmicronSledConfig> {
+    let mut config_ledger = Ledger::new_with(log, paths.clone(), sled_config);
 
     match config_ledger.commit().await {
         Ok(()) => (),
@@ -112,7 +200,8 @@ pub(super) async fn convert_legacy_ledgers(
             warn!(
                 log,
                 "Failed to write new sled config ledger built \
-                 from legacy ledgers";
+                from legacy ledgers";
+                "legacy_kind" => ?kind,
                 InlineErrorChain::new(&err),
             );
             return Some(config_ledger.into_inner());
@@ -121,21 +210,22 @@ pub(super) async fn convert_legacy_ledgers(
 
     // Be paranoid before removing the legacy ledgers: confirm we can read back
     // the new combined config.
-    match Ledger::new(log, new_config_paths.clone()).await {
+    match Ledger::new(log, paths.clone()).await {
         Some(reread_config) => {
             // Check that the contents we wrote match the contents we read. No
             // one should be modifying this file concurrently, so a failure here
-            // means we've ledgered incorrect data, which could be disasterous.
+            // means we've ledgered incorrect data, which could be disastrous.
             // Log an error and at least try remove the ledgers we just wrote,
             // then use the config we cobbled together from the legacy ledgers.
             if config_ledger.data() != reread_config.data() {
                 error!(
                     log,
                     "Reading just-ledgered config returns unexpected contents!";
+                    "legacy_kind" => ?kind,
                     "written" => ?config_ledger.data(),
                     "read" => ?reread_config.data(),
                 );
-                for p in &new_config_paths {
+                for p in &paths {
                     if let Err(err) = tokio::fs::remove_file(p).await {
                         // We're in really big trouble now: we've written a
                         // bogus ledger and can't remove it. We cannot safely
@@ -143,6 +233,7 @@ pub(super) async fn convert_legacy_ledgers(
                         error!(
                             log,
                             "Wrote bogus ledger and then failed to remove it!";
+                            "legacy_kind" => ?kind,
                             "path" => %p,
                             InlineErrorChain::new(&err),
                         );
@@ -170,29 +261,10 @@ pub(super) async fn convert_legacy_ledgers(
             // try to remove the legacy ledgers.
             warn!(
                 log, "Failed to read ledgered config we just wrote!";
-                "paths" => ?new_config_paths,
+                "legacy_kind" => ?kind,
+                "paths" => ?paths,
             );
             return Some(config_ledger.into_inner());
-        }
-    }
-
-    // We've successfully written and reread our new combined config; remove the
-    // old legacy ledgers.
-    for old_ledger_path in
-        disk_paths.iter().chain(dataset_paths.iter()).chain(zone_paths.iter())
-    {
-        if let Err(err) = tokio::fs::remove_file(old_ledger_path).await {
-            // There isn't really anything we can do other than warn here;
-            // future attempts to read the ledger will find the combined config
-            // we wrote above, so we'll just leak the legacy configs here and
-            // rely on support procedures to confirm we don't hit this during
-            // the transition period.
-            warn!(
-                log,
-                "Failed to remove legacy ledger";
-                "path" => %old_ledger_path,
-                InlineErrorChain::new(&err),
-            );
         }
     }
 
@@ -203,8 +275,8 @@ fn merge_old_configs(
     disks: OmicronPhysicalDisksConfig,
     datasets: DatasetsConfig,
     zones: OmicronZonesConfigLocal,
-) -> OmicronSledConfig {
-    OmicronSledConfig {
+) -> OmicronSledConfigV6 {
+    OmicronSledConfigV6 {
         // Take the zone generation as the overall config generation; this is
         // consistent with Reconfigurator's transition from three configs to
         // one.
@@ -243,10 +315,24 @@ impl Ledgerable for OmicronZonesConfigLocal {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 struct OmicronZoneConfigLocal {
-    zone: OmicronZoneConfig,
+    zone: OmicronZoneConfigV6,
     #[serde(rename = "root")]
     #[cfg_attr(test, schemars(with = "String"))]
     _root: Utf8PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(transparent)]
+struct OmicronSledConfigLocal(OmicronSledConfigV6);
+
+impl Ledgerable for OmicronSledConfigLocal {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        self.0.generation > other.0.generation
+    }
+
+    fn generation_bump(&mut self) {
+        self.0.generation = self.0.generation.next()
+    }
 }
 
 #[cfg(test)]
@@ -277,6 +363,40 @@ pub(super) mod tests {
             "../../schema/all-zones-requests.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
+    }
+
+    #[tokio::test]
+    async fn can_convert_v6_config_version() {
+        let logctx = dev::test_setup_log("can_convert_v6_config_version");
+        let tempdir = Utf8TempDir::new().expect("created tempdir");
+
+        // Copy version 6 into a tempdir.
+        println!("logging to {}", tempdir.path());
+        let dst_file_name = Utf8PathBuf::from(
+            Utf8PathBuf::from(MERGED_CONFIG_PATH).file_name().unwrap(),
+        );
+        let dst_file = tempdir.path().join(&dst_file_name);
+        tokio::fs::copy(MERGED_CONFIG_PATH, &dst_file)
+            .await
+            .expect("Copy old config into tempdir");
+        println!("copied {} => {}", MERGED_CONFIG_PATH, dst_file);
+
+        // Convert, which will rewrite the config as well.
+        let converted =
+            try_convert_v6_sled_config(&logctx.log, vec![dst_file.clone()])
+                .await
+                .expect("Should have found and converted v6 config");
+
+        // And make sure it matches the new, directly loaded and converted from
+        // disk.
+        let new_as_v6: OmicronSledConfigV6 = serde_json::from_str(
+            tokio::fs::read_to_string(dst_file).await.unwrap().as_str(),
+        )
+        .expect("successfully converted config");
+        let new = OmicronSledConfig::try_from(new_as_v6)
+            .expect("successfully converted v6 config");
+        assert_eq!(new, converted);
+        logctx.cleanup_successful();
     }
 
     #[test]

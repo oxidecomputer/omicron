@@ -33,7 +33,9 @@ use omicron_uuid_kinds::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_agent_types::probes::ProbeSet;
+use sled_agent_types::inventory::v3;
+use sled_agent_types::inventory::v6;
+use sled_agent_types::probes;
 use sled_agent_types::{
     bootstore::BootstoreStatus,
     disk::DiskEnsureBody,
@@ -53,9 +55,6 @@ use sled_diagnostics::SledDiagnosticsQueryOutput;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
-/// Copies of data types that changed between v3 and v4.
-mod v3;
-
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
     //
@@ -68,6 +67,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (7, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
     (6, ADD_PROBE_PUT_ENDPOINT),
     (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
@@ -328,12 +328,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions =
+            VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+    }]
+    async fn v6_omicron_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v6::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(OmicronSledConfig::try_from)?;
+        Self::omicron_config_put(rqctx, body).await
+    }
 
     #[endpoint {
         operation_id = "omicron_config_put",
@@ -345,7 +359,8 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v3::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+        let body = body.try_map(OmicronSledConfig::try_from)?;
+        Self::omicron_config_put(rqctx, body).await
     }
 
     #[endpoint {
@@ -359,12 +374,28 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = ..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+    }]
+    async fn v6_vmm_register(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<v6::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        let body = body.try_map(InstanceEnsureBody::try_from)?;
+        Self::vmm_register(rqctx, path_params, body).await
+    }
 
     #[endpoint {
         method = DELETE,
@@ -486,12 +517,28 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vpc/{vpc_id}/firewall/rules",
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
     }]
     async fn vpc_firewall_rules_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VpcPathParam>,
         body: TypedBody<VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_put",
+        method = PUT,
+        path = "/vpc/{vpc_id}/firewall/rules",
+        versions = ..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+    }]
+    async fn v6_vpc_firewall_rules_put(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VpcPathParam>,
+        body: TypedBody<v6::VpcFirewallRulesEnsureBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(VpcFirewallRulesEnsureBody::try_from)?;
+        Self::vpc_firewall_rules_put(rqctx, path_params, body).await
+    }
 
     /// Create a mapping from a virtual NIC to a physical host
     // Keep interface_id to maintain parity with the simulated sled agent, which
@@ -570,11 +617,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions =
+            VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+    }]
+    async fn v6_inventory(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v6::Inventory>, HttpError> {
+        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -587,7 +649,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v3::Inventory>, HttpError> {
         let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
-        Ok(HttpResponseOk(inventory.into()))
+        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
 
     /// Fetch sled identifiers
@@ -803,12 +865,31 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/probes",
-        versions = VERSION_ADD_PROBE_PUT_ENDPOINT..,
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
     }]
     async fn probes_put(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<ProbeSet>,
+        body: TypedBody<probes::ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the entire set of probe zones on this sled.
+    ///
+    /// Probe zones are used to debug networking configuration. They look
+    /// similar to instances, in that they have an OPTE port on a VPC subnet and
+    /// external addresses, but no actual VM.
+    #[endpoint {
+        method = PUT,
+        path = "/probes",
+        versions =
+            VERSION_ADD_PROBE_PUT_ENDPOINT..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+    }]
+    async fn v6_probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<probes::v1::ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(TryInto::try_into)?;
+        Self::probes_put(request_context, body).await
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
