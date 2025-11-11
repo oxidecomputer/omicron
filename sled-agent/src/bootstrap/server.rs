@@ -454,6 +454,12 @@ fn start_dropshot_server(
         dropshot_log,
     )
     .config(dropshot_config)
+    .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+        dropshot::ClientSpecifiesVersionInHeader::new(
+            omicron_common::api::VERSION_HEADER,
+            bootstrap_agent_api::latest_version(),
+        ),
+    )))
     .start()
     .map_err(|error| {
         StartError::InitBootstrapDropshotServer(error.to_string())

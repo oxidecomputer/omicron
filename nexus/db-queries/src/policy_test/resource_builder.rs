@@ -348,6 +348,23 @@ impl DynAuthorizedResource for authz::SiloUserList {
     }
 }
 
+impl DynAuthorizedResource for authz::SiloGroupList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: group list", self.silo().resource_name())
+    }
+}
+
 impl DynAuthorizedResource for authz::SiloUserSessionList {
     fn do_authorize<'a, 'b>(
         &'a self,
@@ -399,5 +416,22 @@ impl DynAuthorizedResource for authz::ScimClientBearerTokenList {
             "{}: scim client bearer token list",
             self.silo().resource_name()
         )
+    }
+}
+
+impl DynAuthorizedResource for authz::VpcList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: vpc list", self.project().resource_name())
     }
 }

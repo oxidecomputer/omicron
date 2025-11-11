@@ -53,6 +53,7 @@ use parallel_task_set::ParallelTaskSet;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -175,12 +176,16 @@ impl SupportBundleCollector {
                 return Ok(SledAgentBundleCleanupResult::Deleted);
             }
             Err(progenitor_client::Error::ErrorResponse(err))
-                if err.status() == http::StatusCode::NOT_FOUND =>
+                if err.status() == http::StatusCode::NOT_FOUND
+                    && err.error_code.as_ref().is_some_and(|code| {
+                        code.contains(NESTED_DATASET_NOT_FOUND)
+                    }) =>
             {
                 warn!(
                     &opctx.log,
                     "SupportBundleCollector could not delete bundle (not found)";
-                    "id" => %bundle.id
+                    "id" => %bundle.id,
+                    "err" => ?err
                 );
 
                 return Ok(SledAgentBundleCleanupResult::NotFound);
@@ -1597,10 +1602,23 @@ fn recursively_add_directory_to_zipfile(
 
         let file_type = entry.file_type()?;
         if file_type.is_file() {
+            let src = entry.path();
+
+            let zip_time = entry
+                .path()
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|sys_time| jiff::Zoned::try_from(sys_time).ok())
+                .and_then(|zoned| {
+                    zip::DateTime::try_from(zoned.datetime()).ok()
+                })
+                .unwrap_or_else(zip::DateTime::default);
+
             let opts = FullFileOptions::default()
+                .last_modified_time(zip_time)
                 .compression_method(zip::CompressionMethod::Deflated)
                 .large_file(true);
-            let src = entry.path();
 
             zip.start_file_from_path(dst, opts)?;
             let mut file = std::fs::File::open(&src)?;

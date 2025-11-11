@@ -15,6 +15,7 @@ use live_tests_macros::live_test;
 use nexus_db_model::DbMetadataNexusState;
 use nexus_lockstep_client::types::QuiesceState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -54,7 +55,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     // That blueprint should be propagated to all sleds.  We wait just a bit
     // here to deal with races set up by other tests failing or other ongoing
     // activity.
-    let collection = blueprint_wait_sled_configs_propagated(
+    let _collection = blueprint_wait_sled_configs_propagated(
         opctx,
         datastore,
         &blueprint_initial,
@@ -131,7 +132,9 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         .map(|(id, current)| {
             (
                 id,
-                lc.specific_internal_nexus_client(current.cfg.internal_address),
+                lc.specific_internal_nexus_client(
+                    current.cfg.lockstep_address(),
+                ),
             )
         })
         .collect();
@@ -168,14 +171,25 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &planning_input,
-            &collection,
             &nexus,
             &|builder: &mut BlueprintBuilder| {
+                let mut external_networking_alloc =
+                    ExternalNetworkingAllocator::from_current_zones(
+                        builder,
+                        planning_input.external_ip_policy(),
+                    )
+                    .context(
+                        "failed to construct external networking allocator",
+                    )?;
                 for current_nexus in current_nexus_zones.values() {
+                    let external_ip = external_networking_alloc
+                        .for_new_nexus()
+                        .context("failed to pick an external IP for Nexus")?;
                     builder
                         .sled_add_zone_nexus(
                             current_nexus.sled_id,
                             current_nexus.image_source.clone(),
+                            external_ip,
                             next_generation,
                         )
                         .context("adding Nexus zone")?;
@@ -193,18 +207,15 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
 
     // Find the new Nexus zones and make clients for them.
     let new_nexus_clients = blueprint_new_nexus
-        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
-        .filter_map(|(_sled_id, z)| {
-            let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                nexus_generation,
-                internal_address,
-                ..
-            }) = &z.zone_type
-            else {
-                return None;
-            };
-            (*nexus_generation == next_generation).then(|| {
-                (z.id, lc.specific_internal_nexus_client(*internal_address))
+        .all_nexus_zones(BlueprintZoneDisposition::is_in_service)
+        .filter_map(|(_sled_id, zone_cfg, nexus_config)| {
+            (nexus_config.nexus_generation == next_generation).then(|| {
+                (
+                    zone_cfg.id,
+                    lc.specific_internal_nexus_client(
+                        nexus_config.lockstep_address(),
+                    ),
+                )
             })
         })
         .collect::<BTreeMap<_, _>>();
@@ -216,7 +227,7 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
     // SMF may still be starting up the zone.  Even once the Nexus process
     // starts, it will become blocked on the "not yet" DbMetadataNexusState,
     // waiting for handoff.
-    let collection = blueprint_wait_sled_configs_propagated(
+    let _collection = blueprint_wait_sled_configs_propagated(
         opctx,
         datastore,
         &blueprint_new_nexus,
@@ -261,7 +272,6 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &planning_input,
-            &collection,
             &nexus,
             &|builder: &mut BlueprintBuilder| {
                 builder.set_nexus_generation(next_generation);
@@ -427,7 +437,6 @@ async fn test_nexus_handoff(lc: &LiveTestContext) {
         blueprint_edit_current_target(
             log,
             &planning_input,
-            &collection,
             new_nexus,
             &|builder: &mut BlueprintBuilder| {
                 for (id, current_zone) in &current_nexus_zones {

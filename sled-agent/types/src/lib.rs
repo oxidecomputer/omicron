@@ -10,6 +10,7 @@ pub mod disk;
 pub mod early_networking;
 pub mod firewall_rules;
 pub mod instance;
+pub mod probes;
 pub mod rack_init;
 pub mod rack_ops;
 pub mod sled;

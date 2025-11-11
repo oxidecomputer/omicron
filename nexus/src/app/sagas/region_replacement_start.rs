@@ -764,14 +764,13 @@ async fn srrs_update_request_record(
 pub(crate) mod test {
     use crate::{
         app::RegionAllocationStrategy, app::db::DataStore,
-        app::saga::create_saga_dag,
+        app::db::datastore::Disk, app::saga::create_saga_dag,
         app::sagas::region_replacement_start::Params,
         app::sagas::region_replacement_start::SagaRegionReplacementStart,
         app::sagas::region_replacement_start::find_only_new_region,
         app::sagas::test_helpers::test_opctx,
     };
     use chrono::Utc;
-    use nexus_db_lookup::LookupPath;
     use nexus_db_model::CrucibleDataset;
     use nexus_db_model::Region;
     use nexus_db_model::RegionReplacement;
@@ -820,14 +819,12 @@ pub(crate) mod test {
 
         // Assert disk has three allocated regions
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk_id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        let Disk::Crucible(disk) =
+            datastore.disk_get(&opctx, disk_id).await.unwrap();
 
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+            datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         // Replace one of the disk's regions
@@ -876,7 +873,7 @@ pub(crate) mod test {
 
         // Validate number of regions for disk didn't change
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+            datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         // Validate that one of the regions for the disk is the new one
@@ -1137,14 +1134,12 @@ pub(crate) mod test {
         let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk_id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        let Disk::Crucible(disk) =
+            datastore.disk_get(&opctx, disk_id).await.unwrap();
 
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+            datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         let region_to_replace: &Region = &allocated_regions[0].1;
@@ -1212,14 +1207,12 @@ pub(crate) mod test {
         let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk_id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        let Disk::Crucible(disk) =
+            datastore.disk_get(&opctx, disk_id).await.unwrap();
 
         let allocated_regions =
-            datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
+            datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
         assert_eq!(allocated_regions.len(), 3);
 
         let region_to_replace: &Region = &allocated_regions[0].1;

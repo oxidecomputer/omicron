@@ -53,6 +53,7 @@ internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
+jiff.workspace = true
 lldpd_client.workspace = true
 macaddr.workspace = true
 maplit.workspace = true
@@ -144,7 +145,7 @@ update-common.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
-zip.workspace = true
+zip = { workspace = true, features = ["jiff-02"] }
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
@@ -160,6 +161,7 @@ httpmock.workspace = true
 httptest.workspace = true
 hubtools.workspace = true
 hyper-rustls.workspace = true
+nexus-client.workspace = true
 nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-lockstep-client.workspace = true
 nexus-test-utils.workspace = true
@@ -176,6 +178,7 @@ pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
+scim2-test-client.workspace = true
 similar-asserts.workspace = true
 sp-sim.workspace = true
 strum.workspace = true

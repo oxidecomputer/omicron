@@ -770,6 +770,55 @@ impl AuthorizedResource for SiloUserList {
     }
 }
 
+/// Synthetic resource describing the list of Groups in a Silo
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloGroupList(Silo);
+
+impl SiloGroupList {
+    pub fn new(silo: Silo) -> Self {
+        SiloGroupList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for SiloGroupList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &SiloGroupList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for SiloGroupList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Note the session list and the token list have exactly the same behavior
 
 /// Synthetic resource for managing a user's sessions
@@ -865,6 +914,55 @@ impl AuthorizedResource for SiloUserTokenList {
     ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // To check for silo admin, we need to load roles from the parent silo.
         self.silo_user().parent.load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic resource describing the list of VPCs in a Project
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VpcList(Project);
+
+impl VpcList {
+    pub fn new(project: Project) -> VpcList {
+        VpcList(project)
+    }
+
+    pub fn project(&self) -> &Project {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for VpcList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("project", |list: &VpcList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for VpcList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Project-related roles.
+        self.project().load_roles(opctx, authn, roleset)
     }
 
     fn on_unauthorized(
@@ -1081,12 +1179,23 @@ impl ApiResourceWithRolesType for Project {
     type AllowedRoles = ProjectRole;
 }
 
+// ============================================================================
+// Project Resources - Non-Networking (InProjectLimited)
+//
+// These resources can be created and modified by users with the
+// "limited-collaborator" role and above. These are "regular" project resources
+// that users can work with without needing permission to reconfigure network
+// infrastructure.
+//
+// Examples: Instances, Disks, Snapshots, Images, Floating IPs
+// ============================================================================
+
 authz_resource! {
     name = "Disk",
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1094,7 +1203,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1102,7 +1211,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1110,7 +1219,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1118,7 +1227,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1126,7 +1235,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1134,15 +1243,30 @@ authz_resource! {
     parent = "Instance",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
+
+// ============================================================================
+// Project Resources - Networking Infrastructure (InProjectFull)
+//
+// These resources require the full "collaborator" role to create or modify.
+// Users with only the "limited-collaborator" role can *read* these resources
+// (via viewer inheritance) but cannot create or modify them.
+//
+// This distinction allows organizations to restrict who can reconfigure the
+// network topology while still allowing those users to work with compute
+// resources (instances, disks, etc.) within the existing network.
+//
+// Resources in this category: VPCs, Subnets, Routers, Router Routes,
+// Internet Gateways, and their child resources (IP pools, IP addresses)
+// ============================================================================
 
 authz_resource! {
     name = "Vpc",
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1150,7 +1274,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1158,7 +1282,7 @@ authz_resource! {
     parent = "VpcRouter",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1166,7 +1290,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1174,7 +1298,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1182,7 +1306,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1190,7 +1314,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1198,7 +1322,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 // Customer network integration resources nested below "Fleet"

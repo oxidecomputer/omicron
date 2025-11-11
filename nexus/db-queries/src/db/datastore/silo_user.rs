@@ -92,6 +92,25 @@ impl SiloUser {
             SiloUser::Scim(_) => UserProvisionType::Scim,
         }
     }
+
+    /// Return if a user should be considered active, where inactive users
+    /// should not have sessions created for them.
+    pub fn is_active(&self) -> bool {
+        match &self {
+            SiloUser::ApiOnly(_) => true,
+
+            SiloUser::Jit(_) => true,
+
+            SiloUser::Scim(u) => {
+                // If a SCIM provisioning client has informed Nexus of the
+                // active field's value, use that. Otherwise, consider users
+                // created by clients that do _not_ use the "active" field at
+                // all to be active: otherwise every user created by a client
+                // does not use the "active" field would be considered inactive.
+                u.active.unwrap_or(true)
+            }
+        }
+    }
 }
 
 impl From<model::SiloUser> for SiloUser {

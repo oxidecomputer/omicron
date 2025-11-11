@@ -33,6 +33,7 @@ use omicron_uuid_kinds::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::{
     bootstore::BootstoreStatus,
     disk::DiskEnsureBody,
@@ -67,6 +68,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (6, ADD_PROBE_PUT_ENDPOINT),
     (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
     (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
@@ -791,6 +793,21 @@ pub trait SledAgentApi {
     async fn debug_operator_switch_zone_policy_put(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<OperatorSwitchZonePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the entire set of probe zones on this sled.
+    ///
+    /// Probe zones are used to debug networking configuration. They look
+    /// similar to instances, in that they have an OPTE port on a VPC subnet and
+    /// external addresses, but no actual VM.
+    #[endpoint {
+        method = PUT,
+        path = "/probes",
+        versions = VERSION_ADD_PROBE_PUT_ENDPOINT..,
+    }]
+    async fn probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 

@@ -943,6 +943,9 @@ pub enum DatasetKind {
 
     // Other datasets
     Debug,
+
+    /// Used for transient storage, contains volumes delegated to VMMs
+    LocalStorage,
 }
 
 impl Serialize for DatasetKind {
@@ -1003,7 +1006,10 @@ impl DatasetKind {
         match self {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
+
             TransientZoneRoot | TransientZone { .. } | Debug => false,
+
+            LocalStorage => true,
         }
     }
 
@@ -1041,6 +1047,7 @@ impl fmt::Display for DatasetKind {
                 return Ok(());
             }
             Debug => "debug",
+            LocalStorage => "local_storage",
         };
         write!(f, "{}", s)
     }
@@ -1067,6 +1074,7 @@ impl FromStr for DatasetKind {
             "internal_dns" => InternalDns,
             "zone" => TransientZoneRoot,
             "debug" => Debug,
+            "local_storage" => LocalStorage,
             other => {
                 if let Some(name) = other.strip_prefix("zone/") {
                     TransientZone { name: name.to_string() }
@@ -1162,6 +1170,7 @@ mod tests {
             DatasetKind::TransientZoneRoot,
             DatasetKind::TransientZone { name: String::from("myzone") },
             DatasetKind::Debug,
+            DatasetKind::LocalStorage,
         ];
 
         assert_eq!(kinds.len(), DatasetKind::COUNT);

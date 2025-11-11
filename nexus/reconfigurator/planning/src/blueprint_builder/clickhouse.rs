@@ -7,13 +7,14 @@
 
 use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use nexus_types::deployment::{
-    Blueprint, BlueprintSledConfig, BlueprintZoneDisposition,
-    BlueprintZoneType, ClickhouseClusterConfig,
+    BlueprintZoneDisposition, BlueprintZoneType, ClickhouseClusterConfig,
 };
-use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
+use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::{Logger, error};
 use std::collections::BTreeSet;
 use thiserror::Error;
+
+use crate::blueprint_builder::BlueprintBuilder;
 
 // The set of clickhouse server and keeper zones that should be running as
 // constructed by the `BlueprintBuilder` in the current planning iteration.
@@ -23,22 +24,18 @@ pub struct ClickhouseZonesThatShouldBeRunning {
 }
 
 impl ClickhouseZonesThatShouldBeRunning {
-    pub fn new<'a, I>(zones_by_sled_id: I) -> Self
-    where
-        I: Iterator<Item = (SledUuid, &'a BlueprintSledConfig)>,
-    {
+    pub fn new(blueprint: &BlueprintBuilder<'_>) -> Self {
         let mut keepers = BTreeSet::new();
         let mut servers = BTreeSet::new();
-        for (_, bp_zone_config) in Blueprint::filtered_zones(
-            zones_by_sled_id,
-            BlueprintZoneDisposition::is_in_service,
-        ) {
-            match bp_zone_config.zone_type {
+        for (_, zone) in
+            blueprint.current_zones(BlueprintZoneDisposition::is_in_service)
+        {
+            match zone.zone_type {
                 BlueprintZoneType::ClickhouseKeeper(_) => {
-                    keepers.insert(bp_zone_config.id);
+                    keepers.insert(zone.id);
                 }
                 BlueprintZoneType::ClickhouseServer(_) => {
-                    servers.insert(bp_zone_config.id);
+                    servers.insert(zone.id);
                 }
                 _ => (),
             }
@@ -284,6 +281,10 @@ impl ClickhouseAllocator {
 
     pub fn parent_config(&self) -> &ClickhouseClusterConfig {
         &self.parent_config
+    }
+
+    pub fn into_parent_config(self) -> ClickhouseClusterConfig {
+        self.parent_config
     }
 }
 

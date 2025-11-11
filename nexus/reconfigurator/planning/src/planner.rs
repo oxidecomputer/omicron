@@ -7,12 +7,15 @@
 //! See crate-level documentation for details.
 
 use crate::blueprint_builder::BlueprintBuilder;
+use crate::blueprint_builder::ClickhouseAllocator;
+use crate::blueprint_builder::ClickhouseZonesThatShouldBeRunning;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::EnsureMupdateOverrideAction;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::blueprint_editor::DisksEditError;
+use crate::blueprint_editor::ExternalNetworkingAllocator;
 use crate::blueprint_editor::SledEditError;
 use crate::mgs_updates::ImpossibleUpdatePolicy;
 use crate::mgs_updates::MgsUpdatePlanner;
@@ -22,6 +25,7 @@ use crate::planner::image_source::NoopConvertHostPhase2Contents;
 use crate::planner::image_source::NoopConvertZoneStatus;
 use crate::planner::omicron_zone_placement::PlacementError;
 use iddqd::IdOrdMap;
+use itertools::Either;
 use itertools::Itertools;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
@@ -34,6 +38,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneImageSource;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
@@ -61,10 +66,12 @@ use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog::error;
 use slog::{Logger, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::iter;
 use std::str::FromStr;
 use std::sync::Arc;
 use swrite::SWrite;
@@ -180,7 +187,6 @@ impl<'a> Planner<'a> {
             &log,
             parent_blueprint,
             input,
-            inventory,
             creator,
             rng,
         )?;
@@ -290,6 +296,13 @@ impl<'a> Planner<'a> {
         // CockroachDB settings aren't dependent on zones, so they can be
         // planned independently of the rest of the system.
         let cockroachdb_settings = self.do_plan_cockroachdb_settings();
+
+        // Clickhouse cluster settings aren't dependent on zones, so they can be
+        // planned indepdently of the rest of the system.
+        //
+        // TODO-cleanup We should include something about clickhouse cluster
+        // configs in the PlanningReport.
+        self.do_plan_clickhouse_cluster_settings();
 
         Ok(PlanningReport {
             planner_config: *self.input.planner_config(),
@@ -1008,6 +1021,11 @@ impl<'a> Planner<'a> {
         // discretionary zones, so defer its creation until it's needed.
         let mut zone_placement = None;
 
+        // Likewise, we usually don't need to create an
+        // `ExternalNetworkingAllocator` to add discretionary zones, so defer
+        // its creation until it's needed.
+        let mut external_networking_alloc = None;
+
         for zone_kind in [
             DiscretionaryOmicronZone::BoundaryNtp,
             DiscretionaryOmicronZone::Clickhouse,
@@ -1085,9 +1103,9 @@ impl<'a> Planner<'a> {
                 if num_zones_to_add == 0 {
                     continue;
                 }
-                // We need to add at least one zone; construct our `zone_placement`
-                // (or reuse the existing one if a previous loop iteration already
-                // created it).
+                // We need to add at least one zone; construct our
+                // `zone_placement` (or reuse the existing one if a previous
+                // loop iteration already created it)...
                 let zone_placement = zone_placement.get_or_insert_with(|| {
                     // This constructs a picture of the sleds as we currently
                     // understand them, as far as which sleds have discretionary
@@ -1122,8 +1140,27 @@ impl<'a> Planner<'a> {
                         });
                     OmicronZonePlacement::new(current_discretionary_zones)
                 });
+                // ...and our external networking allocator. (We can't use
+                // `get_or_insert_with()` because we can't bubble out the error,
+                // so recreate the same effect manually.)
+                let external_networking_alloc =
+                    match external_networking_alloc.as_mut() {
+                        Some(allocator) => allocator,
+                        None => {
+                            let allocator =
+                            ExternalNetworkingAllocator::from_current_zones(
+                                &self.blueprint,
+                                self.input.external_ip_policy(),
+                            )
+                            .map_err(Error::ExternalNetworkingAllocator)?;
+                            external_networking_alloc = Some(allocator);
+                            external_networking_alloc.as_mut().unwrap()
+                        }
+                    };
+
                 self.add_discretionary_zones(
                     zone_placement,
+                    external_networking_alloc,
                     zone_kind,
                     num_zones_to_add,
                     image_source,
@@ -1235,11 +1272,24 @@ impl<'a> Planner<'a> {
     fn add_discretionary_zones(
         &mut self,
         zone_placement: &mut OmicronZonePlacement,
+        external_networking_alloc: &mut ExternalNetworkingAllocator,
         kind: DiscretionaryOmicronZone,
         num_zones_to_add: usize,
         image_source: BlueprintZoneImageSource,
         report: &mut PlanningAddStepReport,
     ) -> Result<(), Error> {
+        // If `kind` is "internal DNS", we'll need to pick subnets, but
+        // computing the available subnets isn't free. We could do something
+        // fancy with lazy construction, but that gets a little messy. Instead,
+        // always construct an iterator, and create an empty iterator for any
+        // `kind` that isn't "internal DNS".
+        let mut available_internal_dns_subnets = match kind {
+            DiscretionaryOmicronZone::InternalDns => {
+                Either::Left(self.blueprint.available_internal_dns_subnets()?)
+            }
+            _ => Either::Right(iter::empty()),
+        };
+
         for i in 0..num_zones_to_add {
             let sled_id = match zone_placement.place_zone(kind) {
                 Ok(sled_id) => sled_id,
@@ -1260,8 +1310,12 @@ impl<'a> Planner<'a> {
             let image = image_source.clone();
             match kind {
                 DiscretionaryOmicronZone::BoundaryNtp => {
+                    let external_ip =
+                        external_networking_alloc.for_new_boundary_ntp()?;
                     self.blueprint.sled_promote_internal_ntp_to_boundary_ntp(
-                        sled_id, image,
+                        sled_id,
+                        image,
+                        external_ip,
                     )?
                 }
                 DiscretionaryOmicronZone::Clickhouse => {
@@ -1280,17 +1334,31 @@ impl<'a> Planner<'a> {
                     .blueprint
                     .sled_add_zone_crucible_pantry(sled_id, image)?,
                 DiscretionaryOmicronZone::InternalDns => {
-                    self.blueprint.sled_add_zone_internal_dns(sled_id, image)?
+                    let dns_subnet = available_internal_dns_subnets
+                        .next()
+                        .ok_or(Error::NoAvailableDnsSubnets)?;
+                    self.blueprint.sled_add_zone_internal_dns(
+                        sled_id, image, dns_subnet,
+                    )?
                 }
                 DiscretionaryOmicronZone::ExternalDns => {
-                    self.blueprint.sled_add_zone_external_dns(sled_id, image)?
+                    let external_ip =
+                        external_networking_alloc.for_new_external_dns()?;
+                    self.blueprint.sled_add_zone_external_dns(
+                        sled_id,
+                        image,
+                        external_ip,
+                    )?
                 }
                 DiscretionaryOmicronZone::Nexus => {
+                    let external_ip =
+                        external_networking_alloc.for_new_nexus()?;
                     let nexus_generation =
                         self.determine_nexus_generation(&image)?;
                     self.blueprint.sled_add_zone_nexus(
                         sled_id,
                         image,
+                        external_ip,
                         nexus_generation,
                     )?
                 }
@@ -2278,6 +2346,73 @@ impl<'a> Planner<'a> {
         // https://www.cockroachlabs.com/docs/stable/cluster-settings#change-a-cluster-setting
     }
 
+    fn do_plan_clickhouse_cluster_settings(&mut self) {
+        // Generate a new cluster config based on the policy and parent
+        // blueprint.
+        let new_config = self.generate_current_clickhouse_cluster_config();
+        self.blueprint.set_clickhouse_cluster_config(new_config);
+
+        // Not directly clickhouse cluster settings, but closely related: also
+        // update how we read from Oximeter based on the input policy.
+        let oximeter_read_policy = self.input.oximeter_read_settings();
+        self.blueprint.set_oximeter_read_policy(
+            oximeter_read_policy.version.into(),
+            oximeter_read_policy.mode,
+        );
+    }
+
+    fn generate_current_clickhouse_cluster_config(
+        &mut self,
+    ) -> Option<ClickhouseClusterConfig> {
+        if !self.input.clickhouse_cluster_enabled() {
+            if self.blueprint.clickhouse_cluster_config().is_some() {
+                info!(
+                    self.log,
+                    "clickhouse cluster disabled via policy: \
+                     discarding existing 'ClickhouseAllocator' and \
+                     the resulting generated 'ClickhouseClusterConfig"
+                );
+            }
+            return None;
+        }
+
+        // If we have the clickhouse cluster setup enabled via policy and we
+        // don't yet have a `ClickhouseClusterConfiguration`, then we must
+        // create one and feed it to our `ClickhouseAllocator`.
+        let parent_config =
+            self.blueprint.clickhouse_cluster_config().cloned().unwrap_or_else(
+                || {
+                    info!(
+                        self.log,
+                        "Clickhouse cluster enabled by policy: \
+                         generating initial ClickhouseClusterConfig"
+                    );
+                    self.blueprint.make_empty_clickhouse_cluster_config()
+                },
+            );
+        let allocator = ClickhouseAllocator::new(
+            self.log.clone(),
+            parent_config,
+            self.inventory.latest_clickhouse_keeper_membership(),
+        );
+        let should_be_running =
+            ClickhouseZonesThatShouldBeRunning::new(&self.blueprint);
+
+        match allocator.plan(&should_be_running) {
+            Ok(config) => Some(config),
+            Err(err) => {
+                error!(
+                    self.log, "clickhouse allocator planning failed";
+                    InlineErrorChain::new(&err),
+                );
+
+                // If planning the new config failed, carry forward our
+                // parent's config.
+                Some(allocator.into_parent_config())
+            }
+        }
+    }
+
     /// Return the image source for zones that we need to add.
     fn image_source_for_new_zone(
         &self,
@@ -2463,6 +2598,7 @@ pub(crate) mod test {
     use nexus_types::inventory::CockroachStatus;
     use nexus_types::inventory::InternalDnsGenerationStatus;
     use nexus_types::inventory::TimeSync;
+    use omicron_common::address::Ipv4Range;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::TufArtifactMeta;
@@ -2489,6 +2625,7 @@ pub(crate) mod test {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::net::IpAddr;
+    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactKind;
@@ -2539,7 +2676,7 @@ pub(crate) mod test {
         .expect("created planner");
         let child_blueprint =
             planner.plan().expect("planning should have succeded");
-        verify_blueprint(&child_blueprint);
+        verify_blueprint(&child_blueprint, &input);
         let summary = child_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
             "diff between blueprints (expected no changes):\n{}",
@@ -2563,7 +2700,7 @@ pub(crate) mod test {
             rng.next_system_rng(),
         )
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         let input = example
             .system
@@ -2603,7 +2740,7 @@ pub(crate) mod test {
         assert_eq!(summary.total_datasets_added(), 0);
         assert_eq!(summary.total_datasets_removed(), 0);
         assert_eq!(summary.total_datasets_modified(), 0);
-        verify_blueprint(&blueprint2);
+        verify_blueprint(&blueprint2, &input);
 
         // Now add a new sled.
         let mut sled_id_rng = rng.next_sled_id_rng();
@@ -2637,7 +2774,11 @@ pub(crate) mod test {
 
         assert_eq!(summary.diff.sleds.added.len(), 1);
         assert_eq!(summary.total_disks_added(), 10);
-        assert_eq!(summary.total_datasets_added(), 21);
+
+        // 10 disks added means 30 datasets (each disk adds a debug + zone root
+        //    + local storage), plus one transient zone root for the NTP zone
+        assert_eq!(summary.total_datasets_added(), 31);
+
         let (&sled_id, sled_added) =
             summary.diff.sleds.added.first_key_value().unwrap();
         // We have defined elsewhere that the first generation contains no
@@ -2652,7 +2793,7 @@ pub(crate) mod test {
         ));
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
-        verify_blueprint(&blueprint3);
+        verify_blueprint(&blueprint3, &input);
 
         // Check that with no change in inventory, the planner makes no changes.
         // It needs to wait for inventory to reflect the new NTP zone before
@@ -2673,7 +2814,7 @@ pub(crate) mod test {
         assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
-        verify_blueprint(&blueprint4);
+        verify_blueprint(&blueprint4, &input);
 
         // Now update the inventory to have the requested NTP zone.
         //
@@ -2735,7 +2876,7 @@ pub(crate) mod test {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             }
         }
-        verify_blueprint(&blueprint5);
+        verify_blueprint(&blueprint5, &input);
 
         // Check that there are no more steps.
         assert_planning_makes_no_changes(
@@ -3003,7 +3144,9 @@ pub(crate) mod test {
                 Err(err) => {
                     let err = InlineErrorChain::new(&err).to_string();
                     assert!(
-                        err.contains("error allocating internal DNS"),
+                        err.contains(
+                            "no reserved subnets available for internal DNS"
+                        ),
                         "unexpected error: {err}"
                     );
                 }
@@ -3153,12 +3296,14 @@ pub(crate) mod test {
         // the service IP pool. This will force reuse of the IP that was
         // allocated to the expunged Nexus zone.
         let mut builder = input.into_builder();
-        assert_eq!(builder.policy_mut().service_ip_pool_ranges.len(), 1);
+        let num_available_external_ips = builder
+            .policy_mut()
+            .external_ips
+            .clone()
+            .into_non_external_dns_ips()
+            .count();
         builder.policy_mut().target_nexus_zone_count =
-            builder.policy_mut().service_ip_pool_ranges[0]
-                .len()
-                .try_into()
-                .unwrap();
+            num_available_external_ips;
         let input = builder.build();
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
@@ -3228,72 +3373,92 @@ pub(crate) mod test {
         // We should not be able to add any external DNS zones yet,
         // because we haven't give it any addresses (which currently
         // come only from RSS). This is not an error, though.
-        let mut builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint1,
-            &input,
-            &collection,
-            TEST_NAME,
-            PlannerRng::from_entropy(),
-        )
-        .expect("failed to build blueprint builder");
-        let sled_id = builder.sled_ids_with_zones().next().expect("no sleds");
-        builder
-            .sled_add_zone_external_dns(
-                sled_id,
-                BlueprintZoneImageSource::InstallDataset,
+        assert!(input.external_ip_policy().external_dns_ips().is_empty());
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_blueprint(
+                &blueprint1,
+                input.external_ip_policy(),
             )
-            .expect_err("can't add external DNS zones");
+            .expect("constructed allocator");
+        external_networking_alloc
+            .for_new_external_dns()
+            .expect_err("should not have available IPs for external DNS");
 
-        // Build a builder for a modfied blueprint that will include
-        // some external DNS addresses.
+        // Change the policy: add some external DNS IPs.
+        let external_dns_ips =
+            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
+                addr.parse::<Ipv4Addr>()
+                    .expect("can't parse external DNS IP address")
+            });
+        let input = {
+            let mut builder = input.into_builder();
+            let mut ip_policy =
+                builder.policy_mut().external_ips.clone().into_builder();
+            // Add a "service IP pool" covering our external DNS IP range.
+            ip_policy
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(external_dns_ips[0], external_dns_ips[2])
+                        .unwrap(),
+                )
+                .unwrap();
+            // Set these IPs as "for external DNS".
+            for ip in external_dns_ips {
+                ip_policy.add_external_dns_ip(ip.into()).unwrap();
+            }
+            builder.policy_mut().external_ips = ip_policy.build();
+            builder.build()
+        };
+
+        // Build a builder for a modfied blueprint based on the new policy.
         let mut blueprint_builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
             &input,
-            &collection,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )
         .expect("failed to build blueprint builder");
-
-        // Manually reach into the external networking allocator and "find"
-        // some external IP addresses (maybe they fell off a truck).
-        // TODO-cleanup: Remove when external DNS addresses are in the policy.
-        let external_dns_ips =
-            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
-                addr.parse::<IpAddr>()
-                    .expect("can't parse external DNS IP address")
-            });
-        for addr in external_dns_ips {
-            blueprint_builder.inject_untracked_external_dns_ip(addr).unwrap();
-        }
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &blueprint_builder,
+                input.external_ip_policy(),
+            )
+            .expect("constructed allocator");
 
         // Now we can add external DNS zones. We'll add two to the first
         // sled and one to the second.
         let (sled_1, sled_2) = {
             let mut sleds = blueprint_builder.sled_ids_with_zones();
             (
-                sleds.next().expect("no first sled"),
-                sleds.next().expect("no second sled"),
+                sleds.next().expect("at least one sled"),
+                sleds.next().expect("at least two sleds"),
             )
         };
         blueprint_builder
             .sled_add_zone_external_dns(
                 sled_1,
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_external_dns()
+                    .expect("got IP for external DNS"),
             )
             .expect("added external DNS zone");
         blueprint_builder
             .sled_add_zone_external_dns(
                 sled_1,
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_external_dns()
+                    .expect("got IP for external DNS"),
             )
             .expect("added external DNS zone");
         blueprint_builder
             .sled_add_zone_external_dns(
                 sled_2,
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_external_dns()
+                    .expect("got IP for external DNS"),
             )
             .expect("added external DNS zone");
 
@@ -3356,13 +3521,13 @@ pub(crate) mod test {
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!("2 -> 3 (expunged sled):\n{}", diff.display());
         assert_eq!(
-            blueprint3.sleds[&sled_id]
+            blueprint3.sleds[&sled_1]
                 .zones
                 .iter()
                 .filter(|zone| {
                     zone.disposition
                         == BlueprintZoneDisposition::Expunged {
-                            as_of_generation: blueprint3.sleds[&sled_id]
+                            as_of_generation: blueprint3.sleds[&sled_1]
                                 .sled_agent_generation,
                             ready_for_cleanup: true,
                         }
@@ -3486,9 +3651,13 @@ pub(crate) mod test {
         assert_eq!(summary.total_disks_added(), NEW_IN_SERVICE_DISKS);
         assert_eq!(summary.total_disks_removed(), 0);
 
-        // 1 Zone, Crucible, Transient Crucible Zone, and Debug dataset created
-        // per disk.
-        assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 4);
+        // Five new datasets created per disk:
+        // - Zone Root
+        // - Debug
+        // - Local Storage
+        // - 1 for the Crucible Agent
+        // - Transient Crucible Zone Root
+        assert_eq!(summary.total_datasets_added(), NEW_IN_SERVICE_DISKS * 5);
         assert_eq!(summary.total_datasets_removed(), 0);
         assert_eq!(summary.total_datasets_modified(), 0);
 
@@ -3872,9 +4041,10 @@ pub(crate) mod test {
         // "decommissioned_disk_cleaner" background task for more context.
         assert_eq!(summary.total_datasets_removed(), 0);
 
-        // The disposition has changed from `InService` to `Expunged` for the 4
-        // datasets on this sled.
-        assert_eq!(summary.total_datasets_modified(), 4);
+        // The disposition has changed from `InService` to `Expunged` for the 5
+        // datasets (debug, zone root, local storage, crucible zone root, and
+        // crucible agent) on this sled.
+        assert_eq!(summary.total_datasets_modified(), 5);
         // We don't know the expected name, other than the fact it's a crucible zone
         let test_transient_zone_kind = DatasetKind::TransientZone {
             name: "some-crucible-zone-name".to_string(),
@@ -3883,6 +4053,7 @@ pub(crate) mod test {
             DatasetKind::Crucible,
             DatasetKind::Debug,
             DatasetKind::TransientZoneRoot,
+            DatasetKind::LocalStorage,
             test_transient_zone_kind.clone(),
         ]);
         let mut modified_sled_configs = Vec::new();
@@ -4874,7 +5045,7 @@ pub(crate) mod test {
         let (example, blueprint1) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
         let mut collection = example.collection;
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         // We shouldn't have a clickhouse cluster config, as we don't have a
         // clickhouse policy set yet
@@ -6166,7 +6337,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         // We should start with nothing to do.
         assert_planning_makes_no_changes(
@@ -6584,7 +6755,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &example.input);
 
         // Update the example system and blueprint, as a part of test set-up.
         //
@@ -6888,7 +7059,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &example.input);
 
         // The example system creates three internal NTP zones, and zero
         // boundary NTP zones. This is a little arbitrary, but we're checking it
@@ -7049,7 +7220,7 @@ pub(crate) mod test {
         )
         .expect("can't create planner");
         let new_blueprint = planner.plan().expect("planning succeeded");
-        verify_blueprint(&new_blueprint);
+        verify_blueprint(&new_blueprint, &example.input);
         {
             let summary = new_blueprint.diff_since_blueprint(&blueprint);
             assert_eq!(summary.total_zones_added(), 0);
@@ -7507,7 +7678,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &example.input);
 
         // All zones should be sourced from the initial TUF repo by default.
         assert!(
@@ -7698,7 +7869,7 @@ pub(crate) mod test {
             }
             blueprint = new_blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
-            verify_blueprint(&blueprint);
+            verify_blueprint(&blueprint, &example.input);
 
             // Next blueprint: Add an (updated) internal DNS zone back
 
@@ -7724,7 +7895,7 @@ pub(crate) mod test {
             }
             blueprint = new_blueprint;
             update_collection_from_blueprint(&mut example, &blueprint);
-            verify_blueprint(&blueprint);
+            verify_blueprint(&blueprint, &example.input);
 
             assert_eq!(
                 blueprint
@@ -7784,7 +7955,7 @@ pub(crate) mod test {
         .with_target_release_0_0_1()
         .expect("set target release to 0.0.1")
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         // All zones should be sourced from the 0.0.1 repo by default.
         assert!(
