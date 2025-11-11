@@ -7460,6 +7460,7 @@ dependencies = [
  "derive-where",
  "derive_more 0.99.20",
  "dropshot",
+ "ereport-types",
  "expectorate",
  "futures",
  "gateway-client",
