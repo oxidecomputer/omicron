@@ -173,8 +173,7 @@ impl DataStore {
         authz_project_image: &authz::ProjectImage,
         project_image: &ProjectImage,
     ) -> UpdateResult<Image> {
-        // TODO: This should possiblsy be Modify; exploring Polar change
-        opctx.authorize(authz::Action::ListChildren, authz_silo).await?;
+        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
         opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
         use nexus_db_schema::schema::image::dsl;
@@ -208,8 +207,7 @@ impl DataStore {
         authz_project: &authz::Project,
         silo_image: &SiloImage,
     ) -> UpdateResult<Image> {
-        // TODO: I believe this should be Modify; explore Polar rule change
-        opctx.authorize(authz::Action::Read, authz_silo_image).await?;
+        opctx.authorize(authz::Action::Modify, authz_silo_image).await?;
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
         use nexus_db_schema::schema::image::dsl;

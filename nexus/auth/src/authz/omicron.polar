@@ -138,7 +138,10 @@ resource Silo {
 	"list_children" if "viewer";
 	"read" if "viewer";
 
-	"create_child" if "collaborator";
+	# Allow limited-collaborator to create child resources (specifically for
+	# image promotion). Limited-collaborator is restricted from VPC operations
+	# but should have full image management capabilities.
+	"create_child" if "limited-collaborator";
 	"modify" if "admin";
 
 	# Permissions implied by roles on this resource's parent (Fleet).  Fleet
@@ -825,3 +828,15 @@ resource VpcList {
 }
 has_relation(project: Project, "containing_project", collection: VpcList)
 	if collection.project = project;
+
+# SiloImage modifications for limited-collaborator
+# By default, SiloImage uses the InSilo pattern where only "collaborator" can
+# modify. We extend this to also allow "limited-collaborator" to modify silo
+# images (specifically for demotion). Limited-collaborator is restricted from
+# VPC operations but should have full image management capabilities.
+#
+# Note: If more silo-level resources need limited-collaborator access in the
+# future, consider creating InSiloLimited and InSiloFull macro patterns,
+# similar to InProjectLimited and InProjectFull.
+has_permission(actor: Actor, "modify", silo_image: SiloImage) if
+    has_role(actor, "limited-collaborator", silo_image.silo);
