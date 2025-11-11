@@ -19,7 +19,7 @@ use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// A fault management situation report, or _sitrep_.
 ///
@@ -118,10 +118,16 @@ pub struct SitrepVersion {
 pub struct Case {
     pub id: CaseUuid,
     pub created_sitrep_id: SitrepUuid,
-    pub de: String,
-    pub ereports: BTreeSet<EreportId>,
-    // TODO(eliza) what else?
-    pub alerts_requested: IdOrdMap<AlertRequest>, // TODO(eliza): draw the rest of the sitrep
+    pub time_created: DateTime<Utc>,
+    pub time_closed: Option<DateTime<Utc>>,
+
+    pub de: DiagnosisEngine,
+
+    pub ereports: IdOrdMap<Arc<Ereport>>,
+
+    pub alerts_requested: IdOrdMap<AlertRequest>,
+
+    pub comment: String,
 }
 
 impl IdOrdItem for Case {
@@ -131,4 +137,21 @@ impl IdOrdItem for Case {
     }
 
     iddqd::id_upcast!();
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    strum::Display,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum DiagnosisEngine {
+    PowerShelf,
 }

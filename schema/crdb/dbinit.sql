@@ -6842,6 +6842,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS
     lookup_sitrep_version_by_id
 ON omicron.public.fm_sitrep_history (sitrep_id);
 
+CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
+    -- Case UUID
+    id UUID NOT NULL,
+    -- UUID of the sitrep in which the case had this state.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the sitrep in which the case was created.
+    created_sitrep_id UUID NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_closed TIMESTAMPTZ,
+);
+
 /*
  * List of datasets available to be sliced up and passed to VMMs for instance
  * local storage.

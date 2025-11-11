@@ -23,6 +23,21 @@ pub struct Ereport {
     pub reporter: Reporter,
 }
 
+impl Ereport {
+    pub fn id(&self) -> &EreportId {
+        &self.data.id
+    }
+}
+
+impl iddqd::IdOrdItem for Ereport {
+    type Key<'a> = &'a EreportId;
+    fn key(&self) -> Self::Key<'_> {
+        self.id()
+    }
+
+    iddqd::id_upcast!();
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EreportData {
     #[serde(flatten)]
