@@ -183,9 +183,8 @@ impl<'a> Planner<'a> {
         inventory: &'a Collection,
         rng: PlannerRng,
     ) -> anyhow::Result<Planner<'a>> {
-        // Construct a `BlueprintBuilder`, then update it in ways based on
-        // `input` that are not related to planning so much as just "update the
-        // view of the world".
+        // Construct a `BlueprintBuilder`, then update it to account for any
+        // changes described by `input` that aren't related to planning logic.
         let mut blueprint = BlueprintBuilder::new_based_on(
             &log,
             parent_blueprint,
@@ -193,25 +192,7 @@ impl<'a> Planner<'a> {
             creator,
             rng,
         )?;
-
-        // The builder should know about all commissioned sleds. If it doesn't
-        // know about any of these sleds, it will create an empty sled-editor
-        // for them.
-        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
-            blueprint.ensure_sled_editor_exists(
-                sled_id,
-                &details.baseboard_id,
-                details.resources.subnet,
-            )?;
-        }
-
-        // Copy some "always update to the latest value" settings.
-        blueprint.set_cockroachdb_fingerprint(
-            input.cockroachdb_settings().state_fingerprint.clone(),
-        );
-        blueprint.set_internal_dns_version(input.internal_dns_version());
-        blueprint.set_external_dns_version(input.external_dns_version());
-
+        blueprint.update_from_planning_input(input);
         Ok(Planner { log, input, blueprint, inventory })
     }
 
@@ -2373,14 +2354,6 @@ impl<'a> Planner<'a> {
         // blueprint.
         let new_config = self.generate_current_clickhouse_cluster_config();
         self.blueprint.set_clickhouse_cluster_config(new_config);
-
-        // Not directly clickhouse cluster settings, but closely related: also
-        // update how we read from Oximeter based on the input policy.
-        let oximeter_read_policy = self.input.oximeter_read_settings();
-        self.blueprint.set_oximeter_read_policy(
-            oximeter_read_policy.version.into(),
-            oximeter_read_policy.mode,
-        );
     }
 
     fn generate_current_clickhouse_cluster_config(

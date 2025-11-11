@@ -2231,26 +2231,7 @@ fn cmd_blueprint_edit(
         rng,
     )
     .context("creating blueprint builder")?;
-
-    // The Planner is responsible for telling `BlueprintBuilder` about any new
-    // sleds in `planning_input`, as well as any changes to values that the
-    // blueprint tracks over time. Since we're taking on the role of a manual
-    // planner here, we also need to do that.
-    for (sled_id, details) in planning_input.all_sleds(SledFilter::Commissioned)
-    {
-        builder
-            .ensure_sled_editor_exists(
-                sled_id,
-                &details.baseboard_id,
-                details.resources.subnet,
-            )
-            .context("ensuring a sled editor exists")?;
-    }
-    builder.set_cockroachdb_fingerprint(
-        planning_input.cockroachdb_settings().state_fingerprint.clone(),
-    );
-    builder.set_internal_dns_version(planning_input.internal_dns_version());
-    builder.set_external_dns_version(planning_input.external_dns_version());
+    builder.update_from_planning_input(&planning_input);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);

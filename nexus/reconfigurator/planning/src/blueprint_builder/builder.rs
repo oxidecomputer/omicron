@@ -61,10 +61,8 @@ use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
 use omicron_common::address::DnsSubnet;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
-use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -684,64 +682,47 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
+    /// Update the internal state of `BlueprintBuilder` to be consistent with a
+    /// new `PlanningInput`.
+    ///
+    /// This method performs several "update the blueprint with the current
+    /// state of the world" operations that require no planning logic; e.g.,
+    ///
+    /// * Add empty `SledEditor`s for any commissioned sleds that don't exist
+    /// * Update blueprint values that are populated solely based on the state
+    ///   of the system when the `PlanningInput` was created (e.g., the current
+    ///   DNS versions and any policies that are copied to the blueprint).
+    pub fn update_from_planning_input(&mut self, input: &PlanningInput) {
+        // Add a sled editor for any sled that doesn't have one already.
+        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
+            if let Entry::Vacant(slot) = self.sled_editors.entry(sled_id) {
+                slot.insert(SledEditor::for_new_active(
+                    Arc::new(details.baseboard_id.clone()),
+                    details.resources.subnet,
+                ));
+            }
+        }
+
+        // Copy state values.
+        self.cockroachdb_fingerprint =
+            input.cockroachdb_settings().state_fingerprint.clone();
+        self.internal_dns_version = input.internal_dns_version();
+        self.external_dns_version = input.external_dns_version();
+
+        // Copy policy values.
+        let oximeter_read_policy = input.oximeter_read_settings();
+        self.oximeter_read_policy = OximeterReadPolicy {
+            version: oximeter_read_policy.version.into(),
+            mode: oximeter_read_policy.mode,
+        };
+    }
+
     pub fn parent_blueprint(&self) -> &Blueprint {
         &self.parent_blueprint
     }
 
     pub fn new_blueprint_id(&self) -> BlueprintUuid {
         self.new_blueprint_id
-    }
-
-    /// Ensure a `SledEditor` exists for a given sled.
-    ///
-    /// If no editor exists, one will be created. If an editor exists but has a
-    /// different baseboard ID or subnet, returns an error. (Neither of those
-    /// pieces of information should ever change for a given sled.)
-    pub fn ensure_sled_editor_exists(
-        &mut self,
-        sled_id: SledUuid,
-        baseboard_id: &BaseboardId,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-    ) -> Result<Ensure, Error> {
-        let existing_editor = match self.sled_editors.entry(sled_id) {
-            Entry::Vacant(entry) => {
-                entry.insert(SledEditor::for_new_active(
-                    Arc::new(baseboard_id.clone()),
-                    sled_subnet,
-                ));
-                return Ok(Ensure::Added);
-            }
-            Entry::Occupied(entry) => &*entry.into_mut(),
-        };
-
-        // If this sled already existed and is still active, ensure the
-        // baseboard ID and subnet we already had match what our caller
-        // specified. These properties should never change.
-        //
-        // (They should also never change if the sled is decommissioned;
-        // however, we currently throw away those bits of information for
-        // decommissioned sleds, causing the methods here to return `None`.
-        // Ignore that case.)
-        if let Some(existing_baseboard_id) = existing_editor.baseboard_id() {
-            if *baseboard_id != **existing_baseboard_id {
-                return Err(Error::Planner(anyhow!(
-                    "attempted to ensure active sled {sled_id} with baseboard \
-                     {baseboard_id}, but already have existing editor with \
-                     baseboard {existing_baseboard_id}",
-                )));
-            }
-        }
-        if let Some(existing_subnet) = existing_editor.subnet() {
-            if sled_subnet != existing_subnet {
-                return Err(Error::Planner(anyhow!(
-                    "attempted to ensure active sled {sled_id} with \
-                     subnet {sled_subnet}, but already have existing \
-                     editor with subnet {existing_subnet}",
-                )));
-            }
-        }
-
-        Ok(Ensure::NotNeeded)
     }
 
     /// Helper method to construct an empty [`ClickhouseClusterConfig`] using
@@ -768,27 +749,6 @@ impl<'a> BlueprintBuilder<'a> {
         clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
     ) {
         self.clickhouse_cluster_config = clickhouse_cluster_config;
-    }
-
-    /// Set the Oximeter read policy.
-    pub fn set_oximeter_read_policy(
-        &mut self,
-        version: Generation,
-        mode: OximeterReadMode,
-    ) {
-        self.oximeter_read_policy = OximeterReadPolicy { version, mode };
-    }
-
-    pub fn set_cockroachdb_fingerprint(&mut self, fingerprint: String) {
-        self.cockroachdb_fingerprint = fingerprint;
-    }
-
-    pub fn set_internal_dns_version(&mut self, version: Generation) {
-        self.internal_dns_version = version;
-    }
-
-    pub fn set_external_dns_version(&mut self, version: Generation) {
-        self.external_dns_version = version;
     }
 
     pub fn available_internal_dns_subnets(
@@ -2721,13 +2681,7 @@ pub mod test {
         let new_sled_details =
             &input.sled_lookup(SledFilter::Commissioned, new_sled_id).unwrap();
         let new_sled_resources = &new_sled_details.resources;
-        builder
-            .ensure_sled_editor_exists(
-                new_sled_id,
-                &new_sled_details.baseboard_id,
-                new_sled_resources.subnet,
-            )
-            .unwrap();
+        builder.update_from_planning_input(&input);
         builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
         builder
             .sled_ensure_zone_ntp(
