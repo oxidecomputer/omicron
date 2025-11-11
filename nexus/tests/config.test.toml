@@ -200,7 +200,7 @@ fm.sitrep_load_period_secs = 15
 # is activated every time the current sitrep changes. Periodic activations are
 # only necessary to ensure that it always happens eventually.
 fm.sitrep_gc_period_secs = 600
-
+probe_distributor.period_secs = 60
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

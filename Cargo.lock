@@ -8753,6 +8753,7 @@ dependencies = [
  "hyper",
  "hyper-staticfile",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "installinator-common",
  "internal-dns-resolver",

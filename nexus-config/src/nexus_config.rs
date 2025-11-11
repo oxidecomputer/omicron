@@ -443,6 +443,8 @@ pub struct BackgroundTaskConfig {
     pub sp_ereport_ingester: SpEreportIngesterConfig,
     /// configuration for fault management background tasks
     pub fm: FmTasksConfig,
+    /// configuration for networking probe distributor
+    pub probe_distributor: ProbeDistributorConfig,
 }
 
 #[serde_as]
@@ -897,6 +899,15 @@ impl Default for FmTasksConfig {
     }
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProbeDistributorConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// distributes networking probe zones to sled-agents.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -1201,6 +1212,7 @@ mod test {
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
             fm.sitrep_gc_period_secs = 49
+            probe_distributor.period_secs = 50
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1448,7 +1460,10 @@ mod test {
                         fm: FmTasksConfig {
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
-                        }
+                        },
+                        probe_distributor: ProbeDistributorConfig {
+                            period_secs: Duration::from_secs(50),
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1549,6 +1564,7 @@ mod test {
             sp_ereport_ingester.period_secs = 44
             fm.sitrep_load_period_secs = 45
             fm.sitrep_gc_period_secs = 46
+            probe_distributor.period_secs = 47
 
             [default_region_allocation_strategy]
             type = "random"
