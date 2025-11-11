@@ -68,7 +68,7 @@ const HOST_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 8] = [
     (&PackageName::new_const("oxlog"), InstallMethod::Install),
     (&PackageName::new_const("propolis-server"), InstallMethod::Bundle),
     (&PackageName::new_const("pumpkind-gz"), InstallMethod::Install),
-    (&PackageName::new_const("crucible-dtrace"), InstallMethod::Install),
+    (&PackageName::new_const("crucible-utils"), InstallMethod::Install),
     (&PackageName::new_const("switch-asic"), InstallMethod::Bundle),
 ];
 /// Packages to install or bundle in the recovery (trampoline) OS image.
