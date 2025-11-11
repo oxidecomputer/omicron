@@ -125,6 +125,17 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         filters.check_time_range()?;
 
+        let query = Self::ereport_fetch_matching_query(filters, pagparams);
+        query
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn ereport_fetch_matching_query(
+        filters: &EreportFilters,
+        pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
+    ) -> impl RunnableQuery<Ereport> {
         let mut query = paginated_multicolumn(
             dsl::ereport,
             (dsl::restart_id, dsl::ena),
@@ -153,9 +164,6 @@ impl DataStore {
         }
 
         query
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List ereports from the reporter with the given restart ID.
@@ -342,7 +350,9 @@ mod tests {
     use super::*;
     use crate::db::explain::ExplainableAsync;
     use crate::db::pub_test_utils::TestDatabase;
+    use dropshot::PaginationOrder;
     use omicron_test_utils::dev;
+    use std::num::NonZeroU32;
 
     #[tokio::test]
     async fn explain_sp_latest_ereport_id() {
@@ -417,6 +427,64 @@ mod tests {
             "Found an unexpected FULL SCAN: {}",
             explanation
         );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_ereport_fetch_matching_queries() {
+        let logctx =
+            dev::test_setup_log("explain_ereport_fetch_matching_queries");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
+
+        let filters = &[
+            EreportFilters::default(),
+            EreportFilters {
+                only_serials: vec![
+                    "BRM6900420".to_string(),
+                    "BRM5555555".to_string(),
+                ],
+                ..Default::default()
+            },
+            EreportFilters {
+                only_serials: vec![
+                    "BRM6900420".to_string(),
+                    "BRM5555555".to_string(),
+                ],
+                only_classes: vec![
+                    "my.cool.ereport".to_string(),
+                    "hw.frobulator.fault.frobulation_failed".to_string(),
+                ],
+                ..Default::default()
+            },
+            EreportFilters {
+                end_time: Some(chrono::Utc::now()),
+                ..Default::default()
+            },
+        ];
+
+        for f in filters {
+            let pagparams = DataPageParams {
+                marker: None,
+                direction: PaginationOrder::Ascending,
+                limit: NonZeroU32::new(100).unwrap(),
+            };
+            let query = DataStore::ereport_fetch_matching_query(f, &pagparams);
+            let explanation = query
+                .explain_async(&conn)
+                .await
+                .expect("Failed to explain query - is it valid SQL?");
+
+            eprintln!("\n--- filters: {f:?}\n\n{explanation}");
+
+            assert!(
+                !explanation.contains("FULL SCAN"),
+                "Found an unexpected FULL SCAN: {explanation}",
+            );
+        }
 
         db.terminate().await;
         logctx.cleanup_successful();

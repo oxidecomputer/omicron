@@ -6717,9 +6717,9 @@ ON omicron.public.ereport (
     time_collected
 )
 WHERE
-    time_deleted IS NULL,
-    sp_type IS NOT NULL,
-    sp_slot IS NOT NULL;
+    time_deleted IS NULL
+    AND sp_type IS NOT NULL
+    AND sp_slot IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_ereports_by_sled
 ON omicron.public.ereport (
@@ -6727,28 +6727,45 @@ ON omicron.public.ereport (
     time_collected
 )
 WHERE
-    time_deleted IS NULL,
-    sp_type IS NOT NULL,
-    sp_slot IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS order_ereports_by_timestamp
-ON omicron.public.ereport(
-    time_collected
-)
-WHERE
-    time_deleted IS NULL;
+    sled_id IS NOT NULL
+    AND time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_ereports_by_serial
 ON omicron.public.ereport (
     serial_number
-) WHERE
-    time_deleted IS NULL;
+)
+STORING (
+    time_collected,
+    reporter,
+    sp_type,
+    sp_slot,
+    sled_id
+)
+WHERE
+     time_deleted IS NULL;
 
 CREATE INDEX IF NOT EXISTS lookup_ereports_by_class
 ON omicron.public.ereport (
     class
-) WHERE
+)
+WHERE
     time_deleted IS NULL;
+
+
+CREATE INDEX IF NOT EXISTS un_deleted_ereports
+ON omicron.public.ereport (
+    time_deleted
+)
+STORING (
+    time_collected,
+    class,
+    serial_number,
+    part_number,
+    sled_id,
+    sp_slot,
+    sp_type
+);
+
 
 /*
     * Fault management situation reports (and accessories)
