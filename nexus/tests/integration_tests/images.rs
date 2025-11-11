@@ -599,7 +599,6 @@ async fn test_limited_collaborator_can_promote_demote_images(
     let images_url = get_project_images_url(PROJECT_NAME);
     let silo_images_url = "/v1/images";
 
-    // Create a project image as the unprivileged user (limited-collaborator can do this)
     let image_create_params = get_image_create(
         params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     );
@@ -788,11 +787,10 @@ async fn test_project_collaborator_cannot_promote_demote_images(
     let image_id = image.identity.id;
 
     // Attempt to promote the image as project collaborator - should fail
-    // (no silo role means they can't ListChildren on silo)
     let promote_url = format!("/v1/images/{}/promote", image_id);
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &promote_url)
-            .expect_status(Some(StatusCode::FORBIDDEN)),
+            .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
@@ -809,12 +807,11 @@ async fn test_project_collaborator_cannot_promote_demote_images(
     .await;
 
     // Attempt to demote the image as project collaborator - should fail
-    // (no silo role means they can't Read silo images)
     let demote_url =
         format!("/v1/images/{}/demote?project={}", image_id, PROJECT_NAME);
     NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, &demote_url)
-            .expect_status(Some(StatusCode::FORBIDDEN)),
+            .expect_status(Some(StatusCode::NOT_FOUND)),
     )
     .authn_as(AuthnMode::UnprivilegedUser)
     .execute()
