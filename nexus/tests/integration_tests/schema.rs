@@ -3472,6 +3472,9 @@ fn after_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                 ),
             ]
         );
+    })
+}
+
 const SP_RESTART_ID: Uuid =
     Uuid::from_u128(0x0358a488_3dd1_4da2_a783_570f3a149058);
 const HOST_RESTART_ID: Uuid =
