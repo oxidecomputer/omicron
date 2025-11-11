@@ -150,7 +150,10 @@ impl TransientServer {
         let (dns_server, dropshot_server) = start_servers(
             dns_log,
             store,
-            &dns_server::Config { bind_address: dns_bind_address },
+            &dns_server::Config {
+                bind_address: dns_bind_address,
+                tcp_idle_timeout_secs: 5,
+            },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 default_request_body_max_bytes: 4 * 1024 * 1024,

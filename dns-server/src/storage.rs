@@ -268,9 +268,26 @@ impl Store {
         let config = self.read_config()?;
         let mut catalog = Catalog::new();
 
+        info!(&self.log, "building catalog"; "num_zones" => config.zones.len());
+
         for zone_name in &config.zones {
-            let origin = Name::from_str(zone_name)
+            info!(&self.log, "adding zone to catalog"; "zone" => zone_name);
+            // Parse the zone name and ensure it's absolute (ends with .)
+            let mut origin = Name::from_str(zone_name)
                 .with_context(|| format!("parsing zone name {:?}", zone_name))?;
+
+            // Make sure the name is absolute (FQDN)
+            if !origin.is_fqdn() {
+                // Append the root label to make it absolute
+                origin = origin.append_domain(&Name::root())
+                    .with_context(|| format!("making zone name absolute: {:?}", zone_name))?;
+            }
+
+            info!(&self.log, "parsed zone name";
+                "zone" => zone_name,
+                "origin" => ?origin,
+                "is_fqdn" => origin.is_fqdn());
+
             let authority = Arc::new(OmicronAuthority::new(
                 self.clone(),
                 origin.clone(),
@@ -278,9 +295,12 @@ impl Store {
                 self.log.new(o!("zone" => zone_name.clone())),
             ));
 
-            catalog.upsert(origin.into(), vec![authority as Arc<_>]);
+            let origin_lower = origin.clone().into();
+            catalog.upsert(origin_lower, vec![authority as Arc<_>]);
+            info!(&self.log, "added zone to catalog"; "zone" => zone_name, "origin" => ?origin);
         }
 
+        info!(&self.log, "catalog built successfully"; "total_zones" => config.zones.len());
         Ok(catalog)
     }
 
@@ -349,6 +369,7 @@ impl Store {
         // Build and broadcast initial catalog
         match store.build_catalog() {
             Ok(catalog) => {
+                info!(&store.log, "sending initial catalog on watch channel");
                 let _ = store.catalog_tx.send(Arc::new(catalog));
             }
             Err(e) => {
@@ -716,6 +737,7 @@ impl Store {
         match self.build_catalog() {
             Ok(catalog) => {
                 debug!(&log, "rebuilt catalog after update");
+                info!(&log, "sending updated catalog on watch channel"; "has_receivers" => self.catalog_tx.receiver_count());
                 let _ = self.catalog_tx.send(Arc::new(catalog));
             }
             Err(e) => {

@@ -100,15 +100,23 @@ impl OmicronAuthority {
 /// traits for hickory-server's Authority trait.
 pub struct OmicronLookup {
     records: Vec<Record>,
+    additionals: Option<Vec<Record>>,
 }
 
 impl OmicronLookup {
     fn new(records: Vec<Record>) -> Self {
-        Self { records }
+        Self { records, additionals: None }
+    }
+
+    fn with_additionals(records: Vec<Record>, additionals: Vec<Record>) -> Self {
+        Self {
+            records,
+            additionals: if additionals.is_empty() { None } else { Some(additionals) },
+        }
     }
 
     fn empty() -> Self {
-        Self { records: Vec::new() }
+        Self { records: Vec::new(), additionals: None }
     }
 }
 
@@ -142,8 +150,10 @@ impl LookupObject for OmicronLookup {
     }
 
     fn take_additionals(&mut self) -> Option<Box<dyn LookupObject>> {
-        // We don't separate additional records from the main lookup
-        None
+        // Return additional records if we have any
+        self.additionals.take().map(|additionals| {
+            Box::new(OmicronLookup::new(additionals)) as Box<dyn LookupObject>
+        })
     }
 }
 
@@ -297,11 +307,11 @@ impl Authority for OmicronAuthority {
                 }
             }
 
-            // Combine filtered and additional records
-            let mut all_records = filtered_records;
-            all_records.extend(additional_records);
-
-            LookupControlFlow::Break(Ok(OmicronLookup::new(all_records)))
+            // Return answers and additional records separately
+            LookupControlFlow::Break(Ok(OmicronLookup::with_additionals(
+                filtered_records,
+                additional_records,
+            )))
         })
     }
 
