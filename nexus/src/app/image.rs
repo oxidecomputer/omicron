@@ -186,13 +186,10 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Image> {
         match image_lookup {
             ImageLookup::ProjectImage(lookup) => {
-                // Modify permission on project image and ListChildren permission
-                // (as proxy for "has viewer permission") on silo
-                // are needed to promote an image
                 let (authz_silo, _, authz_project_image, project_image) =
                     lookup.fetch_for(authz::Action::Modify).await?;
                 opctx
-                    .authorize(authz::Action::ListChildren, &authz_silo)
+                    .authorize(authz::Action::CreateChild, &authz_silo)
                     .await?;
                 self.db_datastore
                     .project_image_promote(
@@ -218,13 +215,10 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::Image> {
         match image_lookup {
             ImageLookup::SiloImage(lookup) => {
-                // Read permission on silo and CreateChild permission on project
-                // are the two permissions needed to demote an image
                 let (_, authz_silo_image, silo_image) =
-                    lookup.fetch_for(authz::Action::Read).await?;
-                let (_, authz_project) = project_lookup
-                    .lookup_for(authz::Action::CreateChild)
-                    .await?;
+                    lookup.fetch_for(authz::Action::Modify).await?;
+                let (_, authz_project) =
+                    project_lookup.lookup_for(authz::Action::Modify).await?;
                 self.db_datastore
                     .silo_image_demote(
                         opctx,
