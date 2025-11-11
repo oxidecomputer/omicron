@@ -239,7 +239,7 @@ impl QueryFragment<Pg> for InsertVpcQueryValues {
 /// A `NextItem` query to select a Geneve Virtual Network Identifier (VNI) for a
 /// new VPC.
 struct NextVni {
-    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
+    inner: NextItem<Vni, DefaultShiftGenerator<Vni>>,
 }
 
 impl NextVni {
@@ -247,7 +247,7 @@ impl NextVni {
         let VniShifts { min_shift, max_shift } = VniShifts::new(vni);
         let generator = DefaultShiftGenerator::new(vni, max_shift, min_shift)
             .expect("invalid min/max shift");
-        let inner = NextItem::new_unscoped("vpc", "vni", generator).to_query();
+        let inner = NextItem::new_unscoped("vpc", "vni", generator);
         Self { inner }
     }
 
@@ -263,7 +263,7 @@ impl NextVni {
         );
         let generator = DefaultShiftGenerator::new(vni, max_shift, min_shift)
             .expect("invalid min/max shift");
-        let inner = NextItem::new_unscoped("vpc", "vni", generator).to_query();
+        let inner = NextItem::new_unscoped("vpc", "vni", generator);
         Self { inner }
     }
 }

@@ -11,7 +11,6 @@ use crate::db::queries::next_item::{NextItem, NextItemSelfJoined};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::Insertable;
 use diesel::QueryResult;
 use diesel::RunQueryDsl;
 use diesel::pg::Pg;
@@ -522,7 +521,7 @@ fn last_available_ipv6_address(network: &Ipv6Network) -> std::net::Ipv6Addr {
 /// The `NextIpv4Address` query is a `NextItem` query for choosing the next
 /// available IPv4 address for an interface.
 pub struct NextIpv4Address {
-    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
+    inner: NextItemSelfJoined<db::model::Ipv4Addr>,
 }
 
 impl NextIpv4Address {
@@ -530,15 +529,20 @@ impl NextIpv4Address {
         let min = first_available_ipv4_address(&subnet);
         let max = last_available_ipv4_address(&subnet);
         Self {
-            inner: NextItemSelfJoined::<db::model::Ipv4Addr>::new_scoped(
+            inner: NextItemSelfJoined::new_scoped(
                 "network_interface",
                 "ip",
                 "subnet_id",
                 subnet_id,
                 min.into(),
                 max.into(),
-            ).to_query(),
+            ),
         }
+    }
+
+    /// Builds the NextIpv4Address query into the provided QueryBuilder.
+    pub fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+        self.inner.build_query(builder);
     }
 }
 
@@ -553,7 +557,7 @@ delegate_query_fragment_impl!(NextIpv4Address);
 /// The `NextIpv6Address` query is a `NextItem` query for choosing the next
 /// available IPv6 address for an interface.
 pub struct NextIpv6Address {
-    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
+    inner: NextItemSelfJoined<db::model::Ipv6Addr>,
 }
 
 impl NextIpv6Address {
@@ -561,15 +565,20 @@ impl NextIpv6Address {
         let min = first_available_ipv6_address(&subnet);
         let max = last_available_ipv6_address(&subnet);
         Self {
-            inner: NextItemSelfJoined::<db::model::Ipv6Addr>::new_scoped(
+            inner: NextItemSelfJoined::new_scoped(
                 "network_interface",
                 "ipv6",
                 "subnet_id",
                 subnet_id,
                 min.into(),
                 max.into(),
-            ).to_query(),
+            ),
         }
+    }
+
+    /// Builds the NextIpv6Address query into the provided QueryBuilder.
+    pub fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+        self.inner.build_query(builder);
     }
 }
 
@@ -620,7 +629,7 @@ delegate_query_fragment_impl!(NextIpv6Address);
 /// check on the slot column being between `[0, 8)`. This check violation is
 /// used to detect the case when there are no slots available.
 pub struct NextNicSlot {
-    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
+    inner: NextItem<i16, DefaultShiftGenerator<i16>>,
 }
 
 impl NextNicSlot {
@@ -639,8 +648,18 @@ impl NextNicSlot {
                 "parent_id",
                 parent_id,
                 generator,
-            ).to_query(),
+            ),
         }
+    }
+
+    /// Builds the NextNicSlot query into the provided QueryBuilder.
+    ///
+    /// This wraps the inner NextItem query with COALESCE(..., 0) to ensure
+    /// a default value of 0 is returned when no slot is found.
+    pub fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+        builder.sql("SELECT COALESCE((");
+        self.inner.build_query(builder);
+        builder.sql("), 0)");
     }
 }
 
@@ -662,7 +681,7 @@ impl std::fmt::Debug for NextNicSlot {
 /// A `NextItem` query that selects a random available MAC address for
 /// a network interface.
 pub struct NextMacAddress {
-    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
+    inner: NextItemSelfJoined<db::model::MacAddr>,
 }
 
 impl NextMacAddress {
@@ -685,8 +704,13 @@ impl NextMacAddress {
                 vpc_id,
                 min,
                 max,
-            ).to_query(),
+            ),
         }
+    }
+
+    /// Builds the NextMacAddress query into the provided QueryBuilder.
+    pub fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+        self.inner.build_query(builder);
     }
 }
 
@@ -752,60 +776,24 @@ delegate_query_fragment_impl!(NextMacAddress);
 /// Note that the `COALESCE` expression is there to handle the case where there
 /// _is_ no record with the given `instance_id`. In that case, the `vpc_id`
 /// provided is returned directly, so everything works as if the IDs matched.
-fn push_ensure_unique_vpc_expression<'a>(
-    mut out: AstPass<'_, 'a, Pg>,
-    vpc_id: &'a Uuid,
-    vpc_id_str: &'a String,
-    kind: &'a NetworkInterfaceKind,
-    parent_id: &'a Uuid,
-) -> diesel::QueryResult<()> {
-    out.push_sql("CAST(IF(COALESCE((SELECT ");
-    out.push_identifier(dsl::vpc_id::NAME)?;
-    out.push_sql(" FROM ");
-    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-    out.push_sql(" WHERE ");
-    out.push_identifier(dsl::time_deleted::NAME)?;
-    out.push_sql(" IS NULL AND ");
-    out.push_identifier(dsl::parent_id::NAME)?;
-    out.push_sql(" = ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(parent_id)?;
-    out.push_sql(" AND ");
-    out.push_identifier(dsl::kind::NAME)?;
-    out.push_sql(" = ");
-    out.push_bind_param::<NetworkInterfaceKindEnum, NetworkInterfaceKind>(
-        kind,
-    )?;
-    out.push_sql(" LIMIT 1), ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(vpc_id)?;
-    out.push_sql(") = ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(vpc_id)?;
-    out.push_sql(", ");
-
-    // NOTE: This bind-parameter is intentionally a string, rather than a UUID.
-    //
-    // This query relies on the fact that it generates a parsing error in the
-    // case where there is an interface attached to a VPC that's _different_
-    // from the VPC of the candidate interface. This is so that we can
-    // distinguish this error case from all the others.
-    //
-    // To do that, we generate a query like:
-    //
-    // ```
-    // CAST(IF(<VPC is the same>, '<vpc_id>', 'multiple-vpcs') AS UUID)
-    // ```
-    //
-    // The string "multiple-vpcs" cannot be cast to a UUID, so we get a parsing
-    // error, but only if the condition _succeeds_. That conversion is not done
-    // otherwise.
-    //
-    // However, if we push this parameter as a UUID explicitly, the database
-    // looks at the parts of the `IF` statement, and tries to make them a common
-    // type, a UUID. That's the exact error we're trying to produce, but it's
-    // evaluated too early. So we ensure both are strings here, and then ask the
-    // DB to cast them after that condition is evaluated.
-    out.push_bind_param::<sql_types::Text, String>(vpc_id_str)?;
-    out.push_sql(", 'multiple-vpcs') AS UUID)");
-    Ok(())
+fn build_ensure_unique_vpc_expression(
+    builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    vpc_id: Uuid,
+    vpc_id_str: String,
+    kind: NetworkInterfaceKind,
+    parent_id: Uuid,
+) {
+    builder.sql("CAST(IF(COALESCE((SELECT vpc_id FROM network_interface WHERE time_deleted IS NULL AND parent_id = ");
+    builder.param().bind::<sql_types::Uuid, _>(parent_id);
+    builder.sql(" AND kind = ");
+    builder.param().bind::<NetworkInterfaceKindEnum, _>(kind);
+    builder.sql(" LIMIT 1), ");
+    builder.param().bind::<sql_types::Uuid, _>(vpc_id);
+    builder.sql(") = ");
+    builder.param().bind::<sql_types::Uuid, _>(vpc_id);
+    builder.sql(", ");
+    builder.param().bind::<sql_types::Text, _>(vpc_id_str);
+    builder.sql(", 'multiple-vpcs') AS UUID)");
 }
 
 /// Push a subquery that checks that all NICs for a resource are in distinct
@@ -834,42 +822,68 @@ fn push_ensure_unique_vpc_expression<'a>(
 /// That is, if the subnet ID provided in the query already exists for an
 /// interface on the target instance, we return the literal string
 /// `'non-unique-subnets'`, which will fail casting to a UUID.
-fn push_ensure_unique_vpc_subnet_expression<'a>(
-    mut out: AstPass<'_, 'a, Pg>,
-    interface_id: &'a Uuid,
-    subnet_id: &'a Uuid,
-    subnet_id_str: &'a String,
-    kind: &'a NetworkInterfaceKind,
-    parent_id: &'a Uuid,
-) -> diesel::QueryResult<()> {
-    out.push_sql("CAST(IF(EXISTS(SELECT ");
-    out.push_identifier(dsl::subnet_id::NAME)?;
-    out.push_sql(" FROM ");
-    NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-    out.push_sql(" WHERE ");
-    out.push_identifier(dsl::id::NAME)?;
-    out.push_sql(" != ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(interface_id)?;
-    out.push_sql(" AND ");
-    out.push_identifier(dsl::parent_id::NAME)?;
-    out.push_sql(" = ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(parent_id)?;
-    out.push_sql(" AND ");
-    out.push_identifier(dsl::kind::NAME)?;
-    out.push_sql(" = ");
-    out.push_bind_param::<NetworkInterfaceKindEnum, NetworkInterfaceKind>(
-        kind,
-    )?;
-    out.push_sql(" AND ");
-    out.push_identifier(dsl::time_deleted::NAME)?;
-    out.push_sql(" IS NULL AND ");
-    out.push_identifier(dsl::subnet_id::NAME)?;
-    out.push_sql(" = ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(subnet_id)?;
-    out.push_sql("), 'non-unique-subnets', ");
-    out.push_bind_param::<sql_types::Text, String>(subnet_id_str)?;
-    out.push_sql(") AS UUID)");
-    Ok(())
+fn build_ensure_unique_vpc_subnet_expression(
+    builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    interface_id: Uuid,
+    subnet_id: Uuid,
+    subnet_id_str: String,
+    kind: NetworkInterfaceKind,
+    parent_id: Uuid,
+) {
+    builder.sql("CAST(IF(EXISTS(SELECT subnet_id FROM network_interface WHERE id != ");
+    builder.param().bind::<sql_types::Uuid, _>(interface_id);
+    builder.sql(" AND parent_id = ");
+    builder.param().bind::<sql_types::Uuid, _>(parent_id);
+    builder.sql(" AND kind = ");
+    builder.param().bind::<NetworkInterfaceKindEnum, _>(kind);
+    builder.sql(" AND time_deleted IS NULL AND subnet_id = ");
+    builder.param().bind::<sql_types::Uuid, _>(subnet_id);
+    builder.sql("), 'non-unique-subnets', ");
+    builder.param().bind::<sql_types::Text, _>(subnet_id_str);
+    builder.sql(") AS UUID)");
+}
+
+/// QueryBuilder version of push_instance_state_verification_subquery
+fn build_instance_state_verification_subquery(
+    builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    instance_id: Uuid,
+    instance_id_str: String,
+    failed_ok: bool,
+) {
+    use nexus_db_schema::enums::InstanceStateEnum;
+
+    let no_instance_sentinel = NO_INSTANCE_SENTINEL_STRING.clone();
+    let bad_state_sentinel = INSTANCE_BAD_STATE_SENTINEL_STRING.clone();
+
+    builder.sql("CAST(CASE COALESCE((SELECT CASE WHEN active_propolis_id IS NULL THEN state ELSE ");
+    builder.param().bind::<InstanceStateEnum, _>(INSTANCE_RUNNING);
+    builder.sql(" END FROM instance WHERE id = ");
+    builder.param().bind::<sql_types::Uuid, _>(instance_id);
+    builder.sql(" AND time_deleted IS NULL), ");
+    builder.param().bind::<InstanceStateEnum, _>(INSTANCE_DESTROYED);
+    builder.sql(") WHEN ");
+    builder.param().bind::<InstanceStateEnum, _>(INSTANCE_STOPPED);
+    builder.sql(" THEN ");
+    builder.param().bind::<sql_types::Text, _>(instance_id_str.clone());
+    builder.sql(" WHEN ");
+    builder.param().bind::<InstanceStateEnum, _>(INSTANCE_CREATING);
+    builder.sql(" THEN ");
+    builder.param().bind::<sql_types::Text, _>(instance_id_str.clone());
+
+    if failed_ok {
+        builder.sql(" WHEN ");
+        builder.param().bind::<InstanceStateEnum, _>(INSTANCE_FAILED);
+        builder.sql(" THEN ");
+        builder.param().bind::<sql_types::Text, _>(instance_id_str);
+    }
+
+    builder.sql(" WHEN ");
+    builder.param().bind::<InstanceStateEnum, _>(INSTANCE_DESTROYED);
+    builder.sql(" THEN ");
+    builder.param().bind::<sql_types::Text, _>(no_instance_sentinel);
+    builder.sql(" ELSE ");
+    builder.param().bind::<sql_types::Text, _>(bad_state_sentinel);
+    builder.sql(" END AS UUID)");
 }
 
 /// Push the main interface-validation common-table expression.
@@ -887,83 +901,67 @@ fn push_ensure_unique_vpc_subnet_expression<'a>(
 ///     )
 /// ```
 #[allow(clippy::too_many_arguments)]
-fn push_interface_validation_cte<'a>(
-    mut out: AstPass<'_, 'a, Pg>,
-    interface_id: &'a Uuid,
-    vpc_id: &'a Uuid,
-    vpc_id_str: &'a String,
-    subnet_id: &'a Uuid,
-    subnet_id_str: &'a String,
-    kind: &'a NetworkInterfaceKind,
-    parent_id: &'a Uuid,
-    parent_id_str: &'a String,
-    next_slot_subquery: &'a NextNicSlot,
-    is_primary_subquery: &'a IsPrimaryNic,
-) -> diesel::QueryResult<()> {
+fn build_interface_validation_cte(
+    builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    interface_id: Uuid,
+    vpc_id: Uuid,
+    vpc_id_str: String,
+    subnet_id: Uuid,
+    subnet_id_str: String,
+    kind: NetworkInterfaceKind,
+    parent_id: Uuid,
+    parent_id_str: String,
+    next_slot_subquery: &NextNicSlot,
+    is_primary_subquery: &IsPrimaryNic,
+) {
     // Push the `validated_interface` CTE, which ensures that the VPC and VPC
     // Subnet are valid, and also selects the slot / is_primary.
-    out.push_sql("WITH validated_interface(");
-    out.push_identifier(dsl::vpc_id::NAME)?;
-    out.push_sql(", ");
-    out.push_identifier(dsl::subnet_id::NAME)?;
-    out.push_sql(", ");
-    out.push_identifier(dsl::parent_id::NAME)?;
-    out.push_sql(", ");
-    out.push_identifier(dsl::slot::NAME)?;
-    out.push_sql(", ");
-    out.push_identifier(dsl::is_primary::NAME)?;
-    out.push_sql(") AS (SELECT ");
-    push_ensure_unique_vpc_expression(
-        out.reborrow(),
+    builder.sql("WITH validated_interface (vpc_id, subnet_id, parent_id, slot, is_primary) AS (SELECT ");
+
+    build_ensure_unique_vpc_expression(
+        builder,
         vpc_id,
         vpc_id_str,
         kind,
         parent_id,
-    )?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::vpc_id::NAME)?;
-    out.push_sql(", ");
-    push_ensure_unique_vpc_subnet_expression(
-        out.reborrow(),
+    );
+    builder.sql(" AS vpc_id, ");
+
+    build_ensure_unique_vpc_subnet_expression(
+        builder,
         interface_id,
         subnet_id,
         subnet_id_str,
         kind,
         parent_id,
-    )?;
-    out.push_sql(" AS ");
-    out.push_identifier(dsl::subnet_id::NAME)?;
-
-    out.push_sql(", (");
+    );
+    builder.sql(" AS subnet_id, (");
     // Push the subquery to ensure the instance state when trying to insert the
     // new interface, if `kind=instance`
-    if *kind == NetworkInterfaceKind::Instance {
-        push_instance_state_verification_subquery(
+    if kind == NetworkInterfaceKind::Instance {
+        build_instance_state_verification_subquery(
+            builder,
             parent_id,
             parent_id_str,
-            out.reborrow(),
             false,
-        )?;
+        );
     } else {
-        out.push_sql("SELECT ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(parent_id)?;
+        builder.sql("SELECT ");
+        builder.param().bind::<sql_types::Uuid, _>(parent_id);
     }
 
-    // Push the subquery used to select and validate the slot number for the
-    // interface, including validating that there are available slots on the
-    // resource.
-    out.push_sql("), (");
-    next_slot_subquery.walk_ast(out.reborrow())?;
+    // Push the subquery used to select and validate the slot number
+    builder.sql("), (");
+    next_slot_subquery.build_query(builder);
 
-    // Push the subquery used to detect whether this interface is the primary.
+    // Push the subquery used to detect whether this interface is the primary
     // That's true iff there are zero interfaces for this resource at the time
     // this interface is inserted.
-    out.push_sql("), (");
-    is_primary_subquery.walk_ast(out.reborrow())?;
+    builder.sql("), (");
+    is_primary_subquery.build_query(builder);
 
     // Close is_primary_subquery and the validated_instance CTE.
-    out.push_sql(")) ");
-    Ok(())
+    builder.sql(")) ");
 }
 
 /// Subquery used to insert a new `NetworkInterface` from parameters.
@@ -1152,6 +1150,154 @@ impl InsertQuery {
             is_primary_subquery,
         }
     }
+
+    /// Builds the complete INSERT query using QueryBuilder.
+    ///
+    /// This returns a TypedSqlQuery that can be executed directly, bypassing
+    /// Diesel's Insertable trait machinery.
+    pub fn to_insert_query(
+        self,
+    ) -> crate::db::raw_query_builder::TypedSqlQuery<crate::db::raw_query_builder::SelectableSql<db::model::NetworkInterface>> {
+        use crate::db::raw_query_builder::QueryBuilder;
+
+        let mut builder = QueryBuilder::new();
+
+        // INSERT INTO network_interface
+        builder.sql(" INSERT INTO network_interface (\
+            id, \
+            name, \
+            description, \
+            time_created, \
+            time_modified, \
+            time_deleted, \
+            kind, \
+            parent_id, \
+            vpc_id, \
+            subnet_id, \
+            mac, \
+            ip, \
+            ipv6, \
+            slot, \
+            is_primary, \
+            transit_ips \
+        ) ");
+
+        // Push subqueries that validate the provided instance. This generates a CTE
+        // with the name `validated_instance` and columns:
+        //  - `vpc_id`
+        //  - `subnet_id`
+        //  - `slot`
+        //  - `is_primary`
+        build_interface_validation_cte(
+            &mut builder,
+            self.interface.identity.id,
+            self.interface.subnet.vpc_id,
+            self.vpc_id_str.clone(),
+            self.interface.subnet.identity.id,
+            self.subnet_id_str.clone(),
+            self.interface.kind,
+            self.interface.parent_id,
+            self.parent_id_str.clone(),
+            &self.next_slot_subquery,
+            &self.is_primary_subquery,
+        );
+
+        // Push the columns, values and names, that are named directly. These
+        // are known regardless of whether we're allocating an IP address. These
+        // are all written as `SELECT <value1> AS <name1>, <value2> AS <name2>, ...
+        builder.sql("SELECT ");
+        builder.param().bind::<sql_types::Uuid, _>(self.interface.identity.id);
+        builder.sql(" AS id, ");
+        builder.param().bind::<sql_types::Text, _>(self.interface.identity.name);
+        builder.sql(" AS name, ");
+        builder.param().bind::<sql_types::Text, _>(self.interface.identity.description);
+        builder.sql(" AS description, ");
+        builder.param().bind::<sql_types::Timestamptz, _>(self.now);
+        builder.sql(" AS time_created, ");
+        builder.param().bind::<sql_types::Timestamptz, _>(self.now);
+        builder.sql(" AS time_modified, ");
+        builder.param().bind::<sql_types::Nullable<sql_types::Timestamptz>, _>(None::<DateTime<Utc>>);
+        builder.sql(" AS time_deleted, ");
+        builder.param().bind::<NetworkInterfaceKindEnum, _>(self.interface.kind);
+        builder.sql(" AS kind, ");
+        builder.param().bind::<sql_types::Uuid, _>(self.interface.parent_id);
+        builder.sql(" AS parent_id, \
+            (SELECT vpc_id FROM validated_interface), \
+            (SELECT subnet_id FROM validated_interface), "
+        );
+
+        // If the user specified a MAC address, then insert it by value.
+        // Otherwise we use a subquery to select the next available MAC.
+        if let Some(mac) = self.mac_sql {
+            builder.param().bind::<sql_types::BigInt, _>(mac);
+        } else {
+            builder.sql("(");
+            self.next_mac_subquery.build_query(&mut builder);
+            builder.sql(")");
+        }
+        builder.sql(" AS mac, ");
+
+        // If the user specified an IP address, then insert it by value. If they
+        // did not, meaning we're allocating the next available one on their
+        // behalf, then insert that subquery here.
+        match self.ipv4_sql {
+            AutoOrOptionalIp::Auto(subquery) => {
+                builder.sql("(");
+                subquery.build_query(&mut builder);
+                builder.sql(")");
+            }
+            AutoOrOptionalIp::Nullable(maybe_ip) => {
+                builder.param().bind::<sql_types::Nullable<sql_types::Inet>, _>(maybe_ip);
+            }
+        }
+        builder.sql(" AS ip, ");
+
+        // Same for IPv6 addresses.
+        match self.ipv6_sql {
+            AutoOrOptionalIp::Auto(subquery) => {
+                builder.sql("(");
+                subquery.build_query(&mut builder);
+                builder.sql(")");
+            }
+            AutoOrOptionalIp::Nullable(maybe_ip) => {
+                builder.param().bind::<sql_types::Nullable<sql_types::Inet>, _>(maybe_ip);
+            }
+        }
+        builder.sql(" AS ipv6, ");
+
+        if let Some(slot) = self.slot_sql {
+            builder.param().bind::<sql_types::Int2, _>(slot);
+        } else {
+            builder.sql("(SELECT slot FROM validated_interface)");
+        }
+        builder.sql(" AS slot ");
+        builder.sql(", (SELECT is_primary FROM validated_interface) AS is_primary, ");
+
+        // Transit IPs
+        builder.param().bind::<sql_types::Array<sql_types::Inet>, _>(self.transit_ips);
+        builder.sql(" AS transit_ips ");
+
+        builder.sql(" RETURNING \
+            network_interface.id, \
+            network_interface.name, \
+            network_interface.description, \
+            network_interface.time_created, \
+            network_interface.time_modified, \
+            network_interface.time_deleted, \
+            network_interface.kind, \
+            network_interface.parent_id, \
+            network_interface.vpc_id, \
+            network_interface.subnet_id, \
+            network_interface.mac, \
+            network_interface.ip, \
+            network_interface.ipv6, \
+            network_interface.slot, \
+            network_interface.is_primary, \
+            network_interface.transit_ips"
+        );
+
+        builder.query()
+    }
 }
 
 type FromClause<T> =
@@ -1160,249 +1306,6 @@ type NetworkInterfaceFromClause =
     FromClause<nexus_db_schema::schema::network_interface::table>;
 const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause =
     NetworkInterfaceFromClause::new();
-
-impl QueryId for InsertQuery {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl Insertable<nexus_db_schema::schema::network_interface::table>
-    for InsertQuery
-{
-    type Values = InsertQueryValues;
-
-    fn values(self) -> Self::Values {
-        InsertQueryValues(self)
-    }
-}
-
-impl QueryFragment<Pg> for InsertQuery {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        // Push subqueries that validate the provided instance. This generates a CTE
-        // with the name `validated_instance` and columns:
-        //  - `vpc_id`
-        //  - `subnet_id`
-        //  - `slot`
-        //  - `is_primary`
-        push_interface_validation_cte(
-            out.reborrow(),
-            &self.interface.identity.id,
-            &self.interface.subnet.vpc_id,
-            &self.vpc_id_str,
-            &self.interface.subnet.identity.id,
-            &self.subnet_id_str,
-            &self.interface.kind,
-            &self.interface.parent_id,
-            &self.parent_id_str,
-            &self.next_slot_subquery,
-            &self.is_primary_subquery,
-        )?;
-
-        // Push the columns, values and names, that are named directly. These
-        // are known regardless of whether we're allocating an IP address. These
-        // are all written as `SELECT <value1> AS <name1>, <value2> AS <name2>, ...
-        out.push_sql("SELECT ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            &self.interface.identity.id,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Text, db::model::Name>(
-            &self.interface.identity.name,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::name::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Text, String>(
-            &self.interface.identity.description,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::description::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.now,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::time_created::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.now,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::time_modified::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Nullable<sql_types::Timestamptz>, Option<DateTime<Utc>>>(&None)?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<NetworkInterfaceKindEnum, NetworkInterfaceKind>(
-            &self.interface.kind,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::kind::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            &self.interface.parent_id,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::parent_id::NAME)?;
-        out.push_sql(", ");
-
-        // Helper function to push a subquery selecting something from the CTE.
-        fn select_from_cte(
-            mut out: AstPass<Pg>,
-            column: &'static str,
-        ) -> diesel::QueryResult<()> {
-            out.push_sql("(SELECT ");
-            out.push_identifier(column)?;
-            out.push_sql(" FROM validated_interface)");
-            Ok(())
-        }
-
-        select_from_cte(out.reborrow(), dsl::vpc_id::NAME)?;
-        out.push_sql(", ");
-        select_from_cte(out.reborrow(), dsl::subnet_id::NAME)?;
-        out.push_sql(", ");
-
-        // If the user specified a MAC address, then insert it by value.
-        // Otherwise we use a subquery to select the next available MAC.
-        if let Some(mac) = &self.mac_sql {
-            out.push_bind_param::<sql_types::BigInt, db::model::MacAddr>(mac)?;
-        } else {
-            out.push_sql("(");
-            self.next_mac_subquery.walk_ast(out.reborrow())?;
-            out.push_sql(")");
-        }
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::mac::NAME)?;
-        out.push_sql(", ");
-
-        // If the user specified an IP address, then insert it by value. If they
-        // did not, meaning we're allocating the next available one on their
-        // behalf, then insert that subquery here.
-        match &self.ipv4_sql {
-            AutoOrOptionalIp::Auto(subquery) => {
-                out.push_sql("(");
-                subquery.walk_ast(out.reborrow())?;
-                out.push_sql(")");
-            }
-            AutoOrOptionalIp::Nullable(maybe_ip) => out
-                .push_bind_param::<sql_types::Nullable<sql_types::Inet>, _>(
-                    maybe_ip,
-                )?,
-        }
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::ip::NAME)?;
-        out.push_sql(", ");
-
-        // Same for IPv6 addresses.
-        match &self.ipv6_sql {
-            AutoOrOptionalIp::Auto(subquery) => {
-                out.push_sql("(");
-                subquery.walk_ast(out.reborrow())?;
-                out.push_sql(")");
-            }
-            AutoOrOptionalIp::Nullable(maybe_ip) => out
-                .push_bind_param::<sql_types::Nullable<sql_types::Inet>, _>(
-                    maybe_ip,
-                )?,
-        }
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::ipv6::NAME)?;
-        out.push_sql(", ");
-
-        if let Some(slot) = &self.slot_sql {
-            out.push_bind_param::<sql_types::Int2, SqlU8>(slot)?;
-        } else {
-            select_from_cte(out.reborrow(), dsl::slot::NAME)?;
-        }
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::slot::NAME)?;
-        out.push_sql(", ");
-
-        select_from_cte(out.reborrow(), dsl::is_primary::NAME)?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::is_primary::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Array<sql_types::Inet>, Vec<IpNetwork>>(
-            &self.transit_ips,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::transit_ips::NAME)?;
-
-        Ok(())
-    }
-}
-
-/// Type used to add the results of the `InsertQuery` as values
-/// in a Diesel statement, e.g., `insert_into(network_interface).values(query).`
-/// Not for direct use.
-pub struct InsertQueryValues(InsertQuery);
-
-impl QueryId for InsertQueryValues {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl diesel::insertable::CanInsertInSingleQuery<Pg> for InsertQueryValues {
-    fn rows_to_insert(&self) -> Option<usize> {
-        Some(1)
-    }
-}
-
-impl QueryFragment<Pg> for InsertQueryValues {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        out.push_sql("(");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::name::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::description::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_created::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_modified::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::kind::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::parent_id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::vpc_id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::subnet_id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::mac::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::ip::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::ipv6::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::slot::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::is_primary::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::transit_ips::NAME)?;
-        out.push_sql(") ");
-        self.0.walk_ast(out)
-    }
-}
 
 /// A small helper subquery that automatically assigns the `is_primary` column
 /// for a new network interface.
@@ -1414,6 +1317,17 @@ impl QueryFragment<Pg> for InsertQueryValues {
 struct IsPrimaryNic {
     parent_id: Uuid,
     kind: NetworkInterfaceKind,
+}
+
+impl IsPrimaryNic {
+    /// Builds the IsPrimaryNic query into the provided QueryBuilder.
+    fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+        builder.sql("SELECT NOT EXISTS(SELECT 1 FROM network_interface WHERE parent_id = ");
+        builder.param().bind::<sql_types::Uuid, _>(self.parent_id);
+        builder.sql(" AND kind = ");
+        builder.param().bind::<NetworkInterfaceKindEnum, _>(self.kind);
+        builder.sql(" AND time_deleted IS NULL LIMIT 1)");
+    }
 }
 
 impl QueryId for IsPrimaryNic {

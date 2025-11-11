@@ -34,7 +34,7 @@ pub const MAX_DISKS_PER_INSTANCE: u32 = 8;
 ///
 /// See the `NextItem` documentation for more details.
 struct NextDiskSlot {
-    inner: crate::db::raw_query_builder::TypedSqlQuery<()>,
+    inner: NextItem<i16, DefaultShiftGenerator<i16>>,
 }
 
 impl NextDiskSlot {
@@ -52,7 +52,7 @@ impl NextDiskSlot {
                 "attach_instance_id",
                 instance_id,
                 generator,
-            ).to_query(),
+            ),
         }
     }
 }

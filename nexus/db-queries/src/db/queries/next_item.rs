@@ -231,12 +231,15 @@ where
     /// Convert this NextItem query into a TypedSqlQuery using QueryBuilder.
     ///
     /// This builds the SQL query eagerly using the cleaner QueryBuilder API.
-    pub(super) fn to_query(self) -> TypedSqlQuery<()>
+    /// Builds the NextItem query into the provided QueryBuilder.
+    ///
+    /// This allows composing the query as part of a larger query.
+    /// The caller is responsible for calling `builder.query()` when done.
+    pub fn build_query(&self, builder: &mut QueryBuilder)
     where
         Item: NextItemBinder + Copy,
         Generator: Copy,
     {
-        let mut builder = QueryBuilder::new();
 
         // Copy values we need to bind
         let base = *self.shift_generator.base();
@@ -248,7 +251,7 @@ where
 
         // SELECT <base> + shift AS <item_column>
         builder.sql("SELECT ");
-        base.bind_to_query_builder(&mut builder);
+        base.bind_to_query_builder(builder);
         builder.sql(" + ").sql(SHIFT_COLUMN_IDENT);
         builder.sql(" AS ").sql(self.item_column_name);
 
@@ -278,22 +281,34 @@ where
             builder.sql(", ").sql(TIME_DELETED_COLUMN_IDENT).sql(" IS NULL) = (");
             builder.param().bind::<sql_types::Uuid, _>(scope.key);
             builder.sql(", ");
-            base.bind_to_query_builder(&mut builder);
+            base.bind_to_query_builder(builder);
             builder.sql(" + ").sql(SHIFT_COLUMN_IDENT);
             builder.sql(", TRUE)");
         } else {
             builder.sql(" ON (").sql(self.item_column_name);
             builder.sql(", ").sql(TIME_DELETED_COLUMN_IDENT).sql(" IS NULL) = (");
-            base.bind_to_query_builder(&mut builder);
+            base.bind_to_query_builder(builder);
             builder.sql(" + ").sql(SHIFT_COLUMN_IDENT);
             builder.sql(", TRUE)");
         }
 
         // WHERE <item_column> IS NULL ORDER BY "index" LIMIT 1
         builder.sql(" WHERE ").sql(self.item_column_name);
-        builder.sql(" IS NULL ORDER BY ").sql(INDEX_COLUMN_IDENT);
-        builder.sql(" LIMIT 1");
+        builder.sql(" IS NULL ORDER BY \"").sql(INDEX_COLUMN_IDENT);
+        builder.sql("\" LIMIT 1 ");
+    }
 
+    /// Convenience method that creates a QueryBuilder, builds the query into it,
+    /// and returns the resulting TypedSqlQuery.
+    ///
+    /// This is useful for standalone execution of the query.
+    pub(super) fn to_query(self) -> TypedSqlQuery<()>
+    where
+        Item: NextItemBinder + Copy,
+        Generator: Copy,
+    {
+        let mut builder = QueryBuilder::new();
+        self.build_query(&mut builder);
         builder.query()
     }
 }
@@ -452,7 +467,7 @@ where
         out.push_identifier(self.item_column_name)?;
         out.push_sql(" IS NULL ORDER BY ");
         out.push_identifier(INDEX_COLUMN_IDENT)?;
-        out.push_sql(" LIMIT 1");
+        out.push_sql(" LIMIT 1 ");
         Ok(())
     }
 }
@@ -734,11 +749,14 @@ impl<Item> NextItemSelfJoined<Item> {
     /// Convert this NextItemSelfJoined query into a TypedSqlQuery using QueryBuilder.
     ///
     /// This builds the SQL query eagerly using the cleaner QueryBuilder API.
-    pub(super) fn to_query(self) -> TypedSqlQuery<()>
+    /// Builds the NextItemSelfJoined query into the provided QueryBuilder.
+    ///
+    /// This allows composing the query as part of a larger query.
+    /// The caller is responsible for calling `builder.query()` when done.
+    pub fn build_query(&self, builder: &mut QueryBuilder)
     where
         Item: NextItemBinder + Copy,
     {
-        let mut builder = QueryBuilder::new();
 
         // Copy values we need to bind
         let item_min = self.item_min;
@@ -751,7 +769,7 @@ impl<Item> NextItemSelfJoined<Item> {
 
         // First subquery: SELECT <min_item> WHERE NOT EXISTS (...)
         builder.sql("SELECT ");
-        item_min.bind_to_query_builder(&mut builder);
+        item_min.bind_to_query_builder(builder);
         builder.sql(" AS ").sql(self.item_column_name);
         builder.sql(" WHERE NOT EXISTS (SELECT 1 FROM ");
         builder.sql(self.table_name);
@@ -765,21 +783,33 @@ impl<Item> NextItemSelfJoined<Item> {
         }
 
         builder.sql(TIME_DELETED_COLUMN_IDENT);
-        builder.sql(" IS NULL LIMIT 1)");
+        builder.sql(" IS NULL");
+        builder.sql(" LIMIT 1)");
 
         // UNION ALL - gap below
         builder.sql(" UNION ALL (");
-        self.build_gap_query(&mut builder, Direction::Down, item_min, item_max, scope_column, scope_key);
+        self.build_gap_query(builder, Direction::Down, item_min, item_max, scope_column, scope_key);
         builder.sql(")");
 
         // UNION ALL - gap above
         builder.sql(" UNION ALL (");
-        self.build_gap_query(&mut builder, Direction::Up, item_min, item_max, scope_column, scope_key);
+        self.build_gap_query(builder, Direction::Up, item_min, item_max, scope_column, scope_key);
         builder.sql(")");
 
         // LIMIT 1) AS <item_column>
         builder.sql(" LIMIT 1) AS ").sql(self.item_column_name);
+    }
 
+    /// Convenience method that creates a QueryBuilder, builds the query into it,
+    /// and returns the resulting TypedSqlQuery.
+    ///
+    /// This is useful for standalone execution of the query.
+    pub(super) fn to_query(self) -> TypedSqlQuery<()>
+    where
+        Item: NextItemBinder + Copy,
+    {
+        let mut builder = QueryBuilder::new();
+        self.build_query(&mut builder);
         builder.query()
     }
 
@@ -851,7 +881,8 @@ impl<Item> NextItemSelfJoined<Item> {
 
         builder.sql(" AND ");
         builder.sql(SELF_JOIN_SECOND_TABLE_ALIAS).sql(".");
-        builder.sql(self.item_column_name).sql(" IS NULL");
+        builder.sql(self.item_column_name);
+        builder.sql(" IS NULL");
         builder.sql(" LIMIT 1");
     }
 }

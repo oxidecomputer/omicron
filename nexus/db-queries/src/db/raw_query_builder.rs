@@ -168,7 +168,9 @@ impl<T> QueryFragment<Pg> for TypedSqlQuery<T> {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-        out.unsafe_to_cache_prepared();
+        // Note: We don't call out.unsafe_to_cache_prepared() here because
+        // this query may be used as a subquery, and the parent query should
+        // control caching behavior.
 
         self.inner.walk_ast(out.reborrow())?;
         Ok(())

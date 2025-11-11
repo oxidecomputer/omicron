@@ -9,8 +9,6 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
-use crate::db::collection_insert::AsyncInsertError;
-use crate::db::collection_insert::DatastoreCollection;
 use crate::db::cte_utils::BoxedQuery;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::model::Instance;
@@ -19,7 +17,6 @@ use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
 use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
-use crate::db::model::VpcSubnet;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::network_interface;
@@ -343,28 +340,12 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         interface: IncompleteNetworkInterface,
     ) -> Result<NetworkInterface, network_interface::InsertError> {
-        use nexus_db_schema::schema::network_interface::dsl;
-        let subnet_id = interface.subnet.identity.id;
-        let query = network_interface::InsertQuery::new(interface.clone());
-        VpcSubnet::insert_resource(
-            subnet_id,
-            diesel::insert_into(dsl::network_interface).values(query),
-        )
-        .insert_and_get_result_async(conn)
-        .await
-        .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => {
-                network_interface::InsertError::External(
-                    Error::ObjectNotFound {
-                        type_name: ResourceType::VpcSubnet,
-                        lookup_type: LookupType::ById(subnet_id),
-                    },
-                )
-            }
-            AsyncInsertError::DatabaseError(e) => {
-                network_interface::InsertError::from_diesel(e, &interface)
-            }
-        })
+        let query = network_interface::InsertQuery::new(interface.clone())
+            .to_insert_query();
+        query
+            .get_result_async(conn)
+            .await
+            .map_err(|e| network_interface::InsertError::from_diesel(e, &interface))
     }
 
     /// Delete all network interfaces attached to the given instance.
