@@ -17,9 +17,8 @@ use ereport_types::EreportId;
 use futures::future::BoxFuture;
 use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use nexus_types::fm::EreportData;
+use nexus_types::fm::ereport::EreportData;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::SpEreportIngesterStatus;
 use nexus_types::internal_api::background::SpEreporterStatus;
@@ -311,7 +310,6 @@ impl Ingester {
                     id: EreportId { restart_id, ena },
                     time_collected: Utc::now(),
                     collector_id: self.nexus_id,
-                    reporter,
                     part_number,
                     serial_number,
                     class,
@@ -802,11 +800,11 @@ mod tests {
                 )
                 .await
                 .expect("should be able to query for ereports");
-            paginator = p.found_batch(&batch, &|ereport| {
-                db::model::DbEna(ereport.id.ena)
-            });
+            paginator = p.found_batch(&batch, &|ereport| ereport.ena);
             found_ereports.extend(
-                batch.into_iter().map(|ereport| (ereport.id.ena, ereport)),
+                batch
+                    .into_iter()
+                    .map(|ereport| (Ena::from(ereport.ena), ereport)),
             );
         }
         assert_eq!(

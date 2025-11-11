@@ -8,6 +8,7 @@
 //! structure containing fault management state.
 
 pub mod ereport;
+pub use ereport::Ereport;
 
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid, SitrepUuid};

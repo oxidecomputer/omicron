@@ -10,6 +10,7 @@ use crate::helpers::const_max_len;
 use crate::helpers::datetime_opt_rfc3339_concise;
 use crate::helpers::datetime_rfc3339_concise;
 use crate::helpers::display_option_blank;
+use crate::helpers::display_option_error;
 
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -22,7 +23,8 @@ use clap::Subcommand;
 use diesel::dsl::{count_distinct, min};
 use diesel::prelude::*;
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::SpType;
+use nexus_db_model::ereport as model;
+use nexus_db_model::ereport::DbEna;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
@@ -31,7 +33,6 @@ use nexus_types::fm::ereport::Ena;
 use nexus_types::fm::ereport::Reporter;
 use omicron_uuid_kinds::EreporterRestartUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledUuid;
 use tabled::Tabled;
 use uuid::Uuid;
 
@@ -142,7 +143,7 @@ async fn cmd_db_ereport_list(
             let reporter = ereport.reporter();
             let &db::model::Ereport {
                 restart_id,
-                ena: db::model::DbEna(ena),
+                ena: DbEna(ena),
                 time_collected,
                 ref class,
                 ref serial_number,
@@ -256,17 +257,17 @@ async fn cmd_db_ereport_info(
         SERIAL_NUMBER,
     ]);
     let db::model::Ereport {
-        ena: db::model::DbEna(ena),
+        ena: DbEna(ena),
         restart_id,
         time_deleted,
         time_collected,
         collector_id,
-        part_number,
-        serial_number,
-        class,
-        report,
-        ..
-    } = &ereport;
+        ref part_number,
+        ref serial_number,
+        ref class,
+        ref report,
+        reporter,
+    } = ereport;
     println!("\n{:=<80}", "== EREPORT METADATA ");
     println!("    {ENA:>WIDTH$}: {ena}");
     match class {
@@ -278,13 +279,14 @@ async fn cmd_db_ereport_info(
     }
     println!("    {TIME_COLLECTED:>WIDTH$}: {time_collected}");
     println!("    {COLLECTOR_ID:>WIDTH$}: {collector_id}");
-    match ereport.reporter() {
-        Reporter::Sp { sp_type, slot } => {
+    match Reporter::try_from(reporter) {
+        Err(err) => eprintln!("{err}"),
+        Ok(Reporter::Sp { sp_type, slot }) => {
             println!(
                 "    {REPORTER:>WIDTH$}: {sp_type:?} {slot} (service processor)"
             )
         }
-        Reporter::HostOs { sled } => {
+        Ok(Reporter::HostOs { sled }) => {
             println!("    {REPORTER:>WIDTH$}: sled {sled:?} (host OS)");
         }
     }
@@ -312,7 +314,7 @@ async fn ereport_fetch(
     id: ereport_types::EreportId,
 ) -> anyhow::Result<db::model::Ereport> {
     let restart_id = id.restart_id.into_untyped_uuid();
-    let ena = db::model::DbEna::from(id.ena);
+    let ena = DbEna::from(id.ena);
 
     let query = dsl::ereport
         .filter(dsl::restart_id.eq(restart_id))
@@ -346,6 +348,7 @@ async fn cmd_db_ereporters(
             let mut query = dsl::ereport
                 .group_by((
                     dsl::restart_id,
+                    dsl::reporter,
                     dsl::sled_id,
                     dsl::sp_slot,
                     dsl::sp_type,
@@ -354,9 +357,7 @@ async fn cmd_db_ereporters(
                 ))
                 .select((
                     dsl::restart_id,
-                    dsl::sled_id,
-                    dsl::sp_slot,
-                    dsl::sp_type,
+                    model::Reporter::as_select(),
                     dsl::serial_number,
                     dsl::part_number,
                     min(dsl::time_collected),
@@ -385,7 +386,7 @@ async fn cmd_db_ereporters(
             }
 
             query
-                .load_async::<(Uuid, Option<Uuid>, Option<db::model::SqlU16>, Option<SpType>, Option<String>, Option<String>, Option<DateTime<Utc>>, i64)>(
+                .load_async::<(Uuid, model::Reporter, Option<String>, Option<String>, Option<DateTime<Utc>>, i64)>(
                     &conn,
                 )
                 .await.context("listing reporter entries")
@@ -398,7 +399,8 @@ async fn cmd_db_ereporters(
         #[tabled(display_with = "datetime_opt_rfc3339_concise")]
         first_seen: Option<DateTime<Utc>>,
         id: Uuid,
-        identity: Reporter,
+        #[tabled(display_with = "display_option_error")]
+        identity: Option<Reporter>,
         #[tabled(display_with = "display_option_blank", rename = "S/N")]
         serial: Option<String>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
@@ -406,28 +408,26 @@ async fn cmd_db_ereporters(
         ereports: i64,
     }
 
-    let mut rows = reporters.into_iter().map(|(id, sled_id, sp_slot, sp_type, serial, part_number, first_seen, ereports)| {
-        let identity = match (sp_type, sp_slot, sled_id) {
-            (Some(sp_type), Some(sp_slot), None) => Reporter::Sp { sp_type: sp_type.into(), slot: sp_slot.into() },
-            (None, None, Some(sled_id)) => Reporter::HostOs { sled: SledUuid::from_untyped_uuid(sled_id) },
-            _ => panic!(
-                "the 'reporter_identity_validity' CHECK constraint should \
-                 enforce that all ereports have either both a non-NULL SP \
-                 type and slot OR a non-NULL sled ID, but we encountered \
-                 one with sp_type={sp_type:?}, sp_slot={sp_slot:?}, \
-                 sled_id={sled_id:?}",
-            )
-        };
-        ReporterRow {
-            first_seen,
-            id,
-            identity,
-            serial,
-            part_number,
-            ereports,
-        }
-
-    }).collect::<Vec<_>>();
+    let mut rows = reporters
+        .into_iter()
+        .map(|(id, reporter, serial, part_number, first_seen, ereports)| {
+            let identity = match reporter.try_into() {
+                Ok(reporter) => Some(reporter),
+                Err(err) => {
+                    eprintln!("{err}");
+                    None
+                }
+            };
+            ReporterRow {
+                first_seen,
+                id,
+                identity,
+                serial,
+                part_number,
+                ereports,
+            }
+        })
+        .collect::<Vec<_>>();
     rows.sort_by_key(|row| row.first_seen);
 
     let mut table = tabled::Table::new(rows);

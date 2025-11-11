@@ -23,6 +23,7 @@ use gateway_client::types::SpIgnition;
 use gateway_types::component::SpType;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
+use nexus_db_model::Ereport;
 use nexus_db_model::Sled;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
@@ -34,7 +35,7 @@ use nexus_db_queries::db::datastore::EreportFilters;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_reconfigurator_preparation::reconfigurator_state_load;
 use nexus_types::deployment::SledFilter;
-use nexus_types::fm::Ereport;
+
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
@@ -1198,14 +1199,15 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         // N.B. that we call `into_untyped_uuid()` here, as the `Display`
         // implementation for a typed UUID appends " (ereporter_restart)", which
         // we don't want.
-        .join(ereport.id.restart_id.into_untyped_uuid().to_string());
+        .join(ereport.id().restart_id.into_untyped_uuid().to_string());
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("failed to create directory '{dir}'"))?;
-    let file_path = dir.join(format!("{}.json", ereport.id.ena));
-    let json = serde_json::to_vec(&ereport).with_context(|| {
-        format!("failed to serialize ereport {pn}:{sn}/{}", ereport.id)
-    })?;
+    let ereport_id = ereport.id();
+    let file_path = dir.join(format!("{}.json", ereport_id.ena));
+    let ereport = nexus_types::fm::Ereport::from(ereport);
+    let json = serde_json::to_vec(&ereport)
+        .with_context(|| format!("failed to serialize ereport {ereport_id}"))?;
     tokio::fs::write(&file_path, json)
         .await
         .with_context(|| format!("failed to write '{file_path}'"))
@@ -1630,7 +1632,7 @@ mod test {
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::fm::ereport::EreportData;
+    use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
@@ -1782,8 +1784,6 @@ mod test {
     }
 
     async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
-        use crate::db;
-
         const SP_SERIAL: &str = "BRM42000069";
         const HOST_SERIAL: &str = "BRM66600042";
         const GIMLET_PN: &str = "9130000019";
@@ -1805,8 +1805,6 @@ mod test {
                 collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
-                part_number: Some(GIMLET_PN.to_string()),
-                serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.something.blah".to_string()),
                 report: serde_json::json!({"system_working": "seems to be",})
             },
@@ -1814,8 +1812,6 @@ mod test {
                 id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
                 collector_id: OmicronZoneUuid::new_v4(),
-                part_number: Some(GIMLET_PN.to_string()),
-                serial_number: Some(SP_SERIAL.to_string()),
                 // Let's do a silly one! No VPD, to make sure that's also
                 // handled correctly.
                 part_number: None,
@@ -1831,7 +1827,7 @@ mod test {
             .ereports_insert(
                 &opctx,
                 Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
-                Some(SpEreport {
+                vec![EreportData {
                     id: EreportId {
                         restart_id: EreporterRestartUuid::new_v4(),
                         ena: ereport_types::Ena(1),
@@ -1842,7 +1838,7 @@ mod test {
                     serial_number: Some("BRM41000555".to_string()),
                     class: Some("ereport.fake.whatever".to_string()),
                     report: serde_json::json!({"im_a_sidecar": true}),
-                }),
+                }],
             )
             .await
             .expect("failed to insert another fake SP ereport");
@@ -1854,18 +1850,24 @@ mod test {
                 Reporter::HostOs { sled: SledUuid::new_v4() },
                 vec![
                     EreportData {
-                        id: EreportId { restart_id, ena:  ereport_types::Ena(1) },
+                        id: EreportId {
+                            restart_id,
+                            ena: ereport_types::Ena(1),
+                        },
                         time_collected: chrono::Utc::now(),
-                        collector_id: OmicronZoneUuid::new_v4()
+                        collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever".to_string()),
                         report: serde_json::json!({"hello_world": true}),
                     },
-                    EreportData{
-                        id: EreportId { restart_id, ena:  ereport_types::Ena(2) },
+                    EreportData {
+                        id: EreportId {
+                            restart_id,
+                            ena: ereport_types::Ena(2),
+                        },
                         time_collected: chrono::Utc::now(),
-                        collector_id: OmicronZoneUuid::new_v4()
+                        collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever.thingy".to_string()),
@@ -1876,14 +1878,14 @@ mod test {
             .await
             .expect("failed to insert fake host OS ereports");
         datastore
-            .host_ereports_insert(
+            .ereports_insert(
                 &opctx,
                 Reporter::HostOs { sled: SledUuid::new_v4() },
                 vec![
                     EreportData {
                         id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
                         time_collected: chrono::Utc::now(),
-                        collector_id: OmicronZoneUuid::new_v4()
+                        collector_id: OmicronZoneUuid::new_v4(),
                         serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.something.hostos_related".to_string()),
@@ -2040,12 +2042,8 @@ mod test {
         assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
         assert_eq!(
-            report.host_ereports,
-            SupportBundleEreportStatus::Collected { n_collected: 3 }
-        );
-        assert_eq!(
-            report.sp_ereports,
-            SupportBundleEreportStatus::Collected { n_collected: 4 }
+            report.ereports,
+            SupportBundleEreportStatus::Collected { n_collected: 7 }
         );
 
         let observed_bundle = datastore

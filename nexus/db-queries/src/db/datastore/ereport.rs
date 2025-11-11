@@ -8,13 +8,13 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
-use crate::db::model::DbEna;
 use crate::db::model::Ereport;
 use crate::db::model::SpMgsSlot;
 use crate::db::model::SpType;
 use crate::db::model::SqlU16;
 use crate::db::model::SqlU32;
 use crate::db::model::ereport as model;
+use crate::db::model::ereport::DbEna;
 use crate::db::pagination::{paginated, paginated_multicolumn};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
@@ -25,7 +25,8 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::ereport::dsl;
-use nexus_types::fm::ereport::{self as fm, EreportId, Reporter};
+use nexus_types::fm::ereport as fm;
+use nexus_types::fm::ereport::EreportId;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -42,7 +43,7 @@ type EreportIdTuple = (Uuid, DbEna);
 pub struct EreporterRestartBySerial {
     pub id: EreporterRestartUuid,
     pub first_seen_at: DateTime<Utc>,
-    pub reporter_kind: Reporter,
+    pub reporter_kind: fm::Reporter,
     pub ereports: u32,
 }
 
@@ -112,7 +113,7 @@ impl DataStore {
             .ok_or_else(|| {
                 Error::non_resourcetype_not_found(format!("ereport {id}"))
             })?;
-        Ok(ereport.into())
+        Ok(ereport)
     }
 
     pub async fn ereport_fetch_matching(
@@ -130,7 +131,7 @@ impl DataStore {
             pagparams,
         )
         .filter(dsl::time_deleted.is_null())
-        .select(model::Ereport::as_select());
+        .select(Ereport::as_select());
 
         if let Some(start) = filters.start_time {
             query = query.filter(dsl::time_collected.ge(start));
@@ -168,7 +169,7 @@ impl DataStore {
         paginated(dsl::ereport, dsl::ena, pagparams)
             .filter(dsl::restart_id.eq(restart_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
-            .select(model::Ereport::as_select())
+            .select(Ereport::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -184,12 +185,9 @@ impl DataStore {
 
         let conn = &*self.pool_connection_authorized(opctx).await?;
         let rows = Self::restart_list_by_serial_query(serial.clone())
-            .load_async::<(
-                Uuid,
-                model::ereport::Reporter,
-                Option<DateTime<Utc>>,
-                SqlU32,
-            )>(conn)
+            .load_async::<(Uuid, model::Reporter, Option<DateTime<Utc>>, SqlU32)>(
+                conn,
+            )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -212,12 +210,8 @@ impl DataStore {
 
     fn restart_list_by_serial_query(
         serial: String,
-    ) -> impl RunnableQuery<(
-        Uuid,
-        model::ereport::Reporter,
-        Option<DateTime<Utc>>,
-        SqlU32,
-    )> {
+    ) -> impl RunnableQuery<(Uuid, model::Reporter, Option<DateTime<Utc>>, SqlU32)>
+    {
         dsl::ereport
             .filter(dsl::serial_number.eq(serial.clone()))
             .filter(dsl::time_deleted.is_null())
@@ -230,7 +224,7 @@ impl DataStore {
             ))
             .select((
                 dsl::restart_id,
-                model::ereport::Reporter::as_select(),
+                model::Reporter::as_select(),
                 min(dsl::time_collected),
                 count_distinct(dsl::ena),
             ))
@@ -240,7 +234,7 @@ impl DataStore {
     pub async fn latest_ereport_id(
         &self,
         opctx: &OpContext,
-        reporter: Reporter,
+        reporter: fm::Reporter,
     ) -> Result<Option<EreportId>, Error> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         self.latest_ereport_id_on_conn(
@@ -253,17 +247,17 @@ impl DataStore {
     async fn latest_ereport_id_on_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        reporter: Reporter,
-    ) -> Result<Option<ereport_types::EreportId>, Error> {
+        reporter: fm::Reporter,
+    ) -> Result<Option<EreportId>, Error> {
         let result = match reporter {
-            Reporter::Sp { sp_type, slot } => {
+            fm::Reporter::Sp { sp_type, slot } => {
                 let sp_type = sp_type.into();
                 let slot = SpMgsSlot::from(SqlU16::new(slot));
                 Self::sp_latest_ereport_id_query(sp_type, slot)
                     .get_result_async(conn)
                     .await
             }
-            Reporter::HostOs { sled } => {
+            fm::Reporter::HostOs { sled } => {
                 Self::host_latest_ereport_id_query(sled)
                     .get_result_async(conn)
                     .await
@@ -312,7 +306,7 @@ impl DataStore {
     pub async fn ereports_insert(
         &self,
         opctx: &OpContext,
-        reporter: Reporter,
+        reporter: fm::Reporter,
         ereports: impl IntoIterator<Item = fm::EreportData>,
     ) -> CreateResult<(usize, Option<EreportId>)> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
