@@ -1,4 +1,4 @@
 # Helios should *not* be pinned except on release branches.
 [helios]
-commit = "fbc6cbe9ff877ec8ce97412b4b6abb9f684f4da6"
+commit = "7ab2aa4318defa020f55c5d0537be1d2c4369c8c"
 incorporation = "17.0.0.0"
