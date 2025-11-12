@@ -1069,6 +1069,7 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingChoice;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::{
         SledBuilder, SystemDescription,
@@ -1111,10 +1112,12 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use oxnet::IpNet;
+    use slog::Logger;
     use std::collections::{BTreeMap, HashMap};
     use std::net::Ipv6Addr;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::num::NonZeroU32;
+    use std::sync::LazyLock;
 
     // Default impl is for tests only, and really just so that tests can more
     // easily specify just the parts that they want.
@@ -1199,6 +1202,49 @@ mod test {
 
     fn rack_id() -> Uuid {
         Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap()
+    }
+
+    // Return a `BlueprintBuilder` configured from `system` and based on an
+    // empty parent blueprint.
+    //
+    // If used for RSS tests (most of the time!), the blueprint built by this
+    // builder will need to have its `parent_blueprint_id` manually set to
+    // `None` to erase the link to the empty parent.
+    fn blueprint_builder_with_empty_parent(
+        log: &Logger,
+        system: &SystemDescription,
+        test_name: &str,
+    ) -> BlueprintBuilder<'static> {
+        static EMPTY_BLUEPRINT: LazyLock<Blueprint> = LazyLock::new(|| {
+            BlueprintBuilder::build_empty_with_sleds(
+                std::iter::empty(),
+                "EMPTY_BLUEPRINT static",
+            )
+        });
+
+        let planning_input = system
+            .to_planning_input_builder()
+            .expect("created planning input builder")
+            .build();
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            log,
+            &*EMPTY_BLUEPRINT,
+            &planning_input,
+            test_name,
+            PlannerRng::from_entropy(),
+        )
+        .expect("created blueprint builder");
+
+        for (sled_id, sled_resources) in
+            planning_input.all_sled_resources(SledFilter::InService)
+        {
+            builder
+                .sled_add_disks(sled_id, &sled_resources)
+                .expect("added disks");
+        }
+
+        builder
     }
 
     #[tokio::test]
@@ -1432,43 +1478,22 @@ mod test {
 
         let mut system = SystemDescription::new();
         system
-            .set_external_ip_policy(external_ip_policy)
+            .set_external_ip_policy(external_ip_policy.clone())
             .sled(SledBuilder::new().id(sled1.id()))
             .expect("failed to add sled1")
             .sled(SledBuilder::new().id(sled2.id()))
             .expect("failed to add sled2")
             .sled(SledBuilder::new().id(sled3.id()))
             .expect("failed to add sled3");
-        let planning_input = system
-            .to_planning_input_builder()
-            .expect("created planning input builder")
-            .build();
-        let empty_starting_blueprint = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            test_name,
-        );
+        let mut builder =
+            blueprint_builder_with_empty_parent(&opctx.log, &system, test_name);
+
         let mut external_networking_alloc =
-            ExternalNetworkingAllocator::from_blueprint(
-                &empty_starting_blueprint,
-                planning_input.external_ip_policy(),
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                &external_ip_policy,
             )
             .expect("constructed allocator");
-
-        let mut builder = BlueprintBuilder::new_based_on(
-            &opctx.log,
-            &empty_starting_blueprint,
-            &planning_input,
-            test_name,
-            PlannerRng::from_entropy(),
-        )
-        .expect("created blueprint builder");
-        for (sled_id, sled_resources) in
-            planning_input.all_sled_resources(SledFilter::InService)
-        {
-            builder
-                .sled_add_disks(sled_id, &sled_resources)
-                .expect("added disks");
-        }
 
         let external_dns_networking = external_networking_alloc
             .for_new_external_dns()
@@ -2256,74 +2281,37 @@ mod test {
         system
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
+        let mut builder =
+            blueprint_builder_with_empty_parent(&opctx.log, &system, test_name);
 
+        // We didn't add anything to the `system` IP pool, but pick an IP
+        // anyway. This should fail below.
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
-        let nexus_id = OmicronZoneUuid::new_v4();
         let mut macs = MacAddr::iter_system();
-        let mut blueprint_zones = BTreeMap::new();
-        blueprint_zones.insert(
-            sled.id(),
-            [BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: nexus_id,
-                filesystem_pool: random_zpool(),
-                zone_type: BlueprintZoneType::Nexus(
-                    blueprint_zone_type::Nexus {
-                        internal_address: "[::1]:80".parse().unwrap(),
-                        lockstep_port:
-                            omicron_common::address::NEXUS_LOCKSTEP_PORT,
-                        external_ip: OmicronZoneExternalFloatingIp {
-                            id: ExternalIpUuid::new_v4(),
-                            ip: nexus_ip,
-                        },
-                        external_tls: false,
-                        external_dns_servers: vec![],
-                        nic: NetworkInterface {
-                            id: Uuid::new_v4(),
-                            kind: NetworkInterfaceKind::Service {
-                                id: nexus_id.into_untyped_uuid(),
-                            },
-                            name: "nexus".parse().unwrap(),
-                            ip: nexus_pip.into(),
-                            mac: macs.next().unwrap(),
-                            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
-                            vni: Vni::SERVICES_VNI,
-                            primary: true,
-                            slot: 0,
-                            transit_ips: vec![],
-                        },
-                        nexus_generation: *Generation::new(),
-                    },
-                ),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            }]
-            .into_iter()
-            .collect::<IdOrdMap<_>>(),
-        );
-        let blueprint_id = BlueprintUuid::new_v4();
-        let blueprint = Blueprint {
-            id: blueprint_id,
-            sleds: make_sled_config_only_zones(blueprint_zones),
-            pending_mgs_updates: PendingMgsUpdates::new(),
-            cockroachdb_setting_preserve_downgrade:
-                CockroachDbPreserveDowngrade::DoNotModify,
-            parent_blueprint_id: None,
-            internal_dns_version: *Generation::new(),
-            external_dns_version: *Generation::new(),
-            target_release_minimum_generation: *Generation::new(),
-            nexus_generation: *Generation::new(),
-            cockroachdb_fingerprint: String::new(),
-            clickhouse_cluster_config: None,
-            oximeter_read_version: *Generation::new(),
-            oximeter_read_mode: OximeterReadMode::SingleNode,
-            time_created: now_db_precision(),
-            creator: "test suite".to_string(),
-            comment: "test blueprint".to_string(),
-            source: BlueprintSource::Test,
-        };
+        builder
+            .sled_add_zone_nexus_with_config(
+                sled.id(),
+                false,
+                Vec::new(),
+                BlueprintZoneImageSource::InstallDataset,
+                ExternalNetworkingChoice {
+                    external_ip: nexus_ip,
+                    nic_ip: nexus_pip.into(),
+                    nic_subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
+                    nic_mac: macs.next().unwrap(),
+                },
+                *Generation::new(),
+            )
+            .expect("added Nexus");
+
+        let mut blueprint = builder.build(BlueprintSource::Test);
+
+        // We're emulating RSS, which inserts the initial blueprint. Clear out
+        // the link back to the empty parent we started with.
+        blueprint.parent_blueprint_id = None;
 
         let result = datastore
             .rack_set_initialized(
