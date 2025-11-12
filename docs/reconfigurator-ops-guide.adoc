@@ -2,7 +2,7 @@
 :numbered:
 :toc: left
 
-= Reconfigurator Debugging Guide
+= Reconfigurator Operator Guide
 
 This guide is aimed at helping support and engineering debug problems with Reconfigurator.  If you run into a problem that's not covered here, consider adding it!
 
@@ -259,7 +259,7 @@ As of this writing, the system does not do anything to minimize the impact of up
 
 When the sled hosting the instance itself reboots, the instance will not be running between when the sled is rebooted and when the instance starts again.  The instance is not restarted until after the sled it was on has finished booting.footnote:[Again, because the update system doesn't do anything to minimize disruption, this condition appears to the rest of the system indistinguishable from a _partition_ of the sled hosting the instance.  That's why it doesn't take action until the sled comes back.]  This can happen to an instance more than once during an upgrade, if the sled it gets restarted on itself needs to be rebooted for its upgrade.  In general, this will happen between 1 and `N-1` times for each instance, where `N` is the number of sleds in the system.  The instance will generally be offline for 8-13 minutes.footnote:[For more on this range of time, see https://github.com/oxidecomputer/omicron/issues/9094\[omicron#9094\].  The short version is that the first restart can itself fail spuriously (due to a bug) and it may take an extra 5 minutes before the system tries to restart it again.]
 
-When two of the Crucible downstairs instances backing one of the instance's disks become unavailable, the instance may see I/O delays, timeouts, or other errors until one of the instances becomes available again.  For Crucible zone updates, this is about a minute.  For sled reboots, this is closer to 10 minutes.  Keep in mind that this only happens when _multiple_ Crucible zones are affected at the same time (generally two) and the problem resolves when all but one come back (generally just one needs to come back).
+When two of the Crucible downstairs instances backing one of the instance's disks become unavailable, the instance may see I/O delays, timeouts, or other errors until one of the instances becomes available again.  For Crucible zone updates, this is about a minute.  For sled reboots, this is closer to 10 minutes.  Keep in mind that this only happens when _multiple_ Crucible zones are affected at the same time (generally two) and the problem resolves when all but one come back (generally just one needs to come back).  However, some guest operating systems may transition disks to read-only or other faulted modes when this happens.  There's more about this in the https://docs.oxide.computer/guides/troubleshooting[user-facing troubleshooting guide].
 
 Reducing the duration and impact of the disruption is an area of ongoing engineering focus.
 
@@ -278,7 +278,7 @@ There are some other impacts to the API during the whole upgrade process:
 * During the brief periods where Crucible pantry zones are updated, in-flight Crucible operations like disk import may fail.  The user will have to try the operation again.
 * During the brief periods where Clickhouse or Oximeter is offline, some metric data may fail to be collected (so the metric data will be absent for that period) or queried.
 * During the many brief periods when components or sleds are restarted, some instance start operations may fail, if they or their disks get allocated to sleds or Crucible instances that are currently offline.
-* During the many brief periods when components or sleds are restarted, some disk create operations may fail, if they get allocated to Crucible instances that are currently offline.
+* During the many brief periods when components or sleds are restarted, some disk create operations may fail, if they get allocated to Crucible instances that are currently offline.  Disk deletion may also fail for disks whose downstairs instance is offline.
 
 == Collecting data from Reconfigurator
 
