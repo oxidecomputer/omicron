@@ -33,7 +33,6 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -486,9 +485,8 @@ struct OximeterReadPolicy {
 ///
 /// 1. Build one directly. This would generally only be used once in the
 ///    lifetime of a rack, to assemble the first blueprint during rack setup.
-///    It is also common in tests. To start with a blueprint that contains an
-///    empty zone config for some number of sleds, use
-///    [`BlueprintBuilder::build_empty_with_sleds`].
+///    It is also common in tests. To start with an empty initial blueprint,
+///    use [`BlueprintBuilder::build_empty`].
 ///
 /// 2. Build one _from_ another blueprint, called the "parent", making changes
 ///    as desired.  Use [`BlueprintBuilder::new_based_on`] for this.  Once the
@@ -533,64 +531,16 @@ impl<'a> BlueprintBuilder<'a> {
     /// Directly construct an empty blueprint: no sleds; default values for all
     /// other fields.
     pub fn build_empty(creator: &str) -> Blueprint {
-        Self::build_empty_with_sleds(iter::empty(), creator)
+        Self::build_empty_seeded(creator, PlannerRng::from_entropy())
     }
 
     /// A version of [`Self::build_empty`] that allows the
     /// blueprint ID to be generated from a deterministic RNG.
-    pub fn build_empty_seeded(creator: &str, rng: PlannerRng) -> Blueprint {
-        Self::build_empty_with_sleds_seeded(iter::empty(), creator, rng)
-    }
-
-    /// Directly construct a `Blueprint` that contains an empty zone config for
-    /// the given sleds.
-    pub fn build_empty_with_sleds(
-        sled_ids: impl Iterator<Item = SledUuid>,
-        creator: &str,
-    ) -> Blueprint {
-        Self::build_empty_with_sleds_impl(
-            sled_ids,
-            creator,
-            PlannerRng::from_entropy(),
-        )
-    }
-
-    /// A version of [`Self::build_empty_with_sleds`] that allows the
-    /// blueprint ID to be generated from a deterministic RNG.
-    pub fn build_empty_with_sleds_seeded(
-        sled_ids: impl Iterator<Item = SledUuid>,
-        creator: &str,
-        rng: PlannerRng,
-    ) -> Blueprint {
-        Self::build_empty_with_sleds_impl(sled_ids, creator, rng)
-    }
-
-    fn build_empty_with_sleds_impl(
-        sled_ids: impl Iterator<Item = SledUuid>,
-        creator: &str,
-        mut rng: PlannerRng,
-    ) -> Blueprint {
-        let sleds = sled_ids
-            .map(|sled_id| {
-                let config = BlueprintSledConfig {
-                    state: SledState::Active,
-                    sled_agent_generation: Generation::new(),
-                    disks: IdOrdMap::default(),
-                    datasets: IdOrdMap::default(),
-                    zones: IdOrdMap::default(),
-                    remove_mupdate_override: None,
-                    host_phase_2:
-                        BlueprintHostPhase2DesiredSlots::current_contents(),
-                };
-                (sled_id, config)
-            })
-            .collect::<BTreeMap<_, _>>();
-        let num_sleds = sleds.len();
-
+    pub fn build_empty_seeded(creator: &str, mut rng: PlannerRng) -> Blueprint {
         let id = rng.next_blueprint();
         Blueprint {
             id,
-            sleds,
+            sleds: BTreeMap::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
@@ -605,7 +555,7 @@ impl<'a> BlueprintBuilder<'a> {
             oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
-            comment: format!("starting blueprint with {num_sleds} empty sleds"),
+            comment: format!("starting blueprint (empty)"),
             // The only reason to create empty blueprints is tests. If that
             // changes (e.g., if RSS starts using this builder to generate its
             // blueprints), we could take a `source` argument instead.
