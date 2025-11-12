@@ -40,7 +40,7 @@ pub struct PscPsu {
     pub psc_id: VpdIdentity,
     pub psc_slot: u16,
     pub psu_id: PsuIdentity,
-    pub psu_slot: u16,
+    pub psu_slot: Option<u16>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
