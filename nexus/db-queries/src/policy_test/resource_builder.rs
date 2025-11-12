@@ -435,3 +435,20 @@ impl DynAuthorizedResource for authz::VpcList {
         format!("{}: vpc list", self.project().resource_name())
     }
 }
+
+impl DynAuthorizedResource for authz::SiloImageList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: silo image list", self.silo().resource_name())
+    }
+}

@@ -819,6 +819,61 @@ impl AuthorizedResource for SiloGroupList {
     }
 }
 
+/// Synthetic resource describing the list of Silo Images associated with a Silo
+///
+/// This synthetic resource is used to control who can promote project images to
+/// silo images. By using a synthetic resource, we can grant limited-collaborators
+/// the ability to create silo images (via promotion) without giving them the
+/// broader create_child permission on Silo (which would allow creating projects,
+/// users, groups, etc.).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloImageList(Silo);
+
+impl SiloImageList {
+    pub fn new(silo: Silo) -> Self {
+        SiloImageList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for SiloImageList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &SiloImageList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for SiloImageList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Note the session list and the token list have exactly the same behavior
 
 /// Synthetic resource for managing a user's sessions

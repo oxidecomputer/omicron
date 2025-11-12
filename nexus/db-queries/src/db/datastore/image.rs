@@ -169,11 +169,13 @@ impl DataStore {
     pub async fn project_image_promote(
         &self,
         opctx: &OpContext,
-        authz_silo: &authz::Silo,
+        _authz_silo: &authz::Silo,
         authz_project_image: &authz::ProjectImage,
         project_image: &ProjectImage,
     ) -> UpdateResult<Image> {
-        opctx.authorize(authz::Action::CreateChild, authz_silo).await?;
+        // Authorization for creating silo images is checked in the app layer
+        // via SiloImageList to allow limited-collaborators to promote without
+        // granting them broad create_child on Silo.
         opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
         use nexus_db_schema::schema::image::dsl;

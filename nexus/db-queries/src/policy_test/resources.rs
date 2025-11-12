@@ -245,6 +245,8 @@ async fn make_silo(
         LookupType::ByName(format!("{}-certificate", silo_name)),
     ));
 
+    builder.new_resource(authz::SiloImageList::new(silo.clone()));
+
     builder.new_resource(authz::SiloIdentityProviderList::new(silo.clone()));
     let idp_id = Uuid::new_v4();
     builder.new_resource(authz::IdentityProvider::new(

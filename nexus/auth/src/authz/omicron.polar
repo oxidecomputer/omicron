@@ -138,10 +138,7 @@ resource Silo {
 	"list_children" if "viewer";
 	"read" if "viewer";
 
-	# Allow limited-collaborator to create child resources (specifically for
-	# image promotion). Limited-collaborator is restricted from VPC operations
-	# but should have full image management capabilities.
-	"create_child" if "limited-collaborator";
+	"create_child" if "collaborator";
 	"modify" if "admin";
 
 	# Permissions implied by roles on this resource's parent (Fleet).  Fleet
@@ -828,6 +825,23 @@ resource VpcList {
 }
 has_relation(project: Project, "containing_project", collection: VpcList)
 	if collection.project = project;
+
+# SiloImageList is a synthetic resource for controlling silo image creation.
+# Unlike other silo resources, silo image creation (promotion from project images)
+# should be allowed for limited-collaborators, since they need full image management
+# capabilities while being restricted from VPC operations.
+# This allows organizations to give users full control over images (create, promote,
+# demote) while restricting network configuration.
+resource SiloImageList {
+	permissions = [ "list_children", "create_child" ];
+
+	relations = { containing_silo: Silo };
+
+	"list_children" if "viewer" on "containing_silo";
+	"create_child" if "limited-collaborator" on "containing_silo";
+}
+has_relation(silo: Silo, "containing_silo", collection: SiloImageList)
+	if collection.silo = silo;
 
 # SiloImage modifications for limited-collaborator
 # By default, SiloImage uses the InSilo pattern where only "collaborator" can

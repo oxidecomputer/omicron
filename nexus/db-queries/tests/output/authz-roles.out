@@ -270,6 +270,23 @@ resource: Certificate "silo1-certificate"
   unauthenticated                   !  !  !  !  !  !  !  !
   scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
 
+resource: Silo "silo1": silo image list
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  silo1-collaborator                ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  silo1-limited-collaborator        ✘  ✘  ✔  ✘  ✘  ✘  ✔  ✘
+  silo1-viewer                      ✘  ✘  ✔  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
 resource: Silo "silo1": identity provider list
 
   USER                              Q  R LC RP  M MP CC  D
@@ -414,7 +431,7 @@ resource: SiloImage "silo1-silo-image"
   fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-admin                       ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
   silo1-collaborator                ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
-  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✔  ✔  ✔  ✔  ✔  ✘  ✔
   silo1-viewer                      ✘  ✔  ✔  ✔  ✘  ✘  ✘  ✘
   silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
@@ -1056,6 +1073,23 @@ resource: Certificate "silo2-certificate"
 
   USER                              Q  R LC RP  M MP CC  D
   fleet-admin                       ✘  ✔  ✘  ✔  ✔  ✔  ✘  ✔
+  fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-limited-collaborator        ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-admin                 ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-collaborator          ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-limited-collaborator  ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  silo1-proj1-viewer                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+  unauthenticated                   !  !  !  !  !  !  !  !
+  scim                              ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
+
+resource: Silo "silo2": silo image list
+
+  USER                              Q  R LC RP  M MP CC  D
+  fleet-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   fleet-collaborator                ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   fleet-viewer                      ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   silo1-admin                       ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
