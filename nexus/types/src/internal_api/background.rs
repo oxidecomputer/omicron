@@ -23,7 +23,9 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
@@ -505,25 +507,30 @@ pub struct BlueprintRendezvousStatus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlueprintRendezvousStats {
-    pub debug_dataset: DebugDatasetsRendezvousStats,
+    pub debug_dataset: DatasetsRendezvousStats,
     pub crucible_dataset: CrucibleDatasetsRendezvousStats,
+    pub local_storage_dataset: DatasetsRendezvousStats,
 }
 
+/// Stats for the rendezvous table that stores Crucible datasets
+///
+/// These were created before reconfigurator so there are less fields than other
+/// reconfigurator managed rendezvous tables.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
 pub struct CrucibleDatasetsRendezvousStats {
-    /// Number of new Crucible datasets recorded.
+    /// Number of new datasets recorded.
     ///
-    /// This is a count of in-service Crucible datasets that were also present
-    /// in inventory and newly-inserted into `crucible_dataset`.
+    /// This is a count of in-service datasets that were also present in
+    /// inventory and newly-inserted into the associated table.
     pub num_inserted: usize,
-    /// Number of Crucible datasets that would have been inserted, except
-    /// records for them already existed.
+    /// Number of datasets that would have been inserted, except records for
+    /// them already existed.
     pub num_already_exist: usize,
-    /// Number of Crucible datasets that the current blueprint says are
-    /// in-service, but we did not attempt to insert them because they're not
-    /// present in the latest inventory collection.
+    /// Number of datasets that the current blueprint says are in-service, but
+    /// we did not attempt to insert them because they're not present in the
+    /// latest inventory collection.
     pub num_not_in_inventory: usize,
 }
 
@@ -543,31 +550,36 @@ impl slog::KV for CrucibleDatasetsRendezvousStats {
     }
 }
 
+/// Stats for rendezvous tables
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
 )]
-pub struct DebugDatasetsRendezvousStats {
-    /// Number of new Debug datasets recorded.
+pub struct DatasetsRendezvousStats {
+    /// Number of new datasets recorded.
     ///
-    /// This is a count of in-service Debug datasets that were also present
-    /// in inventory and newly-inserted into `rendezvous_debug_dataset`.
+    /// This is a count of in-service datasets that were also present in
+    /// inventory and newly-inserted into their table.
     pub num_inserted: usize,
-    /// Number of Debug datasets that would have been inserted, except
-    /// records for them already existed.
+
+    /// Number of datasets that would have been inserted, except records for
+    /// them already existed.
     pub num_already_exist: usize,
-    /// Number of Debug datasets that the current blueprint says are
-    /// in-service, but we did not attempt to insert them because they're not
-    /// present in the latest inventory collection.
+
+    /// Number of datasets that the current blueprint says are in-service, but
+    /// we did not attempt to insert them because they're not present in the
+    /// latest inventory collection.
     pub num_not_in_inventory: usize,
-    /// Number of Debug datasets that we tombstoned based on their disposition
-    /// in the current blueprint being expunged.
+
+    /// Number of datasets that we tombstoned based on their disposition in the
+    /// current blueprint being expunged.
     pub num_tombstoned: usize,
-    /// Number of Debug datasets that we would have tombstoned, except they were
+
+    /// Number of datasets that we would have tombstoned, except they were
     /// already tombstoned or deleted.
     pub num_already_tombstoned: usize,
 }
 
-impl slog::KV for DebugDatasetsRendezvousStats {
+impl slog::KV for DatasetsRendezvousStats {
     fn serialize(
         &self,
         _record: &slog::Record,
@@ -755,6 +767,45 @@ pub struct EreporterStatus {
     /// total number of HTTP requests sent.
     pub requests: usize,
     pub errors: Vec<String>,
+}
+
+/// The status of a `fm_sitrep_loader` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepLoadStatus {
+    /// An error occurred.
+    Error(String),
+
+    /// There is no current sitrep.
+    NoSitrep,
+
+    /// We've loaded the most recent sitrep as of `time_loaded`.
+    Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
+}
+
+/// The status of a `fm_sitrep_gc` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepGcStatus {
+    pub orphaned_sitreps_found: usize,
+    pub orphaned_sitreps_deleted: usize,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeError {
+    /// ID of the sled we failed to send a probe to.
+    pub sled_id: SledUuid,
+    /// IP address of the sled we failed to send a probe to.
+    pub sled_ip: Ipv6Addr,
+    /// Error message describing the failure.
+    pub error: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeDistributorStatus {
+    /// Count of successfully sent probes to each sled.
+    pub probes_by_sled: HashMap<SledUuid, usize>,
+    /// Errors when sending a probe.
+    pub errors: Vec<ProbeError>,
 }
 
 #[cfg(test)]

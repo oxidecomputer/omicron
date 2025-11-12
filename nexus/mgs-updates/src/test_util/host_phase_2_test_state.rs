@@ -196,7 +196,6 @@ mod api_impl {
     use dropshot::RequestContext;
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
-    use id_map::IdMap;
     use iddqd::IdOrdMap;
     use nexus_sled_agent_shared::inventory::BootImageHeader;
     use nexus_sled_agent_shared::inventory::BootPartitionContents;
@@ -231,6 +230,7 @@ mod api_impl {
     use sled_agent_types::instance::VmmPutStateBody;
     use sled_agent_types::instance::VmmPutStateResponse;
     use sled_agent_types::instance::VmmUnregisterResponse;
+    use sled_agent_types::probes::ProbeSet;
     use sled_agent_types::sled::AddSledRequest;
     use sled_agent_types::zone_bundle::BundleUtilization;
     use sled_agent_types::zone_bundle::CleanupContext;
@@ -302,9 +302,9 @@ mod api_impl {
             // with something quasi-reasonable (or empty, if we can).
             let config = OmicronSledConfig {
                 generation: Generation::new(),
-                disks: IdMap::new(),
-                datasets: IdMap::new(),
-                zones: IdMap::new(),
+                disks: IdOrdMap::new(),
+                datasets: IdOrdMap::new(),
+                zones: IdOrdMap::new(),
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots {
                     slot_a: HostPhase2DesiredContents::CurrentContents,
@@ -836,6 +836,13 @@ mod api_impl {
         async fn debug_operator_switch_zone_policy_put(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<OperatorSwitchZonePolicy>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn probes_put(
+            _request_context: RequestContext<Self::Context>,
+            _body: TypedBody<ProbeSet>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

@@ -129,7 +129,7 @@ impl NexusSaga for SagaDiskCreate {
 
 async fn sdc_create_disk_record(
     sagactx: NexusActionContext,
-) -> Result<db::model::Disk, ActionError> {
+) -> Result<db::datastore::CrucibleDisk, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
@@ -191,14 +191,20 @@ async fn sdc_create_disk_record(
     let disk = db::model::Disk::new(
         disk_id,
         params.project_id,
-        volume_id,
-        params.create_params.clone(),
+        &params.create_params,
         block_size,
         db::model::DiskRuntimeState::new(),
-    )
-    .map_err(|e| {
-        ActionError::action_failed(Error::invalid_request(&e.to_string()))
-    })?;
+        db::model::DiskType::Crucible,
+    );
+
+    let disk_type_crucible = db::model::DiskTypeCrucible::new(
+        disk_id,
+        volume_id,
+        &params.create_params,
+    );
+
+    let crucible_disk =
+        db::datastore::CrucibleDisk { disk, disk_type_crucible };
 
     let (.., authz_project) = LookupPath::new(&opctx, osagactx.datastore())
         .project_id(params.project_id)
@@ -206,13 +212,17 @@ async fn sdc_create_disk_record(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let disk_created = osagactx
+    osagactx
         .datastore()
-        .project_create_disk(&opctx, &authz_project, disk)
+        .project_create_disk(
+            &opctx,
+            &authz_project,
+            db::datastore::Disk::Crucible(crucible_disk.clone()),
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(disk_created)
+    Ok(crucible_disk)
 }
 
 async fn sdc_create_disk_record_undo(
@@ -294,7 +304,8 @@ async fn sdc_account_space(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
+    let disk_created =
+        sagactx.lookup::<db::datastore::CrucibleDisk>("created_disk")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -305,7 +316,7 @@ async fn sdc_account_space(
             &opctx,
             disk_created.id(),
             params.project_id,
-            disk_created.size,
+            disk_created.size(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -318,7 +329,8 @@ async fn sdc_account_space_undo(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
+    let disk_created =
+        sagactx.lookup::<db::datastore::CrucibleDisk>("created_disk")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -329,7 +341,7 @@ async fn sdc_account_space_undo(
             &opctx,
             disk_created.id(),
             params.project_id,
-            disk_created.size,
+            disk_created.size(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -644,7 +656,8 @@ async fn sdc_finalize_disk_record(
     );
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    let disk_created = sagactx.lookup::<db::model::Disk>("created_disk")?;
+    let disk_created =
+        sagactx.lookup::<db::datastore::CrucibleDisk>("created_disk")?;
     let (.., authz_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .lookup_for(authz::Action::Modify)
@@ -735,7 +748,8 @@ async fn sdc_call_pantry_attach_for_disk(
         &sagactx,
         &params.serialized_authn,
     );
-    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+    let disk_created =
+        sagactx.lookup::<db::datastore::CrucibleDisk>("created_disk")?;
 
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
@@ -743,7 +757,7 @@ async fn sdc_call_pantry_attach_for_disk(
         &log,
         &opctx,
         &osagactx.nexus(),
-        disk_id,
+        &disk_created,
         pantry_address,
     )
     .await?;
@@ -827,8 +841,10 @@ pub(crate) mod test {
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
+    use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::{authn::saga::Serialized, db::datastore::DataStore};
+    use nexus_db_queries::db;
+    use nexus_db_queries::db::datastore::DataStore;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
@@ -891,11 +907,9 @@ pub(crate) mod test {
         let output =
             nexus.sagas.saga_execute::<SagaDiskCreate>(params).await.unwrap();
         let disk = output
-            .lookup_node_output::<nexus_db_queries::db::model::Disk>(
-                "created_disk",
-            )
+            .lookup_node_output::<db::datastore::CrucibleDisk>("created_disk")
             .unwrap();
-        assert_eq!(disk.project_id, project_id);
+        assert_eq!(disk.project_id(), project_id);
     }
 
     async fn no_disk_records_exist(datastore: &DataStore) -> bool {

@@ -15,6 +15,7 @@ use nexus_db_model::RegionReplacementState;
 use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
 use nexus_lockstep_client::types::LastResult;
 use nexus_test_utils::background::*;
@@ -235,11 +236,8 @@ async fn test_region_replacement_does_not_create_freed_region(
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
     // Before expunging the physical disk, save the DB model
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
     assert_eq!(db_disk.id(), disk.identity.id);
 
@@ -331,11 +329,8 @@ mod region_replacement {
             // Manually create the region replacement request for the first
             // allocated region of that disk
 
-            let (.., db_disk) = LookupPath::new(&opctx, &datastore)
-                .disk_id(disk.identity.id)
-                .fetch()
-                .await
-                .unwrap();
+            let Disk::Crucible(db_disk) =
+                datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
             assert_eq!(db_disk.id(), disk.identity.id);
 
@@ -791,11 +786,8 @@ async fn test_racing_replacements_for_soft_deleted_disk_volume(
     .await;
 
     // Before deleting the disk, save the DB model
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
     assert_eq!(db_disk.id(), disk.identity.id);
 
@@ -1364,11 +1356,8 @@ mod region_snapshot_replacement {
             // Manually create the region snapshot replacement request for the
             // first allocated region of that disk
 
-            let (.., db_disk) = LookupPath::new(&opctx, &datastore)
-                .disk_id(disk.identity.id)
-                .fetch()
-                .await
-                .unwrap();
+            let Disk::Crucible(db_disk) =
+                datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
             assert_eq!(db_disk.id(), disk.identity.id);
 
@@ -1437,12 +1426,10 @@ mod region_snapshot_replacement {
                 .await
                 .unwrap();
 
-            let (.., db_disk_from_snapshot) =
-                LookupPath::new(&opctx, &datastore)
-                    .disk_id(disk_from_snapshot.identity.id)
-                    .fetch()
-                    .await
-                    .unwrap();
+            let Disk::Crucible(db_disk_from_snapshot) = datastore
+                .disk_get(&opctx, disk_from_snapshot.identity.id)
+                .await
+                .unwrap();
 
             assert!(volumes_set.contains(&db_snapshot.volume_id()));
             assert!(volumes_set.contains(&db_disk_from_snapshot.volume_id()));
@@ -1679,12 +1666,11 @@ mod region_snapshot_replacement {
                     .parsed_body()
                     .unwrap();
 
-            let (.., db_disk_from_snapshot) =
-                LookupPath::new(&self.opctx(), &self.datastore)
-                    .disk_id(disk_from_snapshot.identity.id)
-                    .fetch()
-                    .await
-                    .unwrap();
+            let Disk::Crucible(db_disk_from_snapshot) = self
+                .datastore
+                .disk_get(&self.opctx(), disk_from_snapshot.identity.id)
+                .await
+                .unwrap();
 
             let result = self
                 .datastore
@@ -2070,11 +2056,8 @@ async fn test_replacement_sanity(cptestctx: &ControlPlaneTestContext) {
     .await;
 
     // Before expunging the physical disk, save the DB model
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
     assert_eq!(db_disk.id(), disk.identity.id);
 
@@ -2181,11 +2164,8 @@ async fn test_region_replacement_triple_sanity(
     .await;
 
     // Before expunging any physical disk, save some DB models
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
     let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
@@ -2307,11 +2287,8 @@ async fn test_region_replacement_triple_sanity_2(
     .await;
 
     // Before expunging any physical disk, save some DB models
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
     let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
         .snapshot_id(snapshot.identity.id)
@@ -2469,11 +2446,8 @@ async fn test_replacement_sanity_twice(cptestctx: &ControlPlaneTestContext) {
     // Manually create region snapshot replacement requests for each region
     // snapshot.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
     assert_eq!(db_disk.id(), disk.identity.id);
 
@@ -2576,11 +2550,8 @@ async fn test_read_only_replacement_sanity(
     // Manually create region snapshot replacement requests for each region
     // snapshot.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
     assert_eq!(db_disk.id(), disk.identity.id);
 
@@ -2744,11 +2715,8 @@ async fn test_replacement_sanity_twice_after_snapshot_delete(
     // Manually create region snapshot replacement requests for each region
     // snapshot.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let Disk::Crucible(db_disk) =
+        datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
     assert_eq!(db_disk.id(), disk.identity.id);
 

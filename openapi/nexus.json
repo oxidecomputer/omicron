@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20251008.0.0"
+    "version": "20251208.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -17777,6 +17777,9 @@
           "device_path": {
             "type": "string"
           },
+          "disk_type": {
+            "$ref": "#/components/schemas/DiskType"
+          },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
             "type": "string",
@@ -17827,6 +17830,7 @@
           "block_size",
           "description",
           "device_path",
+          "disk_type",
           "id",
           "name",
           "project_id",
@@ -18195,6 +18199,12 @@
           }
         ]
       },
+      "DiskType": {
+        "type": "string",
+        "enum": [
+          "crucible"
+        ]
+      },
       "Distributiondouble": {
         "description": "A distribution is a sequence of bins and counts in those bins, and some statistical information tracked to compute the mean, standard deviation, and quantile estimates.\n\nMin, max, and the p-* quantiles are treated as optional due to the possibility of distribution operations, like subtraction.",
         "type": "object",
@@ -18226,27 +18236,18 @@
           },
           "p50": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "type": "number",
@@ -18295,27 +18296,18 @@
           },
           "p50": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p90": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "p99": {
             "nullable": true,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Quantile"
-              }
-            ]
+            "type": "number",
+            "format": "double"
           },
           "squared_mean": {
             "type": "number",

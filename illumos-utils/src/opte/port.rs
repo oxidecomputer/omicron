@@ -57,7 +57,7 @@ impl Drop for PortInner {
             Err(e) => e,
         };
         eprintln!(
-            "WARNING: Failed to delete the xde device. It must be deleted
+            "WARNING: Failed to delete the xde device. It must be deleted \
             out of band, and it will not be possible to recreate the xde \
             device until then. Error: {:?}",
             err,

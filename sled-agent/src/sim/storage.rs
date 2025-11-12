@@ -41,6 +41,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use sled_storage::nested_dataset::NestedDatasetConfig;
 use sled_storage::nested_dataset::NestedDatasetListOptions;
 use sled_storage::nested_dataset::NestedDatasetLocation;
@@ -1669,8 +1670,8 @@ impl StorageInner {
             if path_components.peek().is_none() {
                 if nested_dataset.children.remove(path_component).is_none() {
                     return Err(HttpError::for_not_found(
-                        None,
-                        "Nested Dataset not found".to_string(),
+                        Some(NESTED_DATASET_NOT_FOUND.to_string()),
+                        NESTED_DATASET_NOT_FOUND.to_string(),
                     ));
                 };
                 return Ok(());

@@ -64,7 +64,7 @@ pub(crate) async fn deploy_db_metadata_nexus_records(
 #[cfg(test)]
 mod test {
     use super::*;
-    use id_map::IdMap;
+    use iddqd::IdOrdMap;
     use nexus_db_model::DbMetadataNexus;
     use nexus_db_model::DbMetadataNexusState;
     use nexus_db_queries::db::pub_test_utils::TestDatabase;
@@ -110,7 +110,7 @@ mod test {
         let blueprint_id = BlueprintUuid::new_v4();
         let sled_id = SledUuid::new_v4();
 
-        let zones: IdMap<BlueprintZoneConfig> = nexus_zones
+        let zones: IdOrdMap<BlueprintZoneConfig> = nexus_zones
             .into_iter()
             .map(|(zone_id, disposition, nexus_generation)| BlueprintZoneConfig {
                 disposition,
@@ -154,8 +154,8 @@ mod test {
                 state: SledState::Active,
                 sled_agent_generation: Generation::new(),
                 zones,
-                disks: IdMap::new(),
-                datasets: IdMap::new(),
+                disks: IdOrdMap::new(),
+                datasets: IdOrdMap::new(),
                 remove_mupdate_override: None,
                 host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
                 ),

@@ -169,7 +169,7 @@ pub enum ReconcilerTaskStatus {
     WaitingForInternalDisks,
     WaitingForInitialConfig,
     PerformingReconciliation {
-        config: OmicronSledConfig,
+        config: Box<OmicronSledConfig>,
         started_at_time: DateTime<Utc>,
         started_at_instant: Instant,
     },
@@ -435,8 +435,8 @@ impl ReconcilerTask {
         // Reconcile the mupdate override field. This can be done independently
         // of the other parts of reconciliation (and this doesn't have to block
         // other parts of reconciliation), but the argument for this is somewhat
-        // non-trivial. See
-        // https://rfd.shared.oxide.computer/rfd/556#sa_reconciler_error_handling.
+        // non-trivial. See docs/mupdate-update-flow.adoc, section
+        // "Sled Agent reconciler error handling".
         let remove_mupdate_override =
             if let Some(override_id) = sled_config.remove_mupdate_override {
                 Some(
@@ -587,7 +587,7 @@ impl ReconcilerTask {
         };
 
         let inner = LatestReconciliationResult {
-            sled_config,
+            sled_config: *sled_config,
             external_disks_inventory: self.external_disks.to_inventory(),
             datasets: self.datasets.to_inventory(),
             orphaned_datasets: self.datasets.orphaned_datasets().clone(),

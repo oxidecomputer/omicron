@@ -29,6 +29,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::datastore::CrucibleResources;
 use nexus_db_queries::db::datastore::DestVolume;
+use nexus_db_queries::db::datastore::Disk;
 use nexus_db_queries::db::datastore::ExistingTarget;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
@@ -54,8 +55,8 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
+use omicron_common::api::external;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -141,7 +142,7 @@ async fn create_base_disk(
     image: &views::Image,
     disks_url: &String,
     base_disk_name: &Name,
-) -> Disk {
+) -> external::Disk {
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
@@ -433,7 +434,7 @@ async fn test_snapshot_prevents_other_disk(
     assert!(disk_test.crucible_resources_deleted().await);
 
     // Disk allocation will work now
-    let _next_disk: Disk = NexusRequest::new(
+    let _next_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&next_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -480,7 +481,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
         size: disk_size,
     };
 
-    let first_disk: Disk = NexusRequest::new(
+    let first_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&first_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -522,7 +523,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
         size: disk_size,
     };
 
-    let second_disk: Disk = NexusRequest::new(
+    let second_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&second_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -615,7 +616,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
         size: disk_size,
     };
 
-    let first_disk: Disk = NexusRequest::new(
+    let first_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&first_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -657,7 +658,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
         size: disk_size,
     };
 
-    let second_disk: Disk = NexusRequest::new(
+    let second_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&second_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -745,7 +746,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
         size: disk_size,
     };
 
-    let layer_1_disk: Disk = NexusRequest::new(
+    let layer_1_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&layer_1_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -787,7 +788,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
         size: disk_size,
     };
 
-    let layer_2_disk: Disk = NexusRequest::new(
+    let layer_2_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&layer_2_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -829,7 +830,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
         size: disk_size,
     };
 
-    let layer_3_disk: Disk = NexusRequest::new(
+    let layer_3_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&layer_3_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -1182,7 +1183,7 @@ async fn delete_image_test(
         size: disk_size,
     };
 
-    let _base_disk: Disk = NexusRequest::new(
+    let _base_disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&base_disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -2521,7 +2522,8 @@ async fn test_snapshot_create_saga_unwinds_correctly(
         size: disk_size,
     };
 
-    let _disk: Disk = object_create(client, &disks_url, &base_disk).await;
+    let _disk: external::Disk =
+        object_create(client, &disks_url, &base_disk).await;
 
     // Set the third agent to fail creating the region for the snapshot
     let zpool =
@@ -3320,7 +3322,7 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
         size: ByteCount::from_gibibytes_u32(2),
     };
 
-    let disk: Disk = NexusRequest::new(
+    let disk: external::Disk = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&disk))
             .expect_status(Some(StatusCode::CREATED)),
@@ -3340,9 +3342,8 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
 
     let disk_id = disk.identity.id;
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk_id)
         .await
         .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
 
@@ -3926,9 +3927,8 @@ async fn test_read_only_region_reference_counting(
     // Perform region snapshot replacement for one of the snapshot's regions,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
@@ -3976,9 +3976,8 @@ async fn test_read_only_region_reference_counting(
 
     // The disk-from-snap VCR should also reference that read-only region
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_from_snapshot.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk_from_snapshot) = datastore
+        .disk_get(&opctx, disk_from_snapshot.identity.id)
         .await
         .unwrap_or_else(|_| {
             panic!(
@@ -4194,9 +4193,8 @@ async fn test_read_only_region_reference_counting_layers(
     // Perform region snapshot replacement for one of the snapshot's regions,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
@@ -4239,9 +4237,8 @@ async fn test_read_only_region_reference_counting_layers(
 
     // The disk-from-snap VCR should also reference that read-only region
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_from_snapshot.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk_from_snapshot) = datastore
+        .disk_get(&opctx, disk_from_snapshot.identity.id)
         .await
         .unwrap_or_else(|_| {
             panic!(
@@ -4427,9 +4424,8 @@ async fn test_volume_replace_snapshot_respects_accounting(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
@@ -4633,9 +4629,8 @@ async fn test_volume_remove_rop_respects_accounting(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
@@ -4663,9 +4658,8 @@ async fn test_volume_remove_rop_respects_accounting(
     )
     .await;
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_from_snapshot.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk_from_snapshot) = datastore
+        .disk_get(&opctx, disk_from_snapshot.identity.id)
         .await
         .unwrap_or_else(|_| {
             panic!(
@@ -4796,9 +4790,8 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
 
     let disk = create_disk(&client, PROJECT_NAME, "disk").await;
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
@@ -4826,9 +4819,8 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     )
     .await;
 
-    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_from_snapshot.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk_from_snapshot) = datastore
+        .disk_get(&opctx, disk_from_snapshot.identity.id)
         .await
         .unwrap_or_else(|_| {
             panic!(
@@ -4845,17 +4837,15 @@ async fn test_volume_remove_rop_respects_accounting_no_modify_others(
     )
     .await;
 
-    let (.., db_another_disk_from_snapshot) =
-        LookupPath::new(&opctx, datastore)
-            .disk_id(another_disk_from_snapshot.identity.id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| {
-                panic!(
-                    "another_disk_from_snapshot {:?} should exist",
-                    another_disk_from_snapshot.identity.id
-                )
-            });
+    let Disk::Crucible(db_another_disk_from_snapshot) = datastore
+        .disk_get(&opctx, another_disk_from_snapshot.identity.id)
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "another_disk_from_snapshot {:?} should exist",
+                another_disk_from_snapshot.identity.id
+            )
+        });
 
     // Assert the correct volume resource usage records before the removal: the
     // snapshot volume, disk_from_snapshot volume, and
@@ -5453,9 +5443,8 @@ async fn test_double_layer_with_read_only_region_delete(
     // Perform region snapshot replacement for one of the snapshot's targets,
     // causing a read-only region to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 
@@ -5562,9 +5551,8 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     // Perform region snapshot replacement for two of the snapshot's targets,
     // causing two read-only regions to be created.
 
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
+    let Disk::Crucible(db_disk) = datastore
+        .disk_get(&opctx, disk.identity.id)
         .await
         .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
 

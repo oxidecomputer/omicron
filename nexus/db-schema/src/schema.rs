@@ -18,7 +18,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         project_id -> Uuid,
-        volume_id -> Uuid,
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
@@ -26,11 +25,26 @@ table! {
         slot -> Nullable<Int2>,
         size_bytes -> Int8,
         block_size -> crate::enums::BlockSizeEnum,
+        disk_type -> crate::enums::DiskTypeEnum,
+    }
+}
+
+table! {
+    disk_type_crucible (disk_id) {
+        disk_id -> Uuid,
+        volume_id -> Uuid,
         origin_snapshot -> Nullable<Uuid>,
         origin_image -> Nullable<Uuid>,
         pantry_address -> Nullable<Text>,
     }
 }
+
+allow_tables_to_appear_in_same_query!(disk, disk_type_crucible);
+allow_tables_to_appear_in_same_query!(volume, disk_type_crucible);
+allow_tables_to_appear_in_same_query!(
+    disk_type_crucible,
+    virtual_provisioning_resource
+);
 
 table! {
     image (id) {
@@ -2576,6 +2590,9 @@ joinable!(instance_ssh_key -> instance (instance_id));
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
 
 joinable!(network_interface -> probe (parent_id));
+allow_tables_to_appear_in_same_query!(probe, external_ip);
+allow_tables_to_appear_in_same_query!(external_ip, vpc_subnet);
+allow_tables_to_appear_in_same_query!(external_ip, vpc);
 
 table! {
     volume_resource_usage (usage_id) {
@@ -2812,3 +2829,50 @@ table! {
         bearer_token -> Text,
     }
 }
+
+table! {
+    rendezvous_local_storage_dataset (id) {
+        id -> Uuid,
+
+        time_created -> Timestamptz,
+        time_tombstoned -> Nullable<Timestamptz>,
+
+        blueprint_id_when_created -> Uuid,
+        blueprint_id_when_tombstoned -> Nullable<Uuid>,
+
+        pool_id -> Uuid,
+
+        size_used -> Int8,
+
+        no_provision -> Bool,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(zpool, rendezvous_local_storage_dataset);
+allow_tables_to_appear_in_same_query!(
+    physical_disk,
+    rendezvous_local_storage_dataset
+);
+
+table! {
+    fm_sitrep (id) {
+        id -> Uuid,
+        parent_sitrep_id -> Nullable<Uuid>,
+        inv_collection_id -> Uuid,
+        time_created -> Timestamptz,
+        creator_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, inv_collection);
+
+table! {
+    fm_sitrep_history (version) {
+        version -> Int8,
+        sitrep_id -> Uuid,
+        time_made_current -> Timestamptz,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);

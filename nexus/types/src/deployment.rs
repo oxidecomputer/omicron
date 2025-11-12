@@ -102,6 +102,9 @@ pub use planning_input::CockroachDbClusterVersion;
 pub use planning_input::CockroachDbPreserveDowngrade;
 pub use planning_input::CockroachDbSettings;
 pub use planning_input::DiskFilter;
+pub use planning_input::ExternalIpPolicy;
+pub use planning_input::ExternalIpPolicyBuilder;
+pub use planning_input::ExternalIpPolicyError;
 pub use planning_input::OximeterReadMode;
 pub use planning_input::OximeterReadPolicy;
 pub use planning_input::PlanningInput;
@@ -155,7 +158,7 @@ use blueprint_display::{
     BpDiffState, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableData, BpTableRow, KvList, constants::*,
 };
-use id_map::{IdMap, IdMappable};
+use id_map::IdMappable;
 use std::str::FromStr;
 
 /// Describes a complete set of software and configuration for the system
@@ -306,15 +309,17 @@ impl Blueprint {
     /// that match the provided filter, along with the associated sled id.
     pub fn all_omicron_zones<F>(
         &self,
-        filter: F,
+        mut filter: F,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
     where
         F: FnMut(BlueprintZoneDisposition) -> bool,
     {
-        Blueprint::filtered_zones(
-            self.sleds.iter().map(|(sled_id, config)| (*sled_id, config)),
-            filter,
-        )
+        self.sleds
+            .iter()
+            .flat_map(move |(sled_id, config)| {
+                config.zones.iter().map(move |z| (*sled_id, z))
+            })
+            .filter(move |(_, z)| filter(z.disposition))
     }
 
     /// Iterate over all Nexus zones that match the provided filter.
@@ -334,26 +339,6 @@ impl Blueprint {
                 None
             }
         })
-    }
-
-    /// Iterate over the [`BlueprintZoneConfig`] instances that match the
-    /// provided filter, along with the associated sled id.
-    //
-    // This is a scoped function so that it can be used in the
-    // `BlueprintBuilder` during planning as well as in the `Blueprint`.
-    pub fn filtered_zones<'a, I, F>(
-        zones_by_sled_id: I,
-        mut filter: F,
-    ) -> impl Iterator<Item = (SledUuid, &'a BlueprintZoneConfig)>
-    where
-        I: Iterator<Item = (SledUuid, &'a BlueprintSledConfig)>,
-        F: FnMut(BlueprintZoneDisposition) -> bool,
-    {
-        zones_by_sled_id
-            .flat_map(move |(sled_id, config)| {
-                config.zones.iter().map(move |z| (sled_id, z))
-            })
-            .filter(move |(_, z)| filter(z.disposition))
     }
 
     /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
@@ -587,11 +572,11 @@ impl BpTableData for BlueprintHostPhase2TableData<'_> {
 /// Wrapper to display a table of a `BlueprintSledConfig`'s disks.
 #[derive(Clone, Debug)]
 struct BlueprintPhysicalDisksTableData<'a> {
-    disks: &'a IdMap<BlueprintPhysicalDiskConfig>,
+    disks: &'a IdOrdMap<BlueprintPhysicalDiskConfig>,
 }
 
 impl<'a> BlueprintPhysicalDisksTableData<'a> {
-    fn new(disks: &'a IdMap<BlueprintPhysicalDiskConfig>) -> Self {
+    fn new(disks: &'a IdOrdMap<BlueprintPhysicalDiskConfig>) -> Self {
         Self { disks }
     }
 }
@@ -618,11 +603,11 @@ impl BpTableData for BlueprintPhysicalDisksTableData<'_> {
 /// Wrapper to display a table of a `BlueprintSledConfig`'s disks.
 #[derive(Clone, Debug)]
 struct BlueprintDatasetsTableData<'a> {
-    datasets: &'a IdMap<BlueprintDatasetConfig>,
+    datasets: &'a IdOrdMap<BlueprintDatasetConfig>,
 }
 
 impl<'a> BlueprintDatasetsTableData<'a> {
-    fn new(datasets: &'a IdMap<BlueprintDatasetConfig>) -> Self {
+    fn new(datasets: &'a IdOrdMap<BlueprintDatasetConfig>) -> Self {
         Self { datasets }
     }
 }
@@ -641,11 +626,11 @@ impl BpTableData for BlueprintDatasetsTableData<'_> {
 /// Wrapper to display a table of a `BlueprintSledConfig`'s zones.
 #[derive(Clone, Debug)]
 struct BlueprintZonesTableData<'a> {
-    zones: &'a IdMap<BlueprintZoneConfig>,
+    zones: &'a IdOrdMap<BlueprintZoneConfig>,
 }
 
 impl<'a> BlueprintZonesTableData<'a> {
-    fn new(zones: &'a IdMap<BlueprintZoneConfig>) -> Self {
+    fn new(zones: &'a IdOrdMap<BlueprintZoneConfig>) -> Self {
         Self { zones }
     }
 }
@@ -954,9 +939,9 @@ pub struct BlueprintSledConfig {
     /// sent an `OmicronSledConfig`.
     pub sled_agent_generation: Generation,
 
-    pub disks: IdMap<BlueprintPhysicalDiskConfig>,
-    pub datasets: IdMap<BlueprintDatasetConfig>,
-    pub zones: IdMap<BlueprintZoneConfig>,
+    pub disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
+    pub datasets: IdOrdMap<BlueprintDatasetConfig>,
+    pub zones: IdOrdMap<BlueprintZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
 }
@@ -1612,7 +1597,11 @@ impl PendingMgsUpdate {
             PendingMgsUpdateDetails::Sp { .. } => "SP",
             PendingMgsUpdateDetails::Rot { .. } => "RoT",
             PendingMgsUpdateDetails::RotBootloader { .. } => "RoT bootloader",
-            PendingMgsUpdateDetails::HostPhase1(_) => "host phase 1",
+            // While the `PendingMgsUpdate` technically describes a host phase 1
+            // update, the human-useful description is that it describes a "host
+            // OS" update: it embeds a dependency that the phase 2 is updated
+            // too, and once it's enacted the full OS will be updated.
+            PendingMgsUpdateDetails::HostPhase1(_) => "host OS",
         };
         format!("update {sp_type:?} {slot_id} ({serial}) {kind} to {version}")
     }
@@ -2162,6 +2151,14 @@ impl IdMappable for BlueprintPhysicalDiskConfig {
     }
 }
 
+impl IdOrdItem for BlueprintPhysicalDiskConfig {
+    type Key<'a> = PhysicalDiskUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+    id_upcast!();
+}
+
 impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
     fn from(value: BlueprintPhysicalDiskConfig) -> Self {
         OmicronPhysicalDiskConfig {
@@ -2178,6 +2175,14 @@ impl IdMappable for BlueprintDatasetConfig {
     fn id(&self) -> Self::Id {
         self.id
     }
+}
+
+impl IdOrdItem for BlueprintDatasetConfig {
+    type Key<'a> = DatasetUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+    id_upcast!();
 }
 
 /// The desired state of an Omicron-managed dataset in a blueprint.
