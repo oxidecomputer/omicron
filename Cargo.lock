@@ -2117,7 +2117,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=75ea3408643664877aa603ffc65996ed6dc34c0a#75ea3408643664877aa603ffc65996ed6dc34c0a"
+source = "git+https://github.com/oxidecomputer/crucible?branch=mkeeter%2Fsingle-block-validation#51794d4c724f3f3d23d04ef362f9271703c930a0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2146,7 +2146,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=75ea3408643664877aa603ffc65996ed6dc34c0a#75ea3408643664877aa603ffc65996ed6dc34c0a"
+source = "git+https://github.com/oxidecomputer/crucible?branch=mkeeter%2Fsingle-block-validation#51794d4c724f3f3d23d04ef362f9271703c930a0"
 dependencies = [
  "anyhow",
  "atty",
@@ -2176,7 +2176,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=75ea3408643664877aa603ffc65996ed6dc34c0a#75ea3408643664877aa603ffc65996ed6dc34c0a"
+source = "git+https://github.com/oxidecomputer/crucible?branch=mkeeter%2Fsingle-block-validation#51794d4c724f3f3d23d04ef362f9271703c930a0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2193,7 +2193,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=75ea3408643664877aa603ffc65996ed6dc34c0a#75ea3408643664877aa603ffc65996ed6dc34c0a"
+source = "git+https://github.com/oxidecomputer/crucible?branch=mkeeter%2Fsingle-block-validation#51794d4c724f3f3d23d04ef362f9271703c930a0"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
