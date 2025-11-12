@@ -555,7 +555,7 @@ impl<'a> BlueprintBuilder<'a> {
             oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
-            comment: format!("starting blueprint (empty)"),
+            comment: "starting blueprint (empty)".to_string(),
             // The only reason to create empty blueprints is tests. If that
             // changes (e.g., if RSS starts using this builder to generate its
             // blueprints), we could take a `source` argument instead.
