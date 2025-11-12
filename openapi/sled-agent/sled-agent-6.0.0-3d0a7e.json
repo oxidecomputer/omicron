@@ -430,6 +430,34 @@
         }
       }
     },
+    "/probes": {
+      "put": {
+        "summary": "Update the entire set of probe zones on this sled.",
+        "description": "Probe zones are used to debug networking configuration. They look similar to instances, in that they have an OPTE port on a VPC subnet and external addresses, but no actual VM.",
+        "operationId": "probes_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sled-identifiers": {
       "get": {
         "summary": "Fetch sled identifiers",
@@ -1721,76 +1749,6 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/InstanceExternalIpBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/vmms/{propolis_id}/multicast-group": {
-      "put": {
-        "operationId": "vmm_join_multicast_group",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "propolis_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/PropolisUuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMulticastBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "vmm_leave_multicast_group",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "propolis_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/PropolisUuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMulticastBody"
               }
             }
           },
@@ -4464,6 +4422,43 @@
           "baseboard"
         ]
       },
+      "ExternalIp": {
+        "description": "An external IP address used by a probe.",
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "description": "The first port used by the address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "description": "The external IP address.",
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "description": "The kind of address this is.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpKind"
+              }
+            ]
+          },
+          "last_port": {
+            "description": "The last port used by the address.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "kind",
+          "last_port"
+        ]
+      },
       "ExternalIpGatewayMap": {
         "description": "Per-NIC mappings from external IP addresses to the Internet Gateways which can choose them as a source.",
         "type": "object",
@@ -4756,24 +4751,6 @@
         "minLength": 1,
         "maxLength": 7
       },
-      "IdMapDatasetConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/DatasetConfig"
-        }
-      },
-      "IdMapOmicronPhysicalDiskConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-        }
-      },
-      "IdMapOmicronZoneConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronZoneConfig"
-        }
-      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -4816,7 +4793,7 @@
         ]
       },
       "InstanceEnsureBody": {
-        "description": "The body of a request to ensure that a instance and VMM are known to a sled agent (version 5, with multicast support).",
+        "description": "The body of a request to ensure that a instance and VMM are known to a sled agent.",
         "type": "object",
         "properties": {
           "instance_id": {
@@ -4953,58 +4930,8 @@
           "src_propolis_addr"
         ]
       },
-      "InstanceMulticastBody": {
-        "description": "Request body for multicast group operations.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "join": {
-                "$ref": "#/components/schemas/InstanceMulticastMembership"
-              }
-            },
-            "required": [
-              "join"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "leave": {
-                "$ref": "#/components/schemas/InstanceMulticastMembership"
-              }
-            },
-            "required": [
-              "leave"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
-      "InstanceMulticastMembership": {
-        "description": "Represents a multicast group membership for an instance.",
-        "type": "object",
-        "properties": {
-          "group_ip": {
-            "type": "string",
-            "format": "ip"
-          },
-          "sources": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
-          }
-        },
-        "required": [
-          "group_ip",
-          "sources"
-        ]
-      },
       "InstanceSledLocalConfig": {
-        "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional (version 5, with multicast).",
+        "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.",
         "type": "object",
         "properties": {
           "dhcp_config": {
@@ -5032,12 +4959,6 @@
           "hostname": {
             "$ref": "#/components/schemas/Hostname"
           },
-          "multicast_groups": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InstanceMulticastMembership"
-            }
-          },
           "nics": {
             "type": "array",
             "items": {
@@ -5053,7 +4974,6 @@
           "firewall_rules",
           "floating_ips",
           "hostname",
-          "multicast_groups",
           "nics",
           "source_nat"
         ]
@@ -5350,6 +5270,15 @@
         "required": [
           "id",
           "total_size"
+        ]
+      },
+      "IpKind": {
+        "description": "The kind of external IP address of a probe.",
+        "type": "string",
+        "enum": [
+          "snat",
+          "ephemeral",
+          "floating"
         ]
       },
       "IpNet": {
@@ -5923,10 +5852,38 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "$ref": "#/components/schemas/IdMapDatasetConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/DatasetConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatasetConfig"
+            }
           },
           "disks": {
-            "$ref": "#/components/schemas/IdMapOmicronPhysicalDiskConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
@@ -5955,7 +5912,21 @@
             ]
           },
           "zones": {
-            "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronZoneConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronZoneConfig"
+            }
           }
         },
         "required": [
@@ -6765,6 +6736,77 @@
         },
         "minItems": 2,
         "maxItems": 2
+      },
+      "ProbeCreate": {
+        "description": "Parameters used to create a probe.",
+        "type": "object",
+        "properties": {
+          "external_ips": {
+            "description": "The external IP addresses assigned to the probe.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalIp"
+            }
+          },
+          "id": {
+            "description": "The ID for the probe.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProbeUuid"
+              }
+            ]
+          },
+          "interface": {
+            "description": "The probe's networking interface.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NetworkInterface"
+              }
+            ]
+          }
+        },
+        "required": [
+          "external_ips",
+          "id",
+          "interface"
+        ]
+      },
+      "ProbeSet": {
+        "description": "A set of probes that the target sled should run.",
+        "type": "object",
+        "properties": {
+          "probes": {
+            "title": "IdHashMap",
+            "description": "The exact set of probes to run.",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/ProbeCreate"
+                }
+              ],
+              "path": "iddqd::IdHashMap",
+              "version": "*"
+            },
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeCreate"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "probes"
+        ]
+      },
+      "ProbeUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ProbeUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "QemuPvpanic": {
         "type": "object",

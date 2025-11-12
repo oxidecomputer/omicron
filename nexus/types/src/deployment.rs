@@ -309,15 +309,17 @@ impl Blueprint {
     /// that match the provided filter, along with the associated sled id.
     pub fn all_omicron_zones<F>(
         &self,
-        filter: F,
+        mut filter: F,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)>
     where
         F: FnMut(BlueprintZoneDisposition) -> bool,
     {
-        Blueprint::filtered_zones(
-            self.sleds.iter().map(|(sled_id, config)| (*sled_id, config)),
-            filter,
-        )
+        self.sleds
+            .iter()
+            .flat_map(move |(sled_id, config)| {
+                config.zones.iter().map(move |z| (*sled_id, z))
+            })
+            .filter(move |(_, z)| filter(z.disposition))
     }
 
     /// Iterate over all Nexus zones that match the provided filter.
@@ -337,26 +339,6 @@ impl Blueprint {
                 None
             }
         })
-    }
-
-    /// Iterate over the [`BlueprintZoneConfig`] instances that match the
-    /// provided filter, along with the associated sled id.
-    //
-    // This is a scoped function so that it can be used in the
-    // `BlueprintBuilder` during planning as well as in the `Blueprint`.
-    pub fn filtered_zones<'a, I, F>(
-        zones_by_sled_id: I,
-        mut filter: F,
-    ) -> impl Iterator<Item = (SledUuid, &'a BlueprintZoneConfig)>
-    where
-        I: Iterator<Item = (SledUuid, &'a BlueprintSledConfig)>,
-        F: FnMut(BlueprintZoneDisposition) -> bool,
-    {
-        zones_by_sled_id
-            .flat_map(move |(sled_id, config)| {
-                config.zones.iter().map(move |z| (sled_id, z))
-            })
-            .filter(move |(_, z)| filter(z.disposition))
     }
 
     /// Iterate over the [`BlueprintPhysicalDiskConfig`] instances in the
@@ -1615,7 +1597,11 @@ impl PendingMgsUpdate {
             PendingMgsUpdateDetails::Sp { .. } => "SP",
             PendingMgsUpdateDetails::Rot { .. } => "RoT",
             PendingMgsUpdateDetails::RotBootloader { .. } => "RoT bootloader",
-            PendingMgsUpdateDetails::HostPhase1(_) => "host phase 1",
+            // While the `PendingMgsUpdate` technically describes a host phase 1
+            // update, the human-useful description is that it describes a "host
+            // OS" update: it embeds a dependency that the phase 2 is updated
+            // too, and once it's enacted the full OS will be updated.
+            PendingMgsUpdateDetails::HostPhase1(_) => "host OS",
         };
         format!("update {sp_type:?} {slot_id} ({serial}) {kind} to {version}")
     }

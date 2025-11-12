@@ -719,7 +719,8 @@ mod test {
     use super::Collector;
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
-    use id_map::IdMap;
+    use iddqd::IdOrdMap;
+    use iddqd::id_ord_map;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
@@ -989,18 +990,18 @@ mod test {
         client
             .omicron_config_put(&OmicronSledConfig {
                 generation: Generation::from(3),
-                disks: IdMap::default(),
-                datasets: IdMap::default(),
-                zones: [OmicronZoneConfig {
-                    id: zone_id,
-                    zone_type: OmicronZoneType::Oximeter {
-                        address: zone_address,
-                    },
-                    filesystem_pool: Some(filesystem_pool),
-                    image_source: OmicronZoneImageSource::InstallDataset,
-                }]
-                .into_iter()
-                .collect(),
+                disks: IdOrdMap::default(),
+                datasets: IdOrdMap::default(),
+                zones: id_ord_map! {
+                    OmicronZoneConfig {
+                        id: zone_id,
+                        zone_type: OmicronZoneType::Oximeter {
+                            address: zone_address,
+                        },
+                        filesystem_pool: Some(filesystem_pool),
+                        image_source: OmicronZoneImageSource::InstallDataset,
+                    }
+                },
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots::current_contents(),
             })

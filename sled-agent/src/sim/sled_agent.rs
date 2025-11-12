@@ -56,7 +56,7 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_api::SupportBundleMetadata;
-use sled_agent_api::v5::InstanceMulticastMembership;
+use sled_agent_api::v7::InstanceMulticastMembership;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -209,10 +209,10 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         instance: sled_agent_types::instance::InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
-        // Convert v1 to v5 for internal processing
-        let v5_instance = sled_agent_api::v5::InstanceEnsureBody {
+        // Convert v1 to v7 for internal processing
+        let v5_instance = sled_agent_api::v7::InstanceEnsureBody {
             vmm_spec: instance.vmm_spec,
-            local_config: sled_agent_api::v5::InstanceSledLocalConfig {
+            local_config: sled_agent_api::v7::InstanceSledLocalConfig {
                 hostname: instance.local_config.hostname,
                 nics: instance.local_config.nics,
                 source_nat: instance.local_config.source_nat,
@@ -234,9 +234,9 @@ impl SledAgent {
     pub async fn instance_register(
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
-        instance: sled_agent_api::v5::InstanceEnsureBody,
+        instance: sled_agent_api::v7::InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
-        let sled_agent_api::v5::InstanceEnsureBody {
+        let sled_agent_api::v7::InstanceEnsureBody {
             vmm_spec,
             local_config,
             instance_id,
@@ -722,7 +722,7 @@ impl SledAgent {
     pub async fn instance_join_multicast_group(
         &self,
         propolis_id: PropolisUuid,
-        membership: &sled_agent_api::v5::InstanceMulticastMembership,
+        membership: &sled_agent_api::v7::InstanceMulticastMembership,
     ) -> Result<(), Error> {
         if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
             return Err(Error::internal_error(
@@ -741,7 +741,7 @@ impl SledAgent {
     pub async fn instance_leave_multicast_group(
         &self,
         propolis_id: PropolisUuid,
-        membership: &sled_agent_api::v5::InstanceMulticastMembership,
+        membership: &sled_agent_api::v7::InstanceMulticastMembership,
     ) -> Result<(), Error> {
         if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
             return Err(Error::internal_error(

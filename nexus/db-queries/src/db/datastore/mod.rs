@@ -132,6 +132,8 @@ pub use address_lot::AddressLotCreateResult;
 pub use db_metadata::DatastoreSetupAction;
 pub use db_metadata::ValidatedDatastoreSetupAction;
 pub use deployment::BlueprintLimitReachedOutput;
+pub use disk::CrucibleDisk;
+pub use disk::Disk;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use ereport::EreportFilters;

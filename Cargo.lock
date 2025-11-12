@@ -5010,9 +5010,9 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.3.13"
+version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f73e38c7e0c1b237e00655516f8f633c584c0bd59ce63fedac6f49efeba15613"
+checksum = "dda610d939ea51890ca6c827c8365acf0a44b4b53d2ed6f371e8e7e47bc75d25"
 dependencies = [
  "allocator-api2",
  "daft",
@@ -7340,7 +7340,6 @@ dependencies = [
  "camino",
  "chrono",
  "daft",
- "id-map",
  "iddqd",
  "illumos-utils",
  "indent_write",
@@ -8001,7 +8000,6 @@ dependencies = [
  "futures",
  "hex",
  "http",
- "id-map",
  "iddqd",
  "ipnetwork",
  "libc",
@@ -8291,6 +8289,7 @@ dependencies = [
  "ipnet",
  "ipnetwork",
  "itertools 0.14.0",
+ "jiff",
  "lldpd-client",
  "macaddr",
  "maplit",
@@ -8756,6 +8755,7 @@ dependencies = [
  "hyper",
  "hyper-staticfile",
  "id-map",
+ "iddqd",
  "illumos-utils",
  "installinator-common",
  "internal-dns-resolver",
@@ -12825,7 +12825,6 @@ dependencies = [
  "dropshot",
  "dropshot-api-manager-types",
  "http",
- "id-map",
  "iddqd",
  "nexus-sled-agent-shared",
  "omicron-common",
@@ -13006,9 +13005,11 @@ dependencies = [
  "anyhow",
  "camino",
  "cfg-if",
+ "chrono",
  "fs-err 3.1.1",
  "futures",
  "illumos-utils",
+ "jiff",
  "libc",
  "omicron-common",
  "omicron-test-utils",
@@ -13086,6 +13087,7 @@ dependencies = [
  "expectorate",
  "futures",
  "glob",
+ "iddqd",
  "illumos-utils",
  "key-manager",
  "omicron-common",
@@ -16925,6 +16927,7 @@ dependencies = [
  "crc32fast",
  "flate2",
  "indexmap 2.11.4",
+ "jiff",
  "memchr",
  "zopfli",
  "zstd",

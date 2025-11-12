@@ -81,7 +81,6 @@ pub async fn blueprint_load_target_enabled(
 pub async fn blueprint_edit_current_target(
     log: &slog::Logger,
     planning_input: &PlanningInput,
-    collection: &Collection,
     nexus: &nexus_lockstep_client::Client,
     edit_fn: &dyn Fn(&mut BlueprintBuilder) -> Result<(), anyhow::Error>,
 ) -> Result<(Blueprint, Blueprint), anyhow::Error> {
@@ -94,7 +93,6 @@ pub async fn blueprint_edit_current_target(
         log,
         &blueprint1,
         &planning_input,
-        &collection,
         "test-suite",
         PlannerRng::from_entropy(),
     )

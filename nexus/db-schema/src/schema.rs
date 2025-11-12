@@ -18,7 +18,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         project_id -> Uuid,
-        volume_id -> Uuid,
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
@@ -26,11 +25,26 @@ table! {
         slot -> Nullable<Int2>,
         size_bytes -> Int8,
         block_size -> crate::enums::BlockSizeEnum,
+        disk_type -> crate::enums::DiskTypeEnum,
+    }
+}
+
+table! {
+    disk_type_crucible (disk_id) {
+        disk_id -> Uuid,
+        volume_id -> Uuid,
         origin_snapshot -> Nullable<Uuid>,
         origin_image -> Nullable<Uuid>,
         pantry_address -> Nullable<Text>,
     }
 }
+
+allow_tables_to_appear_in_same_query!(disk, disk_type_crucible);
+allow_tables_to_appear_in_same_query!(volume, disk_type_crucible);
+allow_tables_to_appear_in_same_query!(
+    disk_type_crucible,
+    virtual_provisioning_resource
+);
 
 table! {
     image (id) {
@@ -2576,6 +2590,9 @@ joinable!(instance_ssh_key -> instance (instance_id));
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
 
 joinable!(network_interface -> probe (parent_id));
+allow_tables_to_appear_in_same_query!(probe, external_ip);
+allow_tables_to_appear_in_same_query!(external_ip, vpc_subnet);
+allow_tables_to_appear_in_same_query!(external_ip, vpc);
 
 table! {
     volume_resource_usage (usage_id) {

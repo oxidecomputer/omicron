@@ -35,6 +35,7 @@ use sled_agent_types::instance::{
     InstanceExternalIpBody, VmmPutStateBody, VmmPutStateResponse,
     VmmUnregisterResponse,
 };
+use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -501,16 +502,16 @@ impl SledAgentApi for SledAgentImpl {
         ))
     }
 
-    async fn vmm_register_v5(
+    async fn vmm_register_v7(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_api::v5::InstanceEnsureBody>,
+        body: TypedBody<sled_agent_api::v7::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         Ok(HttpResponseOk(
-            sa.instance_ensure_registered_v5(propolis_id, body_args).await?,
+            sa.instance_ensure_registered_v7(propolis_id, body_args).await?,
         ))
     }
 
@@ -570,7 +571,7 @@ impl SledAgentApi for SledAgentImpl {
     async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_api::v5::InstanceMulticastBody>,
+        body: TypedBody<sled_agent_api::v7::InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
@@ -582,7 +583,7 @@ impl SledAgentApi for SledAgentImpl {
     async fn vmm_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_api::v5::InstanceMulticastBody>,
+        body: TypedBody<sled_agent_api::v7::InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
@@ -1122,6 +1123,14 @@ impl SledAgentApi for SledAgentImpl {
             }
         }
         sa.hardware_monitor().set_switch_zone_policy(policy);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        request_context.context().set_probes(body.into_inner().probes);
         Ok(HttpResponseUpdatedNoContent())
     }
 }

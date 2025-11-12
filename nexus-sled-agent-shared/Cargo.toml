@@ -10,7 +10,6 @@ workspace = true
 camino.workspace = true
 chrono.workspace = true
 daft.workspace = true
-id-map.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
 indent_write.workspace = true

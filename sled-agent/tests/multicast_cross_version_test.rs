@@ -12,7 +12,7 @@ use anyhow::Result;
 use std::net::IpAddr;
 
 use omicron_common::api::internal::shared::DhcpConfig;
-use sled_agent_api::v5;
+use sled_agent_api::v7;
 
 // Generate v5 client from v5 OpenAPI spec (with enhanced multicast support)
 mod v5_client {
@@ -67,7 +67,7 @@ pub async fn multicast_cross_version_works() -> Result<(), anyhow::Error> {
     });
 
     // Create v5 local config with multicast_groups
-    let v5_local_config = v5::InstanceSledLocalConfig {
+    let v5_local_config = v7::InstanceSledLocalConfig {
         hostname: omicron_common::api::external::Hostname::try_from("test-v5")
             .unwrap(),
         nics: vec![],
@@ -79,7 +79,7 @@ pub async fn multicast_cross_version_works() -> Result<(), anyhow::Error> {
         .unwrap(),
         ephemeral_ip: None,
         floating_ips: vec![],
-        multicast_groups: vec![v5::InstanceMulticastMembership {
+        multicast_groups: vec![v7::InstanceMulticastMembership {
             group_ip: multicast_addr,
             sources: vec![source_addr],
         }],

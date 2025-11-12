@@ -13,6 +13,7 @@ use nexus_config::RegionAllocationStrategy;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::PhysicalDiskPolicy;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore;
 use nexus_db_queries::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use nexus_db_queries::db::datastore::RegionAllocationFor;
 use nexus_db_queries::db::datastore::RegionAllocationParameters;
@@ -113,6 +114,21 @@ async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
     create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
+}
+
+async fn get_crucible_disk(
+    datastore: &Arc<datastore::DataStore>,
+    opctx: &OpContext,
+    disk_id: Uuid,
+) -> datastore::CrucibleDisk {
+    let disk = datastore
+        .disk_get(opctx, disk_id)
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    match disk {
+        datastore::Disk::Crucible(disk) => disk,
+    }
 }
 
 #[nexus_test]
@@ -1955,11 +1971,8 @@ async fn test_region_allocation_strategy_random_is_idempotent(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2085,11 +2098,8 @@ async fn test_single_region_allocate_for_replace(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2169,11 +2179,7 @@ async fn test_single_region_allocate_for_replace_not_enough_zpools(
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2257,11 +2263,8 @@ async fn test_no_halt_disk_delete_one_region_on_expunged_agent(
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
 
     // Grab the db record now, before the delete
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk.identity.id)
-        .fetch()
-        .await
-        .unwrap();
+    let disk_id = disk.identity.id;
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     // Choose one of the datasets, and drop the simulated Crucible agent
     let zpool = disk_test.zpools().next().expect("Expected at least one zpool");
@@ -2337,11 +2340,7 @@ async fn test_disk_expunge(cptestctx: &ControlPlaneTestContext) {
 
     // Assert disk has three allocated regions
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
@@ -2400,11 +2399,7 @@ async fn test_do_not_provision_on_dataset(cptestctx: &ControlPlaneTestContext) {
 
     // Assert no region was allocated to the marked dataset
     let disk_id = disk.identity.id;
-    let (.., db_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(disk_id)
-        .fetch()
-        .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+    let db_disk = get_crucible_disk(datastore, &opctx, disk_id).await;
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();

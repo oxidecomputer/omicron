@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Sled agent API types (version 5)
+//! Sled agent API types (version 7)
 //!
-//! Version 5 adds support for multicast group management on instances.
+//! Version 7 adds support for multicast group management on instances.
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -26,7 +26,7 @@ use uuid::Uuid;
 use sled_agent_types::instance::{InstanceMetadata, VmmSpec};
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
-/// agent (version 5, with multicast support).
+/// agent (version 7, with multicast support).
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /// The virtual hardware configuration this virtual machine should have when
@@ -56,7 +56,7 @@ pub struct InstanceEnsureBody {
 }
 
 /// Describes sled-local configuration that a sled-agent must establish to make
-/// the instance's virtual hardware fully functional (version 5, with multicast).
+/// the instance's virtual hardware fully functional (version 7, with multicast).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstanceSledLocalConfig {
     pub hostname: Hostname,

@@ -36,7 +36,7 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
 use range_requests::PotentialRange;
-use sled_agent_api::v5::InstanceMulticastBody;
+use sled_agent_api::v7::InstanceMulticastBody;
 use sled_agent_api::*;
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::disk::DiskEnsureBody;
@@ -46,6 +46,7 @@ use sled_agent_types::instance::InstanceExternalIpBody;
 use sled_agent_types::instance::VmmPutStateBody;
 use sled_agent_types::instance::VmmPutStateResponse;
 use sled_agent_types::instance::VmmUnregisterResponse;
+use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::zone_bundle::BundleUtilization;
 use sled_agent_types::zone_bundle::CleanupContext;
@@ -94,10 +95,10 @@ impl SledAgentApi for SledAgentSimImpl {
         ))
     }
 
-    async fn vmm_register_v5(
+    async fn vmm_register_v7(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_api::v5::InstanceEnsureBody>,
+        body: TypedBody<sled_agent_api::v7::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
@@ -868,6 +869,13 @@ impl SledAgentApi for SledAgentSimImpl {
         _body: TypedBody<OperatorSwitchZonePolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         method_unimplemented()
+    }
+
+    async fn probes_put(
+        _request_context: RequestContext<Self::Context>,
+        _body: TypedBody<ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        Ok(HttpResponseUpdatedNoContent())
     }
 }
 

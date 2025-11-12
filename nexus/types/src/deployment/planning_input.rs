@@ -1442,6 +1442,7 @@ pub enum TufRepoContentsError {
     Debug,
     Display,
     Clone,
+    Copy,
     Serialize,
     Deserialize,
     JsonSchema,

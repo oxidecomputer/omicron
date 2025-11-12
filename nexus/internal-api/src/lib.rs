@@ -251,10 +251,11 @@ pub trait NexusInternalApi {
         query_params: Query<RpwNatQueryParam>,
     ) -> Result<HttpResponseOk<Vec<NatEntryView>>, HttpError>;
 
-    /// Get all the probes associated with a given sled.
-    ///
-    /// This should not be used in new code, and abandoned if a change is
-    /// required. See #9157.
+    /// This endpoint has been abandoned and will permanently return a 410 Gone
+    /// error.
+    //
+    // Remove this once we can appropriately handle client-side versioned APIs.
+    // See https://github.com/oxidecomputer/omicron/issues/9290 for details.
     #[endpoint {
         method = GET,
         path = "/probes/{sled}"
@@ -265,10 +266,11 @@ pub trait NexusInternalApi {
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError>;
 
-    /// Request that Nexus refreshes VPC routes.
-    ///
-    /// This should not be used in new code, and abandoned if a change is
-    /// required. See #9157.
+    /// This endpoint has been abandoned and will permanently return a 410 Gone
+    /// error.
+    //
+    // Remove this once we can appropriately handle client-side versioned APIs.
+    // See https://github.com/oxidecomputer/omicron/issues/9290 for details.
     #[endpoint {
         method = POST,
         path = "/refresh-vpc-routes"

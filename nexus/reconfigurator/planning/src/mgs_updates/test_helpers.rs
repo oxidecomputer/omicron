@@ -13,7 +13,6 @@ use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpState;
 use gateway_types::rot::RotSlot;
-use id_map::IdMap;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use nexus_sled_agent_shared::inventory::Baseboard;
@@ -1134,9 +1133,9 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     .unwrap();
                 let fake_sled_config = OmicronSledConfig {
                     generation: Generation::new(),
-                    disks: IdMap::new(),
-                    datasets: IdMap::new(),
-                    zones: IdMap::new(),
+                    disks: IdOrdMap::new(),
+                    datasets: IdOrdMap::new(),
+                    zones: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     host_phase_2: HostPhase2DesiredSlots::current_contents(),
                 };

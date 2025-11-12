@@ -29,6 +29,7 @@ use derive_more::From;
 use dropshot::HttpError;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zpool::PathInPool;
@@ -53,7 +54,7 @@ use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
-use sled_agent_api::v5::{InstanceEnsureBody, InstanceMulticastBody};
+use sled_agent_api::v7::{InstanceEnsureBody, InstanceMulticastBody};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -65,6 +66,7 @@ use sled_agent_types::instance::{
     InstanceExternalIpBody, VmmPutStateResponse, VmmStateRequested,
     VmmUnregisterResponse,
 };
+use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -644,18 +646,16 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
+        let currently_managed_zpools_rx =
+            config_reconciler.currently_managed_zpools_rx().clone();
         let probes = ProbeManager::new(
-            request.body.id.into_untyped_uuid(),
-            nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
             metrics_manager.request_queue(),
             config_reconciler.available_datasets_rx(),
             log.new(o!("component" => "ProbeManager")),
+            currently_managed_zpools_rx,
         );
-
-        let currently_managed_zpools_rx =
-            config_reconciler.currently_managed_zpools_rx().clone();
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -681,8 +681,6 @@ impl SledAgent {
             log: log.clone(),
             sprockets: config.sprockets.clone(),
         };
-
-        sled_agent.inner.probes.run(currently_managed_zpools_rx).await;
 
         // We immediately add a notification to the request queue about our
         // existence. If inspection of the hardware later informs us that we're
@@ -849,10 +847,10 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         instance: sled_agent_types::instance::InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
-        // Convert v1 to v2
-        let v5_instance = sled_agent_api::v5::InstanceEnsureBody {
+        // Convert v1 to v7
+        let v5_instance = sled_agent_api::v7::InstanceEnsureBody {
             vmm_spec: instance.vmm_spec,
-            local_config: sled_agent_api::v5::InstanceSledLocalConfig {
+            local_config: sled_agent_api::v7::InstanceSledLocalConfig {
                 hostname: instance.local_config.hostname,
                 nics: instance.local_config.nics,
                 source_nat: instance.local_config.source_nat,
@@ -868,10 +866,10 @@ impl SledAgent {
             propolis_addr: instance.propolis_addr,
             metadata: instance.metadata,
         };
-        self.instance_ensure_registered_v5(propolis_id, v5_instance).await
+        self.instance_ensure_registered_v7(propolis_id, v5_instance).await
     }
 
-    pub async fn instance_ensure_registered_v5(
+    pub async fn instance_ensure_registered_v7(
         &self,
         propolis_id: PropolisUuid,
         instance: InstanceEnsureBody,
@@ -1244,6 +1242,11 @@ impl SledAgent {
         &self,
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
         sled_diagnostics::health_check().await
+    }
+
+    /// Completely replace the set of probes managed by this sled.
+    pub(crate) fn set_probes(&self, probes: IdHashMap<ProbeCreate>) {
+        self.inner.probes.set_probes(probes);
     }
 }
 

@@ -23,7 +23,9 @@ use semver::Version;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
@@ -811,6 +813,32 @@ pub enum SitrepLoadStatus {
 
     /// We've loaded the most recent sitrep as of `time_loaded`.
     Loaded { version: crate::fm::SitrepVersion, time_loaded: DateTime<Utc> },
+}
+
+/// The status of a `fm_sitrep_gc` background task activation.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepGcStatus {
+    pub orphaned_sitreps_found: usize,
+    pub orphaned_sitreps_deleted: usize,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeError {
+    /// ID of the sled we failed to send a probe to.
+    pub sled_id: SledUuid,
+    /// IP address of the sled we failed to send a probe to.
+    pub sled_ip: Ipv6Addr,
+    /// Error message describing the failure.
+    pub error: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProbeDistributorStatus {
+    /// Count of successfully sent probes to each sled.
+    pub probes_by_sled: HashMap<SledUuid, usize>,
+    /// Errors when sending a probe.
+    pub errors: Vec<ProbeError>,
 }
 
 #[cfg(test)]

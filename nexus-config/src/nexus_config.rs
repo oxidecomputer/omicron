@@ -446,6 +446,8 @@ pub struct BackgroundTaskConfig {
     pub sp_ereport_ingester: SpEreportIngesterConfig,
     /// configuration for fault management background tasks
     pub fm: FmTasksConfig,
+    /// configuration for networking probe distributor
+    pub probe_distributor: ProbeDistributorConfig,
     /// configuration for multicast reconciler (group+members) task
     pub multicast_reconciler: MulticastGroupReconcilerConfig,
 }
@@ -937,11 +939,21 @@ pub struct FmTasksConfig {
     /// reads the latest fault management sitrep from the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_load_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// garbage collects unneeded fault management sitreps in the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_gc_period_secs: Duration,
 }
 
 impl Default for FmTasksConfig {
     fn default() -> Self {
-        Self { sitrep_load_period_secs: Duration::from_secs(15) }
+        Self {
+            sitrep_load_period_secs: Duration::from_secs(15),
+            // This need not be activated very frequently, as it's triggered any
+            // time the current sitrep changes, and activating it more
+            // frequently won't make things more responsive.
+            sitrep_gc_period_secs: Duration::from_secs(600),
+        }
     }
 }
 
@@ -967,6 +979,15 @@ pub struct MulticastConfig {
     /// Default: false (experimental feature, disabled by default)
     #[serde(default)]
     pub enabled: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProbeDistributorConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// distributes networking probe zones to sled-agents.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 /// Configuration for a nexus server
@@ -1269,6 +1290,8 @@ mod test {
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
+            fm.sitrep_gc_period_secs = 49
+            probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
@@ -1514,14 +1537,18 @@ mod test {
                             period_secs: Duration::from_secs(47),
                             disable: false,
                         },
+                        fm: FmTasksConfig {
+                            sitrep_load_period_secs: Duration::from_secs(48),
+                            sitrep_gc_period_secs: Duration::from_secs(49),
+                        },
+                        probe_distributor: ProbeDistributorConfig {
+                            period_secs: Duration::from_secs(50),
+                        },
                         multicast_reconciler: MulticastGroupReconcilerConfig {
                             period_secs: Duration::from_secs(60),
                             sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
                             backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
                         },
-                        fm: FmTasksConfig {
-                            sitrep_load_period_secs: Duration::from_secs(48),
-                        }
                     },
                     multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
@@ -1622,6 +1649,8 @@ mod test {
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
             fm.sitrep_load_period_secs = 45
+            fm.sitrep_gc_period_secs = 46
+            probe_distributor.period_secs = 47
             multicast_reconciler.period_secs = 60
 
             [default_region_allocation_strategy]
