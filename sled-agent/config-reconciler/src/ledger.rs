@@ -113,7 +113,7 @@ pub(crate) enum CurrentSledConfig {
     /// yet, or from Nexus if we're a newly-added sled).
     WaitingForInitialConfig,
     /// We have a ledgered config.
-    Ledgered(OmicronSledConfig),
+    Ledgered(Box<OmicronSledConfig>),
 }
 
 #[derive(Debug)]
@@ -178,7 +178,7 @@ impl LedgerTaskHandle {
         new_config: OmicronSledConfig,
     ) -> Result<Result<(), LedgerNewConfigError>, LedgerTaskError> {
         self.try_send_request(|tx| LedgerTaskRequest::WriteNewConfig {
-            new_config,
+            new_config: Box::new(new_config),
             tx,
         })
         .await
@@ -237,7 +237,7 @@ impl LedgerTaskHandle {
 #[derive(Debug)]
 enum LedgerTaskRequest {
     WriteNewConfig {
-        new_config: OmicronSledConfig,
+        new_config: Box<OmicronSledConfig>,
         tx: oneshot::Sender<Result<(), LedgerNewConfigError>>,
     },
     ValidateArtifactConfig {
@@ -294,7 +294,7 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
             match request {
                 LedgerTaskRequest::WriteNewConfig { new_config, tx } => {
                     // We don't care if the receiver is gone.
-                    _ = tx.send(self.set_new_config(new_config).await);
+                    _ = tx.send(self.set_new_config(*new_config).await);
                 }
                 LedgerTaskRequest::ValidateArtifactConfig {
                     new_config,
@@ -364,7 +364,7 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
 
                 // Now that we've committed the ledger, update our watch channel
                 let new_config =
-                    CurrentSledConfig::Ledgered(ledger.into_inner());
+                    CurrentSledConfig::Ledgered(Box::new(ledger.into_inner()));
                 self.current_config_tx.send_if_modified(|c| {
                     if *c == new_config {
                         false
@@ -420,7 +420,7 @@ impl<T: SledAgentArtifactStore> LedgerTask<T> {
                 } else if new_config.generation
                     == omicron_sled_config.generation
                 {
-                    if *new_config != omicron_sled_config {
+                    if *new_config != *omicron_sled_config {
                         warn!(
                             self.log,
                             "requested config changed (with same generation)";
@@ -640,14 +640,14 @@ async fn load_sled_config(
     );
     if let Some(config) = Ledger::new(log, paths).await {
         info!(log, "Ledger of sled config exists");
-        return CurrentSledConfig::Ledgered(config.into_inner());
+        return CurrentSledConfig::Ledgered(Box::new(config.into_inner()));
     }
 
     // If we have no ledgered config, see if we can convert from the previous
     // triple of legacy ledgers.
     if let Some(config) = convert_legacy_ledgers(&config_datasets, log).await {
         info!(log, "Converted legacy triple of ledgers into new sled config");
-        return CurrentSledConfig::Ledgered(config);
+        return CurrentSledConfig::Ledgered(Box::new(config));
     }
 
     // We have no ledger and didn't find legacy ledgers to convert; we must be
@@ -680,7 +680,7 @@ mod tests {
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
     use camino_tempfile::tempfile;
-    use id_map::IdMap;
+    use iddqd::IdOrdMap;
     use illumos_utils::zpool::ZpoolName;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
@@ -906,8 +906,8 @@ mod tests {
             disks: [make_dummy_disk_config("test-serial")]
                 .into_iter()
                 .collect(),
-            datasets: IdMap::default(),
-            zones: IdMap::default(),
+            datasets: IdOrdMap::default(),
+            zones: IdOrdMap::default(),
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
         }
@@ -986,7 +986,7 @@ mod tests {
         // Confirm that the watch channel was updated.
         assert_eq!(
             *test_harness.current_config_rx.borrow_and_update(),
-            CurrentSledConfig::Ledgered(sled_config.clone()),
+            CurrentSledConfig::Ledgered(Box::new(sled_config.clone())),
         );
 
         // Also confirm the config was persisted as expected.
@@ -1018,7 +1018,7 @@ mod tests {
         // It should have read that config.
         assert_eq!(
             *test_harness.current_config_rx.borrow(),
-            CurrentSledConfig::Ledgered(sled_config)
+            CurrentSledConfig::Ledgered(Box::new(sled_config))
         );
 
         logctx.cleanup_successful();
@@ -1067,7 +1067,7 @@ mod tests {
                 .await;
 
         // Mutate the sled_config but don't bump the generation.
-        sled_config.disks.insert(make_dummy_disk_config(TEST_NAME));
+        sled_config.disks.insert_overwrite(make_dummy_disk_config(TEST_NAME));
         let err = test_harness
             .task_handle
             .set_new_config(sled_config)
@@ -1103,8 +1103,8 @@ mod tests {
         // hash.
         let mut config = OmicronSledConfig {
             generation: Generation::new().next(),
-            disks: IdMap::new(),
-            datasets: IdMap::new(),
+            disks: IdOrdMap::new(),
+            datasets: IdOrdMap::new(),
             zones: [make_dummy_zone_config_using_artifact_hash(
                 nonexisting_artifact_hash,
             )]
@@ -1144,7 +1144,7 @@ mod tests {
         // Try a config that references a host phase 2 artifact that isn't in
         // the store; this should be rejected.
         config.generation = config.generation.next();
-        config.zones = IdMap::new();
+        config.zones = IdOrdMap::new();
         config.host_phase_2 = HostPhase2DesiredSlots {
             slot_a: HostPhase2DesiredContents::CurrentContents,
             slot_b: HostPhase2DesiredContents::Artifact {
@@ -1199,9 +1199,9 @@ mod tests {
         // with remove_mupdate_override set to a value.
         let mut config = make_nonempty_sled_config();
         config.remove_mupdate_override = Some(MupdateOverrideUuid::max());
-        config
-            .zones
-            .insert(make_dummy_zone_config_using_artifact_hash(artifact_hash));
+        config.zones.insert_overwrite(
+            make_dummy_zone_config_using_artifact_hash(artifact_hash),
+        );
 
         // The ledger task should reject this config due to the artifact store
         // set to InstallDataset.
@@ -1225,7 +1225,7 @@ mod tests {
         // Try a config where the host phase 2 contents are not set to
         // CurrentContents.
         config.generation = config.generation.next();
-        config.zones = IdMap::new();
+        config.zones = IdOrdMap::new();
         config.host_phase_2 = HostPhase2DesiredSlots {
             slot_a: HostPhase2DesiredContents::CurrentContents,
             slot_b: HostPhase2DesiredContents::Artifact { hash: artifact_hash },
@@ -1276,9 +1276,9 @@ mod tests {
         // Claim we have a host phase 2
         // Set up the ledger task with an initial config.
         let mut sled_config = make_nonempty_sled_config();
-        sled_config.zones.insert(make_dummy_zone_config_using_artifact_hash(
-            used_zone_artifact_hash,
-        ));
+        sled_config.zones.insert_overwrite(
+            make_dummy_zone_config_using_artifact_hash(used_zone_artifact_hash),
+        );
         sled_config.host_phase_2.slot_a = HostPhase2DesiredContents::Artifact {
             hash: used_host_artifact_hash,
         };
@@ -1361,7 +1361,7 @@ mod tests {
         // It should have combined the legacy ledgers.
         assert_eq!(
             *test_harness.current_config_rx.borrow(),
-            CurrentSledConfig::Ledgered(test_data_merged_config())
+            CurrentSledConfig::Ledgered(Box::new(test_data_merged_config())),
         );
 
         logctx.cleanup_successful();

@@ -501,11 +501,14 @@ pub fn representative() -> Representative {
     let mut zpools = Vec::new();
     for disk in &disks {
         let pool_id = zpool_id_iter.next().unwrap();
-        sled14.disks.insert(OmicronPhysicalDiskConfig {
-            identity: disk.identity.clone(),
-            id: disk_id_iter.next().unwrap(),
-            pool_id,
-        });
+        sled14
+            .disks
+            .insert_unique(OmicronPhysicalDiskConfig {
+                identity: disk.identity.clone(),
+                id: disk_id_iter.next().unwrap(),
+                pool_id,
+            })
+            .unwrap();
         zpools.push(InventoryZpool {
             id: pool_id,
             total_size: ByteCount::from(4096),
@@ -524,15 +527,18 @@ pub fn representative() -> Representative {
         reservation: None,
         compression: "lz4".to_string(),
     }];
-    sled14.datasets.insert(DatasetConfig {
-        id: datasets[0].id.unwrap(),
-        name: dataset_name,
-        inner: SharedDatasetConfig {
-            compression: datasets[0].compression.parse().unwrap(),
-            quota: datasets[0].quota,
-            reservation: datasets[0].reservation,
-        },
-    });
+    sled14
+        .datasets
+        .insert_unique(DatasetConfig {
+            id: datasets[0].id.unwrap(),
+            name: dataset_name,
+            inner: SharedDatasetConfig {
+                compression: datasets[0].compression.parse().unwrap(),
+                quota: datasets[0].quota,
+                reservation: datasets[0].reservation,
+            },
+        })
+        .unwrap();
 
     builder
         .found_sled_inventory(

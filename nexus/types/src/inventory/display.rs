@@ -871,7 +871,7 @@ fn display_sleds(
                     indented,
                     "running for {running_for:?} (since {started_at})"
                 )?;
-                if Some(config) == ledgered_sled_config.as_ref() {
+                if Some(&**config) == ledgered_sled_config.as_ref() {
                     writeln!(
                         indented,
                         "reconciling currently-ledgered config"
