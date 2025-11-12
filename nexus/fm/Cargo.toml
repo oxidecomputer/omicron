@@ -12,6 +12,9 @@ chrono.workspace = true
 iddqd.workspace = true
 nexus-types.workspace = true
 omicron-uuid-kinds.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 slog.workspace = true
 
 omicron-workspace-hack.workspace = true
