@@ -19,7 +19,6 @@ use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
 use anyhow::anyhow;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
-use id_map::IdMap;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
@@ -565,9 +564,9 @@ impl<'a> BlueprintBuilder<'a> {
                 let config = BlueprintSledConfig {
                     state: SledState::Active,
                     sled_agent_generation: Generation::new(),
-                    disks: IdMap::default(),
-                    datasets: IdMap::default(),
-                    zones: IdMap::default(),
+                    disks: IdOrdMap::default(),
+                    datasets: IdOrdMap::default(),
+                    zones: IdOrdMap::default(),
                     remove_mupdate_override: None,
                     host_phase_2:
                         BlueprintHostPhase2DesiredSlots::current_contents(),

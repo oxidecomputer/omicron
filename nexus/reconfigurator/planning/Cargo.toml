@@ -19,7 +19,6 @@ daft.workspace = true
 gateway-client.workspace = true
 gateway-types.workspace = true
 iddqd.workspace = true
-id-map.workspace = true
 illumos-utils.workspace = true
 indexmap.workspace = true
 internal-dns-resolver.workspace = true
