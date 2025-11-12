@@ -401,10 +401,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let blueprint = BlueprintBuilder::build_empty_with_sleds(
-            iter::once(SledUuid::new_v4()),
-            "test",
-        );
+        let blueprint = BlueprintBuilder::build_empty("test");
         let blueprint_target = BlueprintTarget {
             target_id: blueprint.id,
             enabled: true,
@@ -464,10 +461,7 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let blueprint = BlueprintBuilder::build_empty_with_sleds(
-            iter::once(SledUuid::new_v4()),
-            "test",
-        );
+        let blueprint = BlueprintBuilder::build_empty("test");
         let blueprint_target = BlueprintTarget {
             target_id: blueprint.id,
             enabled: true,
