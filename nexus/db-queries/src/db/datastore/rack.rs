@@ -1197,10 +1197,7 @@ mod test {
         test_name: &str,
     ) -> BlueprintBuilder<'static> {
         static EMPTY_BLUEPRINT: LazyLock<Blueprint> = LazyLock::new(|| {
-            BlueprintBuilder::build_empty_with_sleds(
-                std::iter::empty(),
-                "EMPTY_BLUEPRINT static",
-            )
+            BlueprintBuilder::build_empty("EMPTY_BLUEPRINT static")
         });
 
         let planning_input = system
