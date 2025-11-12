@@ -627,7 +627,7 @@ source.repo = "crucible"
 source.commit = "cc661b84fd258467ec1961e8c9879f76d2d07903fb9161012afa75c37490e24f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-utils.sha256.txt
-source.sha256 = "46d1ec24e068124f33d3fbc2bcb4246c886089da95ba76a0a69a8facee1dc8ec"
+source.sha256 = "6f9113b819adfd9de80ac30ea2044c39573cfed5414e4554440ea8d49c0a6375"
 output.type = "tarball"
 
 # Refer to
