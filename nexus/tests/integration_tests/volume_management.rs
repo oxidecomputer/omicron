@@ -6336,3 +6336,91 @@ async fn test_volume_create_wont_use_deleted_region_snapshots(
 
     assert!(datastore.volume_create(VolumeUuid::new_v4(), vcr).await.is_err());
 }
+
+// Test VolumeConstructionRequest::Region generation/gen field
+// serialization compatibility
+#[test]
+fn test_volume_construction_request_region_gen_serialization() {
+    // Test that VolumeConstructionRequest::Region with Rust field
+    // "generation" serializes to JSON as "gen" and can be deserialized back
+    let vcr = VolumeConstructionRequest::Region {
+        block_size: 512,
+        blocks_per_extent: 100,
+        extent_count: 10,
+        opts: CrucibleOpts {
+            id: uuid::Uuid::parse_str("12345678-1234-1234-1234-123456789abc")
+                .unwrap(),
+            target: vec![
+                "[::1]:3810".parse::<SocketAddr>().unwrap(),
+                "[::1]:3820".parse::<SocketAddr>().unwrap(),
+                "[::1]:3830".parse::<SocketAddr>().unwrap(),
+            ],
+            lossy: false,
+            flush_timeout: None,
+            key: None,
+            cert_pem: None,
+            key_pem: None,
+            root_cert_pem: None,
+            control: None,
+            read_only: false,
+        },
+        generation: 42,
+    };
+
+    // Serialize to JSON
+    let json = serde_json::to_string(&vcr).unwrap();
+
+    // Verify JSON uses "gen" not "generation"
+    assert!(
+        json.contains("\"gen\""),
+        "JSON should contain 'gen' field, got: {}",
+        json
+    );
+    assert!(
+        !json.contains("\"generation\""),
+        "JSON should not contain 'generation' field, got: {}",
+        json
+    );
+
+    // Deserialize back and verify value
+    let deserialized: VolumeConstructionRequest =
+        serde_json::from_str(&json).expect("Failed to deserialize");
+
+    if let VolumeConstructionRequest::Region { generation, .. } = deserialized
+    {
+        assert_eq!(generation, 42, "generation field should be 42");
+    } else {
+        panic!("Expected Region variant");
+    }
+
+    // Also verify that manually created JSON with "gen" works
+    let manual_json = r#"{
+        "type": "region",
+        "block_size": 512,
+        "blocks_per_extent": 100,
+        "extent_count": 10,
+        "opts": {
+            "id": "12345678-1234-1234-1234-123456789abc",
+            "target": ["[::1]:3810", "[::1]:3820", "[::1]:3830"],
+            "lossy": false,
+            "flush_timeout": null,
+            "key": null,
+            "cert_pem": null,
+            "key_pem": null,
+            "root_cert_pem": null,
+            "control": null,
+            "read_only": false
+        },
+        "gen": 99
+    }"#;
+
+    let manual_vcr: VolumeConstructionRequest =
+        serde_json::from_str(manual_json)
+            .expect("Failed to deserialize manual JSON");
+
+    if let VolumeConstructionRequest::Region { generation, .. } = manual_vcr {
+        assert_eq!(generation, 99, "generation field should be 99");
+    } else {
+        panic!("Expected Region variant");
+    }
+}
