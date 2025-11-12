@@ -5,19 +5,13 @@
 //! Queries for inserting and deleting network interfaces.
 
 use crate::db;
+use crate::db::column_walker::AllColumnsOf;
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::{NextItem, NextItemSelfJoined};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::QueryResult;
-use diesel::RunQueryDsl;
-use diesel::pg::Pg;
-use diesel::prelude::Column;
-use diesel::query_builder::QueryFragment;
-use diesel::query_builder::QueryId;
-use diesel::query_builder::{AstPass, Query};
 use diesel::result::Error as DieselError;
 use diesel::sql_types::{self, Nullable};
 use ipnetwork::Ipv4Network;
@@ -28,7 +22,6 @@ use nexus_db_lookup::DbConnection;
 use nexus_db_model::{Ip, IpAssignment, SqlU8};
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
 use nexus_db_schema::enums::NetworkInterfaceKindEnum;
-use nexus_db_schema::schema::network_interface::dsl;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{self, Error};
 use slog_error_chain::SlogInlineError;
@@ -374,7 +367,7 @@ fn decode_database_error(
         }
 
         // This catches the UUID-cast failure intentionally introduced by
-        // `push_instance_state_verification_subquery`, which verifies that
+        // `build_instance_state_verification_subquery`, which verifies that
         // the instance is actually stopped when running this query.
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
             if info.message() == INSTANCE_BAD_STATE_ERROR_MESSAGE =>
@@ -383,7 +376,7 @@ fn decode_database_error(
             InsertError::InstanceMustBeStopped(interface.parent_id)
         }
         // This catches the UUID-cast failure intentionally introduced by
-        // `push_instance_state_verification_subquery`, which verifies that
+        // `build_instance_state_verification_subquery`, which verifies that
         // the instance doesn't even exist when running this query.
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
             if info.message() == NO_INSTANCE_ERROR_MESSAGE =>
@@ -663,15 +656,6 @@ impl NextNicSlot {
     }
 }
 
-impl QueryFragment<Pg> for NextNicSlot {
-    fn walk_ast<'a>(&'a self, mut out: AstPass<'_, 'a, Pg>) -> QueryResult<()> {
-        out.push_sql("SELECT COALESCE((");
-        self.inner.walk_ast(out.reborrow())?;
-        out.push_sql("), 0)");
-        Ok(())
-    }
-}
-
 impl std::fmt::Debug for NextNicSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NextNicSlot").finish_non_exhaustive()
@@ -843,7 +827,63 @@ fn build_ensure_unique_vpc_subnet_expression(
     builder.sql(") AS UUID)");
 }
 
-/// QueryBuilder version of push_instance_state_verification_subquery
+// Subquery used to ensure an instance both exists and is either stopped (or
+// optionally failed) before inserting or deleting a network interface.
+//
+// This pushes a subquery like:
+//
+// ```sql
+// CAST(
+//  CASE
+//      COALESCE(
+//          -- Identify the state of the instance
+//          (
+//              SELECT
+//                  CASE
+//                      WHEN active_propolis_id IS NULL THEN state
+//                      ELSE 'running'
+//                  END
+//              FROM
+//                  instance
+//              WHERE
+//                  id = <instance_id> AND time_deleted IS NULL
+//          ),
+//          'destroyed' -- Default state, if not found
+//      )
+//      WHEN 'stopped' THEN '<instance_id_str>' -- Instance UUID as a string
+//      WHEN 'creating' THEN '<instance_id_str>' -- Instance UUID as a string
+//      WHEN 'failed' THEN '<instance_id_str>' -- Instance UUID as a string
+//      WHEN 'destroyed' THEN 'no-instance' -- Sentinel for an instance not existing
+//      ELSE 'bad-state' -- Any other state is invalid for operating on instances
+//      END
+// AS UUID)
+// ```
+//
+// This uses the familiar cast-fail trick to select the instance's UUID if the
+// instance is in a state that allows network interfaces to be altered or
+// produce a cast error if they cannot. The COALESCE statement and its innards
+// yield the following state string:
+//
+// - 'destroyed' if the instance is not found at all
+// - 'running' if the instance is found and has an active VMM (this forbids
+//   network interface changes irrespective of that VMM's actual state)
+// - the instance's `state` otherwise
+//
+// If this produces 'stopped', 'creating', or (if applicable) 'failed', the
+// outer CASE returns the instance ID as a string, which casts to a UUID. The
+// 'destroyed' and 'bad-state' cases return non-UUID strings that cause a cast
+// failure that can be caught and interpreted as a specific class of error.
+//
+// 'failed' is conditionally an accepted state: it would not be accepted as part
+// of InsertQuery, but it should be as part of DeleteQuery (for example if the
+// instance creation saga failed).
+//
+// Note that 'stopped', 'failed', and 'creating' are considered valid states.
+// 'stopped' is used for most situations, especially client-facing, but
+// 'creating' is critical for the instance-creation saga. When an instance is
+// first provisioned, it remains in the 'creating' state until provisioning is
+// copmleted and it transitions to 'stopped'; it is permissible to add
+// interfaces during that provisioning process.
 fn build_instance_state_verification_subquery(
     builder: &mut crate::db::raw_query_builder::QueryBuilder,
     instance_id: Uuid,
@@ -1051,6 +1091,8 @@ pub struct InsertQuery {
     // The following fields are derived from the previous fields. This raises the
     // question: "Why bother storing them at all?"
     //
+    // TODO: Is this still relevant? We aren't using Diesel's querybuilder for this logic anymore.
+    //
     // Diesel's [`diesel::query_builder::ast_pass::AstPass:push_bind_param`] method
     // requires that the provided value now live as long as the entire AstPass
     // type. By storing these values in the struct, they'll live at least as
@@ -1080,10 +1122,7 @@ enum AutoOrOptionalIp<Q> {
     Nullable(Option<IpNetwork>),
 }
 
-impl<Q> AutoOrOptionalIp<Q>
-where
-    Q: QueryFragment<Pg>,
-{
+impl<Q> AutoOrOptionalIp<Q> {
     fn new<T>(assignment: Option<&IpAssignment<T>>, auto: Q) -> Self
     where
         T: Ip,
@@ -1097,6 +1136,8 @@ where
         }
     }
 }
+
+type AllNetworkInterfaceColumns = AllColumnsOf::<nexus_db_schema::schema::network_interface::table>;
 
 impl InsertQuery {
     pub fn new(interface: IncompleteNetworkInterface) -> Self {
@@ -1162,25 +1203,9 @@ impl InsertQuery {
 
         let mut builder = QueryBuilder::new();
 
-        // INSERT INTO network_interface
-        builder.sql(" INSERT INTO network_interface (\
-            id, \
-            name, \
-            description, \
-            time_created, \
-            time_modified, \
-            time_deleted, \
-            kind, \
-            parent_id, \
-            vpc_id, \
-            subnet_id, \
-            mac, \
-            ip, \
-            ipv6, \
-            slot, \
-            is_primary, \
-            transit_ips \
-        ) ");
+        builder.sql(" INSERT INTO network_interface (");
+        builder.sql(AllNetworkInterfaceColumns::as_str());
+        builder.sql(") ");
 
         // Push subqueries that validate the provided instance. This generates a CTE
         // with the name `validated_instance` and columns:
@@ -1277,35 +1302,12 @@ impl InsertQuery {
         builder.param().bind::<sql_types::Array<sql_types::Inet>, _>(self.transit_ips);
         builder.sql(" AS transit_ips ");
 
-        builder.sql(" RETURNING \
-            network_interface.id, \
-            network_interface.name, \
-            network_interface.description, \
-            network_interface.time_created, \
-            network_interface.time_modified, \
-            network_interface.time_deleted, \
-            network_interface.kind, \
-            network_interface.parent_id, \
-            network_interface.vpc_id, \
-            network_interface.subnet_id, \
-            network_interface.mac, \
-            network_interface.ip, \
-            network_interface.ipv6, \
-            network_interface.slot, \
-            network_interface.is_primary, \
-            network_interface.transit_ips"
-        );
+        builder.sql(" RETURNING ");
+        builder.sql(AllNetworkInterfaceColumns::with_prefix("network_interface"));
 
         builder.query()
     }
 }
-
-type FromClause<T> =
-    diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
-type NetworkInterfaceFromClause =
-    FromClause<nexus_db_schema::schema::network_interface::table>;
-const NETWORK_INTERFACE_FROM_CLAUSE: NetworkInterfaceFromClause =
-    NetworkInterfaceFromClause::new();
 
 /// A small helper subquery that automatically assigns the `is_primary` column
 /// for a new network interface.
@@ -1328,167 +1330,6 @@ impl IsPrimaryNic {
         builder.param().bind::<NetworkInterfaceKindEnum, _>(self.kind);
         builder.sql(" AND time_deleted IS NULL LIMIT 1)");
     }
-}
-
-impl QueryId for IsPrimaryNic {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl QueryFragment<Pg> for IsPrimaryNic {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        out.push_sql("SELECT NOT EXISTS(SELECT 1 FROM ");
-        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(dsl::parent_id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.parent_id)?;
-        out.push_sql(" AND ");
-        out.push_identifier(dsl::kind::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<NetworkInterfaceKindEnum, NetworkInterfaceKind>(
-            &self.kind,
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL LIMIT 1)");
-        Ok(())
-    }
-}
-
-type InstanceFromClause = FromClause<nexus_db_schema::schema::instance::table>;
-const INSTANCE_FROM_CLAUSE: InstanceFromClause = InstanceFromClause::new();
-
-// Subquery used to ensure an instance both exists and is either stopped (or
-// optionally failed) before inserting or deleting a network interface.
-//
-// This pushes a subquery like:
-//
-// ```sql
-// CAST(
-//  CASE
-//      COALESCE(
-//          -- Identify the state of the instance
-//          (
-//              SELECT
-//                  CASE
-//                      WHEN active_propolis_id IS NULL THEN state
-//                      ELSE 'running'
-//                  END
-//              FROM
-//                  instance
-//              WHERE
-//                  id = <instance_id> AND time_deleted IS NULL
-//          ),
-//          'destroyed' -- Default state, if not found
-//      )
-//      WHEN 'stopped' THEN '<instance_id_str>' -- Instance UUID as a string
-//      WHEN 'creating' THEN '<instance_id_str>' -- Instance UUID as a string
-//      WHEN 'failed' THEN '<instance_id_str>' -- Instance UUID as a string
-//      WHEN 'destroyed' THEN 'no-instance' -- Sentinel for an instance not existing
-//      ELSE 'bad-state' -- Any other state is invalid for operating on instances
-//      END
-// AS UUID)
-// ```
-//
-// This uses the familiar cast-fail trick to select the instance's UUID if the
-// instance is in a state that allows network interfaces to be altered or
-// produce a cast error if they cannot. The COALESCE statement and its innards
-// yield the following state string:
-//
-// - 'destroyed' if the instance is not found at all
-// - 'running' if the instance is found and has an active VMM (this forbids
-//   network interface changes irrespective of that VMM's actual state)
-// - the instance's `state` otherwise
-//
-// If this produces 'stopped', 'creating', or (if applicable) 'failed', the
-// outer CASE returns the instance ID as a string, which casts to a UUID. The
-// 'destroyed' and 'bad-state' cases return non-UUID strings that cause a cast
-// failure that can be caught and interpreted as a specific class of error.
-//
-// 'failed' is conditionally an accepted state: it would not be accepted as part
-// of InsertQuery, but it should be as part of DeleteQuery (for example if the
-// instance creation saga failed).
-//
-// Note that 'stopped', 'failed', and 'creating' are considered valid states.
-// 'stopped' is used for most situations, especially client-facing, but
-// 'creating' is critical for the instance-creation saga. When an instance is
-// first provisioned, it remains in the 'creating' state until provisioning is
-// copmleted and it transitions to 'stopped'; it is permissible to add
-// interfaces during that provisioning process.
-
-fn push_instance_state_verification_subquery<'a>(
-    instance_id: &'a Uuid,
-    instance_id_str: &'a String,
-    mut out: AstPass<'_, 'a, Pg>,
-    failed_ok: bool,
-) -> QueryResult<()> {
-    use nexus_db_schema::enums::InstanceStateEnum;
-
-    out.push_sql("CAST(CASE COALESCE((SELECT ");
-    out.push_sql("CASE WHEN ");
-    out.push_identifier(
-        nexus_db_schema::schema::instance::dsl::active_propolis_id::NAME,
-    )?;
-    out.push_sql(" IS NULL THEN ");
-    out.push_identifier(nexus_db_schema::schema::instance::dsl::state::NAME)?;
-    out.push_sql(" ELSE ");
-    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
-        &INSTANCE_RUNNING,
-    )?;
-    out.push_sql(" END ");
-    out.push_sql(" FROM ");
-    INSTANCE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-    out.push_sql(" WHERE ");
-    out.push_identifier(nexus_db_schema::schema::instance::dsl::id::NAME)?;
-    out.push_sql(" = ");
-    out.push_bind_param::<sql_types::Uuid, Uuid>(instance_id)?;
-    out.push_sql(" AND ");
-    out.push_identifier(
-        nexus_db_schema::schema::instance::dsl::time_deleted::NAME,
-    )?;
-    out.push_sql(" IS NULL), ");
-    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
-        &INSTANCE_DESTROYED,
-    )?;
-    out.push_sql(") WHEN ");
-    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
-        &INSTANCE_STOPPED,
-    )?;
-    out.push_sql(" THEN ");
-    out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
-    out.push_sql(" WHEN ");
-    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
-        &INSTANCE_CREATING,
-    )?;
-    out.push_sql(" THEN ");
-    out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
-    if failed_ok {
-        // FAILED is ok for DeleteQuery, but not for InsertQuery!
-        out.push_sql(" WHEN ");
-        out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
-            &INSTANCE_FAILED,
-        )?;
-        out.push_sql(" THEN ");
-        out.push_bind_param::<sql_types::Text, String>(instance_id_str)?;
-    }
-    out.push_sql(" WHEN ");
-    out.push_bind_param::<InstanceStateEnum, db::model::InstanceState>(
-        &INSTANCE_DESTROYED,
-    )?;
-    out.push_sql(" THEN ");
-    out.push_bind_param::<sql_types::Text, String>(
-        &NO_INSTANCE_SENTINEL_STRING,
-    )?;
-    out.push_sql(" ELSE ");
-    out.push_bind_param::<sql_types::Text, String>(
-        &INSTANCE_BAD_STATE_SENTINEL_STRING,
-    )?;
-    out.push_sql(" END AS UUID)");
-    Ok(())
 }
 
 /// Delete a network interface.
@@ -1609,6 +1450,53 @@ impl DeleteQuery {
         }
     }
 
+    /// Builds the complete DELETE query using QueryBuilder.
+    pub fn to_delete_query(
+        self,
+    ) -> crate::db::raw_query_builder::TypedSqlQuery<(Nullable<sql_types::Uuid>, Nullable<sql_types::Uuid>)> {
+        use crate::db::raw_query_builder::QueryBuilder;
+        let mut builder = QueryBuilder::new();
+
+        builder.sql("WITH ");
+        if self.kind == NetworkInterfaceKind::Instance {
+            builder.sql("instance AS MATERIALIZED (SELECT ");
+            build_instance_state_verification_subquery(
+                &mut builder,
+                self.parent_id,
+                self.parent_id_str.clone(),
+                true,
+            );
+            builder.sql("), ");
+        }
+
+        builder.sql("interface AS MATERIALIZED (SELECT CAST(IF((SELECT NOT is_primary FROM network_interface WHERE id = ");
+        builder.param().bind::<sql_types::Uuid, _>(self.interface_id);
+        builder.sql(" AND time_deleted IS NULL) OR (SELECT COUNT(*) FROM network_interface WHERE parent_id = ");
+        builder.param().bind::<sql_types::Uuid, _>(self.parent_id);
+        builder.sql(" AND kind = ");
+        builder.param().bind::<NetworkInterfaceKindEnum, _>(self.kind);
+        builder.sql(" AND time_deleted IS NULL) <= 1, ");
+        builder.param().bind::<sql_types::Text, _>(self.parent_id_str);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Text, _>(DeleteError::HAS_SECONDARIES_SENTINEL);
+        builder.sql(") AS UUID)), ");
+
+        // found_interface CTE - checks if interface exists
+        builder.sql("found_interface AS (SELECT id FROM network_interface WHERE id = ");
+        builder.param().bind::<sql_types::Uuid, _>(self.interface_id);
+        builder.sql("), ");
+
+        // updated CTE - actually performs the deletion
+        builder.sql("updated AS (UPDATE network_interface SET time_deleted = NOW() WHERE id = ");
+        builder.param().bind::<sql_types::Uuid, _>(self.interface_id);
+        builder.sql(" AND time_deleted IS NULL RETURNING id) ");
+
+        // Final SELECT - returns (found_id, deleted_id)
+        builder.sql("SELECT found_interface.id, updated.id FROM found_interface LEFT JOIN updated ON found_interface.id = updated.id");
+
+        builder.query()
+    }
+
     /// Issue the delete and parses the result.
     ///
     /// The three outcomes are:
@@ -1619,8 +1507,9 @@ impl DeleteQuery {
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<bool, DieselError> {
+        let query = self.to_delete_query();
         let (found_id, deleted_id) =
-            self.get_result_async::<(Option<Uuid>, Option<Uuid>)>(conn).await?;
+            query.get_result_async::<(Option<Uuid>, Option<Uuid>)>(conn).await?;
         match (found_id, deleted_id) {
             (Some(found), Some(deleted)) => {
                 assert_eq!(
@@ -1640,96 +1529,6 @@ impl DeleteQuery {
         }
     }
 }
-
-impl QueryId for DeleteQuery {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl QueryFragment<Pg> for DeleteQuery {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        out.push_sql("WITH ");
-        if self.kind == NetworkInterfaceKind::Instance {
-            out.push_sql("instance AS MATERIALIZED (SELECT ");
-            push_instance_state_verification_subquery(
-                &self.parent_id,
-                &self.parent_id_str,
-                out.reborrow(),
-                true,
-            )?;
-            out.push_sql("), ");
-        }
-        out.push_sql("interface AS MATERIALIZED (SELECT CAST(IF((SELECT NOT ");
-        out.push_identifier(dsl::is_primary::NAME)?;
-        out.push_sql(" FROM ");
-        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.interface_id)?;
-        out.push_sql(" AND ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL) OR (SELECT COUNT(*) FROM ");
-        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(dsl::parent_id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.parent_id)?;
-        out.push_sql(" AND ");
-        out.push_identifier(dsl::kind::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<NetworkInterfaceKindEnum, NetworkInterfaceKind>(
-            &self.kind,
-        )?;
-        out.push_sql(" AND ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL) <= 1, ");
-        out.push_bind_param::<sql_types::Text, String>(&self.parent_id_str)?;
-        out.push_sql(", ");
-        out.push_bind_param::<sql_types::Text, &str>(
-            &DeleteError::HAS_SECONDARIES_SENTINEL,
-        )?;
-        out.push_sql(") AS UUID)), found_interface AS (SELECT ");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" FROM ");
-        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.interface_id)?;
-        out.push_sql("), updated AS (UPDATE ");
-        NETWORK_INTERFACE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" SET ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" = NOW() WHERE ");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.interface_id)?;
-        out.push_sql(" AND ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL RETURNING ");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(") SELECT found_interface.");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(", updated.");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" FROM found_interface LEFT JOIN updated");
-        out.push_sql(" ON found_interface.");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" = updated.");
-        out.push_identifier(dsl::id::NAME)?;
-        Ok(())
-    }
-}
-
-impl Query for DeleteQuery {
-    type SqlType = (Nullable<sql_types::Uuid>, Nullable<sql_types::Uuid>);
-}
-
-impl RunQueryDsl<DbConnection> for DeleteQuery {}
 
 /// Errors related to deleting a network interface
 #[derive(Debug, thiserror::Error, SlogInlineError, PartialEq)]
@@ -1852,7 +1651,7 @@ fn decode_delete_network_interface_database_error(
         }
 
         // This catches the UUID-cast failure intentionally introduced by
-        // `push_instance_state_verification_subquery`, which verifies that
+        // `build_instance_state_verification_subquery`, which verifies that
         // the instance can be worked on when running this query.
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
             if info.message() == INSTANCE_BAD_STATE_ERROR_MESSAGE =>
@@ -1860,7 +1659,7 @@ fn decode_delete_network_interface_database_error(
             DeleteError::InstanceBadState(parent_id)
         }
         // This catches the UUID-cast failure intentionally introduced by
-        // `push_instance_state_verification_subquery`, which verifies that
+        // `build_instance_state_verification_subquery`, which verifies that
         // the instance doesn't even exist when running this query.
         DieselError::DatabaseError(DatabaseErrorKind::Unknown, ref info)
             if info.message() == NO_INSTANCE_ERROR_MESSAGE =>

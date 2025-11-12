@@ -297,20 +297,6 @@ where
         builder.sql(" IS NULL ORDER BY \"").sql(INDEX_COLUMN_IDENT);
         builder.sql("\" LIMIT 1 ");
     }
-
-    /// Convenience method that creates a QueryBuilder, builds the query into it,
-    /// and returns the resulting TypedSqlQuery.
-    ///
-    /// This is useful for standalone execution of the query.
-    pub(super) fn to_query(self) -> TypedSqlQuery<()>
-    where
-        Item: NextItemBinder + Copy,
-        Generator: Copy,
-    {
-        let mut builder = QueryBuilder::new();
-        self.build_query(&mut builder);
-        builder.query()
-    }
 }
 
 const TIME_DELETED_COLUMN_IDENT: &str = "time_deleted";
@@ -798,19 +784,6 @@ impl<Item> NextItemSelfJoined<Item> {
 
         // LIMIT 1) AS <item_column>
         builder.sql(" LIMIT 1) AS ").sql(self.item_column_name);
-    }
-
-    /// Convenience method that creates a QueryBuilder, builds the query into it,
-    /// and returns the resulting TypedSqlQuery.
-    ///
-    /// This is useful for standalone execution of the query.
-    pub(super) fn to_query(self) -> TypedSqlQuery<()>
-    where
-        Item: NextItemBinder + Copy,
-    {
-        let mut builder = QueryBuilder::new();
-        self.build_query(&mut builder);
-        builder.query()
     }
 
     fn build_gap_query(
