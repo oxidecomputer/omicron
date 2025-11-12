@@ -26,7 +26,7 @@ blueprint df06bb57-ad42-4431-9206-abff322896c7 created from blueprint af934083-5
 > # which does not include any of those blueprints.
 > blueprint-history
 TIME                     BLUEPRINT                           
-<REDACTED_TIMESTAMP> 184f10b3-61cb-41ef-9b93-3489b2bac559 starting blueprint with 3 empty sleds
+<REDACTED_TIMESTAMP> 184f10b3-61cb-41ef-9b93-3489b2bac559 starting blueprint with 0 empty sleds
 <REDACTED_TIMESTAMP> dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 
 
 
@@ -34,7 +34,7 @@ TIME                     BLUEPRINT
 > # You can give it a specific blueprint.
 > blueprint-history 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1
 TIME                     BLUEPRINT                           
-<REDACTED_TIMESTAMP> 184f10b3-61cb-41ef-9b93-3489b2bac559 starting blueprint with 3 empty sleds
+<REDACTED_TIMESTAMP> 184f10b3-61cb-41ef-9b93-3489b2bac559 starting blueprint with 0 empty sleds
 <REDACTED_TIMESTAMP> dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 
 <REDACTED_TIMESTAMP> 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 
 
@@ -43,7 +43,7 @@ TIME                     BLUEPRINT
 > # Running it from the latest blueprint should report all of them.
 > blueprint-history latest
 TIME                     BLUEPRINT                           
-<REDACTED_TIMESTAMP> 184f10b3-61cb-41ef-9b93-3489b2bac559 starting blueprint with 3 empty sleds
+<REDACTED_TIMESTAMP> 184f10b3-61cb-41ef-9b93-3489b2bac559 starting blueprint with 0 empty sleds
 <REDACTED_TIMESTAMP> dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 
 <REDACTED_TIMESTAMP> 8da82a8e-bf97-4fbd-8ddd-9f6462732cf1 
 <REDACTED_TIMESTAMP> 58d5e830-0884-47d8-a7cd-b2b3751adeb4 
@@ -64,21 +64,21 @@ TIME                     BLUEPRINT
 > # Show diffs, too.
 > blueprint-history --diff latest
 TIME                     BLUEPRINT                           
-<REDACTED_TIMESTAMP> 184f10b3-61cb-41ef-9b93-3489b2bac559 starting blueprint with 3 empty sleds
+<REDACTED_TIMESTAMP> 184f10b3-61cb-41ef-9b93-3489b2bac559 starting blueprint with 0 empty sleds
 <REDACTED_TIMESTAMP> dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21 
 from: blueprint 184f10b3-61cb-41ef-9b93-3489b2bac559
 to:   blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 
- MODIFIED SLEDS:
+ ADDED SLEDS:
 
-  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 1 -> 2):
+  sled 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 2):
 
     host phase 2 contents:
     ------------------------
     slot   boot image source
     ------------------------
-    A      current contents 
-    B      current contents 
++   A      current contents 
++   B      current contents 
 
 
     physical disks:
@@ -184,14 +184,14 @@ to:   blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 +   nexus             466a9f29-62bf-4e63-924a-b9efdb86afec   install dataset   in service    fd00:1122:3344:102::22
 
 
-  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 1 -> 2):
+  sled 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 2):
 
     host phase 2 contents:
     ------------------------
     slot   boot image source
     ------------------------
-    A      current contents 
-    B      current contents 
++   A      current contents 
++   B      current contents 
 
 
     physical disks:
@@ -294,14 +294,14 @@ to:   blueprint dbcbd3d6-41ff-48ae-ac0b-1becc9b2fd21
 +   nexus             0c71b3b2-6ceb-4e8f-b020-b08675e83038   install dataset   in service    fd00:1122:3344:101::22
 
 
-  sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 1 -> 2):
+  sled d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 2):
 
     host phase 2 contents:
     ------------------------
     slot   boot image source
     ------------------------
-    A      current contents 
-    B      current contents 
++   A      current contents 
++   B      current contents 
 
 
     physical disks:

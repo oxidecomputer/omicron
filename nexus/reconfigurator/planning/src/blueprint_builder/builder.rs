@@ -536,6 +536,12 @@ impl<'a> BlueprintBuilder<'a> {
         Self::build_empty_with_sleds(iter::empty(), creator)
     }
 
+    /// A version of [`Self::build_empty`] that allows the
+    /// blueprint ID to be generated from a deterministic RNG.
+    pub fn build_empty_seeded(creator: &str, rng: PlannerRng) -> Blueprint {
+        Self::build_empty_with_sleds_seeded(iter::empty(), creator, rng)
+    }
+
     /// Directly construct a `Blueprint` that contains an empty zone config for
     /// the given sleds.
     pub fn build_empty_with_sleds(
