@@ -167,10 +167,10 @@ impl CaseBuilder {
         Ok(())
     }
 
-    pub fn close(&mut self, log: &slog::Logger) {
+    pub fn close(&mut self) {
         self.case.time_closed = Some(Utc::now());
 
-        slog::info!(log, "case closed");
+        slog::info!(&self.log, "case closed");
     }
 
     pub fn add_ereport(&mut self, report: &Arc<fm::Ereport>) {
