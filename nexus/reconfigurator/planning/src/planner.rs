@@ -207,7 +207,7 @@ impl<'a> Planner<'a> {
         let zone_safety_checks = ZoneSafetyChecks::new(
             &self.blueprint,
             &self.inventory,
-            self.input.internal_dns_version(),
+            &self.input,
         );
 
         let mut noop_info =

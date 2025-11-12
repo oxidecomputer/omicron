@@ -53,7 +53,6 @@ use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
-use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
@@ -512,15 +511,15 @@ pub struct BlueprintBuilder<'a> {
     /// The ID that the completed blueprint will have
     new_blueprint_id: BlueprintUuid,
 
-    // These fields are used to allocate resources for sleds.
-    input: &'a PlanningInput,
-
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+    cockroachdb_fingerprint: String,
     target_release_minimum_generation: Generation,
     nexus_generation: Generation,
+    internal_dns_version: Generation,
+    external_dns_version: Generation,
 
     creator: String,
     operations: Vec<Operation>,
@@ -624,17 +623,19 @@ impl<'a> BlueprintBuilder<'a> {
 
             let editor = match state {
                 SledState::Active => {
-                    let subnet = input
+                    let details = input
                         .sled_lookup(SledFilter::Commissioned, *sled_id)
                         .with_context(|| {
                             format!(
                                 "failed to find sled details for \
                                  active sled in parent blueprint {sled_id}"
                             )
-                        })?
-                        .resources
-                        .subnet;
-                    SledEditor::for_existing_active(subnet, sled_cfg.clone())
+                        })?;
+                    SledEditor::for_existing_active(
+                        Arc::new(details.baseboard_id.clone()),
+                        details.resources.subnet,
+                        sled_cfg.clone(),
+                    )
                 }
                 SledState::Decommissioned => {
                     SledEditor::for_existing_decommissioned(sled_cfg.clone())
@@ -652,6 +653,7 @@ impl<'a> BlueprintBuilder<'a> {
         for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
             if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
                 slot.insert(SledEditor::for_new_active(
+                    Arc::new(details.baseboard_id.clone()),
                     details.resources.subnet,
                 ));
             }
@@ -672,14 +674,19 @@ impl<'a> BlueprintBuilder<'a> {
                 .clone(),
             oximeter_read_policy,
             new_blueprint_id: rng.next_blueprint(),
-            input,
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
+            cockroachdb_fingerprint: input
+                .cockroachdb_settings()
+                .state_fingerprint
+                .clone(),
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
             nexus_generation: parent_blueprint.nexus_generation,
+            internal_dns_version: input.internal_dns_version(),
+            external_dns_version: input.external_dns_version(),
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -738,9 +745,9 @@ impl<'a> BlueprintBuilder<'a> {
         // multirack (either DNS will be on a wider subnet or we need to pick a
         // particular rack subnet here?).
         let any_sled_subnet = self
-            .input
-            .all_sled_resources(SledFilter::Commissioned)
-            .map(|(_sled_id, resources)| resources.subnet)
+            .sled_editors
+            .values()
+            .filter_map(|editor| editor.subnet())
             .next()
             .ok_or(Error::RackSubnetUnknownNoSleds)?;
         let rack_subnet = ReservedRackSubnet::from_subnet(any_sled_subnet);
@@ -762,10 +769,6 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(rack_subnet.get_dns_subnets().into_iter().filter(move |subnet| {
             !internal_dns_subnets_in_use.contains(&subnet)
         }))
-    }
-
-    pub fn planning_input(&self) -> &PlanningInput {
-        &self.input
     }
 
     /// Iterates over the list of sled IDs for which we have zones.
@@ -879,19 +882,14 @@ impl<'a> BlueprintBuilder<'a> {
             sleds,
             pending_mgs_updates: self.pending_mgs_updates,
             parent_blueprint_id: Some(self.parent_blueprint.id),
-            internal_dns_version: self.input.internal_dns_version(),
-            external_dns_version: self.input.external_dns_version(),
+            internal_dns_version: self.internal_dns_version,
+            external_dns_version: self.external_dns_version,
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
             nexus_generation: self.nexus_generation,
-            cockroachdb_fingerprint: self
-                .input
-                .cockroachdb_settings()
-                .state_fingerprint
-                .clone(),
+            cockroachdb_fingerprint: self.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
-
             clickhouse_cluster_config: self.clickhouse_cluster_config,
             oximeter_read_version: self.oximeter_read_policy.version,
             oximeter_read_mode: self.oximeter_read_policy.mode,
@@ -1315,14 +1313,16 @@ impl<'a> BlueprintBuilder<'a> {
                 "tried to ensure mupdate override for unknown sled {sled_id}"
             ))
         })?;
+        let baseboard_id = editor.baseboard_id().ok_or_else(|| {
+            // All commissioned sleds have baseboards; this should never fail.
+            Error::Planner(anyhow!(
+                "tried to ensure mupdate override for \
+                 decommissioned sled {sled_id}"
+            ))
+        })?;
 
         // Also map the editor to the corresponding PendingMgsUpdates.
-        let sled_details = self
-            .input
-            .sled_lookup(SledFilter::InService, sled_id)
-            .map_err(|error| Error::Planner(anyhow!(error)))?;
-        let pending_mgs_update =
-            self.pending_mgs_updates.entry(&sled_details.baseboard_id);
+        let pending_mgs_update = self.pending_mgs_updates.entry(baseboard_id);
         let noop_sled_info = noop_info.sled_info_mut(sled_id)?;
 
         editor
@@ -1492,14 +1492,14 @@ impl<'a> BlueprintBuilder<'a> {
         image_source: BlueprintZoneImageSource,
     ) -> Result<Ensure, Error> {
         let pool_name = ZpoolName::new_external(zpool_id);
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to ensure crucible zone for unknown sled {sled_id}"
+            ))
+        })?;
 
         // If this sled already has a Crucible zone on this pool, do nothing.
-        let has_crucible_on_this_pool = {
-            let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
-                Error::Planner(anyhow!(
-                    "tried to ensure crucible zone for unknown sled {sled_id}"
-                ))
-            })?;
+        let has_crucible_on_this_pool =
             editor.zones(BlueprintZoneDisposition::is_in_service).any(|z| {
                 matches!(
                     &z.zone_type,
@@ -1509,17 +1509,19 @@ impl<'a> BlueprintBuilder<'a> {
                     })
                     if dataset.pool_name == pool_name
                 )
-            })
-        };
+            });
         if has_crucible_on_this_pool {
             return Ok(Ensure::NotNeeded);
         }
 
-        let sled_info = self.sled_resources(sled_id)?;
-        if !sled_info.zpools.contains_key(&zpool_id) {
+        // Double-check that our caller didn't pass a bad sled/zpool combo.
+        if !editor
+            .disks(BlueprintPhysicalDiskDisposition::is_in_service)
+            .any(|disk| disk.pool_id == zpool_id)
+        {
             return Err(Error::Planner(anyhow!(
                 "adding crucible zone for sled {:?}: \
-                attempted to use unknown zpool {:?}",
+                 attempted to use unknown zpool {:?}",
                 sled_id,
                 pool_name
             )));
@@ -2114,16 +2116,11 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
 
-        // We'll check both the disks available to this sled per our current
-        // blueprint and the list of all in-service zpools on this sled per our
-        // planning input, and only pick zpools that are available in both.
-        let current_sled_disks = editor
+        // Only choose from zpools that are in-service.
+        let in_service_zpools = editor
             .disks(BlueprintPhysicalDiskDisposition::is_in_service)
             .map(|disk_config| disk_config.pool_id)
             .collect::<BTreeSet<_>>();
-
-        let all_in_service_zpools =
-            self.sled_resources(sled_id)?.all_zpools(ZpoolFilter::InService);
 
         // We refuse to choose a zpool for a zone of a given `zone_kind` if this
         // sled already has a durable zone of that kind on the same zpool. Build
@@ -2142,31 +2139,14 @@ impl<'a> BlueprintBuilder<'a> {
             skip_zpools.insert(&zone_config.filesystem_pool);
         }
 
-        for &zpool_id in all_in_service_zpools {
+        for zpool_id in in_service_zpools {
             let zpool_name = ZpoolName::new_external(zpool_id);
-            if !skip_zpools.contains(&zpool_name)
-                && current_sled_disks.contains(&zpool_id)
-            {
+            if !skip_zpools.contains(&zpool_name) {
                 return Ok(zpool_name);
             }
         }
-        Err(Error::NoAvailableZpool { sled_id, kind: zone_kind })
-    }
 
-    /// Returns the resources for a sled that hasn't been decommissioned.
-    fn sled_resources(
-        &self,
-        sled_id: SledUuid,
-    ) -> Result<&'a SledResources, Error> {
-        let details = self
-            .input
-            .sled_lookup(SledFilter::Commissioned, sled_id)
-            .map_err(|error| {
-                Error::Planner(anyhow!(error).context(format!(
-                    "for sled {sled_id}, error looking up resources"
-                )))
-            })?;
-        Ok(&details.resources)
+        Err(Error::NoAvailableZpool { sled_id, kind: zone_kind })
     }
 
     /// Determine the number of desired external DNS zones by counting
