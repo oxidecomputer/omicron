@@ -6386,8 +6386,7 @@ fn test_volume_construction_request_region_gen_serialization() {
     let deserialized: VolumeConstructionRequest =
         serde_json::from_str(&json).expect("Failed to deserialize");
 
-    if let VolumeConstructionRequest::Region { generation, .. } = deserialized
-    {
+    if let VolumeConstructionRequest::Region { generation, .. } = deserialized {
         assert_eq!(generation, 42, "generation field should be 42");
     } else {
         panic!("Expected Region variant");
