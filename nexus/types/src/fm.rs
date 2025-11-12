@@ -53,6 +53,10 @@ impl Sitrep {
         self.metadata.parent_sitrep_id
     }
 
+    pub fn open_cases(&self) -> impl Iterator<Item = &Case> + '_ {
+        self.cases.iter().filter(|c| c.is_open())
+    }
+
     /// Iterate over all alerts requested by cases in this sitrep.
     pub fn alerts_requested(
         &self,
@@ -128,6 +132,12 @@ pub struct Case {
     pub alerts_requested: IdOrdMap<AlertRequest>,
 
     pub comment: String,
+}
+
+impl Case {
+    pub fn is_open(&self) -> bool {
+        self.time_closed.is_none()
+    }
 }
 
 impl IdOrdItem for Case {

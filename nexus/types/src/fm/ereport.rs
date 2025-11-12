@@ -29,6 +29,13 @@ impl Ereport {
     }
 }
 
+impl core::ops::Deref for Ereport {
+    type Target = EreportData;
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
 impl iddqd::IdOrdItem for Ereport {
     type Key<'a> = &'a EreportId;
     fn key(&self) -> Self::Key<'_> {
