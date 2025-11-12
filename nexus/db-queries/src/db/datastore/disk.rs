@@ -9,8 +9,9 @@ use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::collection_attach;
 use crate::db::collection_attach::AttachError;
-use crate::db::collection_attach::DatastoreAttachTarget;
+use crate::db::collection_attach::AttachQueryTemplate;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
 use crate::db::collection_insert::AsyncInsertError;
@@ -29,7 +30,7 @@ use crate::db::model::VirtualProvisioningResource;
 use crate::db::model::Volume;
 use crate::db::model::to_db_typed_uuid;
 use crate::db::pagination::paginated;
-use crate::db::queries::disk::DiskSetClauseForAttach;
+use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -40,6 +41,8 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
+use nexus_db_schema::schema::disk;
+use nexus_db_schema::schema::instance;
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
@@ -57,6 +60,23 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
+
+/// QueryBuilder-based template for attaching disks to instances.
+#[allow(dead_code)] // TODO: Remove once AttachQuery::attach_and_get_result_async is implemented
+const DISK_ATTACH_QUERY_TEMPLATE: AttachQueryTemplate::<instance::table, disk::table> = AttachQueryTemplate::new(
+    collection_attach::Collection::new(
+        "instance",        // collection table
+        "id",              // collection id column
+        "time_deleted",    // collection time_deleted
+    ),
+    collection_attach::Resource::new(
+        "disk",            // resource table
+        "id",              // resource id column
+        "attach_instance_id", // resource FK column
+        "time_deleted",    // resource time_deleted
+    ),
+    false,             // allow_from_attached
+);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Disk {
@@ -503,8 +523,6 @@ impl DataStore {
         authz_disk: &authz::Disk,
         max_disks: u32,
     ) -> Result<(Instance, Disk), Error> {
-        use nexus_db_schema::schema::{disk, instance};
-
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
         opctx.authorize(authz::Action::Modify, authz_disk).await?;
 
@@ -525,21 +543,46 @@ impl DataStore {
             db::model::InstanceState::NoVmm,
         ];
 
-        let attach_update = DiskSetClauseForAttach::new(authz_instance.id());
-
-        let query = Instance::attach_resource(
-            authz_instance.id(),
-            authz_disk.id(),
-            instance::table.into_boxed().filter(
-                instance::dsl::state
-                    .eq_any(ok_to_attach_instance_states)
-                    .and(instance::dsl::active_propolis_id.is_null()),
-            ),
-            disk::table.into_boxed().filter(
-                disk::dsl::disk_state.eq_any(ok_to_attach_disk_state_labels),
-            ),
+        let instance_id = authz_instance.id();
+        let disk_id = authz_disk.id();
+        let query = DISK_ATTACH_QUERY_TEMPLATE.build::<model::Disk, model::Instance>(
+            instance_id,
+            disk_id,
             max_disks,
-            diesel::update(disk::dsl::disk).set(attach_update),
+            |builder| {
+                use crate::db::queries::disk::build_next_disk_slot_subquery;
+                use diesel::sql_types;
+
+                // Build SET clause: attach_instance_id, disk_state, slot
+                let attached_label = api::external::DiskState::Attached(instance_id).label();
+                builder.sql("attach_instance_id = ");
+                builder.param().bind::<sql_types::Uuid, _>(instance_id);
+                builder.sql(", disk_state = ");
+                builder.param().bind::<sql_types::Text, _>(attached_label);
+                builder.sql(", slot = (");
+                build_next_disk_slot_subquery(builder, instance_id);
+                builder.sql(")");
+            },
+            Some(|builder: &mut QueryBuilder| {
+                use diesel::sql_types;
+                // Collection (instance) filter: state and active_propolis_id
+                let state_labels: Vec<_> = ok_to_attach_instance_states
+                    .iter()
+                    .map(|s| s.label())
+                    .collect();
+                builder.sql(" AND state = ANY(");
+                builder.param().bind::<sql_types::Array<sql_types::Text>, _>(state_labels);
+                builder.sql(") AND active_propolis_id IS NULL");
+            }),
+            Some(|builder: &mut QueryBuilder| {
+                use diesel::sql_types;
+                // Resource (disk) filter: disk_state
+                builder.sql(" AND disk_state = ANY(");
+                builder.param().bind::<sql_types::Array<sql_types::Text>, _>(
+                    ok_to_attach_disk_state_labels.clone(),
+                );
+                builder.sql(")");
+            }),
         );
 
         let conn = self.pool_connection_authorized(opctx).await?;

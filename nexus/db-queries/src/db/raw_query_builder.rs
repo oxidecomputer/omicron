@@ -47,6 +47,13 @@ impl TrustedStr {
         Self(TrustedStrVariants::ValidatedExplicitly(s))
     }
 
+    /// Constructs a TrustedStr from a u32.
+    ///
+    /// This is safe because u32 can't contain SQL injection.
+    pub fn from_u32(n: u32) -> Self {
+        Self(TrustedStrVariants::ValidatedExplicitly(n.to_string()))
+    }
+
     #[cfg(test)]
     pub fn as_str(&self) -> &str {
         match &self.0 {
@@ -153,7 +160,6 @@ impl QueryBuilder {
 /// - It forces the usage of "QueryableByName", which acts wrong if we're
 /// returning multiple columns with the same name (this is normal! If you want
 /// to UNION two objects that both have "id" columns, this happens).
-#[derive(QueryId)]
 pub struct TypedSqlQuery<T> {
     inner: diesel::query_builder::BoxedSqlQuery<
         'static,
@@ -161,6 +167,11 @@ pub struct TypedSqlQuery<T> {
         diesel::query_builder::SqlQuery,
     >,
     _phantom: PhantomData<T>,
+}
+
+impl<T> QueryId for TypedSqlQuery<T> {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
 }
 
 impl<T> QueryFragment<Pg> for TypedSqlQuery<T> {
@@ -176,6 +187,13 @@ impl<T> QueryFragment<Pg> for TypedSqlQuery<T> {
         Ok(())
     }
 }
+
+// Safety: TypedSqlQuery is Send because:
+// - BoxedSqlQuery is Send (it contains boxed trait objects that are Send)
+// - PhantomData<T> is always Send/Sync regardless of T (it's zero-sized)
+// The T type parameter is only used as a marker for the SQL type system
+// and doesn't actually store any T values.
+unsafe impl<T> Send for TypedSqlQuery<T> {}
 
 impl<T> RunQueryDsl<DbConnection> for TypedSqlQuery<T> {}
 
