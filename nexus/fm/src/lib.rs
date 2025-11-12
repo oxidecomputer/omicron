@@ -6,12 +6,17 @@
 
 use nexus_types::fm;
 use nexus_types::inventory;
+use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use slog::Logger;
-use std::fmt::Write;
+// use std::fmt::Write;
+use anyhow::Context;
+use chrono::Utc;
+use std::sync::Arc;
 
+pub mod alert;
 pub mod de;
 
 #[derive(Debug)]
@@ -20,7 +25,7 @@ pub struct SitrepBuilder<'a> {
     pub inventory: &'a inventory::Collection,
     pub parent_sitrep: Option<&'a fm::Sitrep>,
     pub sitrep_id: SitrepUuid,
-    pub cases: iddqd::IdOrdMap<fm::Case>,
+    pub cases: iddqd::IdOrdMap<CaseBuilder>,
     comment: String,
 }
 
@@ -36,73 +41,64 @@ impl<'a> SitrepBuilder<'a> {
             "parent_sitrep_id" => format!("{:?}", parent_sitrep.as_ref().map(|s| s.id())),
             "inv_collection_id" => format!("{:?}", inventory.id),
         ));
+
+        // Copy forward any open cases from the parent sitrep.
+        // If a case was closed in the parent sitrep, skip it.
+        let cases: iddqd::IdOrdMap<_> = parent_sitrep
+            .iter()
+            .flat_map(|s| s.open_cases())
+            .map(|case| CaseBuilder::new(&log, sitrep_id, case.clone()))
+            .collect();
+
+        slog::info!(
+            &log,
+            "preparing sitrep {sitrep_id:?}";
+            "existing_open_cases" => cases.len(),
+        );
+
         SitrepBuilder {
             log,
             sitrep_id,
             inventory,
             parent_sitrep,
             comment: String::new(),
-            cases: Default::default(),
+            cases,
         }
     }
 
-    pub fn open_case(&mut self, case: fm::Case) -> anyhow::Result<CaseUuid> {
-        let case_id = case.id;
-        if self.cases.contains_key(&case_id) {
-            anyhow::bail!("case with ID {case_id:?} already exists");
-        }
-
-        slog::info!(
-            self.log,
-            "opened case {case_id:?}";
-            "case_id" => ?case_id,
-            "de" => %case.de
-        );
-
-        writeln!(&mut self.comment, "* de {} opened case {case_id:?}", case.de)
-            .unwrap();
-
-        self.cases
-            .insert_unique(case)
-            .expect("we just checked that it doesn't exist");
-        Ok(case_id)
-    }
-
-    pub fn request_alert(
+    pub fn open_case(
         &mut self,
-        case_id: CaseUuid,
-        req: fm::AlertRequest,
-    ) -> anyhow::Result<()> {
-        let mut case = self.cases
-            .get_mut(&case_id)
-            .ok_or_else(|| anyhow::anyhow!(
-                "cannot create an alert request for non-existent case ID {case_id:?}",
-            ))?;
-        let alert_id = req.id;
-        let alert_class = req.class;
-
-        case.alerts_requested.insert_unique(req).map_err(|_| {
-            anyhow::anyhow!("an alert with ID {alert_id:?} already exists")
-        })?;
-
-        writeln!(
-            &mut self.comment,
-            "* de {} requested {alert_class:?} alert {alert_id:?} for case \
-             {case_id:?}",
-            case.de
-        )
-        .unwrap();
+        de: fm::DiagnosisEngine,
+    ) -> anyhow::Result<iddqd::id_ord_map::RefMut<'_, CaseBuilder>> {
+        let id = CaseUuid::new_v4();
+        let sitrep_id = self.sitrep_id;
+        let case = match self.cases.entry(&id) {
+            iddqd::id_ord_map::Entry::Occupied(_) => {
+                panic!("generated a colliding UUID!")
+            }
+            iddqd::id_ord_map::Entry::Vacant(entry) => {
+                let case = fm::Case {
+                    id,
+                    created_sitrep_id: self.sitrep_id,
+                    time_created: chrono::Utc::now(),
+                    time_closed: None,
+                    de,
+                    comment: String::new(),
+                    ereports: Default::default(),
+                    alerts_requested: Default::default(),
+                };
+                entry.insert(CaseBuilder::new(&self.log, sitrep_id, case))
+            }
+        };
 
         slog::info!(
             self.log,
-            "requested an alert for case {case_id:?}";
-            "case_id" => ?case_id,
-            "de" => %case.de,
-            "alert_id" => ?alert_id,
-            "alert_class" => ?alert_class,
+            "opened case {id:?}";
+            "case_id" => ?id,
+            "de" => %de
         );
 
-        Ok(())
+        Ok(case)
     }
 
     pub fn build(self, creator_id: OmicronZoneUuid) -> fm::Sitrep {
@@ -115,7 +111,114 @@ impl<'a> SitrepBuilder<'a> {
                 comment: self.comment,
                 time_created: chrono::Utc::now(),
             },
-            cases: self.cases,
+            cases: self
+                .cases
+                .into_iter()
+                .map(|builder| fm::Case::from(builder))
+                .collect(),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct CaseBuilder {
+    pub log: slog::Logger,
+    pub case: fm::Case,
+    pub sitrep_id: SitrepUuid,
+}
+
+impl CaseBuilder {
+    fn new(log: &slog::Logger, sitrep_id: SitrepUuid, case: fm::Case) -> Self {
+        let log = log.new(slog::o!(
+            "case_id" => format!("{:?}", case.id),
+            "de" => case.de.to_string(),
+            "created_sitrep_id" => format!("{:?}", case.created_sitrep_id),
+        ));
+        Self { log, case, sitrep_id }
+    }
+
+    pub fn request_alert<A: alert::Alert>(
+        &mut self,
+        alert: &A,
+    ) -> anyhow::Result<()> {
+        let id = AlertUuid::new_v4();
+        let class = A::CLASS;
+        let req = fm::AlertRequest {
+            id,
+            class,
+            requested_sitrep_id: self.sitrep_id,
+            payload: serde_json::to_value(&alert).with_context(|| {
+                format!(
+                    "failed to serialize payload for {class:?} alert {alert:?}"
+                )
+            })?,
+        };
+        self.case.alerts_requested.insert_unique(req).map_err(|_| {
+            anyhow::anyhow!("an alert with ID {id:?} already exists")
+        })?;
+
+        slog::info!(
+            &self.log,
+            "requested an alert";
+            "alert_id" => ?id,
+            "alert_class" => ?class,
+        );
+
+        Ok(())
+    }
+
+    pub fn close(&mut self, log: &slog::Logger) {
+        self.case.time_closed = Some(Utc::now());
+
+        slog::info!(log, "case closed");
+    }
+
+    pub fn add_ereport(&mut self, report: &Arc<fm::Ereport>) {
+        match self.case.ereports.insert_unique(report.clone()) {
+            Ok(_) => {
+                slog::info!(
+                    self.log,
+                    "assigned ereport {} to case", report.id();
+                    "ereport_id" => ?report.id(),
+                    "ereport_class" => ?report.class,
+                );
+            }
+            Err(_) => {
+                slog::warn!(
+                    self.log,
+                    "ereport {} already assigned to case", report.id();
+                    "ereport_id" => ?report.id(),
+                    "ereport_class" => ?report.class,
+                );
+            }
+        }
+    }
+}
+
+impl From<CaseBuilder> for fm::Case {
+    fn from(CaseBuilder { case, .. }: CaseBuilder) -> Self {
+        case
+    }
+}
+
+impl core::ops::Deref for CaseBuilder {
+    type Target = fm::Case;
+    fn deref(&self) -> &Self::Target {
+        &self.case
+    }
+}
+
+impl core::ops::DerefMut for CaseBuilder {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.case
+    }
+}
+
+impl iddqd::IdOrdItem for CaseBuilder {
+    type Key<'a> = &'a CaseUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.case.id
+    }
+
+    iddqd::id_upcast!();
 }
