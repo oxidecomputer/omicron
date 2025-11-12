@@ -4341,6 +4341,25 @@
               "type",
               "value"
             ]
+          },
+          {
+            "description": "The sled model could not be determined",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unable_to_determine_sled_model"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
           }
         ]
       },
