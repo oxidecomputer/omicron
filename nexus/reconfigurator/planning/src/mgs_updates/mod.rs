@@ -771,7 +771,8 @@ mod test {
 
     use super::ImpossibleUpdatePolicy;
     use super::PlannedMgsUpdates;
-    use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_1;
+    use super::test_helpers::ARTIFACT_HASH_COSMO_HOST_PHASE_1;
+    use super::test_helpers::ARTIFACT_HASH_GIMLET_HOST_PHASE_1;
     use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1;
     use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_2;
     use super::test_helpers::ARTIFACT_HASH_HOST_PHASE_2_V1;
@@ -798,6 +799,7 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::SpType;
     use omicron_test_utils::dev::LogContext;
+    use sled_hardware_types::OxideSled;
     use std::collections::BTreeSet;
     use std::sync::Arc;
     use strum::IntoEnumIterator;
@@ -1002,7 +1004,7 @@ mod test {
         // each of the sled boards, and report no pending updates
         let mut expected_blocked_updates = Vec::new();
         for baseboard_id in &collection.baseboards {
-            if baseboard_id.part_number == "dummy_sled" {
+            if OxideSled::try_from_model(&baseboard_id.part_number).is_some() {
                 expected_blocked_updates.push(BlockedMgsUpdate {
                     baseboard_id: baseboard_id.clone(),
                     reason: FailedMgsUpdateReason::HostOs(
@@ -1190,7 +1192,11 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
-            .host_phase_1_artifacts(
+            .gimlet_host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .cosmo_host_phase_1_artifacts(
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
             )
@@ -1241,6 +1247,9 @@ mod test {
             // just planned for the next iteration.
             let sp_type = update.sp_type;
             let sp_slot = update.slot_id;
+            let sled_type =
+                OxideSled::try_from_model(&update.baseboard_id.part_number);
+
             match update.details {
                 PendingMgsUpdateDetails::Rot { .. } => {
                     assert!(
@@ -1279,7 +1288,15 @@ mod test {
                     assert!(!builder.has_host_active_exception(sp_slot));
                     builder = builder.host_active_exception(
                         sp_slot,
-                        ARTIFACT_HASH_HOST_PHASE_1,
+                        match sled_type {
+                            Some(OxideSled::Gimlet) => {
+                                ARTIFACT_HASH_GIMLET_HOST_PHASE_1
+                            }
+                            Some(OxideSled::Cosmo) => {
+                                ARTIFACT_HASH_COSMO_HOST_PHASE_1
+                            }
+                            None => panic!("expected a sled"),
+                        },
                         ARTIFACT_HASH_HOST_PHASE_2,
                     );
                 }
@@ -1343,7 +1360,11 @@ mod test {
                 ARTIFACT_VERSION_1,
                 ExpectedVersion::NoValidVersion,
             )
-            .host_phase_1_artifacts(
+            .gimlet_host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .cosmo_host_phase_1_artifacts(
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
             )
@@ -1390,7 +1411,11 @@ mod test {
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
             .rot_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
-            .host_phase_1_artifacts(
+            .gimlet_host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .cosmo_host_phase_1_artifacts(
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
             )
@@ -1435,7 +1460,11 @@ mod test {
         let collection = test_boards
             .collection_builder()
             .sp_versions(ARTIFACT_VERSION_1, ExpectedVersion::NoValidVersion)
-            .host_phase_1_artifacts(
+            .gimlet_host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .cosmo_host_phase_1_artifacts(
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
             )
@@ -1479,7 +1508,11 @@ mod test {
         // update all the host OSs.
         let collection = test_boards
             .collection_builder()
-            .host_phase_1_artifacts(
+            .gimlet_host_phase_1_artifacts(
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+                ARTIFACT_HASH_HOST_PHASE_1_V1,
+            )
+            .cosmo_host_phase_1_artifacts(
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
                 ARTIFACT_HASH_HOST_PHASE_1_V1,
             )

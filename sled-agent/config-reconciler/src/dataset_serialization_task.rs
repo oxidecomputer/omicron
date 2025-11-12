@@ -15,9 +15,9 @@ use crate::InventoryError;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::StreamExt;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use illumos_utils::zfs;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
@@ -166,12 +166,14 @@ pub(crate) struct DatasetEnsureResult {
     pub(crate) result: Result<(), Arc<DatasetEnsureError>>,
 }
 
-impl IdMappable for DatasetEnsureResult {
-    type Id = DatasetUuid;
+impl IdOrdItem for DatasetEnsureResult {
+    type Key<'a> = DatasetUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.config.id
     }
+
+    id_upcast!();
 }
 
 #[derive(Debug, Clone)]
@@ -252,7 +254,7 @@ impl DatasetTaskHandle {
     /// attempted destruction but it failed.
     pub async fn datasets_destroy_orphans(
         &self,
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
     ) -> Result<anyhow::Result<IdOrdMap<OrphanedDataset>>, DatasetTaskError>
     {
@@ -266,9 +268,9 @@ impl DatasetTaskHandle {
 
     pub async fn datasets_ensure(
         &self,
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-    ) -> Result<IdMap<DatasetEnsureResult>, DatasetTaskError> {
+    ) -> Result<IdOrdMap<DatasetEnsureResult>, DatasetTaskError> {
         self.try_send_request(|tx| DatasetTaskRequest::DatasetsEnsure {
             datasets,
             currently_managed_zpools,
@@ -456,7 +458,7 @@ impl DatasetTask {
 
     async fn datasets_destroy_orphans<T: ZfsImpl>(
         &mut self,
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         zfs: &T,
     ) -> anyhow::Result<IdOrdMap<OrphanedDataset>> {
@@ -590,11 +592,11 @@ impl DatasetTask {
 
     async fn datasets_ensure<T: ZfsImpl>(
         &mut self,
-        config: IdMap<DatasetConfig>,
+        config: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         zfs: &T,
-    ) -> IdMap<DatasetEnsureResult> {
-        let mut ensure_results = IdMap::new();
+    ) -> IdOrdMap<DatasetEnsureResult> {
+        let mut ensure_results = IdOrdMap::new();
 
         // There's an implicit hierarchy inside the list of `DatasetConfig`s:
         //
@@ -636,10 +638,15 @@ impl DatasetTask {
                     "dataset" => ?dataset,
                 );
                 let err = DatasetEnsureError::ZpoolNotFound(*zpool);
-                ensure_results.insert(DatasetEnsureResult {
-                    config: dataset,
-                    result: Err(Arc::new(err)),
-                });
+                ensure_results
+                    .insert_unique(DatasetEnsureResult {
+                        config: dataset,
+                        result: Err(Arc::new(err)),
+                    })
+                    .expect(
+                        "DatasetConfig and DatasetEnsureResult both use \
+                         DatasetUuid as their key, so this is unique",
+                    );
                 continue;
             }
 
@@ -730,7 +737,8 @@ impl DatasetTask {
         .buffer_unordered(DATASET_ENSURE_CONCURRENCY_LIMIT);
 
         while let Some((config, result)) = non_transient_zones.next().await {
-            ensure_results.insert(DatasetEnsureResult { config, result });
+            ensure_results
+                .insert_overwrite(DatasetEnsureResult { config, result });
         }
 
         // For each transient zone dataset: either ensure it or mark down why we
@@ -746,7 +754,9 @@ impl DatasetTask {
                 else {
                     let err =
                         DatasetEnsureError::TransientZoneRootNoConfig(zpool);
-                    ensure_results.insert(DatasetEnsureResult {
+                    // Inserting into ensure_results here should also be unique
+                    // but it's hard to tell by code inspection.
+                    ensure_results.insert_overwrite(DatasetEnsureResult {
                         config: dataset,
                         result: Err(Arc::new(err)),
                     });
@@ -765,7 +775,9 @@ impl DatasetTask {
                                 zpool,
                                 err: Arc::clone(err),
                             };
-                        ensure_results.insert(DatasetEnsureResult {
+                        // Inserting into ensure_results here should also be
+                        // unique but it's hard to tell by code inspection.
+                        ensure_results.insert_overwrite(DatasetEnsureResult {
                             config: dataset,
                             result: Err(Arc::new(err)),
                         });
@@ -798,7 +810,10 @@ impl DatasetTask {
         let mut transient_zones = futures::stream::iter(transient_zone_futures)
             .buffer_unordered(DATASET_ENSURE_CONCURRENCY_LIMIT);
         while let Some((config, result)) = transient_zones.next().await {
-            ensure_results.insert(DatasetEnsureResult { config, result });
+            // Inserting into ensure_results here should also be unique but it's
+            // hard to tell by code inspection.
+            ensure_results
+                .insert_overwrite(DatasetEnsureResult { config, result });
         }
 
         // Remember all successfully-ensured datasets (used by
@@ -1112,16 +1127,16 @@ enum DatasetTaskRequest {
         >,
     },
     DatasetsDestroyOrphans {
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
         tx: DebugIgnore<
             oneshot::Sender<anyhow::Result<IdOrdMap<OrphanedDataset>>>,
         >,
     },
     DatasetsEnsure {
-        datasets: IdMap<DatasetConfig>,
+        datasets: IdOrdMap<DatasetConfig>,
         currently_managed_zpools: Arc<CurrentlyManagedZpools>,
-        tx: DebugIgnore<oneshot::Sender<IdMap<DatasetEnsureResult>>>,
+        tx: DebugIgnore<oneshot::Sender<IdOrdMap<DatasetEnsureResult>>>,
     },
     NestedDatasetMount {
         name: NestedDatasetLocation,
@@ -1542,7 +1557,7 @@ mod tests {
             .cycle()
             .map(|zpool| make_dataset_config(zpool, DatasetKind::Crucible))
             .take(100)
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
         let currently_managed_zpools =
@@ -1661,7 +1676,7 @@ mod tests {
                     )
                 }))
             })
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Configure our fake ZFS to fail to mount some of the transient zone
         // root.
@@ -1792,7 +1807,7 @@ mod tests {
                     ),
                 ]
             })
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
         let currently_managed_zpools =
@@ -1857,7 +1872,7 @@ mod tests {
                 .into_iter()
                 .map(move |kind| make_dataset_config(zpool, kind))
             })
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Send this pile of datasets to the task as a set to ensure.
         let currently_managed_zpools =
@@ -1991,7 +2006,7 @@ mod tests {
         // 2. The set of `DatasetConfig`s
         // 3. The set of datasets that don't have `DatasetConfig`s
         let mut pools: BTreeSet<ZpoolName> = BTreeSet::new();
-        let mut dataset_configs = IdMap::new();
+        let mut dataset_configs = IdOrdMap::new();
         let mut datasets_in_config = BTreeSet::new();
         let mut datasets_not_in_config = BTreeSet::new();
         for input in inputs {
@@ -2003,7 +2018,7 @@ mod tests {
                 if in_config {
                     assert!(!datasets_not_in_config.contains(&name));
                     assert!(datasets_in_config.insert(name.clone()));
-                    dataset_configs.insert(DatasetConfig {
+                    dataset_configs.insert_overwrite(DatasetConfig {
                         id: DatasetUuid::new_v4(),
                         name,
                         inner: SharedDatasetConfig::default(),
@@ -2185,7 +2200,7 @@ mod tests {
             .iter()
             .filter(|input| input.is_debug_datset_mounted)
             .map(|input| make_dataset_config(input.pool, DatasetKind::Debug))
-            .collect::<IdMap<_>>();
+            .collect::<IdOrdMap<_>>();
 
         // Spawn the task and feed our setup to it. All the debug datasets
         // should successfully be created.
@@ -2317,6 +2332,7 @@ mod illumos_tests {
     use crate::CurrentlyManagedZpoolsReceiver;
     use assert_matches::assert_matches;
     use camino_tempfile::Utf8TempDir;
+    use iddqd::id_ord_map;
     use illumos_utils::zpool::Zpool;
     use key_manager::KeyManager;
     use key_manager::SecretRetriever;
@@ -2720,12 +2736,10 @@ mod illumos_tests {
 
         // Because `dataset` has kind `TransientZone { .. }`, we also need to
         // supply its parent root.
-        let dataset_configs: IdMap<_> = [
+        let dataset_configs = id_ord_map! {
             dataset.clone(),
             make_dataset_config(zpool, DatasetKind::TransientZoneRoot),
-        ]
-        .into_iter()
-        .collect();
+        };
 
         // Create the datasets.
         let result = task_handle
@@ -2794,14 +2808,23 @@ mod illumos_tests {
         );
 
         // Build configs for a few datasets on each zpool
-        let mut datasets = IdMap::new();
+        let mut datasets = IdOrdMap::new();
         for &zpool in &zpools {
-            datasets.insert(make_dataset_config(zpool, DatasetKind::Crucible));
-            datasets.insert(make_dataset_config(zpool, DatasetKind::Debug));
-            datasets.insert(make_dataset_config(
-                zpool,
-                DatasetKind::TransientZoneRoot,
-            ));
+            datasets
+                .insert_unique(make_dataset_config(
+                    zpool,
+                    DatasetKind::Crucible,
+                ))
+                .unwrap();
+            datasets
+                .insert_unique(make_dataset_config(zpool, DatasetKind::Debug))
+                .unwrap();
+            datasets
+                .insert_unique(make_dataset_config(
+                    zpool,
+                    DatasetKind::TransientZoneRoot,
+                ))
+                .unwrap();
         }
 
         // Create the datasets.

@@ -5010,9 +5010,9 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.3.13"
+version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f73e38c7e0c1b237e00655516f8f633c584c0bd59ce63fedac6f49efeba15613"
+checksum = "dda610d939ea51890ca6c827c8365acf0a44b4b53d2ed6f371e8e7e47bc75d25"
 dependencies = [
  "allocator-api2",
  "daft",
@@ -6907,7 +6907,6 @@ dependencies = [
  "gateway-test-utils",
  "gateway-types",
  "httpmock",
- "id-map",
  "iddqd",
  "itertools 0.14.0",
  "nexus-client",
@@ -7138,7 +7137,6 @@ dependencies = [
  "diesel",
  "futures",
  "httptest",
- "id-map",
  "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7196,7 +7194,6 @@ dependencies = [
  "gateway-types",
  "hex-literal",
  "hickory-resolver 0.25.2",
- "id-map",
  "iddqd",
  "illumos-utils",
  "indexmap 2.11.4",
@@ -7220,6 +7217,7 @@ dependencies = [
  "rand 0.9.2",
  "semver 1.0.27",
  "sled-agent-client",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "sp-sim",
@@ -7339,7 +7337,6 @@ dependencies = [
  "camino",
  "chrono",
  "daft",
- "id-map",
  "iddqd",
  "illumos-utils",
  "indent_write",
@@ -7399,7 +7396,7 @@ dependencies = [
  "http",
  "http-body-util",
  "hyper",
- "id-map",
+ "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7493,6 +7490,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "steno",
@@ -7999,7 +7997,6 @@ dependencies = [
  "futures",
  "hex",
  "http",
- "id-map",
  "iddqd",
  "ipnetwork",
  "libc",
@@ -8281,7 +8278,6 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-staticfile",
- "id-map",
  "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
@@ -12821,7 +12817,6 @@ dependencies = [
  "dropshot",
  "dropshot-api-manager-types",
  "http",
- "id-map",
  "iddqd",
  "nexus-sled-agent-shared",
  "omicron-common",
@@ -12879,7 +12874,6 @@ dependencies = [
  "expectorate",
  "futures",
  "glob",
- "id-map",
  "iddqd",
  "illumos-utils",
  "installinator-common",
@@ -13084,6 +13078,7 @@ dependencies = [
  "expectorate",
  "futures",
  "glob",
+ "iddqd",
  "illumos-utils",
  "key-manager",
  "omicron-common",

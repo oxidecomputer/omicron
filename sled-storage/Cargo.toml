@@ -16,6 +16,7 @@ debug-ignore.workspace = true
 derive_more.workspace = true
 glob.workspace = true
 futures.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 key-manager.workspace = true
 omicron-common.workspace = true

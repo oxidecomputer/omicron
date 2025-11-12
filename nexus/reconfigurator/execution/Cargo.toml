@@ -20,7 +20,6 @@ cockroach-admin-client.workspace = true
 chrono.workspace = true
 futures.workspace = true
 iddqd.workspace = true
-id-map.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 newtype-uuid.workspace = true
