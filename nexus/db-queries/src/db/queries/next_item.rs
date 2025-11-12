@@ -4,7 +4,7 @@
 
 //! A generic query for selecting a unique next item from a table.
 
-use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
+use crate::db::raw_query_builder::QueryBuilder;
 use diesel::RunQueryDsl;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;

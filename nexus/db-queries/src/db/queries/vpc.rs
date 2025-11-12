@@ -4,26 +4,13 @@
 
 //! Queries for inserting a candidate, incomplete VPC
 
-use crate::db::model::Generation;
+use crate::db::column_walker::AllColumnsOf;
 use crate::db::model::IncompleteVpc;
-use crate::db::model::Name;
 use crate::db::model::Vni;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::NextItem;
-use chrono::DateTime;
-use chrono::Utc;
-use diesel::Column;
-use diesel::Insertable;
-use diesel::pg::Pg;
-use diesel::query_builder::AstPass;
-use diesel::query_builder::QueryFragment;
-use diesel::query_builder::QueryId;
 use diesel::sql_types;
-use ipnetwork::IpNetwork;
-use nexus_db_schema::schema::vpc;
-use nexus_db_schema::schema::vpc::dsl;
 use omicron_common::api::external;
-use uuid::Uuid;
 
 #[derive(Debug)]
 enum VniSubquery {
@@ -43,6 +30,8 @@ pub struct InsertVpcQuery {
     pub(crate) vpc: IncompleteVpc,
     vni_subquery: VniSubquery,
 }
+
+type AllVpcColumns = AllColumnsOf::<nexus_db_schema::schema::vpc::table>;
 
 impl InsertVpcQuery {
     pub fn new(vpc: IncompleteVpc) -> Self {
@@ -67,172 +56,63 @@ impl InsertVpcQuery {
         };
         Self { vpc, vni_subquery }
     }
-}
 
-impl QueryId for InsertVpcQuery {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
+    /// Builds the complete INSERT query using QueryBuilder.
+    pub fn to_insert_query(
+        self,
+    ) -> crate::db::raw_query_builder::TypedSqlQuery<
+        crate::db::raw_query_builder::SelectableSql<crate::db::model::Vpc>,
+    > {
+        use crate::db::raw_query_builder::QueryBuilder;
 
-impl Insertable<vpc::table> for InsertVpcQuery {
-    type Values = InsertVpcQueryValues;
+        let mut builder = QueryBuilder::new();
 
-    fn values(self) -> Self::Values {
-        InsertVpcQueryValues(self)
-    }
-}
+        builder.sql("INSERT INTO vpc (");
+        builder.sql(AllVpcColumns::as_str());
+        builder.sql(") ");
+        builder.sql("SELECT ");
+        builder.param().bind::<sql_types::Uuid, _>(self.vpc.identity.id);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Text, _>(self.vpc.identity.name);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Text, _>(self.vpc.identity.description);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Timestamptz, _>(self.vpc.identity.time_created);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Timestamptz, _>(self.vpc.identity.time_modified);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Nullable<sql_types::Timestamptz>, _>(self.vpc.identity.time_deleted);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Uuid, _>(self.vpc.project_id);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Uuid, _>(self.vpc.system_router_id);
+        builder.sql(", ");
 
-impl QueryFragment<Pg> for InsertVpcQuery {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        out.push_sql("SELECT ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.vpc.identity.id)?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Text, Name>(&self.vpc.identity.name)?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::name::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Text, String>(
-            &self.vpc.identity.description,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::description::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.vpc.identity.time_created,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::time_created::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
-            &self.vpc.identity.time_modified,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::time_modified::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<
-            sql_types::Nullable<sql_types::Timestamptz>,
-            Option<DateTime<Utc>>
-        >(&self.vpc.identity.time_deleted)?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.vpc.project_id)?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::project_id::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Uuid, Uuid>(
-            &self.vpc.system_router_id,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::system_router_id::NAME)?;
-        out.push_sql(", ");
-
-        out.push_bind_param::<sql_types::Text, Name>(&self.vpc.dns_name)?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::dns_name::NAME)?;
-        out.push_sql(", ");
-
-        match &self.vni_subquery {
+        // VNI - either fixed or from NextItem query
+        match self.vni_subquery {
             VniSubquery::Fixed(vni) => {
-                out.push_bind_param::<sql_types::Int4, i32>(vni)?;
+                builder.param().bind::<sql_types::Int4, _>(vni);
             }
             VniSubquery::Next(vni_subquery) => {
-                out.push_sql("(");
-                vni_subquery.walk_ast(out.reborrow())?;
-                out.push_sql(")");
+                builder.sql("(");
+                vni_subquery.inner.build_query(&mut builder);
+                builder.sql(")");
             }
         }
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::vni::NAME)?;
-        out.push_sql(", ");
+        builder.sql(", ");
 
-        // TODO-performance: It might be possible to replace this with a
-        // NextItem query, but Cockroach doesn't currently support the 128-bit
-        // integers we'd need to create `/48` prefixes by adding a random offset
-        // to `fd00::/8`. For now, we do that with a retry-loop in the
-        // application.
-        out.push_bind_param::<sql_types::Inet, IpNetwork>(
-            &self.vpc.ipv6_prefix,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::ipv6_prefix::NAME)?;
-        out.push_sql(", ");
+        builder.param().bind::<sql_types::Inet, _>(self.vpc.ipv6_prefix);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Text, _>(self.vpc.dns_name);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Int8, _>(self.vpc.firewall_gen);
+        builder.sql(", ");
+        builder.param().bind::<sql_types::Int8, _>(self.vpc.subnet_gen);
 
-        out.push_bind_param::<sql_types::Int8, Generation>(
-            &self.vpc.firewall_gen,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::firewall_gen::NAME)?;
-        out.push_sql(", ");
+        builder.sql(" RETURNING ");
+        builder.sql(AllVpcColumns::as_str());
 
-        out.push_bind_param::<sql_types::Int8, Generation>(
-            &self.vpc.subnet_gen,
-        )?;
-        out.push_sql(" AS ");
-        out.push_identifier(dsl::subnet_gen::NAME)?;
-
-        Ok(())
-    }
-}
-
-pub struct InsertVpcQueryValues(InsertVpcQuery);
-
-impl QueryId for InsertVpcQueryValues {
-    type QueryId = ();
-    const HAS_STATIC_QUERY_ID: bool = false;
-}
-
-impl diesel::insertable::CanInsertInSingleQuery<Pg> for InsertVpcQueryValues {
-    fn rows_to_insert(&self) -> Option<usize> {
-        Some(1)
-    }
-}
-
-impl QueryFragment<Pg> for InsertVpcQueryValues {
-    fn walk_ast<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> diesel::QueryResult<()> {
-        out.push_sql("(");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::name::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::description::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_created::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_modified::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::project_id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::system_router_id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::dns_name::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::vni::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::ipv6_prefix::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::firewall_gen::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::subnet_gen::NAME)?;
-        out.push_sql(")");
-        self.0.walk_ast(out)
+        builder.query()
     }
 }
 
@@ -267,8 +147,6 @@ impl NextVni {
         Self { inner }
     }
 }
-
-delegate_query_fragment_impl!(NextVni);
 
 impl std::fmt::Debug for NextVni {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

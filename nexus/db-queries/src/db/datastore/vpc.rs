@@ -19,7 +19,6 @@ use crate::db::model::DbTypedUuid;
 use crate::db::model::IncompleteVpc;
 use crate::db::model::InstanceNetworkInterface;
 use crate::db::model::Name;
-use crate::db::model::Project;
 use crate::db::model::RouterRoute;
 use crate::db::model::RouterRouteKind;
 use crate::db::model::RouterRouteUpdate;
@@ -473,8 +472,6 @@ impl DataStore {
         authz_project: &authz::Project,
         vpc_query: InsertVpcQuery,
     ) -> Result<Option<(authz::Vpc, Vpc)>, Error> {
-        use nexus_db_schema::schema::vpc::dsl;
-
         assert_eq!(authz_project.id(), vpc_query.vpc.project_id);
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
@@ -482,12 +479,10 @@ impl DataStore {
         let project_id = vpc_query.vpc.project_id;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let result: Result<Vpc, _> = Project::insert_resource(
-            project_id,
-            diesel::insert_into(dsl::vpc).values(vpc_query),
-        )
-        .insert_and_get_result_async(&conn)
-        .await;
+
+        // Use the QueryBuilder-based query
+        let query = vpc_query.to_insert_query();
+        let result: Result<Vpc, _> = query.get_result_async(&*conn).await;
         match result {
             Ok(vpc) => Ok(Some((
                 authz::Vpc::new(
@@ -497,17 +492,19 @@ impl DataStore {
                 ),
                 vpc,
             ))),
-            Err(AsyncInsertError::CollectionNotFound) => {
+            Err(DieselError::DatabaseError(
+                DatabaseErrorKind::ForeignKeyViolation,
+                ref info,
+            )) if info.constraint_name() == Some("vpc_project_id_fkey") => {
+                // Project doesn't exist
                 Err(Error::ObjectNotFound {
                     type_name: ResourceType::Project,
                     lookup_type: LookupType::ById(project_id),
                 })
             }
-            Err(AsyncInsertError::DatabaseError(
-                DieselError::DatabaseError(
-                    DatabaseErrorKind::NotNullViolation,
-                    info,
-                ),
+            Err(DieselError::DatabaseError(
+                DatabaseErrorKind::NotNullViolation,
+                ref info,
             )) if info
                 .message()
                 .starts_with("null value in column \"vni\"") =>
@@ -517,7 +514,7 @@ impl DataStore {
                 // None instead to signal the error.
                 Ok(None)
             }
-            Err(AsyncInsertError::DatabaseError(e)) => {
+            Err(e) => {
                 Err(public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
