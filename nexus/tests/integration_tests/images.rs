@@ -655,7 +655,7 @@ async fn test_silo_collaborator_can_promote_demote_images(
 }
 
 #[nexus_test]
-async fn test_limited_collaborator_can_promote_demote_images(
+async fn test_silo_limited_collaborator_can_promote_demote_images(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -761,7 +761,7 @@ async fn test_limited_collaborator_can_promote_demote_images(
 }
 
 #[nexus_test]
-async fn test_viewer_cannot_promote_demote_images(
+async fn test_silo_viewer_cannot_promote_demote_images(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
