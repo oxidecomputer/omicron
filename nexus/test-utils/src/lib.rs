@@ -25,7 +25,7 @@ use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
 use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::proto::xfer::Protocol;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
@@ -1611,59 +1611,65 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         {
             let sled_id = sled_agent.sled_agent_id();
 
-            let mut disks = IdMap::new();
-            let mut datasets = IdMap::new();
+            let mut disks = IdOrdMap::new();
+            let mut datasets = IdOrdMap::new();
             let zones = if let Some(zones) = maybe_zones {
                 for zone in zones {
                     let zpool = &zone.filesystem_pool;
-                    disks.insert(BlueprintPhysicalDiskConfig {
-                        disposition:
-                            BlueprintPhysicalDiskDisposition::InService,
-                        identity: omicron_common::disk::DiskIdentity {
-                            vendor: "nexus-tests".to_string(),
-                            model: "nexus-test-model".to_string(),
-                            serial: format!("nexus-test-disk-{disk_index}"),
-                        },
-                        id: PhysicalDiskUuid::new_v4(),
-                        pool_id: zpool.id(),
-                    });
+                    disks
+                        .insert_unique(BlueprintPhysicalDiskConfig {
+                            disposition:
+                                BlueprintPhysicalDiskDisposition::InService,
+                            identity: omicron_common::disk::DiskIdentity {
+                                vendor: "nexus-tests".to_string(),
+                                model: "nexus-test-model".to_string(),
+                                serial: format!("nexus-test-disk-{disk_index}"),
+                            },
+                            id: PhysicalDiskUuid::new_v4(),
+                            pool_id: zpool.id(),
+                        })
+                        .expect("freshly generated disk IDs are unique");
                     disk_index += 1;
                     let id = DatasetUuid::new_v4();
-                    datasets.insert(BlueprintDatasetConfig {
-                        disposition: BlueprintDatasetDisposition::InService,
-                        id,
-                        pool: *zpool,
-                        kind: DatasetKind::TransientZone {
-                            name: illumos_utils::zone::zone_name(
-                                zone.zone_type.kind().zone_prefix(),
-                                Some(zone.id),
-                            ),
-                        },
-                        address: None,
-                        quota: None,
-                        reservation: None,
-                        compression: CompressionAlgorithm::Off,
-                    });
+                    datasets
+                        .insert_unique(BlueprintDatasetConfig {
+                            disposition: BlueprintDatasetDisposition::InService,
+                            id,
+                            pool: *zpool,
+                            kind: DatasetKind::TransientZone {
+                                name: illumos_utils::zone::zone_name(
+                                    zone.zone_type.kind().zone_prefix(),
+                                    Some(zone.id),
+                                ),
+                            },
+                            address: None,
+                            quota: None,
+                            reservation: None,
+                            compression: CompressionAlgorithm::Off,
+                        })
+                        .expect("freshly generated dataset IDs are unique");
                 }
                 zones.iter().cloned().collect()
             } else {
-                IdMap::new()
+                IdOrdMap::new()
             };
 
             // Populate extra fake disks, giving each sled 10 total.
             if disks.len() < 10 {
                 for _ in disks.len()..10 {
-                    disks.insert(BlueprintPhysicalDiskConfig {
-                        disposition:
-                            BlueprintPhysicalDiskDisposition::InService,
-                        identity: omicron_common::disk::DiskIdentity {
-                            vendor: "nexus-tests".to_string(),
-                            model: "nexus-test-model".to_string(),
-                            serial: format!("nexus-test-disk-{disk_index}"),
-                        },
-                        id: PhysicalDiskUuid::new_v4(),
-                        pool_id: ZpoolUuid::new_v4(),
-                    });
+                    disks
+                        .insert_unique(BlueprintPhysicalDiskConfig {
+                            disposition:
+                                BlueprintPhysicalDiskDisposition::InService,
+                            identity: omicron_common::disk::DiskIdentity {
+                                vendor: "nexus-tests".to_string(),
+                                model: "nexus-test-model".to_string(),
+                                serial: format!("nexus-test-disk-{disk_index}"),
+                            },
+                            id: PhysicalDiskUuid::new_v4(),
+                            pool_id: ZpoolUuid::new_v4(),
+                        })
+                        .expect("freshly generated disk IDs are unique");
                     disk_index += 1;
                 }
             }

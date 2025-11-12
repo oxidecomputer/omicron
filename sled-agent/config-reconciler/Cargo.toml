@@ -20,7 +20,6 @@ dropshot.workspace = true
 either.workspace = true
 futures.workspace = true
 glob.workspace = true
-id-map.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true
