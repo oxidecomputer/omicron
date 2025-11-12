@@ -650,10 +650,7 @@ mod test {
     /// test blueprint_internal_dns_config(): trivial case of an empty blueprint
     #[test]
     fn test_blueprint_internal_dns_empty() {
-        let blueprint = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test-suite",
-        );
+        let blueprint = BlueprintBuilder::build_empty("test-suite");
         let blueprint_dns = blueprint_internal_dns_config(
             &blueprint,
             &IdOrdMap::new(),

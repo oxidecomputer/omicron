@@ -530,6 +530,12 @@ pub struct BlueprintBuilder<'a> {
 }
 
 impl<'a> BlueprintBuilder<'a> {
+    /// Directly construct an empty blueprint: no sleds; default values for all
+    /// other fields.
+    pub fn build_empty(creator: &str) -> Blueprint {
+        Self::build_empty_with_sleds(iter::empty(), creator)
+    }
+
     /// Directly construct a `Blueprint` that contains an empty zone config for
     /// the given sleds.
     pub fn build_empty_with_sleds(

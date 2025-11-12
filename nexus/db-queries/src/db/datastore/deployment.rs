@@ -3311,10 +3311,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an empty blueprint from it
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test");
         let authz_blueprint = authz_blueprint_from_id(blueprint1.id);
 
         // Trying to read it from the database should fail with the relevant
@@ -4039,10 +4036,7 @@ mod tests {
         // Create three blueprints:
         // * `blueprint1` has no parent
         // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test1",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -4190,10 +4184,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an initial blueprint and a child.
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test1",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
