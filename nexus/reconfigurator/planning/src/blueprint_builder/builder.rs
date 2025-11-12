@@ -606,7 +606,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn new_based_on(
         log: &Logger,
         parent_blueprint: &'a Blueprint,
-        input: &'a PlanningInput,
+        input: &PlanningInput,
         creator: &str,
         mut rng: PlannerRng,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
