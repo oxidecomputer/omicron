@@ -32,6 +32,7 @@ pub struct Ereport {
     Serialize,
     Deserialize,
     JsonSchema,
+    Hash,
 )]
 #[repr(transparent)]
 #[serde(from = "u64", into = "u64")]
@@ -103,7 +104,16 @@ impl TryFrom<i64> for Ena {
 
 /// Unique identifier for an ereport.
 #[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    PartialOrd,
+    Ord,
+    Hash,
 )]
 pub struct EreportId {
     pub restart_id: EreporterRestartUuid,

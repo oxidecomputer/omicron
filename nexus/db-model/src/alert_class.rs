@@ -4,6 +4,7 @@
 
 use super::impl_enum_type;
 use nexus_types::external_api::views;
+use omicron_common::api::external::Error;
 use serde::de::{self, Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 use std::fmt;
@@ -100,6 +101,22 @@ impl From<nexus_types::fm::AlertClass> for AlertClass {
         match input {
             In::PsuRemoved => Self::PsuRemoved,
             In::PsuInserted => Self::PsuInserted,
+        }
+    }
+}
+
+impl TryFrom<AlertClass> for nexus_types::fm::AlertClass {
+    type Error = Error;
+
+    fn try_from(input: AlertClass) -> Result<Self, Self::Error> {
+        use nexus_types::fm::AlertClass as Out;
+        match input {
+            AlertClass::PsuRemoved => Ok(Out::PsuRemoved),
+            AlertClass::PsuInserted => Ok(Out::PsuInserted),
+            class => Err(Error::invalid_value(
+                "alert_class",
+                format!("'{class}' is not a FM alert class"),
+            )),
         }
     }
 }
