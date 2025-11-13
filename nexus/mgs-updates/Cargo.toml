@@ -13,7 +13,6 @@ gateway-client.workspace = true
 gateway-types.workspace = true
 gateway-messages.workspace = true
 iddqd.workspace = true
-id-map.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true
 nexus-sled-agent-shared.workspace = true

@@ -60,7 +60,6 @@ members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
-    "id-map",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -223,7 +222,6 @@ default-members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
-    "id-map",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -505,7 +503,6 @@ hyper-util = "0.1.16"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
 iddqd = { version = "0.3.16", features = ["daft", "serde", "schemars08"] }
-id-map = { path = "id-map" }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
 indent_write = "2.2.0"

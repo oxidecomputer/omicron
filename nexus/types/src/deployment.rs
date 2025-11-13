@@ -158,7 +158,6 @@ use blueprint_display::{
     BpDiffState, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableData, BpTableRow, KvList, constants::*,
 };
-use id_map::IdMappable;
 use std::str::FromStr;
 
 /// Describes a complete set of software and configuration for the system
@@ -1075,14 +1074,6 @@ pub struct BlueprintZoneConfig {
     pub filesystem_pool: ZpoolName,
     pub zone_type: BlueprintZoneType,
     pub image_source: BlueprintZoneImageSource,
-}
-
-impl IdMappable for BlueprintZoneConfig {
-    type Id = OmicronZoneUuid;
-
-    fn id(&self) -> Self::Id {
-        self.id
-    }
 }
 
 impl IdOrdItem for BlueprintZoneConfig {
@@ -2143,14 +2134,6 @@ pub struct BlueprintPhysicalDiskConfig {
     pub pool_id: ZpoolUuid,
 }
 
-impl IdMappable for BlueprintPhysicalDiskConfig {
-    type Id = PhysicalDiskUuid;
-
-    fn id(&self) -> Self::Id {
-        self.id
-    }
-}
-
 impl IdOrdItem for BlueprintPhysicalDiskConfig {
     type Key<'a> = PhysicalDiskUuid;
     fn key(&self) -> Self::Key<'_> {
@@ -2166,14 +2149,6 @@ impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
             id: value.id,
             pool_id: value.pool_id,
         }
-    }
-}
-
-impl IdMappable for BlueprintDatasetConfig {
-    type Id = DatasetUuid;
-
-    fn id(&self) -> Self::Id {
-        self.id
     }
 }
 
