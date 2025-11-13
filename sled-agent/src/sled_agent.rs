@@ -1218,7 +1218,7 @@ impl SledAgent {
             // just in case.
             mountpoint: Mountpoint(format!("/{dataset_id}").into()),
             can_mount: CanMount::Off,
-            zoned: true,
+            zoned: false,
             // encryption details not required, will inherit from parent
             // "oxp_UUID/crypt/local_storage", which inherits from
             // "oxp_UUID/crypt"
