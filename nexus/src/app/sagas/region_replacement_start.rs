@@ -683,7 +683,7 @@ async fn srrs_create_fake_volume(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            generation: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
                 target: vec![old_region_address.into()],
@@ -1072,8 +1072,8 @@ pub(crate) mod test {
                 }
             }
 
-            VolumeConstructionRequest::Region { gen, .. } => {
-                *gen = 0;
+            VolumeConstructionRequest::Region { generation, .. } => {
+                *generation = 0;
             }
 
             _ => {}
