@@ -53,7 +53,7 @@ async fn main_impl() -> Result<(), anyhow::Error> {
         .to_logger("dns-server")
         .context("failed to create logger")?;
 
-    let dns_server_config = dns_server::dns_server::Config {
+    let dns_server_config = dns_server::dns::server::Config {
         bind_address: args.dns_address,
         ..Default::default()
     };

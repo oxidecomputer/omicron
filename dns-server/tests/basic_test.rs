@@ -640,7 +640,7 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
 struct TestContext {
     client: Client,
     resolver: TokioResolver,
-    dns_server: dns_server::dns_server::ServerHandle,
+    dns_server: dns_server::dns::server::ServerHandle,
     dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
     tmp: Utf8TempDir,
     logctx: LogContext,
@@ -672,7 +672,7 @@ async fn init_client_server(
     assert!(store.is_new());
 
     // launch a dns server
-    let dns_server_config = dns_server::dns_server::Config {
+    let dns_server_config = dns_server::dns::server::Config {
         bind_address: "[::1]:0".parse().unwrap(),
         ..Default::default()
     };

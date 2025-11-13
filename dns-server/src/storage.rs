@@ -262,7 +262,7 @@ impl Store {
     /// This creates a hickory-server Catalog with one Authority for each zone
     /// we're authoritative for.
     fn build_catalog(&self) -> Result<Catalog, anyhow::Error> {
-        use crate::authority::OmicronAuthority;
+        use crate::dns::authority::OmicronAuthority;
         use hickory_server::authority::ZoneType;
 
         let config = self.read_config()?;

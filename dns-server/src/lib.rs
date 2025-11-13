@@ -46,13 +46,12 @@
 //! This crate provides three main pieces for running the DNS server program:
 //!
 //! 1. Persistent [`storage::Store`] of DNS data
-//! 2. A [`dns_server::Server`], that serves data from a `storage::Store` out
+//! 2. A [`dns::server::Server`], that serves data from a `storage::Store` out
 //!    over the DNS protocol
 //! 3. A Dropshot server that serves HTTP endpoints for reading and modifying
 //!    the persistent DNS data
 
-pub mod authority;
-pub mod dns_server;
+pub mod dns;
 pub mod http_server;
 pub mod storage;
 
@@ -70,14 +69,14 @@ use std::net::SocketAddr;
 pub async fn start_servers(
     log: slog::Logger,
     store: storage::Store,
-    dns_server_config: &dns_server::Config,
+    dns_server_config: &dns::server::Config,
     dropshot_config: &dropshot::ConfigDropshot,
 ) -> Result<
-    (dns_server::ServerHandle, dropshot::HttpServer<http_server::Context>),
+    (dns::server::ServerHandle, dropshot::HttpServer<http_server::Context>),
     anyhow::Error,
 > {
     let dns_server = {
-        dns_server::Server::start(
+        dns::server::Server::start(
             log.new(o!("component" => "dns")),
             store.clone(),
             dns_server_config,
@@ -116,7 +115,7 @@ pub struct TransientServer {
     /// Server storage dir
     pub storage_dir: tempfile::TempDir,
     /// DNS server
-    pub dns_server: dns_server::ServerHandle,
+    pub dns_server: dns::server::ServerHandle,
     /// Dropshot server
     pub dropshot_server: dropshot::HttpServer<http_server::Context>,
 }
@@ -150,7 +149,7 @@ impl TransientServer {
         let (dns_server, dropshot_server) = start_servers(
             dns_log,
             store,
-            &dns_server::Config {
+            &dns::server::Config {
                 bind_address: dns_bind_address,
                 ..Default::default()
             },

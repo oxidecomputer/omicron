@@ -486,7 +486,7 @@ mod test {
         dropshot_server: dropshot::HttpServer<dns_server::http_server::Context>,
 
         successful: bool,
-        dns_server: dns_server::dns_server::ServerHandle,
+        dns_server: dns_server::dns::server::ServerHandle,
         config_client: dns_service_client::Client,
         log: slog::Logger,
     }
@@ -512,7 +512,7 @@ mod test {
             let (dns_server, dropshot_server) = dns_server::start_servers(
                 log.clone(),
                 store,
-                &dns_server::dns_server::Config {
+                &dns_server::dns::server::Config {
                     bind_address: "[::1]:0".parse().unwrap(),
                     ..Default::default()
                 },

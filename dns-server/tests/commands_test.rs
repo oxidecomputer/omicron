@@ -31,7 +31,7 @@ async fn test_dnsadm() {
     let (_dns_server, dropshot_server) = dns_server::start_servers(
         logctx.log.clone(),
         store,
-        &dns_server::dns_server::Config {
+        &dns_server::dns::server::Config {
             bind_address: "[::1]:0".parse().unwrap(),
             ..Default::default()
         },
