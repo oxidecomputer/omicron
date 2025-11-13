@@ -132,7 +132,7 @@ pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
         as usize;
 pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 
-pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
+pub const MAX_VCPU_PER_INSTANCE: u16 = 254;
 
 pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
 // This is larger than total memory (let alone reservoir) on some sleds; it is

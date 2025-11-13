@@ -389,8 +389,23 @@ pub enum TufArtifactReplicationOperation {
     Copy { hash: ArtifactHash, source_sled: SledUuid },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct TufRepoPrunerStatus {
+/// High-level status of the TUF repo pruner background task.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
+pub enum TufRepoPrunerStatus {
+    /// The TUF repo pruner is disabled.
+    Disabled {
+        /// The reason why the pruner is disabled.
+        reason: String,
+    },
+    /// The TUF repo pruner is enabled and ran successfully.
+    Enabled(TufRepoPrunerDetails),
+}
+
+/// Details about a TUF repo pruner run when the task is enabled.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TufRepoPrunerDetails {
     // Input
     /// how many recent releases we're configured to keep
     pub nkeep_recent_releases: u8,
@@ -410,7 +425,7 @@ pub struct TufRepoPrunerStatus {
     pub warnings: Vec<String>,
 }
 
-impl std::fmt::Display for TufRepoPrunerStatus {
+impl std::fmt::Display for TufRepoPrunerDetails {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn print_collection(c: &IdOrdMap<TufRepoInfo>) -> String {
             if c.is_empty() {
@@ -474,6 +489,22 @@ impl std::fmt::Display for TufRepoPrunerStatus {
         )?;
 
         Ok(())
+    }
+}
+
+impl std::fmt::Display for TufRepoPrunerStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TufRepoPrunerStatus::Disabled { reason } => {
+                writeln!(f, "    status: disabled")?;
+                writeln!(f, "    reason: {}", reason)?;
+                Ok(())
+            }
+            TufRepoPrunerStatus::Enabled(details) => {
+                writeln!(f, "    status: enabled")?;
+                details.fmt(f)
+            }
+        }
     }
 }
 
@@ -811,12 +842,13 @@ pub struct ProbeDistributorStatus {
 #[cfg(test)]
 mod test {
     use super::TufRepoInfo;
+    use super::TufRepoPrunerDetails;
     use super::TufRepoPrunerStatus;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
 
     #[test]
-    fn test_display_tuf_repo_pruner_status() {
+    fn test_display_tuf_repo_pruner_status_enabled() {
         let repo1 = TufRepoInfo {
             id: "4e8a87a0-3102-4014-99d3-e1bf486685bd".parse().unwrap(),
             system_version: "1.2.3".parse().unwrap(),
@@ -829,7 +861,7 @@ mod test {
         };
         let repo_map: IdOrdMap<_> = std::iter::once(repo1.clone()).collect();
 
-        let status = TufRepoPrunerStatus {
+        let details = TufRepoPrunerDetails {
             nkeep_recent_releases: 1,
             nkeep_recent_uploads: 2,
             repos_keep_target_release: repo_map,
@@ -840,9 +872,22 @@ mod test {
                 .collect(),
             warnings: vec![String::from("fake-oh problem-oh")],
         };
+        let status = TufRepoPrunerStatus::Enabled(details);
 
         assert_contents(
-            "output/tuf_repo_pruner_status.out",
+            "output/tuf_repo_pruner_status_enabled.out",
+            &status.to_string(),
+        );
+    }
+
+    #[test]
+    fn test_display_tuf_repo_pruner_status_disabled() {
+        let status = TufRepoPrunerStatus::Disabled {
+            reason: "disabled in this test".to_string(),
+        };
+
+        assert_contents(
+            "output/tuf_repo_pruner_status_disabled.out",
             &status.to_string(),
         );
     }

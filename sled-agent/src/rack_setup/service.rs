@@ -1621,9 +1621,9 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 // value, we will need to revisit storing this in the serialized
                 // RSS plan.
                 sled_agent_generation: DeployStepVersion::V5_EVERYTHING,
-                disks: sled_config.disks.iter().cloned().collect(),
+                disks: sled_config.disks.clone(),
                 datasets,
-                zones: sled_config.zones.iter().cloned().collect(),
+                zones: sled_config.zones.clone(),
                 host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
                 ),
                 remove_mupdate_override: None,
