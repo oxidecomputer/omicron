@@ -76,8 +76,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.ereport (
     sled_id UUID,
 
     CONSTRAINT reporter_identity_validity CHECK (
-        (reporter = 'sp' AND sp_type IS NOT NULL AND sp_slot IS NOT NULL) OR
-        (reporter = 'host' AND sled_id IS NOT NULL)
+        (
+            -- ereports from SPs must have a SP type and slot,
+            -- and must not have a sled ID.
+            reporter = 'sp'
+                AND sp_type IS NOT NULL
+                AND sp_slot IS NOT NULL
+                AND sled_id IS NULL
+        ) OR (
+            -- ereports from the sled host OS must have a sled ID,
+            -- and must not have a SP type or slot.
+            reporter = 'host'
+                AND sled_id IS NOT NULL
+                AND sp_type IS NULL
+                AND sp_slot IS NULL
+        )
     ),
 
     PRIMARY KEY (restart_id, ena)
