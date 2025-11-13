@@ -135,6 +135,18 @@ impl Ereport {
         EreportId { ena: self.ena.into(), restart_id: self.restart_id.into() }
     }
 
+    /// Returns the [`types::Reporter`] identifying the entity that reported
+    /// this ereport.
+    ///
+    /// # Panics
+    ///
+    /// This function assumes that the database record for this ereport is
+    /// valid, and panics if it does not contain either a non-NULL `sp_type` and
+    /// `sp_slot` XOR a non-NULL `sled_id`.
+    ///
+    /// This constraint is enforced by the `reporter_identity_validity` CHECK
+    /// constraint in the database schema, so this should not panic unless an
+    /// ereport is manually constructed in memory with invalid values.
     pub fn reporter(&self) -> types::Reporter {
         self.reporter.try_into().unwrap()
     }
