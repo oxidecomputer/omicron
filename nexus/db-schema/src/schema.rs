@@ -2884,6 +2884,8 @@ table! {
         case_id -> Uuid,
         sitrep_id -> Uuid,
         assigned_sitrep_id -> Uuid,
+
+        comment -> Text,
     }
 }
 
