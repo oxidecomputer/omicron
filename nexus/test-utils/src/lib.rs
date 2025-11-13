@@ -278,6 +278,13 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         )
     }
 
+    pub fn lockstep_client(&self) -> nexus_lockstep_client::Client {
+        nexus_lockstep_client::Client::new(
+            &format!("http://{}", self.lockstep_client.bind_address),
+            self.lockstep_client.client_log.clone(),
+        )
+    }
+
     pub async fn teardown(mut self) {
         self.server.close().await;
         self.database.cleanup().await.unwrap();
@@ -848,6 +855,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             Some(ReconfiguratorConfig {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
+                tuf_repo_pruner_enabled: true,
             });
         self.config.deployment.internal_dns = InternalDns::FromAddress {
             address: self

@@ -429,8 +429,7 @@ mod test {
     use nexus_test_utils::db::TestDatabase;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        PendingMgsUpdates, PlannerConfig, ReconfiguratorConfig,
-        ReconfiguratorConfigView,
+        PendingMgsUpdates, ReconfiguratorConfig, ReconfiguratorConfigView,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::OmicronZoneUuid;
@@ -488,7 +487,7 @@ mod test {
                 version: 1,
                 config: ReconfiguratorConfig {
                     planner_enabled: true,
-                    planner_config: PlannerConfig::default(),
+                    ..ReconfiguratorConfig::default()
                 },
                 time_modified: now_db_precision(),
             }),
@@ -660,7 +659,7 @@ mod test {
                 version: 1,
                 config: ReconfiguratorConfig {
                     planner_enabled: true,
-                    planner_config: PlannerConfig::default(),
+                    ..ReconfiguratorConfig::default()
                 },
                 time_modified: now_db_precision(),
             }),
