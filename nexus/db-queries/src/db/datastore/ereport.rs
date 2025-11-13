@@ -433,15 +433,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explain_ereport_fetch_matching_queries() {
-        let logctx =
-            dev::test_setup_log("explain_ereport_fetch_matching_queries");
-        let db = TestDatabase::new_with_pool(&logctx.log).await;
-        let pool = db.pool();
-        let conn = pool.claim().await.unwrap();
-
-        let filters = &[
+    async fn explain_ereport_fetch_matching_default() {
+        explain_fetch_matching_query(
+            "explain_ereport_fetch_matching_default",
             EreportFilters::default(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_ereport_fetch_matching_only_serials() {
+        explain_fetch_matching_query(
+            "explain_ereport_fetch_matching_only_serials",
             EreportFilters {
                 only_serials: vec![
                     "BRM6900420".to_string(),
@@ -449,6 +452,14 @@ mod tests {
                 ],
                 ..Default::default()
             },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_ereport_fetch_matching_serials_and_classes() {
+        explain_fetch_matching_query(
+            "explain_ereport_fetch_matching_serials_and_classes",
             EreportFilters {
                 only_serials: vec![
                     "BRM6900420".to_string(),
@@ -460,31 +471,68 @@ mod tests {
                 ],
                 ..Default::default()
             },
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn explain_ereport_fetch_matching_only_time() {
+        explain_fetch_matching_query(
+            "explain_ereport_fetch_matching_only_time",
             EreportFilters {
                 end_time: Some(chrono::Utc::now()),
                 ..Default::default()
             },
-        ];
+        )
+        .await
+    }
 
-        for f in filters {
-            let pagparams = DataPageParams {
-                marker: None,
-                direction: PaginationOrder::Ascending,
-                limit: NonZeroU32::new(100).unwrap(),
-            };
-            let query = DataStore::ereport_fetch_matching_query(f, &pagparams);
-            let explanation = query
-                .explain_async(&conn)
-                .await
-                .expect("Failed to explain query - is it valid SQL?");
+    #[tokio::test]
+    async fn explain_ereport_fetch_matching_time_and_serials() {
+        explain_fetch_matching_query(
+            "explain_ereport_fetch_matching_only_time",
+            EreportFilters {
+                only_serials: vec![
+                    "BRM6900420".to_string(),
+                    "BRM5555555".to_string(),
+                ],
+                end_time: Some(chrono::Utc::now()),
+                ..Default::default()
+            },
+        )
+        .await
+    }
 
-            eprintln!("\n--- filters: {f:?}\n\n{explanation}");
+    async fn explain_fetch_matching_query(
+        test_name: &str,
+        filters: EreportFilters,
+    ) {
+        let logctx = dev::test_setup_log(test_name);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = pool.claim().await.unwrap();
 
-            assert!(
-                !explanation.contains("FULL SCAN"),
-                "Found an unexpected FULL SCAN: {explanation}",
-            );
-        }
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        eprintln!("--- filters: {filters:#?}\n");
+
+        let query =
+            DataStore::ereport_fetch_matching_query(&filters, &pagparams);
+
+        let explanation = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {explanation}",
+        );
+
+        eprintln!("--- explanation: {explanation}");
 
         db.terminate().await;
         logctx.cleanup_successful();
