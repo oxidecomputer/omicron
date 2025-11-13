@@ -47,6 +47,9 @@ use omicron_common::api::external::TufRepoMeta;
 use omicron_common::disk::M2Slot;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::SledUuid;
+use sled_hardware_types::COSMO_SLED_MODEL;
+use sled_hardware_types::GIMLET_SLED_MODEL;
+use sled_hardware_types::OxideSled;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
@@ -105,13 +108,16 @@ pub(super) const ARTIFACT_HASH_ROT_BOOTLOADER_PSC: ArtifactHash =
 /// Hash of fake artifact for fake switch RoT bootloader
 pub(super) const ARTIFACT_HASH_ROT_BOOTLOADER_SWITCH: ArtifactHash =
     ArtifactHash([28; 32]);
-/// Hash of fake artifact for host OS phase 1
-pub(super) const ARTIFACT_HASH_HOST_PHASE_1: ArtifactHash =
+/// Hash of fake artifact for Gimlet host OS phase 1
+pub(super) const ARTIFACT_HASH_GIMLET_HOST_PHASE_1: ArtifactHash =
     ArtifactHash([29; 32]);
 /// Hash of fake artifact for host OS phase 1 (for a fake version 1.5)
+/// This is used in a limited subset of tests so there is no need for
+/// a separate Gimlet/Cosmo hash
 pub(super) const ARTIFACT_HASH_HOST_PHASE_1_V1_5: ArtifactHash =
     ArtifactHash([30; 32]);
 /// Hash of fake artifact for host OS phase 2
+/// This is common for both Gimlet/Cosmo
 pub(super) const ARTIFACT_HASH_HOST_PHASE_2: ArtifactHash =
     ArtifactHash([31; 32]);
 
@@ -119,6 +125,9 @@ pub(super) const ARTIFACT_HASH_HOST_PHASE_2: ArtifactHash =
 ///
 /// This can be used to produce an inventory collection for a host slot that
 /// needs an update.
+///
+/// This is common between Gimlet and Cosmo as it's used to
+/// represent a set that needs an update
 pub(super) const ARTIFACT_HASH_HOST_PHASE_1_V1: ArtifactHash =
     ArtifactHash([32; 32]);
 /// Hash of a fake "version 1" artifact for host OS phase 1
@@ -127,6 +136,22 @@ pub(super) const ARTIFACT_HASH_HOST_PHASE_1_V1: ArtifactHash =
 /// needs an update.
 pub(super) const ARTIFACT_HASH_HOST_PHASE_2_V1: ArtifactHash =
     ArtifactHash([33; 32]);
+
+/// Hash of fake artifact for fake cosmo-b SP
+pub(super) const ARTIFACT_HASH_SP_COSMO_B: ArtifactHash =
+    ArtifactHash([34; 32]);
+/// Hash of fake artifact for fake cosmo RoT slot A
+pub(super) const ARTIFACT_HASH_ROT_COSMO_A: ArtifactHash =
+    ArtifactHash([35; 32]);
+/// Hash of fake artifact for fake cosmo RoT slot B
+pub(super) const ARTIFACT_HASH_ROT_COSMO_B: ArtifactHash =
+    ArtifactHash([36; 32]);
+/// Hash of fake artifact for fake cosmo RoT bootloader
+pub(super) const ARTIFACT_HASH_ROT_BOOTLOADER_COSMO: ArtifactHash =
+    ArtifactHash([37; 32]);
+/// Hash of fake artifact for Cosmo host OS phase 1
+pub(super) const ARTIFACT_HASH_COSMO_HOST_PHASE_1: ArtifactHash =
+    ArtifactHash([38; 32]);
 
 // unused artifact hashes contained in our fake TUF repo
 const ARTIFACT_HASH_CONTROL_PLANE: ArtifactHash = ArtifactHash([33; 32]);
@@ -139,6 +164,8 @@ const ROT_SIGN_PSC: &str =
     "2222222222222222222222222222222222222222222222222222222222222222";
 const ROT_SIGN_SWITCH: &str =
     "3333333333333333333333333333333333333333333333333333333333333333";
+const ROT_SIGN_COSMO: &str =
+    "4444444444444444444444444444444444444444444444444444444444444444";
 
 /// Description of a single fake board (sled, switch, or PSC).
 #[derive(Debug)]
@@ -184,6 +211,7 @@ impl TestBoards {
     /// The specific set of hardware (boards) vary and are hardcoded:
     ///
     /// - sled 0: gimlet-d, oxide-rot-1
+    /// - sled 1: cosmo-b, oxide-rot-1
     /// - other sleds: gimlet-e, oxide-rot-1
     /// - switch 0: sidecar-b, oxide-rot-1
     /// - switch 1: sidecar-c, oxide-rot-1
@@ -196,7 +224,7 @@ impl TestBoards {
                 SpType::Sled,
                 &[
                     ("sled_0", "gimlet-d", "oxide-rot-1", ROT_SIGN_GIMLET),
-                    ("sled_1", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
+                    ("sled_1", "cosmo-b", "oxide-rot-1", ROT_SIGN_COSMO),
                     ("sled_2", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
                     ("sled_3", "gimlet-e", "oxide-rot-1", ROT_SIGN_GIMLET),
                 ] as &[_],
@@ -261,12 +289,20 @@ impl TestBoards {
     pub fn collection_builder<'a>(&'a self) -> TestBoardCollectionBuilder<'a> {
         TestBoardCollectionBuilder::new(
             self,
-            ARTIFACT_VERSION_2,
-            ExpectedVersion::NoValidVersion,
-            ARTIFACT_HASH_HOST_PHASE_1,
-            ARTIFACT_HASH_HOST_PHASE_1_V1,
-            ARTIFACT_HASH_HOST_PHASE_2,
-            ARTIFACT_HASH_HOST_PHASE_2_V1,
+            TestBoardCollectionBuilderDescription {
+                default_active_version: ARTIFACT_VERSION_2,
+                default_inactive_version: ExpectedVersion::NoValidVersion,
+                gimlet_default_active_host_phase_1:
+                    ARTIFACT_HASH_GIMLET_HOST_PHASE_1,
+                gimlet_default_inactive_host_phase_1:
+                    ARTIFACT_HASH_HOST_PHASE_1_V1,
+                cosmo_default_active_host_phase_1:
+                    ARTIFACT_HASH_COSMO_HOST_PHASE_1,
+                cosmo_default_inactive_host_phase_1:
+                    ARTIFACT_HASH_HOST_PHASE_1_V1,
+                default_active_host_phase_2: ARTIFACT_HASH_HOST_PHASE_2,
+                default_inactive_host_phase_2: ARTIFACT_HASH_HOST_PHASE_2_V1,
+            },
         )
     }
 
@@ -316,14 +352,14 @@ impl TestBoards {
             make_artifact(
                 "gimlet-host-os-phase-1",
                 ArtifactKind::GIMLET_HOST_PHASE_1,
-                ARTIFACT_HASH_HOST_PHASE_1,
+                ARTIFACT_HASH_GIMLET_HOST_PHASE_1,
                 None,
                 None,
             ),
             make_artifact(
                 "cosmo-host-os-phase-1",
                 ArtifactKind::COSMO_HOST_PHASE_1,
-                ARTIFACT_HASH_HOST_PHASE_1,
+                ARTIFACT_HASH_COSMO_HOST_PHASE_1,
                 None,
                 None,
             ),
@@ -332,6 +368,13 @@ impl TestBoards {
                 ArtifactKind::HOST_PHASE_2,
                 ARTIFACT_HASH_HOST_PHASE_2,
                 None,
+                None,
+            ),
+            make_artifact(
+                "cosmo-b",
+                KnownArtifactKind::GimletSp.into(),
+                test_artifact_for_board("cosmo-b"),
+                Some("cosmo-b"),
                 None,
             ),
             make_artifact(
@@ -381,6 +424,7 @@ impl TestBoards {
                 ArtifactKind::GIMLET_ROT_IMAGE_A,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::GIMLET_ROT_IMAGE_A,
+                    Some(OxideSled::Gimlet),
                 ),
                 Some("oxide-rot-1"),
                 Some(ROT_SIGN_GIMLET.into()),
@@ -390,21 +434,48 @@ impl TestBoards {
                 ArtifactKind::GIMLET_ROT_IMAGE_B,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::GIMLET_ROT_IMAGE_B,
+                    Some(OxideSled::Gimlet),
                 ),
                 Some("oxide-rot-1"),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
                 "oxide-rot-1-fake-key",
+                ArtifactKind::GIMLET_ROT_IMAGE_A,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::GIMLET_ROT_IMAGE_A,
+                    Some(OxideSled::Cosmo),
+                ),
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_COSMO.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1-fake-key",
+                ArtifactKind::GIMLET_ROT_IMAGE_B,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::GIMLET_ROT_IMAGE_B,
+                    Some(OxideSled::Cosmo),
+                ),
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_COSMO.into()),
+            ),
+            make_artifact(
+                "oxide-rot-1-fake-key",
                 ArtifactKind::PSC_ROT_IMAGE_A,
-                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_A),
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::PSC_ROT_IMAGE_A,
+                    None,
+                ),
                 Some("oxide-rot-1"),
                 Some(ROT_SIGN_PSC.into()),
             ),
             make_artifact(
                 "oxide-rot-1-fake-key",
                 ArtifactKind::PSC_ROT_IMAGE_B,
-                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_IMAGE_B),
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::PSC_ROT_IMAGE_B,
+                    None,
+                ),
                 Some("oxide-rot-1"),
                 Some(ROT_SIGN_PSC.into()),
             ),
@@ -413,6 +484,7 @@ impl TestBoards {
                 ArtifactKind::SWITCH_ROT_IMAGE_A,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::SWITCH_ROT_IMAGE_A,
+                    None,
                 ),
                 Some("oxide-rot-1"),
                 Some(ROT_SIGN_SWITCH.into()),
@@ -422,6 +494,7 @@ impl TestBoards {
                 ArtifactKind::SWITCH_ROT_IMAGE_B,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::SWITCH_ROT_IMAGE_B,
+                    None,
                 ),
                 Some("oxide-rot-1"),
                 Some(ROT_SIGN_SWITCH.into()),
@@ -431,14 +504,28 @@ impl TestBoards {
                 ArtifactKind::GIMLET_ROT_STAGE0,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::GIMLET_ROT_STAGE0,
+                    Some(OxideSled::Gimlet),
                 ),
                 Some("oxide-rot-1"),
                 Some(ROT_SIGN_GIMLET.into()),
             ),
             make_artifact(
                 "bootloader-fake-key",
+                ArtifactKind::GIMLET_ROT_STAGE0,
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::GIMLET_ROT_STAGE0,
+                    Some(OxideSled::Cosmo),
+                ),
+                Some("oxide-rot-1"),
+                Some(ROT_SIGN_COSMO.into()),
+            ),
+            make_artifact(
+                "bootloader-fake-key",
                 ArtifactKind::PSC_ROT_STAGE0,
-                test_artifact_for_artifact_kind(ArtifactKind::PSC_ROT_STAGE0),
+                test_artifact_for_artifact_kind(
+                    ArtifactKind::PSC_ROT_STAGE0,
+                    None,
+                ),
                 Some("oxide-rot-1"),
                 Some(ROT_SIGN_PSC.into()),
             ),
@@ -447,6 +534,7 @@ impl TestBoards {
                 ArtifactKind::SWITCH_ROT_STAGE0,
                 test_artifact_for_artifact_kind(
                     ArtifactKind::SWITCH_ROT_STAGE0,
+                    None,
                 ),
                 Some("oxide-rot-1"),
                 Some(ROT_SIGN_SWITCH.into()),
@@ -472,6 +560,7 @@ impl TestBoards {
         let mut phase2 = IdOrdMap::new();
 
         for board in &self.boards {
+            let sled_type = board_to_sled(&board.sp_board);
             updates
                 .insert_unique(ExpectedUpdate {
                     sp_type: board.id.type_,
@@ -493,6 +582,7 @@ impl TestBoards {
                             SpType::Power => ArtifactKind::PSC_ROT_IMAGE_B,
                             SpType::Switch => ArtifactKind::SWITCH_ROT_IMAGE_B,
                         },
+                        sled_type,
                     ),
                 })
                 .expect("boards are unique");
@@ -508,6 +598,7 @@ impl TestBoards {
                             SpType::Power => ArtifactKind::PSC_ROT_STAGE0,
                             SpType::Switch => ArtifactKind::SWITCH_ROT_STAGE0,
                         },
+                        sled_type,
                     ),
                 })
                 .expect("boards are unique");
@@ -519,7 +610,15 @@ impl TestBoards {
                         sp_slot: board.id.slot,
                         component: MgsUpdateComponent::HostOs,
                         expected_serial: board.serial,
-                        expected_artifact: ARTIFACT_HASH_HOST_PHASE_1,
+                        expected_artifact: match sled_type {
+                            Some(OxideSled::Gimlet) => {
+                                ARTIFACT_HASH_GIMLET_HOST_PHASE_1
+                            }
+                            Some(OxideSled::Cosmo) => {
+                                ARTIFACT_HASH_COSMO_HOST_PHASE_1
+                            }
+                            None => panic!("expected sled"),
+                        },
                     })
                     .expect("boards are unique");
                 phase2
@@ -697,6 +796,20 @@ impl ExpectedUpdates {
     }
 }
 
+/// Details about expected hashes for test boards
+struct TestBoardCollectionBuilderDescription {
+    default_active_version: ArtifactVersion,
+    default_inactive_version: ExpectedVersion,
+
+    gimlet_default_active_host_phase_1: ArtifactHash,
+    gimlet_default_inactive_host_phase_1: ArtifactHash,
+    cosmo_default_active_host_phase_1: ArtifactHash,
+    cosmo_default_inactive_host_phase_1: ArtifactHash,
+
+    default_active_host_phase_2: ArtifactHash,
+    default_inactive_host_phase_2: ArtifactHash,
+}
+
 /// Test helper that will produce an inventory collection.
 ///
 /// After construction, the caller _must_ call:
@@ -721,8 +834,12 @@ pub(super) struct TestBoardCollectionBuilder<'a> {
     stage0_next_version: ExpectedVersion,
 
     // default artifacts (host OS updates don't work in terms of versions)
-    host_phase_1_active_artifact: ArtifactHash,
-    host_phase_1_inactive_artifact: ArtifactHash,
+    gimlet_host_phase_1_active_artifact: ArtifactHash,
+    gimlet_host_phase_1_inactive_artifact: ArtifactHash,
+
+    cosmo_host_phase_1_active_artifact: ArtifactHash,
+    cosmo_host_phase_1_inactive_artifact: ArtifactHash,
+
     host_phase_2_active_artifact: ArtifactHash,
     host_phase_2_inactive_artifact: ArtifactHash,
 
@@ -740,25 +857,31 @@ pub(super) struct TestBoardCollectionBuilder<'a> {
 impl<'a> TestBoardCollectionBuilder<'a> {
     fn new(
         boards: &'a TestBoards,
-        default_active_version: ArtifactVersion,
-        default_inactive_version: ExpectedVersion,
-        default_active_host_phase_1: ArtifactHash,
-        default_inactive_host_phase_1: ArtifactHash,
-        default_active_host_phase_2: ArtifactHash,
-        default_inactive_host_phase_2: ArtifactHash,
+        description: TestBoardCollectionBuilderDescription,
     ) -> Self {
         Self {
             boards,
-            sp_active_version: default_active_version.clone(),
-            sp_inactive_version: default_inactive_version.clone(),
-            rot_active_version: default_active_version.clone(),
-            rot_inactive_version: default_inactive_version.clone(),
-            stage0_version: default_active_version,
-            stage0_next_version: default_inactive_version,
-            host_phase_1_active_artifact: default_active_host_phase_1,
-            host_phase_1_inactive_artifact: default_inactive_host_phase_1,
-            host_phase_2_active_artifact: default_active_host_phase_2,
-            host_phase_2_inactive_artifact: default_inactive_host_phase_2,
+            sp_active_version: description.default_active_version.clone(),
+            sp_inactive_version: description.default_inactive_version.clone(),
+            rot_active_version: description.default_active_version.clone(),
+            rot_inactive_version: description.default_inactive_version.clone(),
+            stage0_version: description.default_active_version,
+            stage0_next_version: description.default_inactive_version,
+            gimlet_host_phase_1_active_artifact: description
+                .gimlet_default_active_host_phase_1,
+            gimlet_host_phase_1_inactive_artifact: description
+                .gimlet_default_inactive_host_phase_1,
+
+            cosmo_host_phase_1_active_artifact: description
+                .cosmo_default_active_host_phase_1,
+            cosmo_host_phase_1_inactive_artifact: description
+                .cosmo_default_inactive_host_phase_1,
+
+            host_phase_2_active_artifact: description
+                .default_active_host_phase_2,
+            host_phase_2_inactive_artifact: description
+                .default_inactive_host_phase_2,
+
             sp_active_version_exceptions: BTreeMap::new(),
             rot_active_version_exceptions: BTreeMap::new(),
             stage0_version_exceptions: BTreeMap::new(),
@@ -879,13 +1002,23 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             .contains_key(&SpIdentifier { type_, slot })
     }
 
-    pub fn host_phase_1_artifacts(
+    pub fn gimlet_host_phase_1_artifacts(
         mut self,
         active: ArtifactHash,
         inactive: ArtifactHash,
     ) -> Self {
-        self.host_phase_1_active_artifact = active;
-        self.host_phase_1_inactive_artifact = inactive;
+        self.gimlet_host_phase_1_active_artifact = active;
+        self.gimlet_host_phase_1_inactive_artifact = inactive;
+        self
+    }
+
+    pub fn cosmo_host_phase_1_artifacts(
+        mut self,
+        active: ArtifactHash,
+        inactive: ArtifactHash,
+    ) -> Self {
+        self.cosmo_host_phase_1_active_artifact = active;
+        self.cosmo_host_phase_1_inactive_artifact = inactive;
         self
     }
 
@@ -963,10 +1096,24 @@ impl<'a> TestBoardCollectionBuilder<'a> {
             };
 
             let sp_state = SpState {
-                model: format!("dummy_{}", sp_id.type_),
+                // We assume a valid model ID for sleds
+                model: match sp_id.type_ {
+                    SpType::Sled => {
+                        // The RKTH is expected to be different between
+                        // Cosmo and Gimlet so we can use that here.
+                        if rkth == ROT_SIGN_COSMO {
+                            COSMO_SLED_MODEL.to_string()
+                        } else {
+                            GIMLET_SLED_MODEL.to_string()
+                        }
+                    }
+                    _ => format!("dummy_{}", sp_id.type_),
+                },
                 serial_number: serial.to_string(),
                 ..dummy_sp_state.clone()
             };
+
+            let sled_model = OxideSled::try_from_model(&sp_state.model);
 
             let baseboard_id = builder
                 .found_sp_state(
@@ -1102,7 +1249,15 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                     .host_exceptions
                     .get(&board.id.slot)
                     .map(|ex| ex.phase_1)
-                    .unwrap_or(self.host_phase_1_active_artifact);
+                    .unwrap_or(match sled_model {
+                        Some(OxideSled::Gimlet) => {
+                            self.gimlet_host_phase_1_active_artifact
+                        }
+                        Some(OxideSled::Cosmo) => {
+                            self.cosmo_host_phase_1_active_artifact
+                        }
+                        None => panic!("Expected a valid sled model"),
+                    });
                 let phase_2_active_artifact = self
                     .host_exceptions
                     .get(&board.id.slot)
@@ -1128,7 +1283,15 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                         &baseboard_id,
                         M2Slot::B,
                         "test",
-                        self.host_phase_1_inactive_artifact,
+                        match sled_model {
+                            Some(OxideSled::Gimlet) => {
+                                self.gimlet_host_phase_1_inactive_artifact
+                            }
+                            Some(OxideSled::Cosmo) => {
+                                self.cosmo_host_phase_1_inactive_artifact
+                            }
+                            None => panic!("Expected a valid sled model"),
+                        },
                     )
                     .unwrap();
                 let fake_sled_config = OmicronSledConfig {
@@ -1222,6 +1385,14 @@ struct HostOsException {
     phase_2: ArtifactHash,
 }
 
+fn board_to_sled(board: &str) -> Option<OxideSled> {
+    match board {
+        "gimlet-d" | "gimlet-e" => Some(OxideSled::Gimlet),
+        "cosmo-b" => Some(OxideSled::Cosmo),
+        _ => None,
+    }
+}
+
 fn test_artifact_for_board(board: &str) -> ArtifactHash {
     match board {
         "gimlet-d" => ARTIFACT_HASH_SP_GIMLET_D,
@@ -1230,15 +1401,34 @@ fn test_artifact_for_board(board: &str) -> ArtifactHash {
         "sidecar-c" => ARTIFACT_HASH_SP_SIDECAR_C,
         "psc-b" => ARTIFACT_HASH_SP_PSC_B,
         "psc-c" => ARTIFACT_HASH_SP_PSC_C,
+        "cosmo-b" => ARTIFACT_HASH_SP_COSMO_B,
         _ => panic!("test bug: no artifact for board {board:?}"),
     }
 }
 
-fn test_artifact_for_artifact_kind(kind: ArtifactKind) -> ArtifactHash {
-    if kind == ArtifactKind::GIMLET_ROT_IMAGE_A {
+// There's no difference between Gimlet and Cosmo from an RoT perspective
+// so both of them still use the same `ArtifactKind` everywhere. This is
+// why we need the extra `sled_type` argument here
+fn test_artifact_for_artifact_kind(
+    kind: ArtifactKind,
+    sled_type: Option<OxideSled>,
+) -> ArtifactHash {
+    if kind == ArtifactKind::GIMLET_ROT_IMAGE_A
+        && sled_type == Some(OxideSled::Gimlet)
+    {
         ARTIFACT_HASH_ROT_GIMLET_A
-    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B {
+    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B
+        && sled_type == Some(OxideSled::Gimlet)
+    {
         ARTIFACT_HASH_ROT_GIMLET_B
+    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_A
+        && sled_type == Some(OxideSled::Cosmo)
+    {
+        ARTIFACT_HASH_ROT_COSMO_A
+    } else if kind == ArtifactKind::GIMLET_ROT_IMAGE_B
+        && sled_type == Some(OxideSled::Cosmo)
+    {
+        ARTIFACT_HASH_ROT_COSMO_B
     } else if kind == ArtifactKind::PSC_ROT_IMAGE_A {
         ARTIFACT_HASH_ROT_PSC_A
     } else if kind == ArtifactKind::PSC_ROT_IMAGE_B {
@@ -1247,8 +1437,14 @@ fn test_artifact_for_artifact_kind(kind: ArtifactKind) -> ArtifactHash {
         ARTIFACT_HASH_ROT_SWITCH_A
     } else if kind == ArtifactKind::SWITCH_ROT_IMAGE_B {
         ARTIFACT_HASH_ROT_SWITCH_B
-    } else if kind == ArtifactKind::GIMLET_ROT_STAGE0 {
+    } else if kind == ArtifactKind::GIMLET_ROT_STAGE0
+        && sled_type == Some(OxideSled::Gimlet)
+    {
         ARTIFACT_HASH_ROT_BOOTLOADER_GIMLET
+    } else if kind == ArtifactKind::GIMLET_ROT_STAGE0
+        && sled_type == Some(OxideSled::Cosmo)
+    {
+        ARTIFACT_HASH_ROT_BOOTLOADER_COSMO
     } else if kind == ArtifactKind::PSC_ROT_STAGE0 {
         ARTIFACT_HASH_ROT_BOOTLOADER_PSC
     } else if kind == ArtifactKind::SWITCH_ROT_STAGE0 {

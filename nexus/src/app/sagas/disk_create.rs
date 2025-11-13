@@ -501,7 +501,7 @@ async fn sdc_regions_ensure(
             block_size,
             blocks_per_extent,
             extent_count,
-            gen: 1,
+            generation: 1,
             opts: CrucibleOpts {
                 id: disk_id,
                 target: datasets_and_regions
