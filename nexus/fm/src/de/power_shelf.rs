@@ -34,7 +34,7 @@ pub fn diagnose(
             Some("hw.insert.psu") => {
                 let psc_psu = extract_psc_psu(&ereport, slot, &sitrep.log);
                 let mut case = sitrep.open_case(DiagnosisEngine::PowerShelf)?;
-                case.add_ereport(ereport);
+                case.add_ereport(ereport, "PSU inserted ereport");
                 case.comment =
                     format!("PSC {slot} PSU {:?} inserted", psc_psu.psu_slot);
                 case.request_alert(&alert::power_shelf::PsuInserted::V0 {
@@ -46,7 +46,7 @@ pub fn diagnose(
             Some("hw.remove.psu") => {
                 let psc_psu = extract_psc_psu(&ereport, slot, &sitrep.log);
                 let mut case = sitrep.open_case(DiagnosisEngine::PowerShelf)?;
-                case.add_ereport(ereport);
+                case.add_ereport(ereport, "PSU removed ereport");
                 case.comment =
                     format!("PSC {slot} PSU {:?} removed", psc_psu.psu_slot);
                 case.request_alert(&alert::power_shelf::PsuRemoved::V0 {

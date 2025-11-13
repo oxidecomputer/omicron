@@ -180,6 +180,8 @@ impl DataStore {
                     for model::fm::CaseEreport {
                         restart_id,
                         ena: DbEna(ena),
+                        comment,
+                        assigned_sitrep_id,
                         ..
                     } in ereport_assignments
                     {
@@ -202,7 +204,13 @@ impl DataStore {
                                 entry.insert(Arc::new(ereport)).clone()
                             }
                         };
-                        ereports.insert_unique(ereport).unwrap();
+                        ereports
+                            .insert_unique(fm::case::CaseEreport {
+                                ereport,
+                                assigned_sitrep_id: assigned_sitrep_id.into(),
+                                comment,
+                            })
+                            .unwrap();
                     }
 
                     cases
@@ -218,6 +226,7 @@ impl DataStore {
                             comment: case.comment,
                             ereports,
                             alerts_requested,
+                            impacted_sp_slots: Default::default(), // TODO
                         })
                         .expect("case UUIDs should be unique");
                 }
@@ -1228,7 +1237,7 @@ mod tests {
     ) -> Result<BTreeSet<SitrepUuid>, Error> {
         let mut listed_orphans = BTreeSet::new();
         let mut paginator = Paginator::new(
-            crate::dbSQL_BATC::datastore::H_SIZE,
+            SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Descending,
         );
         while let Some(p) = paginator.next() {
