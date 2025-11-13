@@ -96,7 +96,6 @@ use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
 use hickory_proto::rr::LowerName;
 use hickory_resolver::Name;
-use hickory_server::authority::Catalog;
 use internal_dns_types::{
     config::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord},
     names::ZONE_APEX_NAME,
@@ -131,7 +130,6 @@ pub struct Store {
     keep: usize,
     updating: Arc<Mutex<Option<UpdateInfo>>>,
     poisoned: Arc<AtomicBool>,
-    catalog_tx: tokio::sync::watch::Sender<Arc<Catalog>>,
 }
 
 /// A temporary schema for DNS configurations from before the presence of the
@@ -257,64 +255,6 @@ pub enum UpdateError {
 }
 
 impl Store {
-    /// Build a Catalog from the current DNS configuration
-    ///
-    /// This creates a hickory-server Catalog with one Authority for each zone
-    /// we're authoritative for.
-    fn build_catalog(&self) -> Result<Catalog, anyhow::Error> {
-        use crate::dns::authority::OmicronAuthority;
-
-        let config = self.read_config()?;
-        let mut catalog = Catalog::new();
-
-        info!(&self.log, "building catalog"; "num_zones" => config.zones.len());
-
-        for zone_name in &config.zones {
-            info!(&self.log, "adding zone to catalog"; "zone" => zone_name);
-            // Parse the zone name and ensure it's absolute (ends with .)
-            let mut origin = Name::from_str(zone_name).with_context(|| {
-                format!("parsing zone name {:?}", zone_name)
-            })?;
-
-            // Make sure the name is absolute (FQDN)
-            if !origin.is_fqdn() {
-                // Append the root label to make it absolute
-                origin =
-                    origin.append_domain(&Name::root()).with_context(|| {
-                        format!("making zone name absolute: {:?}", zone_name)
-                    })?;
-            }
-
-            info!(&self.log, "parsed zone name";
-                "zone" => zone_name,
-                "origin" => ?origin,
-                "is_fqdn" => origin.is_fqdn());
-
-            let authority = Arc::new(OmicronAuthority::new(
-                self.clone(),
-                origin.clone(),
-                self.log.new(o!("zone" => zone_name.clone())),
-            ));
-
-            let origin_lower = origin.clone().into();
-            catalog.upsert(origin_lower, vec![authority as Arc<_>]);
-            info!(&self.log, "added zone to catalog"; "zone" => zone_name, "origin" => ?origin);
-        }
-
-        info!(&self.log, "catalog built successfully"; "total_zones" => config.zones.len());
-        Ok(catalog)
-    }
-
-    /// Get a receiver for catalog updates
-    ///
-    /// This returns a watch channel receiver that will be notified whenever
-    /// the DNS configuration changes and the catalog is rebuilt.
-    pub fn catalog_receiver(
-        &self,
-    ) -> tokio::sync::watch::Receiver<Arc<Catalog>> {
-        self.catalog_tx.subscribe()
-    }
-
     pub fn new(
         log: slog::Logger,
         config: &Config,
@@ -336,20 +276,13 @@ impl Store {
         db: Arc<sled::Db>,
         config: &Config,
     ) -> Result<Self, anyhow::Error> {
-        // Create initial empty catalog and watch channel
-        let initial_catalog = Catalog::new();
-        let (catalog_tx, _catalog_rx) =
-            tokio::sync::watch::channel(Arc::new(initial_catalog));
-
         let store = Store {
             log,
             db,
             keep: config.keep_old_generations,
             updating: Arc::new(Mutex::new(None)),
             poisoned: Arc::new(AtomicBool::new(false)),
-            catalog_tx,
         };
-
         if store.read_config_optional()?.is_none() {
             let now = chrono::Utc::now();
             let initial_config_bytes = serde_json::to_vec(&CurrentConfig {
@@ -366,21 +299,9 @@ impl Store {
                 .context("inserting initial config")?;
         }
 
-        let current_config = store.read_config()?;
-        store.prune_newer(&current_config);
-        store.prune_older(&current_config);
-
-        // Build and broadcast initial catalog
-        match store.build_catalog() {
-            Ok(catalog) => {
-                info!(&store.log, "sending initial catalog on watch channel");
-                let _ = store.catalog_tx.send(Arc::new(catalog));
-            }
-            Err(e) => {
-                warn!(&store.log, "failed to build initial catalog"; "error" => ?e);
-            }
-        }
-
+        let config = store.read_config()?;
+        store.prune_newer(&config);
+        store.prune_older(&config);
         Ok(store)
     }
 
@@ -736,20 +657,6 @@ impl Store {
         self.db.flush_async().await.context("flush")?;
 
         self.prune_older(&new_config);
-
-        // Rebuild and broadcast the catalog with the new zone configuration
-        match self.build_catalog() {
-            Ok(catalog) => {
-                debug!(&log, "rebuilt catalog after update");
-                info!(&log, "sending updated catalog on watch channel"; "has_receivers" => self.catalog_tx.receiver_count());
-                let _ = self.catalog_tx.send(Arc::new(catalog));
-            }
-            Err(e) => {
-                warn!(&log, "failed to rebuild catalog after update"; "error" => ?e);
-                // Don't fail the update if catalog rebuild fails
-            }
-        }
-
         Ok(())
     }
 
@@ -868,13 +775,7 @@ impl Store {
                 let zone_name = LowerName::from(Name::from_str(&z).unwrap());
                 zone_name.zone_of(name)
             })
-            .ok_or_else(|| {
-                // This should be impossible because the higher-level Catalog
-                // routing in hickory should only route queries to us if we have
-                // an Authority for that zone.  That should only happen if we
-                // are in fact authoritative for it.
-                QueryError::NoZone(orig_name.to_string())
-            })?;
+            .ok_or_else(|| QueryError::NoZone(orig_name.to_string()))?;
 
         let tree_name = Self::tree_name_for_zone(zone_name, config.generation);
         let tree = self

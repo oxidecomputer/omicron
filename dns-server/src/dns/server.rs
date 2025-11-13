@@ -7,13 +7,14 @@
 //! This module uses hickory-server's ServerFuture to provide a full-featured
 //! DNS server with eDNS support, TCP transport, and proper UDP truncation.
 
+use crate::dns::authority::OmicronAuthority;
 use crate::storage::Store;
 use anyhow::Context;
+use hickory_proto::rr::Name;
 use hickory_server::ServerFuture;
 use hickory_server::authority::Catalog;
-use hickory_server::server::{Request, ResponseHandler, ResponseInfo};
 use serde::Deserialize;
-use slog::{Logger, info};
+use slog::{Logger, info, o};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,50 +44,8 @@ impl Default for Config {
     }
 }
 
-/// Request handler that wraps our catalog with watch-based updates
-///
-/// This handler receives updates to the catalog through a watch channel,
-/// ensuring it always uses the latest zone configuration without locks.
-struct OmicronRequestHandler {
-    catalog_rx: tokio::sync::watch::Receiver<Arc<Catalog>>,
-}
-
-impl OmicronRequestHandler {
-    fn new(catalog_rx: tokio::sync::watch::Receiver<Arc<Catalog>>) -> Self {
-        Self { catalog_rx }
-    }
-}
-
-impl hickory_server::server::RequestHandler for OmicronRequestHandler {
-    fn handle_request<'life0, 'life1, 'async_trait, R>(
-        &'life0 self,
-        request: &'life1 Request,
-        response_handle: R,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = ResponseInfo>
-                + Send
-                + 'async_trait,
-        >,
-    >
-    where
-        R: 'async_trait + ResponseHandler,
-        Self: 'async_trait,
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-    {
-        // Clone the latest catalog Arc from the watch channel
-        // Note: We must borrow INSIDE the async block to get the latest value at request time
-        let mut catalog_rx = self.catalog_rx.clone();
-
-        // Create an async block that owns the catalog receiver
-        Box::pin(async move {
-            // Borrow the catalog NOW, at request handling time
-            let catalog = catalog_rx.borrow_and_update().clone();
-            catalog.handle_request(request, response_handle).await
-        })
-    }
-}
+// OmicronRequestHandler removed - we use Catalog directly since it
+// already implements RequestHandler
 
 /// Handle to the DNS server
 ///
@@ -121,11 +80,17 @@ impl Server {
         store: Store,
         config: &Config,
     ) -> anyhow::Result<ServerHandle> {
-        // Get the catalog receiver from the store
-        let catalog_rx = store.catalog_receiver();
-
-        // Create the request handler
-        let handler = OmicronRequestHandler::new(catalog_rx);
+        // Build catalog with a single root Authority
+        // The Authority delegates to Store for zone routing
+        // Catalog implements RequestHandler, so we use it directly
+        info!(&log, "building DNS catalog with root authority");
+        let mut catalog = Catalog::new();
+        let root_authority = Arc::new(OmicronAuthority::new(
+            store.clone(),
+            Name::root(),
+            log.new(o!("component" => "authority")),
+        ));
+        catalog.upsert(Name::root().into(), vec![root_authority as Arc<_>]);
 
         // Bind UDP socket
         let udp_socket =
@@ -159,8 +124,8 @@ impl Server {
             "tcp_idle_timeout_secs" => config.tcp_idle_timeout_secs
         );
 
-        // Create ServerFuture and register both UDP and TCP
-        let mut server_future = ServerFuture::new(handler);
+        // Create ServerFuture with our Catalog (which implements RequestHandler)
+        let mut server_future = ServerFuture::new(catalog);
         info!(&log, "created ServerFuture, registering sockets");
         server_future.register_socket(udp_socket);
         server_future.register_listener(

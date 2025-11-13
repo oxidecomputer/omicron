@@ -10,6 +10,7 @@
 use crate::storage::{QueryError, Store};
 use anyhow::anyhow;
 use async_trait::async_trait;
+use hickory_proto::op::ResponseCode;
 use hickory_proto::rr::rdata::{NS, SRV};
 use hickory_proto::rr::{LowerName, Name, RData, Record, RecordType};
 use hickory_server::authority::{
@@ -30,6 +31,8 @@ enum AuthorityLookupError {
     QueryError(#[from] QueryError),
     #[error("error converting record")]
     ConversionError(#[from] anyhow::Error),
+    #[error("NXDOMAIN")]
+    Nxdomain,
 }
 
 /// Omicron's Authority implementation that wraps our Store
@@ -78,9 +81,18 @@ impl OmicronAuthority {
             name_records.push(store.soa_for(&answer)?);
         }
 
-        // XXX-dap at this point we used to return NXDOMAIN, before filtering
-        // but that doesn't seem quite right either.  Anyway, we shouldn't wind
-        // up called in a case that would return NXDOMAIN.
+        // If we got no records at this point, then the name does not exist.
+        // Return NXDOMAIN for this case rather than no records at all.
+        if name_records.is_empty() {
+            debug!(
+                &log,
+                "authority lookup result: nxdomain";
+                "name" => ?name,
+                "rtype" => ?rtype,
+                "origin" => ?self.origin,
+            );
+            return Err(AuthorityLookupError::Nxdomain);
+        }
 
         // Filter for just the record types that were requested.
         let response_records = name_records
@@ -186,9 +198,9 @@ impl Authority for OmicronAuthority {
     async fn update(
         &self,
         _update: &MessageRequest,
-    ) -> Result<bool, hickory_proto::op::ResponseCode> {
+    ) -> Result<bool, ResponseCode> {
         // We do not support updates via DNS (our consumers).
-        Err(hickory_proto::op::ResponseCode::NotImp)
+        Err(ResponseCode::NotImp)
     }
 
     fn origin(&self) -> &LowerName {
@@ -211,6 +223,9 @@ impl Authority for OmicronAuthority {
 
         match self.lookup_impl(query_name, rtype) {
             Ok(rv) => rv,
+            Err(AuthorityLookupError::Nxdomain) => LookupControlFlow::Break(
+                Err(LookupError::ResponseCode(ResponseCode::NXDomain)),
+            ),
             Err(err) => {
                 let error = InlineErrorChain::new(&err);
                 error!(&self.log,
