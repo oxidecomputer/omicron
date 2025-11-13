@@ -294,7 +294,6 @@ impl Store {
             let authority = Arc::new(OmicronAuthority::new(
                 self.clone(),
                 origin.clone(),
-                ZoneType::Primary,
                 self.log.new(o!("zone" => zone_name.clone())),
             ));
 

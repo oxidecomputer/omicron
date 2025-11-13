@@ -30,63 +30,13 @@ use std::str::FromStr;
 pub struct OmicronAuthority {
     store: Store,
     origin: LowerName,
-    zone_type: ZoneType,
     log: Logger,
 }
 
 impl OmicronAuthority {
     /// Create a new authority for the given zone
-    pub fn new(
-        store: Store,
-        origin: Name,
-        zone_type: ZoneType,
-        log: Logger,
-    ) -> Self {
-        Self { store, origin: origin.into(), zone_type, log }
-    }
-
-    /// Convert a DnsRecord to a hickory Record
-    fn dns_record_to_record(
-        name: &Name,
-        record: &DnsRecord,
-    ) -> Result<Record, LookupError> {
-        match record {
-            DnsRecord::A(addr) => Ok(Record::from_rdata(
-                name.clone(),
-                0,
-                RData::A((*addr).into()),
-            )),
-
-            DnsRecord::Aaaa(addr) => Ok(Record::from_rdata(
-                name.clone(),
-                0,
-                RData::AAAA((*addr).into()),
-            )),
-
-            DnsRecord::Srv(Srv { prio, weight, port, target }) => {
-                let tgt = Name::from_str(&target).map_err(|error| {
-                    LookupError::Io(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("bad SRV target {:?}: {:#}", &target, error),
-                    ))
-                })?;
-                Ok(Record::from_rdata(
-                    name.clone(),
-                    0,
-                    RData::SRV(SRV::new(*prio, *weight, *port, tgt)),
-                ))
-            }
-
-            DnsRecord::Ns(nsdname) => {
-                let nsdname = Name::from_str(&nsdname).map_err(|error| {
-                    LookupError::Io(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("bad NS dname {:?}: {:#}", &nsdname, error),
-                    ))
-                })?;
-                Ok(Record::from_rdata(name.clone(), 0, RData::NS(NS(nsdname))))
-            }
-        }
+    pub fn new(store: Store, origin: Name, log: Logger) -> Self {
+        Self { store, origin: origin.into(), log }
     }
 }
 
@@ -167,11 +117,11 @@ impl Authority for OmicronAuthority {
     type Lookup = OmicronLookup;
 
     fn zone_type(&self) -> ZoneType {
-        self.zone_type
+        ZoneType::Primary
     }
 
     fn is_axfr_allowed(&self) -> bool {
-        // Zone transfers not yet supported
+        // Zone transfers are not (yet) supported.
         false
     }
 
@@ -179,7 +129,7 @@ impl Authority for OmicronAuthority {
         &self,
         _update: &MessageRequest,
     ) -> Result<bool, hickory_proto::op::ResponseCode> {
-        // Dynamic DNS updates are handled via HTTP API, not DNS protocol
+        // We do not support updates via DNS (our consumers).
         Err(hickory_proto::op::ResponseCode::NotImp)
     }
 
@@ -235,7 +185,7 @@ impl Authority for OmicronAuthority {
         // Add regular records
         if let Some(ref dns_records) = answer.records {
             for dns_record in dns_records {
-                match Self::dns_record_to_record(&query_name, dns_record) {
+                match dns_record_to_record(&query_name, dns_record) {
                     Ok(record) => records.push(record),
                     Err(e) => {
                         warn!(&log, "failed to convert record"; "error" => ?e);
@@ -282,7 +232,7 @@ impl Authority for OmicronAuthority {
                     if let Some(target_records) = target_answer.records {
                         for target_record in &target_records {
                             if let Ok(record) =
-                                Self::dns_record_to_record(target, target_record)
+                                dns_record_to_record(target, target_record)
                             {
                                 additional_records.push(record);
                             }
@@ -304,7 +254,8 @@ impl Authority for OmicronAuthority {
         request: RequestInfo<'_>,
         lookup_options: LookupOptions,
     ) -> LookupControlFlow<Self::Lookup> {
-        // Delegate to lookup
+        // Delegate to lookup.  These functions appear to be roughly equivalent.
+        // See https://github.com/hickory-dns/hickory-dns/issues/1309.
         self.lookup(
             request.query.name(),
             request.query.query_type(),
@@ -318,7 +269,47 @@ impl Authority for OmicronAuthority {
         _name: &LowerName,
         _lookup_options: LookupOptions,
     ) -> LookupControlFlow<Self::Lookup> {
-        // DNSSEC not supported
+        // DNSSEC not supported.
         LookupControlFlow::Break(Ok(OmicronLookup::empty()))
+    }
+}
+
+/// Convert a DnsRecord to a hickory Record
+fn dns_record_to_record(
+    name: &Name,
+    record: &DnsRecord,
+) -> Result<Record, LookupError> {
+    match record {
+        DnsRecord::A(addr) => {
+            Ok(Record::from_rdata(name.clone(), 0, RData::A((*addr).into())))
+        }
+
+        DnsRecord::Aaaa(addr) => {
+            Ok(Record::from_rdata(name.clone(), 0, RData::AAAA((*addr).into())))
+        }
+
+        DnsRecord::Srv(Srv { prio, weight, port, target }) => {
+            let tgt = Name::from_str(&target).map_err(|error| {
+                LookupError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("bad SRV target {:?}: {:#}", &target, error),
+                ))
+            })?;
+            Ok(Record::from_rdata(
+                name.clone(),
+                0,
+                RData::SRV(SRV::new(*prio, *weight, *port, tgt)),
+            ))
+        }
+
+        DnsRecord::Ns(nsdname) => {
+            let nsdname = Name::from_str(&nsdname).map_err(|error| {
+                LookupError::Io(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("bad NS dname {:?}: {:#}", &nsdname, error),
+                ))
+            })?;
+            Ok(Record::from_rdata(name.clone(), 0, RData::NS(NS(nsdname))))
+        }
     }
 }
