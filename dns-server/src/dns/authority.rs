@@ -8,6 +8,7 @@
 //! Store-based DNS data with hickory-server's high-level server infrastructure.
 
 use crate::storage::{QueryError, Store};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use hickory_proto::rr::rdata::{NS, SRV};
 use hickory_proto::rr::{LowerName, Name, RData, Record, RecordType};
@@ -21,6 +22,15 @@ use slog::{Logger, debug, error, warn};
 use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::str::FromStr;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+enum AuthorityLookupError {
+    #[error("error querying store")]
+    QueryError(#[from] QueryError),
+    #[error("error converting record")]
+    ConversionError(#[from] anyhow::Error),
+}
 
 /// Omicron's Authority implementation that wraps our Store
 ///
@@ -38,6 +48,125 @@ impl OmicronAuthority {
     /// Create a new authority for the given zone
     pub fn new(store: Store, origin: Name, log: Logger) -> Self {
         Self { store, origin: origin.into(), log }
+    }
+
+    fn lookup_impl(
+        &self,
+        name: &LowerName,
+        rtype: RecordType,
+    ) -> Result<LookupControlFlow<OmicronLookup>, AuthorityLookupError> {
+        let log = &self.log;
+        let store = &self.store;
+
+        // Query the underlying store.
+        let answer = store.query_name(&name)?;
+
+        // Convert our internal representation to the one we'll return back to
+        // hickory-dns.
+        let mut name_records = answer
+            .records
+            .as_ref()
+            .unwrap_or(&Vec::new())
+            .iter()
+            .map(|record| dns_record_to_record(&name, record))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut additional_records = vec![];
+
+        if answer.name.is_none() && rtype == RecordType::SOA {
+            // The query was for an SOA record at the apex. There isn't an SOA
+            // record in the database, but we can build one from the answer.
+            name_records.push(store.soa_for(&answer)?);
+        }
+
+        // XXX-dap at this point we used to return NXDOMAIN, before filtering
+        // but that doesn't seem quite right either.  Anyway, we shouldn't wind
+        // up called in a case that would return NXDOMAIN.
+
+        // Filter for just the record types that were requested.
+        let response_records = name_records
+            .into_iter()
+            .filter(|record| match (rtype, record.data()) {
+                (RecordType::ANY, _) => true,
+                (RecordType::A, RData::A(_)) => true,
+                (RecordType::AAAA, RData::AAAA(_)) => true,
+                (RecordType::SRV, RData::SRV(_)) => true,
+                (RecordType::NS, RData::NS(_)) => true,
+                (RecordType::SOA, RData::SOA(_)) => true,
+                _ => false,
+            })
+            .collect::<Vec<_>>();
+
+        // DNS allows for the server to return additional records that weren't
+        // explicitly asked for by the client but that the server expects the
+        // client will want. SRV and NS records both use names for their
+        // referents (rather than IP addresses directly). If someone has queried
+        // for one of those kinds of records, they'll almost certainly be
+        // needing the IP addresses that go with them as well. We
+        // opportunistically attempt to resolve the target here and if
+        // successful return those additional records in the response.
+        //
+        // NOTE: we only do this one-layer deep. If the target of a SRV or
+        // NS is a CNAME instead of A/AAAA directly, it will be lost here.
+        for record in &response_records {
+            let target = match record.data() {
+                RData::SRV(srv) => srv.target(),
+                RData::NS(ns) => &ns.0,
+                _ => {
+                    continue;
+                }
+            };
+
+            let target_records = store.query_name(target).map(|answer| {
+                answer
+                    .records
+                    .unwrap_or(Vec::new())
+                    .into_iter()
+                    .map(|record| dns_record_to_record(target, &record))
+                    .collect::<Result<Vec<_>, _>>()
+            });
+
+            match target_records {
+                Ok(Ok(target_records)) => {
+                    additional_records.extend(target_records);
+                }
+                // Don't bail out if we failed to lookup or handle the
+                // response as the original request did succeed and we only
+                // care to do this on a best-effort basis.
+                Err(error) => {
+                    let error = InlineErrorChain::new(&error);
+                    warn!(
+                        &log,
+                        "additional records lookup failed";
+                        "target" => ?target,
+                        error,
+                    );
+                }
+                Ok(Err(error)) => {
+                    let error = InlineErrorChain::new(&*error);
+                    warn!(
+                        &log,
+                        "additional records unexpected response";
+                        "target" => ?target,
+                        error,
+                    );
+                }
+            }
+        }
+
+        debug!(
+            &log,
+            "authority lookup result";
+            "name" => ?name,
+            "rtype" => ?rtype,
+            "origin" => ?self.origin,
+            "records" => ?&response_records,
+            "additional_records" => ?&additional_records,
+        );
+
+        Ok(LookupControlFlow::Break(Ok(OmicronLookup::with_additionals(
+            response_records,
+            additional_records,
+        ))))
     }
 }
 
@@ -68,130 +197,36 @@ impl Authority for OmicronAuthority {
 
     async fn lookup(
         &self,
-        name: &LowerName,
+        query_name: &LowerName,
         rtype: RecordType,
         _lookup_options: LookupOptions,
     ) -> LookupControlFlow<Self::Lookup> {
-        let store = self.store.clone();
-        let name = name.clone();
-        let log = self.log.clone();
-        let origin = self.origin.clone();
-
-        // Convert LowerName to Name
-        let query_name: Name = name.into();
-
-        debug!(&log, "authority lookup";
+        debug!(
+            &self.log,
+            "authority lookup";
             "name" => ?query_name,
             "rtype" => ?rtype,
-            "origin" => ?origin,
+            "origin" => ?self.origin,
         );
 
-        // Query the store using query_name directly
-        let answer = match store.query_name(&query_name) {
-            Ok(answer) => answer,
-            Err(QueryError::NoZone(zone)) => {
-                // This should be impossible: the Catalog should only route
-                // queries to this Authority if the zone matches our origin.
-                // If we get here, it indicates a bug in the catalog routing
-                // logic or a race condition during configuration updates.
-                error!(&log, "query routed to wrong authority";
+        match self.lookup_impl(query_name, rtype) {
+            Ok(rv) => rv,
+            Err(err) => {
+                let error = InlineErrorChain::new(&err);
+                error!(&self.log,
+                    "authority lookup failed";
                     "name" => ?query_name,
-                    "zone" => &zone,
-                    "origin" => ?origin,
+                    "rtype" => ?rtype,
+                    "origin" => ?self.origin,
+                    &error,
                 );
-                return LookupControlFlow::Break(Err(LookupError::Io(
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!(
-                            "internal error: query for {} routed to wrong \
-                             authority (expected zone {}, got {})",
-                            query_name, origin, zone
-                        ),
-                    ),
-                )));
-            }
-            Err(
-                e @ (QueryError::QueryFail(..) | QueryError::ParseFail(..)),
-            ) => {
-                let error = InlineErrorChain::new(&e);
-                warn!(&log, "query failed"; &error);
-                return LookupControlFlow::Break(Err(LookupError::Io(
-                    io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("query failed: {}", e),
-                    ),
-                )));
-            }
-        };
 
-        // Convert DnsRecords to hickory Records
-        let mut records: Vec<Record> = Vec::new();
-
-        // Add regular records
-        if let Some(ref dns_records) = answer.records {
-            for dns_record in dns_records {
-                match dns_record_to_record(&query_name, dns_record) {
-                    Ok(record) => records.push(record),
-                    Err(e) => {
-                        warn!(&log, "failed to convert record"; "error" => ?e);
-                    }
-                }
+                LookupControlFlow::Break(Err(LookupError::Io(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("internal error: {}", error),
+                ))))
             }
         }
-
-        // Handle SOA queries at the apex
-        if answer.name.is_none() && rtype == RecordType::SOA {
-            match store.soa_for(&answer) {
-                Ok(soa_record) => records.push(soa_record),
-                Err(e) => {
-                    warn!(&log, "failed to generate SOA"; "error" => ?e);
-                }
-            }
-        }
-
-        // Filter records by type
-        let filtered_records: Vec<Record> = records
-            .into_iter()
-            .filter(|record| match rtype {
-                RecordType::ANY => true,
-                RecordType::A => matches!(record.data(), RData::A(_)),
-                RecordType::AAAA => matches!(record.data(), RData::AAAA(_)),
-                RecordType::SRV => matches!(record.data(), RData::SRV(_)),
-                RecordType::NS => matches!(record.data(), RData::NS(_)),
-                RecordType::SOA => matches!(record.data(), RData::SOA(_)),
-                _ => false,
-            })
-            .collect();
-
-        // Handle additional records for SRV and NS
-        let mut additional_records: Vec<Record> = Vec::new();
-        for record in &filtered_records {
-            let target = match record.data() {
-                RData::SRV(srv) => Some(srv.target()),
-                RData::NS(ns) => Some(&ns.0),
-                _ => None,
-            };
-
-            if let Some(target) = target {
-                if let Ok(target_answer) = store.query_name(target) {
-                    if let Some(target_records) = target_answer.records {
-                        for target_record in &target_records {
-                            if let Ok(record) =
-                                dns_record_to_record(target, target_record)
-                            {
-                                additional_records.push(record);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Return answers and additional records separately
-        LookupControlFlow::Break(Ok(OmicronLookup::with_additionals(
-            filtered_records,
-            additional_records,
-        )))
     }
 
     async fn search(
@@ -252,37 +287,16 @@ impl OmicronLookup {
     }
 }
 
-// Implement the necessary traits for OmicronLookup
-impl Iterator for OmicronLookup {
-    type Item = Record;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.records.is_empty() {
-            None
-        } else {
-            Some(self.records.remove(0))
-        }
-    }
-}
-
-impl From<Vec<Record>> for OmicronLookup {
-    fn from(records: Vec<Record>) -> Self {
-        Self::new(records)
-    }
-}
-
 // Implement LookupObject so OmicronAuthority can be used as AuthorityObject
 impl LookupObject for OmicronLookup {
     fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
 
-    // XXX-dap why do this when it already impls Iterator?
     fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Record> + Send + 'a> {
         Box::new(self.records.iter())
     }
 
-    // XXX-dap this seems like a weird thing to have
     fn take_additionals(&mut self) -> Option<Box<dyn LookupObject>> {
         // Return additional records if we have any
         self.additionals.take().map(|additionals| {
@@ -295,7 +309,7 @@ impl LookupObject for OmicronLookup {
 fn dns_record_to_record(
     name: &Name,
     record: &DnsRecord,
-) -> Result<Record, LookupError> {
+) -> Result<Record, anyhow::Error> {
     match record {
         DnsRecord::A(addr) => {
             Ok(Record::from_rdata(name.clone(), 0, RData::A((*addr).into())))
@@ -307,10 +321,7 @@ fn dns_record_to_record(
 
         DnsRecord::Srv(Srv { prio, weight, port, target }) => {
             let tgt = Name::from_str(&target).map_err(|error| {
-                LookupError::Io(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("bad SRV target {:?}: {:#}", &target, error),
-                ))
+                anyhow!(error).context(format!("bad SRV target {:?}", target))
             })?;
             Ok(Record::from_rdata(
                 name.clone(),
@@ -321,10 +332,7 @@ fn dns_record_to_record(
 
         DnsRecord::Ns(nsdname) => {
             let nsdname = Name::from_str(&nsdname).map_err(|error| {
-                LookupError::Io(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("bad NS dname {:?}: {:#}", &nsdname, error),
-                ))
+                anyhow!(error).context(format!("bad NS dname {:?}", nsdname))
             })?;
             Ok(Record::from_rdata(name.clone(), 0, RData::NS(NS(nsdname))))
         }

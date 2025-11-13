@@ -868,7 +868,13 @@ impl Store {
                 let zone_name = LowerName::from(Name::from_str(&z).unwrap());
                 zone_name.zone_of(name)
             })
-            .ok_or_else(|| QueryError::NoZone(orig_name.to_string()))?;
+            .ok_or_else(|| {
+                // This should be impossible because the higher-level Catalog
+                // routing in hickory should only route queries to us if we have
+                // an Authority for that zone.  That should only happen if we
+                // are in fact authoritative for it.
+                QueryError::NoZone(orig_name.to_string())
+            })?;
 
         let tree_name = Self::tree_name_for_zone(zone_name, config.generation);
         let tree = self
