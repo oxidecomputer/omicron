@@ -447,7 +447,7 @@ done:       <REDACTED_TIMESTAMP>
 errors:     0
 
 Sled serial0
-    part number: model0
+    part number: 913-0000019
     power:    A2
     revision: 0
     MGS slot: Sled 0
@@ -473,7 +473,7 @@ Sled serial0
     RoT: slot B SHA3-256: slotBdigest1
 
 Sled serial1
-    part number: model1
+    part number: 913-0000019
     power:    A2
     revision: 0
     MGS slot: Sled 1
@@ -499,7 +499,7 @@ Sled serial1
     RoT: slot B SHA3-256: slotBdigest1
 
 Sled serial2
-    part number: model2
+    part number: 913-0000019
     power:    A2
     revision: 0
     MGS slot: Sled 2
