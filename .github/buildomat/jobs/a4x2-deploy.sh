@@ -29,7 +29,8 @@ pfexec chown -R "$UID" /out
 # just doing this to try out the rest of the script
 POOL=/pool/int/"$(ls /pool/int | head -n1)" # aaaaaaaaaaaaaaaaaaaaaaaaaa
 INPUT=$POOL/input
-mkdir -p $INPUT/a4x2
+pfexec mkdir -p $INPUT/a4x2
+pfexec chown "$UID" "$INPUT/a4x2"
 
 (
     cd $INPUT/a4x2
@@ -81,7 +82,7 @@ capture_dianostics() {
 #        ./a4x2 exec $gimlet "svcs -xvZ"
 #    done
 
-    ./xtask a4x2 deploy collect-evidence
+    pfexec ./xtask a4x2 deploy collect-evidence
 
     # create a bundle of output logs for easy bulk retrieval, but also include
     # the logs as individual outputs for easy hot-linking.
@@ -133,7 +134,7 @@ trap _exit_trap EXIT
 # Run the topology
 # XXX set env var to pull from http://catacomb.eng.oxide.computer:12346/falcon/
 #
-./xtask a4x2 deploy start --package $INPUT/a4x2/a4x2-package.tar.gz
+pfexec ./xtask a4x2 deploy start --package $INPUT/a4x2/a4x2-package.tar.gz
 
 pfexec dladm
 pfexec ipadm
@@ -159,6 +160,6 @@ pfexec netstat -nr
 #     --test-duration 200s \
 #     --packet-rate 10
 
-./xtask a4x2 deploy run-live-tests
+pfexec ./xtask a4x2 deploy run-live-tests
 
 collect_evidence
