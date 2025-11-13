@@ -582,7 +582,7 @@ async fn test_reject_creating_disk_from_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: db::model::Generation::new(),
+                generation: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
@@ -735,7 +735,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: db::model::Generation::new(),
+                generation: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
@@ -831,7 +831,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                 volume_id: VolumeUuid::new_v4().into(),
                 destination_volume_id: VolumeUuid::new_v4().into(),
 
-                gen: db::model::Generation::new(),
+                generation: db::model::Generation::new(),
                 state: db::model::SnapshotState::Creating,
                 block_size: db::model::BlockSize::AdvancedFormat,
 
@@ -1049,7 +1049,7 @@ async fn test_create_snapshot_record_idempotent(
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
 
-        gen: db::model::Generation::new(),
+        generation: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: db::model::BlockSize::Traditional,
         size: external::ByteCount::try_from(1024u32).unwrap().into(),
@@ -1100,7 +1100,7 @@ async fn test_create_snapshot_record_idempotent(
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
 
-        gen: db::model::Generation::new(),
+        generation: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: db::model::BlockSize::Traditional,
         size: external::ByteCount::try_from(1024u32).unwrap().into(),
@@ -1127,7 +1127,7 @@ async fn test_create_snapshot_record_idempotent(
         .project_snapshot_update_state(
             &opctx,
             &authz_snapshot,
-            db_snapshot.gen,
+            db_snapshot.generation,
             db::model::SnapshotState::Ready,
         )
         .await
@@ -1201,7 +1201,7 @@ async fn test_create_snapshot_record_idempotent(
         volume_id: VolumeUuid::new_v4().into(),
         destination_volume_id: VolumeUuid::new_v4().into(),
 
-        gen: db::model::Generation::new(),
+        generation: db::model::Generation::new(),
         state: db::model::SnapshotState::Creating,
         block_size: db::model::BlockSize::Traditional,
         size: external::ByteCount::try_from(1024u32).unwrap().into(),

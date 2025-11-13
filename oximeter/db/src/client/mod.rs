@@ -299,8 +299,8 @@ impl Client {
         limit: NonZeroU32,
     ) -> Result<ResultsPage<Timeseries>, Error> {
         let (params, offset) = match page {
-            WhichPage::First(ref params) => (params, 0),
-            WhichPage::Next(ref sel) => (&sel.params, sel.offset.get()),
+            WhichPage::First(params) => (params, 0),
+            WhichPage::Next(sel) => (&sel.params, sel.offset.get()),
         };
         let schema = self
             .schema_for_timeseries(&params.timeseries_name)
@@ -392,7 +392,7 @@ impl Client {
                     limit.get(),
                 )
             }
-            WhichPage::Next(ref last_timeseries) => {
+            WhichPage::Next(last_timeseries) => {
                 format!(
                     concat!(
                         "SELECT * FROM {}.timeseries_schema ",

@@ -232,7 +232,7 @@ impl SledAgent {
                 disk_state: DiskState::Attached(
                     instance_id.into_untyped_uuid(),
                 ),
-                gen: omicron_common::api::external::Generation::new(),
+                generation: omicron_common::api::external::Generation::new(),
                 time_updated: chrono::Utc::now(),
             };
 
@@ -310,7 +310,7 @@ impl SledAgent {
             migration_id.map(|migration_id| MigrationRuntimeState {
                 migration_id,
                 state: MigrationState::Pending,
-                gen: Generation::new(),
+                generation: Generation::new(),
                 time_updated: chrono::Utc::now(),
             });
 
