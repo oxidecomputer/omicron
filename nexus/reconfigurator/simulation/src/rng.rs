@@ -4,6 +4,8 @@
 
 //! Versioned random number generation for the simulator.
 
+use std::fmt;
+
 use nexus_inventory::CollectionBuilderRng;
 use nexus_reconfigurator_planning::{
     example::{ExampleSystemRng, SimRngState},
@@ -132,6 +134,34 @@ pub enum SimRngLogEntry {
     NextCollectionRng,
     NextPlannerRng,
     NextSledId(SledUuid),
+}
+
+impl fmt::Display for SimRngLogEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SimRngLogEntry::SetSeed(seed) => {
+                write!(f, "set seed: {}", seed)
+            }
+            SimRngLogEntry::ResetState { existing_seed } => {
+                write!(f, "reset state (existing seed: {})", existing_seed)
+            }
+            SimRngLogEntry::RegenerateSeedFromEntropy(seed) => {
+                write!(f, "regenerate seed from entropy: {}", seed)
+            }
+            SimRngLogEntry::NextExampleRng => {
+                write!(f, "next example rng")
+            }
+            SimRngLogEntry::NextCollectionRng => {
+                write!(f, "next collection rng")
+            }
+            SimRngLogEntry::NextPlannerRng => {
+                write!(f, "next planner rng")
+            }
+            SimRngLogEntry::NextSledId(id) => {
+                write!(f, "next sled id: {}", id)
+            }
+        }
+    }
 }
 
 pub(crate) fn seed_from_entropy() -> String {
