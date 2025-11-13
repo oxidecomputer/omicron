@@ -17,6 +17,7 @@ use chrono::Utc;
 use std::sync::Arc;
 
 pub mod alert;
+pub mod case;
 pub mod de;
 
 #[derive(Debug)]
@@ -87,6 +88,7 @@ impl<'a> SitrepBuilder<'a> {
                     comment: String::new(),
                     ereports: Default::default(),
                     alerts_requested: Default::default(),
+                    impacted_sp_slots: Default::default(),
                 };
                 entry.insert(CaseBuilder::new(&self.log, sitrep_id, case))
             }
