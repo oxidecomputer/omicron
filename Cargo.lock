@@ -2877,6 +2877,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-envlogger",
+ "slog-error-chain",
  "slog-term",
  "subprocess",
  "tempfile",

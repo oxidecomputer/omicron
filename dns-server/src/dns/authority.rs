@@ -18,6 +18,7 @@ use hickory_server::authority::{
 use hickory_server::server::RequestInfo;
 use internal_dns_types::config::{DnsRecord, Srv};
 use slog::{Logger, debug, warn};
+use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::str::FromStr;
 
@@ -96,12 +97,15 @@ impl Authority for OmicronAuthority {
                 // Not our zone - return empty
                 return LookupControlFlow::Break(Ok(OmicronLookup::empty()));
             }
-            Err(e) => {
-                warn!(&log, "query failed"; "error" => ?e);
+            Err(
+                e @ (QueryError::QueryFail(..) | QueryError::ParseFail(..)),
+            ) => {
+                let error = InlineErrorChain::new(&e);
+                warn!(&log, "query failed"; &error);
                 return LookupControlFlow::Break(Err(LookupError::Io(
                     io::Error::new(
                         io::ErrorKind::Other,
-                        format!("query failed: {:#}", e),
+                        format!("query failed: {}", e),
                     ),
                 )));
             }

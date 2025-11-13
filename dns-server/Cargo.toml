@@ -32,6 +32,7 @@ serde_json.workspace = true
 sled.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
+slog-error-chain.workspace = true
 slog-term.workspace = true
 slog.workspace = true
 tempfile.workspace = true
