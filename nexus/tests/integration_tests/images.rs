@@ -652,6 +652,37 @@ async fn test_silo_collaborator_can_promote_demote_images(
 
     assert_eq!(project_images.len(), 1);
     assert_eq!(project_images[0].identity.id, image_id);
+
+    // Test that silo collaborator can delete silo images
+    // First, promote the image back to silo
+    let promote_url = format!("/v1/images/{}/promote", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &promote_url)
+            .expect_status(Some(http::StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute_and_parse_unwrap::<views::Image>()
+    .await;
+
+    // Delete the silo image as collaborator - should succeed
+    let image_url = format!("/v1/images/{}", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, &image_url)
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("silo collaborator should be able to delete silo image");
+
+    // Verify no silo images remain
+    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(silo_images.len(), 0);
 }
 
 #[nexus_test]
@@ -758,6 +789,46 @@ async fn test_silo_limited_collaborator_can_promote_demote_images(
         .items;
 
     assert_eq!(silo_images.len(), 0);
+
+    // Test that limited-collaborator can delete both project and silo images
+    // First, promote the image back to silo
+    let promote_url = format!("/v1/images/{}/promote", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::POST, &promote_url)
+            .expect_status(Some(http::StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute_and_parse_unwrap::<views::Image>()
+    .await;
+
+    // Verify it's a silo image
+    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(silo_images.len(), 1);
+
+    // Delete the silo image as limited-collaborator - should succeed
+    let image_url = format!("/v1/images/{}", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, &image_url)
+            .expect_status(Some(http::StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("limited-collaborator should be able to delete silo image");
+
+    // Verify no silo images remain
+    let silo_images = NexusRequest::object_get(client, &silo_images_url)
+        .authn_as(AuthnMode::UnprivilegedUser)
+        .execute_and_parse_unwrap::<ResultsPage<views::Image>>()
+        .await
+        .items;
+
+    assert_eq!(silo_images.len(), 0);
 }
 
 #[nexus_test]
@@ -827,6 +898,17 @@ async fn test_silo_viewer_cannot_promote_demote_images(
     .execute()
     .await
     .expect("expected viewer to be blocked from demoting image");
+
+    // Attempt to delete the silo image as viewer - should fail
+    let image_url = format!("/v1/images/{}", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, &image_url)
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("expected viewer to be blocked from deleting silo image");
 }
 
 #[nexus_test]
@@ -896,6 +978,20 @@ async fn test_project_collaborator_cannot_promote_demote_images(
     .execute()
     .await
     .expect("expected project collaborator to be blocked from demoting image");
+
+    // Attempt to delete the silo image as project collaborator - should fail
+    // Project collaborators have no silo-level permissions, so they get NOT_FOUND
+    let image_url = format!("/v1/images/{}", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, &image_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect(
+        "expected project collaborator to be blocked from deleting silo image",
+    );
 }
 
 #[nexus_test]
@@ -965,4 +1061,16 @@ async fn test_project_limited_collaborator_cannot_promote_demote_images(
     .execute()
     .await
     .expect("expected project limited-collaborator to be blocked from demoting image");
+
+    // Attempt to delete the silo image as project limited-collaborator - should fail
+    // Project limited-collaborators have no silo-level permissions, so they get NOT_FOUND
+    let image_url = format!("/v1/images/{}", image_id);
+    NexusRequest::new(
+        RequestBuilder::new(client, http::Method::DELETE, &image_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::UnprivilegedUser)
+    .execute()
+    .await
+    .expect("expected project limited-collaborator to be blocked from deleting silo image");
 }
