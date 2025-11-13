@@ -2984,6 +2984,17 @@ table! {
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_case);
 
 table! {
+    fm_case_impacts_sp_slot (sitrep_id, case_id, sp_type, sp_slot) {
+        sitrep_id -> Uuid,
+        case_id -> Uuid,
+        sp_type -> crate::enums::SpTypeEnum,
+        sp_slot -> Int4,
+        created_sitrep_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+table! {
     fm_alert_request (sitrep_id, id) {
         id -> Uuid,
         sitrep_id -> Uuid,

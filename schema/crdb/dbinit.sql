@@ -6898,6 +6898,19 @@ CREATE INDEX IF NOT EXISTS
     lookup_ereports_assigned_to_fm_case
 ON omicron.public.fm_ereport_in_case (sitrep_id, case_id);
 
+CREATE TABLE IF NOT EXISTS omicron.public.fm_case_impacts_sp_slot (
+    sitrep_id UUID NOT NULL,
+    case_id UUID NOT NULL,
+    -- location of this device according to MGS
+    sp_type omicron.public.sp_type NOT NULL,
+    sp_slot INT4 NOT NULL,
+
+    -- ID of the sitrep in which this SP was added to the case.
+    created_sitrep_id UUID NOT NULL,
+    comment TEXT NOT NULL,
+
+    PRIMARY KEY (sitrep_id, case_id, sp_type, sp_slot)
+);
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
     -- Requested alert UUID

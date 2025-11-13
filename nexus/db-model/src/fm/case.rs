@@ -6,9 +6,13 @@
 
 use super::DiagnosisEngine;
 use crate::DbTypedUuid;
+use crate::SpMgsSlot;
+use crate::SpType;
 use crate::ereport;
 use chrono::{DateTime, Utc};
-use nexus_db_schema::schema::{fm_case, fm_ereport_in_case};
+use nexus_db_schema::schema::{
+    fm_case, fm_case_impacts_sp_slot, fm_ereport_in_case,
+};
 use omicron_uuid_kinds::{CaseKind, EreporterRestartKind, SitrepKind};
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
@@ -35,4 +39,15 @@ pub struct CaseEreport {
     pub case_id: DbTypedUuid<CaseKind>,
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub assigned_sitrep_id: DbTypedUuid<SitrepKind>,
+}
+
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
+#[diesel(table_name = fm_case_impacts_sp_slot)]
+pub struct CaseImpactsSp {
+    pub sitrep_id: DbTypedUuid<SitrepKind>,
+    pub case_id: DbTypedUuid<CaseKind>,
+    pub sp_type: SpType,
+    pub sp_slot: SpMgsSlot,
+    pub created_sitrep_id: DbTypedUuid<SitrepKind>,
+    pub comment: String,
 }

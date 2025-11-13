@@ -13,13 +13,15 @@ pub use ereport::{Ereport, EreportId};
 mod alert;
 pub use alert::*;
 
+pub mod case;
+pub use case::Case;
+
 use chrono::{DateTime, Utc};
-use iddqd::{IdOrdItem, IdOrdMap};
+use iddqd::IdOrdMap;
 use omicron_uuid_kinds::{
     CaseUuid, CollectionUuid, OmicronZoneUuid, SitrepUuid,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 /// A fault management situation report, or _sitrep_.
 ///
@@ -116,39 +118,6 @@ pub struct SitrepVersion {
     pub id: SitrepUuid,
     pub version: u32,
     pub time_made_current: DateTime<Utc>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-pub struct Case {
-    pub id: CaseUuid,
-    pub created_sitrep_id: SitrepUuid,
-    pub time_created: DateTime<Utc>,
-
-    pub closed_sitrep_id: Option<SitrepUuid>,
-    pub time_closed: Option<DateTime<Utc>>,
-
-    pub de: DiagnosisEngine,
-
-    pub ereports: IdOrdMap<Arc<Ereport>>,
-
-    pub alerts_requested: IdOrdMap<AlertRequest>,
-
-    pub comment: String,
-}
-
-impl Case {
-    pub fn is_open(&self) -> bool {
-        self.time_closed.is_none()
-    }
-}
-
-impl IdOrdItem for Case {
-    type Key<'a> = &'a CaseUuid;
-    fn key(&self) -> Self::Key<'_> {
-        &self.id
-    }
-
-    iddqd::id_upcast!();
 }
 
 #[derive(
