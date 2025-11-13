@@ -39,6 +39,7 @@ pub struct CaseEreport {
     pub case_id: DbTypedUuid<CaseKind>,
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub assigned_sitrep_id: DbTypedUuid<SitrepKind>,
+    pub comment: String,
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]

@@ -177,8 +177,16 @@ impl CaseBuilder {
         slog::info!(&self.log, "case closed");
     }
 
-    pub fn add_ereport(&mut self, report: &Arc<fm::Ereport>) {
-        match self.case.ereports.insert_unique(report.clone()) {
+    pub fn add_ereport(
+        &mut self,
+        report: &Arc<fm::Ereport>,
+        comment: impl std::fmt::Display,
+    ) {
+        match self.case.ereports.insert_unique(fm::case::CaseEreport {
+            ereport: report.clone(),
+            assigned_sitrep_id: self.sitrep_id,
+            comment: comment.to_string(),
+        }) {
             Ok(_) => {
                 slog::info!(
                     self.log,
