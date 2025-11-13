@@ -17,7 +17,7 @@ use hickory_server::authority::{
 };
 use hickory_server::server::RequestInfo;
 use internal_dns_types::config::{DnsRecord, Srv};
-use slog::{Logger, debug, warn};
+use slog::{Logger, debug, error, warn};
 use slog_error_chain::InlineErrorChain;
 use std::io;
 use std::str::FromStr;
@@ -90,12 +90,25 @@ impl Authority for OmicronAuthority {
         let answer = match store.query_name(&query_name) {
             Ok(answer) => answer,
             Err(QueryError::NoZone(zone)) => {
-                debug!(&log, "no zone for query";
+                // This should be impossible: the Catalog should only route
+                // queries to this Authority if the zone matches our origin.
+                // If we get here, it indicates a bug in the catalog routing
+                // logic or a race condition during configuration updates.
+                error!(&log, "query routed to wrong authority";
                     "name" => ?query_name,
                     "zone" => &zone,
+                    "origin" => ?origin,
                 );
-                // Not our zone - return empty
-                return LookupControlFlow::Break(Ok(OmicronLookup::empty()));
+                return LookupControlFlow::Break(Err(LookupError::Io(
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!(
+                            "internal error: query for {} routed to wrong \
+                             authority (expected zone {}, got {})",
+                            query_name, origin, zone
+                        ),
+                    ),
+                )));
             }
             Err(
                 e @ (QueryError::QueryFail(..) | QueryError::ParseFail(..)),
