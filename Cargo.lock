@@ -4995,20 +4995,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "id-map"
-version = "0.1.0"
-dependencies = [
- "daft",
- "derive-where",
- "omicron-workspace-hack",
- "proptest",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "test-strategy",
-]
-
-[[package]]
 name = "iddqd"
 version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6714,6 +6700,7 @@ dependencies = [
  "oxnet",
  "parse-display",
  "pq-sys",
+ "proptest",
  "rand 0.9.2",
  "ref-cast",
  "regex",
@@ -6726,6 +6713,7 @@ dependencies = [
  "slog-error-chain",
  "steno",
  "strum 0.27.2",
+ "test-strategy",
  "thiserror 2.0.17",
  "tokio",
  "tufaceous-artifact",
@@ -6759,7 +6747,6 @@ dependencies = [
  "gateway-types",
  "hex",
  "hyper-rustls",
- "id-map",
  "iddqd",
  "illumos-utils",
  "internal-dns-resolver",
@@ -7028,7 +7015,6 @@ dependencies = [
  "gateway-types",
  "http",
  "hubtools",
- "id-map",
  "iddqd",
  "internal-dns-resolver",
  "internal-dns-types",
@@ -7463,7 +7449,6 @@ dependencies = [
  "gateway-types",
  "http",
  "humantime",
- "id-map",
  "iddqd",
  "illumos-utils",
  "indent_write",
@@ -8749,7 +8734,6 @@ dependencies = [
  "http-range",
  "hyper",
  "hyper-staticfile",
- "id-map",
  "iddqd",
  "illumos-utils",
  "installinator-common",
