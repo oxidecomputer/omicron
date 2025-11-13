@@ -5010,9 +5010,9 @@ dependencies = [
 
 [[package]]
 name = "iddqd"
-version = "0.3.13"
+version = "0.3.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f73e38c7e0c1b237e00655516f8f633c584c0bd59ce63fedac6f49efeba15613"
+checksum = "dda610d939ea51890ca6c827c8365acf0a44b4b53d2ed6f371e8e7e47bc75d25"
 dependencies = [
  "allocator-api2",
  "daft",
@@ -14857,6 +14857,7 @@ dependencies = [
  "chacha20poly1305",
  "ciborium",
  "daft",
+ "debug-ignore",
  "derive_more 0.99.20",
  "dropshot",
  "futures",

@@ -233,6 +233,36 @@ impl EstablishedConn {
                         panic!("Connection to main task channnel full");
                     }
                 }
+                WireMsg::ProxyRequest(req) => {
+                    if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
+                        task_id: self.task_id,
+                        msg: ConnToMainMsgInner::ProxyRequestReceived {
+                            from: self.peer_id.clone(),
+                            req,
+                        },
+                    }) {
+                        error!(
+                            self.log,
+                            "Failed to send received proxy msg to the main task"
+                        );
+                        panic!("Connection to main task channel full");
+                    }
+                }
+                WireMsg::ProxyResponse(rsp) => {
+                    if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
+                        task_id: self.task_id,
+                        msg: ConnToMainMsgInner::ProxyResponseReceived {
+                            from: self.peer_id.clone(),
+                            rsp,
+                        },
+                    }) {
+                        error!(
+                            self.log,
+                            "Failed to send received proxy msg to the main task"
+                        );
+                        panic!("Connection to main task channel full");
+                    }
+                }
             }
         }
     }

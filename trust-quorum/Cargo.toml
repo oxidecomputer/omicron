@@ -16,6 +16,7 @@ camino.workspace = true
 chacha20poly1305.workspace = true
 ciborium.workspace = true
 daft.workspace = true
+debug-ignore.workspace = true
 derive_more.workspace = true
 futures.workspace = true
 gfss.workspace = true

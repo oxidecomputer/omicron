@@ -7,9 +7,10 @@
 mod connection_manager;
 pub(crate) mod established_conn;
 mod ledgers;
+mod proxy;
 mod task;
 
 pub(crate) use connection_manager::{
     ConnToMainMsg, ConnToMainMsgInner, MainToConnMsg, WireMsg,
 };
-pub use task::NodeTask;
+pub use task::{CommitStatus, Config, NodeApiError, NodeTask, NodeTaskHandle};
