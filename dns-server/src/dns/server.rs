@@ -25,27 +25,18 @@ use tokio::net::{TcpListener, UdpSocket};
 pub struct Config {
     /// The address to listen for DNS requests on
     pub bind_address: SocketAddr,
-    /// Optional TCP idle timeout in seconds
-    /// Defaults to 5 seconds if not specified
-    #[serde(default = "default_tcp_idle_timeout_secs")]
-    pub tcp_idle_timeout_secs: u64,
-}
-
-fn default_tcp_idle_timeout_secs() -> u64 {
-    5
+    /// TCP idle timeout in seconds
+    pub timeout_idle_tcp_conns: u64,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             bind_address: "[::]:53".parse().unwrap(),
-            tcp_idle_timeout_secs: default_tcp_idle_timeout_secs(),
+            timeout_idle_tcp_conns: 10,
         }
     }
 }
-
-// OmicronRequestHandler removed - we use Catalog directly since it
-// already implements RequestHandler
 
 /// Handle to the DNS server
 ///
@@ -80,9 +71,22 @@ impl Server {
         store: Store,
         config: &Config,
     ) -> anyhow::Result<ServerHandle> {
-        // Build catalog with a single root Authority
-        // The Authority delegates to Store for zone routing
-        // Catalog implements RequestHandler, so we use it directly
+        // Build catalog with a single root Authority that's used to handle all
+        // incoming queries.
+        //
+        // Normally with hickory you'd create a separate Authority for each DNS
+        // zone that you want to handle.  We could do this, but it's more
+        // annoying to implement (since the set of zones can theoretically
+        // change at runtime with an incoming HTTP request) and it's not very
+        // useful for us because we're going to funnel all the requests to our
+        // (one) Store anyway.  And there's an important case we need to
+        // consider: when we get a query for a name inside a zone that we're not
+        // authoritative for, we want to report SERVFAIL in order to trigger
+        // dumb clients to query the next nameserver.  But when an incoming
+        // query doesn't match one of its Authorities, hickory returns REFUSED.
+        // This may not trigger the same behavior that we want.  By building one
+        // Authority, we ensure that we're invoked for all queries and can
+        // return the SERVFAIL that we want.
         info!(&log, "building DNS catalog with root authority");
         let mut catalog = Catalog::new();
         let root_authority = Arc::new(OmicronAuthority::new(
@@ -92,7 +96,7 @@ impl Server {
         ));
         catalog.upsert(Name::root().into(), vec![root_authority as Arc<_>]);
 
-        // Bind UDP socket
+        // Bind UDP socket.
         let udp_socket =
             UdpSocket::bind(config.bind_address).await.with_context(|| {
                 format!(
@@ -109,7 +113,7 @@ impl Server {
             "local_address" => ?local_address
         );
 
-        // Bind TCP socket on the same address
+        // Bind TCP socket on the same address.
         let tcp_listener = TcpListener::bind(config.bind_address)
             .await
             .with_context(|| {
@@ -121,16 +125,16 @@ impl Server {
 
         info!(&log, "DNS server bound to TCP address";
             "local_address" => ?local_address,
-            "tcp_idle_timeout_secs" => config.tcp_idle_timeout_secs
+            "timeout_idle_tcp_conns" => config.timeout_idle_tcp_conns
         );
 
-        // Create ServerFuture with our Catalog (which implements RequestHandler)
+        // Start the ServerFuture with our Catalog.
         let mut server_future = ServerFuture::new(catalog);
         info!(&log, "created ServerFuture, registering sockets");
         server_future.register_socket(udp_socket);
         server_future.register_listener(
             tcp_listener,
-            Duration::from_secs(config.tcp_idle_timeout_secs),
+            Duration::from_secs(config.timeout_idle_tcp_conns),
         );
 
         // Spawn the server task
@@ -145,7 +149,11 @@ impl Server {
                 .block_until_done()
                 .await
                 .context("DNS server task failed");
-            info!(&log_clone, "ServerFuture block_until_done returned"; "result" => ?result);
+            info!(
+                &log_clone,
+                "ServerFuture block_until_done returned";
+                "result" => ?result
+            );
             result
         });
 
