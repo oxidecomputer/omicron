@@ -1390,7 +1390,7 @@ pub mod test {
         let (_, new_dns_dropshot_server) = dns_server::start_servers(
             log.clone(),
             store,
-            &dns_server::dns_server::Config {
+            &dns_server::dns::server::Config {
                 bind_address: "[::1]:0".parse().unwrap(),
                 ..Default::default()
             },

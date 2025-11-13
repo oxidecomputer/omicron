@@ -2241,7 +2241,7 @@ pub async fn start_dns_server(
     storage_path: &Utf8Path,
 ) -> Result<
     (
-        dns_server::dns_server::ServerHandle,
+        dns_server::dns::server::ServerHandle,
         dropshot::HttpServer<dns_server::http_server::Context>,
         TokioResolver,
     ),
@@ -2260,7 +2260,7 @@ pub async fn start_dns_server(
     let (dns_server, http_server) = dns_server::start_servers(
         log,
         store,
-        &dns_server::dns_server::Config {
+        &dns_server::dns::server::Config {
             bind_address: "[::1]:0".parse().unwrap(),
             ..Default::default()
         },

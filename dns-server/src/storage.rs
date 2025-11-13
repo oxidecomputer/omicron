@@ -263,7 +263,6 @@ impl Store {
     /// we're authoritative for.
     fn build_catalog(&self) -> Result<Catalog, anyhow::Error> {
         use crate::dns::authority::OmicronAuthority;
-        use hickory_server::authority::ZoneType;
 
         let config = self.read_config()?;
         let mut catalog = Catalog::new();

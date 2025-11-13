@@ -40,78 +40,6 @@ impl OmicronAuthority {
     }
 }
 
-/// The Lookup type for OmicronAuthority
-///
-/// This wraps our DNS records in a type that implements the necessary
-/// traits for hickory-server's Authority trait.
-pub struct OmicronLookup {
-    records: Vec<Record>,
-    additionals: Option<Vec<Record>>,
-}
-
-impl OmicronLookup {
-    fn new(records: Vec<Record>) -> Self {
-        Self { records, additionals: None }
-    }
-
-    fn with_additionals(
-        records: Vec<Record>,
-        additionals: Vec<Record>,
-    ) -> Self {
-        Self {
-            records,
-            additionals: if additionals.is_empty() {
-                None
-            } else {
-                Some(additionals)
-            },
-        }
-    }
-
-    fn empty() -> Self {
-        Self { records: Vec::new(), additionals: None }
-    }
-}
-
-// Implement the necessary traits for OmicronLookup
-impl Iterator for OmicronLookup {
-    type Item = Record;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.records.is_empty() {
-            None
-        } else {
-            Some(self.records.remove(0))
-        }
-    }
-}
-
-impl From<Vec<Record>> for OmicronLookup {
-    fn from(records: Vec<Record>) -> Self {
-        Self::new(records)
-    }
-}
-
-// Implement LookupObject so OmicronAuthority can be used as AuthorityObject
-impl LookupObject for OmicronLookup {
-    fn is_empty(&self) -> bool {
-        self.records.is_empty()
-    }
-
-    // XXX-dap why do this when it already impls Iterator?
-    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Record> + Send + 'a> {
-        Box::new(self.records.iter())
-    }
-
-    // XXX-dap this seems like a weird thing to have
-    fn take_additionals(&mut self) -> Option<Box<dyn LookupObject>> {
-        // Return additional records if we have any
-        self.additionals.take().map(|additionals| {
-            Box::new(OmicronLookup::new(additionals)) as Box<dyn LookupObject>
-        })
-    }
-}
-
 #[async_trait]
 impl Authority for OmicronAuthority {
     type Lookup = OmicronLookup;
@@ -271,6 +199,78 @@ impl Authority for OmicronAuthority {
     ) -> LookupControlFlow<Self::Lookup> {
         // DNSSEC not supported.
         LookupControlFlow::Break(Ok(OmicronLookup::empty()))
+    }
+}
+
+/// The Lookup type for OmicronAuthority
+///
+/// This wraps our DNS records in a type that implements the necessary
+/// traits for hickory-server's Authority trait.
+pub struct OmicronLookup {
+    records: Vec<Record>,
+    additionals: Option<Vec<Record>>,
+}
+
+impl OmicronLookup {
+    fn new(records: Vec<Record>) -> Self {
+        Self { records, additionals: None }
+    }
+
+    fn with_additionals(
+        records: Vec<Record>,
+        additionals: Vec<Record>,
+    ) -> Self {
+        Self {
+            records,
+            additionals: if additionals.is_empty() {
+                None
+            } else {
+                Some(additionals)
+            },
+        }
+    }
+
+    fn empty() -> Self {
+        Self { records: Vec::new(), additionals: None }
+    }
+}
+
+// Implement the necessary traits for OmicronLookup
+impl Iterator for OmicronLookup {
+    type Item = Record;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.records.is_empty() {
+            None
+        } else {
+            Some(self.records.remove(0))
+        }
+    }
+}
+
+impl From<Vec<Record>> for OmicronLookup {
+    fn from(records: Vec<Record>) -> Self {
+        Self::new(records)
+    }
+}
+
+// Implement LookupObject so OmicronAuthority can be used as AuthorityObject
+impl LookupObject for OmicronLookup {
+    fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+
+    // XXX-dap why do this when it already impls Iterator?
+    fn iter<'a>(&'a self) -> Box<dyn Iterator<Item = &'a Record> + Send + 'a> {
+        Box::new(self.records.iter())
+    }
+
+    // XXX-dap this seems like a weird thing to have
+    fn take_additionals(&mut self) -> Option<Box<dyn LookupObject>> {
+        // Return additional records if we have any
+        self.additionals.take().map(|additionals| {
+            Box::new(OmicronLookup::new(additionals)) as Box<dyn LookupObject>
+        })
     }
 }
 
