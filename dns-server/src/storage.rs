@@ -94,7 +94,7 @@
 
 use anyhow::{Context, anyhow};
 use camino::Utf8PathBuf;
-use hickory_proto::{op::LowerQuery, rr::LowerName};
+use hickory_proto::rr::LowerName;
 use hickory_resolver::Name;
 use hickory_server::authority::Catalog;
 use internal_dns_types::{
@@ -273,14 +273,17 @@ impl Store {
         for zone_name in &config.zones {
             info!(&self.log, "adding zone to catalog"; "zone" => zone_name);
             // Parse the zone name and ensure it's absolute (ends with .)
-            let mut origin = Name::from_str(zone_name)
-                .with_context(|| format!("parsing zone name {:?}", zone_name))?;
+            let mut origin = Name::from_str(zone_name).with_context(|| {
+                format!("parsing zone name {:?}", zone_name)
+            })?;
 
             // Make sure the name is absolute (FQDN)
             if !origin.is_fqdn() {
                 // Append the root label to make it absolute
-                origin = origin.append_domain(&Name::root())
-                    .with_context(|| format!("making zone name absolute: {:?}", zone_name))?;
+                origin =
+                    origin.append_domain(&Name::root()).with_context(|| {
+                        format!("making zone name absolute: {:?}", zone_name)
+                    })?;
             }
 
             info!(&self.log, "parsed zone name";
@@ -308,7 +311,9 @@ impl Store {
     ///
     /// This returns a watch channel receiver that will be notified whenever
     /// the DNS configuration changes and the catalog is rebuilt.
-    pub fn catalog_receiver(&self) -> tokio::sync::watch::Receiver<Arc<Catalog>> {
+    pub fn catalog_receiver(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Arc<Catalog>> {
         self.catalog_tx.subscribe()
     }
 
@@ -335,7 +340,8 @@ impl Store {
     ) -> Result<Self, anyhow::Error> {
         // Create initial empty catalog and watch channel
         let initial_catalog = Catalog::new();
-        let (catalog_tx, _catalog_rx) = tokio::sync::watch::channel(Arc::new(initial_catalog));
+        let (catalog_tx, _catalog_rx) =
+            tokio::sync::watch::channel(Arc::new(initial_catalog));
 
         let store = Store {
             log,
@@ -839,20 +845,6 @@ impl Store {
         let trees_to_prune =
             trees_older.into_iter().take(ntake).map(|(_, n)| n);
         self.prune_trees(trees_to_prune, "too old");
-    }
-
-    /// Returns an [`Answer`] describing the records associated with the name in
-    /// the given DNS request, as well as the zone containing the name and the
-    /// name prefix in that zone that the query is for.
-    ///
-    /// If the name does not match any zone, returns `QueryError::NoZone`.
-    pub(crate) fn query(
-        &self,
-        query: &LowerQuery,
-    ) -> Result<Answer, QueryError> {
-        let name = query.name();
-        let orig_name = query.original().name();
-        self.query_raw(name, orig_name)
     }
 
     /// Returns an [`Answer`] describing the records associated with the given

@@ -8,15 +8,15 @@
 //! Store-based DNS data with hickory-server's high-level server infrastructure.
 
 use crate::storage::{QueryError, Store};
-use hickory_proto::rr::{LowerName, Name, RData, Record, RecordType};
 use hickory_proto::rr::rdata::{NS, SRV};
+use hickory_proto::rr::{LowerName, Name, RData, Record, RecordType};
 use hickory_server::authority::{
     Authority, LookupControlFlow, LookupError, LookupObject, LookupOptions,
     MessageRequest, ZoneType,
 };
 use hickory_server::server::RequestInfo;
 use internal_dns_types::config::{DnsRecord, Srv};
-use slog::{debug, warn, Logger};
+use slog::{Logger, debug, warn};
 use std::future::Future;
 use std::io;
 use std::pin::Pin;
@@ -43,12 +43,7 @@ impl OmicronAuthority {
         zone_type: ZoneType,
         log: Logger,
     ) -> Self {
-        Self {
-            store,
-            origin: origin.into(),
-            zone_type,
-            log,
-        }
+        Self { store, origin: origin.into(), zone_type, log }
     }
 
     /// Convert a DnsRecord to a hickory Record
@@ -59,13 +54,17 @@ impl OmicronAuthority {
         record: &DnsRecord,
     ) -> Result<Record, LookupError> {
         match record {
-            DnsRecord::A(addr) => {
-                Ok(Record::from_rdata(name.clone(), 0, RData::A((*addr).into())))
-            }
+            DnsRecord::A(addr) => Ok(Record::from_rdata(
+                name.clone(),
+                0,
+                RData::A((*addr).into()),
+            )),
 
-            DnsRecord::Aaaa(addr) => {
-                Ok(Record::from_rdata(name.clone(), 0, RData::AAAA((*addr).into())))
-            }
+            DnsRecord::Aaaa(addr) => Ok(Record::from_rdata(
+                name.clone(),
+                0,
+                RData::AAAA((*addr).into()),
+            )),
 
             DnsRecord::Srv(Srv { prio, weight, port, target }) => {
                 let tgt = Name::from_str(&target).map_err(|error| {
@@ -108,10 +107,17 @@ impl OmicronLookup {
         Self { records, additionals: None }
     }
 
-    fn with_additionals(records: Vec<Record>, additionals: Vec<Record>) -> Self {
+    fn with_additionals(
+        records: Vec<Record>,
+        additionals: Vec<Record>,
+    ) -> Self {
         Self {
             records,
-            additionals: if additionals.is_empty() { None } else { Some(additionals) },
+            additionals: if additionals.is_empty() {
+                None
+            } else {
+                Some(additionals)
+            },
         }
     }
 
@@ -174,7 +180,9 @@ impl Authority for OmicronAuthority {
         _update: &'life1 MessageRequest,
     ) -> Pin<
         Box<
-            dyn Future<Output = Result<bool, hickory_proto::op::ResponseCode>> + Send + 'async_trait,
+            dyn Future<Output = Result<bool, hickory_proto::op::ResponseCode>>
+                + Send
+                + 'async_trait,
         >,
     >
     where
@@ -183,9 +191,7 @@ impl Authority for OmicronAuthority {
         Self: 'async_trait,
     {
         // Dynamic DNS updates are handled via HTTP API, not DNS protocol
-        Box::pin(async {
-            Err(hickory_proto::op::ResponseCode::NotImp)
-        })
+        Box::pin(async { Err(hickory_proto::op::ResponseCode::NotImp) })
     }
 
     fn origin(&self) -> &LowerName {
@@ -233,14 +239,18 @@ impl Authority for OmicronAuthority {
                         "zone" => &zone,
                     );
                     // Not our zone - return empty
-                    return LookupControlFlow::Break(Ok(OmicronLookup::empty()));
+                    return LookupControlFlow::Break(
+                        Ok(OmicronLookup::empty()),
+                    );
                 }
                 Err(e) => {
                     warn!(&log, "query failed"; "error" => ?e);
-                    return LookupControlFlow::Break(Err(LookupError::Io(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("query failed: {:#}", e),
-                    ))));
+                    return LookupControlFlow::Break(Err(LookupError::Io(
+                        io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("query failed: {:#}", e),
+                        ),
+                    )));
                 }
             };
 
@@ -296,9 +306,10 @@ impl Authority for OmicronAuthority {
                     if let Ok(target_answer) = store.query_name(target) {
                         if let Some(target_records) = target_answer.records {
                             for target_record in &target_records {
-                                if let Ok(record) =
-                                    Self::dns_record_to_record(target, target_record)
-                                {
+                                if let Ok(record) = Self::dns_record_to_record(
+                                    target,
+                                    target_record,
+                                ) {
                                     additional_records.push(record);
                                 }
                             }
@@ -358,5 +369,4 @@ impl Authority for OmicronAuthority {
         // DNSSEC not supported
         Box::pin(async { LookupControlFlow::Break(Ok(OmicronLookup::empty())) })
     }
-
 }

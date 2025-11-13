@@ -152,7 +152,7 @@ impl TransientServer {
             store,
             &dns_server::Config {
                 bind_address: dns_bind_address,
-                tcp_idle_timeout_secs: 5,
+                ..Default::default()
             },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),

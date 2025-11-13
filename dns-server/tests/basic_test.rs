@@ -674,7 +674,7 @@ async fn init_client_server(
     // launch a dns server
     let dns_server_config = dns_server::dns_server::Config {
         bind_address: "[::1]:0".parse().unwrap(),
-        tcp_idle_timeout_secs: 5,
+        ..Default::default()
     };
     let (dns_server, dropshot_server) = dns_server::start_servers(
         log.clone(),

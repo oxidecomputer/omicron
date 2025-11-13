@@ -9,9 +9,9 @@
 
 use crate::storage::Store;
 use anyhow::Context;
+use hickory_server::ServerFuture;
 use hickory_server::authority::Catalog;
 use hickory_server::server::{Request, ResponseHandler, ResponseInfo};
-use hickory_server::ServerFuture;
 use serde::Deserialize;
 use slog::{Logger, info};
 use std::net::SocketAddr;
@@ -128,15 +128,17 @@ impl Server {
         let handler = OmicronRequestHandler::new(catalog_rx);
 
         // Bind UDP socket
-        let udp_socket = UdpSocket::bind(config.bind_address)
-            .await
-            .with_context(|| {
-                format!("DNS server start: UDP bind to {:?}", config.bind_address)
+        let udp_socket =
+            UdpSocket::bind(config.bind_address).await.with_context(|| {
+                format!(
+                    "DNS server start: UDP bind to {:?}",
+                    config.bind_address
+                )
             })?;
 
-        let local_address = udp_socket
-            .local_addr()
-            .context("DNS server start: failed to get local address of bound socket")?;
+        let local_address = udp_socket.local_addr().context(
+            "DNS server start: failed to get local address of bound socket",
+        )?;
 
         info!(&log, "DNS server bound to UDP address";
             "local_address" => ?local_address
@@ -146,7 +148,10 @@ impl Server {
         let tcp_listener = TcpListener::bind(config.bind_address)
             .await
             .with_context(|| {
-                format!("DNS server start: TCP bind to {:?}", config.bind_address)
+                format!(
+                    "DNS server start: TCP bind to {:?}",
+                    config.bind_address
+                )
             })?;
 
         info!(&log, "DNS server bound to TCP address";
@@ -167,7 +172,10 @@ impl Server {
         info!(&log, "spawning ServerFuture task");
         let log_clone = log.clone();
         let handle = tokio::task::spawn(async move {
-            info!(&log_clone, "ServerFuture task started, calling block_until_done");
+            info!(
+                &log_clone,
+                "ServerFuture task started, calling block_until_done"
+            );
             let result = server_future
                 .block_until_done()
                 .await

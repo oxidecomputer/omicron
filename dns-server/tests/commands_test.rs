@@ -33,7 +33,7 @@ async fn test_dnsadm() {
         store,
         &dns_server::dns_server::Config {
             bind_address: "[::1]:0".parse().unwrap(),
-            tcp_idle_timeout_secs: 5,
+            ..Default::default()
         },
         &dropshot::ConfigDropshot {
             bind_address: "[::1]:0".parse().unwrap(),

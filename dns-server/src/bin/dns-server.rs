@@ -55,7 +55,7 @@ async fn main_impl() -> Result<(), anyhow::Error> {
 
     let dns_server_config = dns_server::dns_server::Config {
         bind_address: args.dns_address,
-        tcp_idle_timeout_secs: 5,
+        ..Default::default()
     };
 
     info!(&log, "config";

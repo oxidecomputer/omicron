@@ -1392,6 +1392,7 @@ pub mod test {
             store,
             &dns_server::dns_server::Config {
                 bind_address: "[::1]:0".parse().unwrap(),
+                ..Default::default()
             },
             &dropshot::ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
