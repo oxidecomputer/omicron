@@ -279,7 +279,14 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         )
     }
 
-    /// Stop a Dendrite instance for testing failure scenarios
+    pub fn lockstep_client(&self) -> nexus_lockstep_client::Client {
+        nexus_lockstep_client::Client::new(
+            &format!("http://{}", self.lockstep_client.bind_address),
+            self.lockstep_client.client_log.clone(),
+        )
+    }
+
+    /// Stop a Dendrite instance for testing failure scenarios.
     pub async fn stop_dendrite(
         &self,
         switch_location: omicron_common::api::external::SwitchLocation,
@@ -871,6 +878,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             Some(ReconfiguratorConfig {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
+                tuf_repo_pruner_enabled: true,
             });
         self.config.deployment.internal_dns = InternalDns::FromAddress {
             address: self

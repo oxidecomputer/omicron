@@ -4635,7 +4635,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     time_modified TIMESTAMPTZ NOT NULL,
 
     -- Whether to add zones while the system has detected a mupdate override.
-    add_zones_with_mupdate_override BOOL NOT NULL
+    add_zones_with_mupdate_override BOOL NOT NULL,
+
+    -- Enable the TUF repo pruner background task
+    tuf_repo_pruner_enabled BOOL NOT NULL
 );
 
 /*
@@ -7375,7 +7378,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '208.0.0', NULL)
+    (TRUE, NOW(), NOW(), '209.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

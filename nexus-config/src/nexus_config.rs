@@ -1233,6 +1233,7 @@ mod test {
             [initial_reconfigurator_config]
             planner_enabled = true
             planner_config.add_zones_with_mupdate_override = true
+            tuf_repo_pruner_enabled = false
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1394,6 +1395,7 @@ mod test {
                         planner_config: PlannerConfig {
                             add_zones_with_mupdate_override: true,
                         },
+                        tuf_repo_pruner_enabled: false,
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {

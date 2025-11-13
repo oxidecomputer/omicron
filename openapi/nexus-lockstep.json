@@ -7775,11 +7775,15 @@
           },
           "planner_enabled": {
             "type": "boolean"
+          },
+          "tuf_repo_pruner_enabled": {
+            "type": "boolean"
           }
         },
         "required": [
           "planner_config",
-          "planner_enabled"
+          "planner_enabled",
+          "tuf_repo_pruner_enabled"
         ]
       },
       "ReconfiguratorConfigParam": {

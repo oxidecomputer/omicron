@@ -887,6 +887,7 @@ task: "tuf_repo_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    status: enabled
     configuration:
         nkeep_recent_releases: 3
         nkeep_recent_uploads:  3
@@ -1454,6 +1455,7 @@ task: "tuf_repo_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    status: enabled
     configuration:
         nkeep_recent_releases: 3
         nkeep_recent_uploads:  3
@@ -1833,6 +1835,7 @@ stdout:
 Reconfigurator config:
     version: 1
     modified time: <REDACTED_TIMESTAMP>
+    tuf repo pruner enabled: true
     planner enabled: false
     planner config:
         add zones with mupdate override:   false
@@ -1913,7 +1916,8 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-*   planner enabled:   false -> true
+    tuf repo pruner enabled:   true (unchanged)
+*   planner enabled:::::::::   false -> true
     planner config:
         add zones with mupdate override:   false (unchanged)
 ---------------------------------------------
@@ -1925,7 +1929,8 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    planner enabled:   true (unchanged)
+    tuf repo pruner enabled:   true (unchanged)
+    planner enabled:::::::::   true (unchanged)
     planner config:
     *   add zones with mupdate override:   false -> true
 ---------------------------------------------
@@ -1939,6 +1944,7 @@ stdout:
 Reconfigurator config:
     version: 3
     modified time: <REDACTED_TIMESTAMP>
+    tuf repo pruner enabled: true
     planner enabled: true
     planner config:
         add zones with mupdate override:   true
