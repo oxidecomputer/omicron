@@ -117,10 +117,9 @@ impl fmt::Display for DisplayCase<'_> {
         } = self;
         writeln!(
             f,
-            "{:>indent$}case: {id:?}",
+            "{:>indent$}case: {id}",
             if indent > 0 { BULLET } else { "" }
         )?;
-        writeln!(f, "{:>indent$}comment: {comment}", "")?;
         writeln!(f, "{:>indent$}diagnosis engine: {de}", "")?;
         writeln!(f, "{:>indent$}created in sitrep: {created_sitrep_id}", "")?;
         writeln!(f, "{:>indent$}  at: {time_created}", "")?;
@@ -133,25 +132,41 @@ impl fmt::Display for DisplayCase<'_> {
             }
         }
 
+        writeln!(f, "\n{:>indent$}comment: {comment}", "")?;
+
         if !ereports.is_empty() {
-            writeln!(f, "\n{:>indent$}ereports:", "")?;
+            writeln!(f, "\n{:>indent$}ereports:\n", "")?;
             let indent = indent + LIST_INDENT;
             for CaseEreport { ereport, assigned_sitrep_id, comment } in ereports
             {
+                let pn =
+                    ereport.part_number.as_deref().unwrap_or("<UNKNOWN PART>");
+                let sn = ereport
+                    .serial_number
+                    .as_deref()
+                    .unwrap_or("<UNKNOWN SERIAL>");
                 writeln!(f, "{BULLET:>indent$}{}", ereport.id())?;
-                writeln!(f, "{:>indent$}class: {:?}", "", ereport.class)?;
-                writeln!(f, "{:>indent$}reporter: {}", "", ereport.reporter)?;
+                writeln!(
+                    f,
+                    "{:>indent$}class: {}",
+                    "",
+                    ereport.class.as_deref().unwrap_or("<NONE>")
+                )?;
+                writeln!(f, "{:>indent$}reported by:", "")?;
+
+                writeln!(f, "{:>indent$}  location: {}", "", ereport.reporter)?;
+                writeln!(f, "{:>indent$}  identity: {pn}:{sn}", "")?;
                 writeln!(
                     f,
                     "{:>indent$}added in sitrep: {assigned_sitrep_id}",
                     ""
                 )?;
-                writeln!(f, "{:>indent$}comment: {comment}", "")?;
+                writeln!(f, "{:>indent$}comment: {comment}\n", "")?;
             }
         }
 
         if !impacted_sp_slots.is_empty() {
-            writeln!(f, "\n{:>indent$}SP slots impacted:", "")?;
+            writeln!(f, "\n{:>indent$}SP slots impacted:\n", "")?;
             let indent = indent + LIST_INDENT;
             for ImpactedSpSlot { sp_type, slot, created_sitrep_id, comment } in
                 impacted_sp_slots
@@ -162,21 +177,21 @@ impl fmt::Display for DisplayCase<'_> {
                     "{:>indent$}added in sitrep: {created_sitrep_id}",
                     ""
                 )?;
-                writeln!(f, "{:>indent$}comment: {comment}", "")?;
+                writeln!(f, "{:>indent$}comment: {comment}\n", "")?;
             }
         }
 
         if !alerts_requested.is_empty() {
-            writeln!(f, "\n{:>indent$}alerts requested:", "")?;
+            writeln!(f, "{:>indent$}alerts requested:\n", "")?;
             let indent = indent + LIST_INDENT;
             for AlertRequest { id, class, requested_sitrep_id, .. } in
                 alerts_requested
             {
-                writeln!(f, "{BULLET:>indent$}{id:?}")?;
+                writeln!(f, "{BULLET:>indent$}{id}")?;
                 writeln!(f, "{:>indent$}class: {class:?}", "")?;
                 writeln!(
                     f,
-                    "{:>indent$}requested in sitrep: {requested_sitrep_id}",
+                    "{:>indent$}requested in sitrep: {requested_sitrep_id}\n",
                     ""
                 )?;
             }
