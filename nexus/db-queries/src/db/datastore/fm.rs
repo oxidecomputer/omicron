@@ -33,6 +33,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
+use nexus_db_schema::schema::fm_case_impacts_sp_slot::dsl as impacted_sp_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
@@ -130,7 +131,8 @@ impl DataStore {
         Ok(Some((version, sitrep)))
     }
 
-    /// Reads the entire content of the sitrep with the provided ID, if one exists.
+    /// Reads the entire content of the sitrep with the provided ID, if one
+    /// exists.
     pub async fn fm_sitrep_read(
         &self,
         opctx: &OpContext,
@@ -356,16 +358,27 @@ impl DataStore {
     pub async fn fm_sitrep_insert(
         &self,
         opctx: &OpContext,
-        sitrep: &Sitrep,
+        sitrep: Sitrep,
     ) -> Result<(), InsertSitrepError> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // TODO(eliza): there should probably be an authz object for the fm sitrep?
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
+        let sitrep_id = sitrep.id();
+
         // Create the sitrep metadata record.
+        //
+        // NOTE: we must insert this record before anything else, because it's
+        // how orphaned sitreps are found when performing garbage collection.
+        // Were we to first insert some other records and insert the metadata
+        // record *last*, we could die when we have inserted some sitrep data
+        // but have yet to create the metadata record. If this occurs, those
+        // records could not be easily found by the garbage collection task.
+        // Those (unused) records would then be permanently leaked without
+        // manual human intervention to delete them.
         diesel::insert_into(sitrep_dsl::fm_sitrep)
-            .values(model::SitrepMetadata::from(sitrep.metadata.clone()))
+            .values(model::SitrepMetadata::from(sitrep.metadata))
             .execute_async(&*conn)
             .await
             .map_err(|e| {
@@ -373,10 +386,77 @@ impl DataStore {
                     .internal_context("failed to insert sitrep metadata record")
             })?;
 
-        // TODO(eliza): other sitrep records would be inserted here...
+        // Create case records.
+        let mut cases = Vec::with_capacity(sitrep.cases.len());
+        for case in sitrep.cases {
+            // TODO(eliza): some of this could be done in parallel using a
+            // `ParallelTaskSet`, if the time it takes to insert a sitrep were
+            // to become important?
+            let model::fm::Case {
+                metadata,
+                ereports,
+                alerts_requested,
+                impacted_sp_slots,
+            } = model::fm::Case::from_sitrep(sitrep_id, case);
+
+            if !ereports.is_empty() {
+                diesel::insert_into(case_ereport_dsl::fm_ereport_in_case)
+                    .values(ereports)
+                    .execute_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(format!(
+                                "failed to insert ereport records for case {}",
+                                metadata.id
+                            ))
+                    })?;
+            }
+
+            if !alerts_requested.is_empty() {
+                diesel::insert_into(alert_req_dsl::fm_alert_request)
+                    .values(alerts_requested)
+                    .execute_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(format!(
+                                "failed to insert ereport alert requests for case {}",
+                                metadata.id
+                            ))
+                    })?;
+            }
+
+            if !impacted_sp_slots.is_empty() {
+                diesel::insert_into(impacted_sp_dsl::fm_case_impacts_sp_slot)
+                    .values(impacted_sp_slots)
+                    .execute_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(format!(
+                                "failed to insert impacted SP slots for case {}",
+                                metadata.id
+                            ))
+                    })?;
+            }
+
+            cases.push(metadata);
+        }
+
+        if !cases.is_empty() {
+            diesel::insert_into(case_dsl::fm_case)
+                .values(cases)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context("failed to insert case records")
+                })?;
+        }
 
         // Now, try to make the sitrep current.
-        let query = Self::insert_sitrep_version_query(sitrep.id());
+        let query = Self::insert_sitrep_version_query(sitrep_id);
         query
             .execute_async(&*conn)
             .await
@@ -387,7 +467,7 @@ impl DataStore {
                 ) if info.message()
                     == Self::PARENT_NOT_CURRENT_ERROR_MESSAGE =>
                 {
-                    InsertSitrepError::ParentNotCurrent(sitrep.id())
+                    InsertSitrepError::ParentNotCurrent(sitrep_id)
                 }
                 err => {
                     let err =
@@ -943,7 +1023,7 @@ mod tests {
             cases: Default::default(),
         };
 
-        datastore.fm_sitrep_insert(&opctx, &sitrep).await.unwrap();
+        datastore.fm_sitrep_insert(&opctx, sitrep.clone()).await.unwrap();
 
         let current = datastore
             .fm_sitrep_read_current(&opctx)
@@ -962,7 +1042,7 @@ mod tests {
 
         // Trying to insert the same sitrep again should fail.
         let err =
-            datastore.fm_sitrep_insert(&opctx, &sitrep).await.unwrap_err();
+            datastore.fm_sitrep_insert(&opctx, sitrep.clone()).await.unwrap_err();
         assert!(err.to_string().contains("duplicate key"));
 
         // Clean up.
@@ -989,7 +1069,7 @@ mod tests {
             },
             cases: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, &sitrep1).await.unwrap();
+        datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
         // Create a second sitrep with the first as parent
         let sitrep2 = nexus_types::fm::Sitrep {
@@ -1003,7 +1083,7 @@ mod tests {
             },
             cases: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, &sitrep2).await.expect(
+        datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.expect(
             "inserting a sitrep whose parent is current should succeed",
         );
 
@@ -1044,7 +1124,7 @@ mod tests {
             },
             cases: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, &sitrep1).await.unwrap();
+        datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
         // Try to insert a sitrep with a non-existent parent ID
         let nonexistent_id = SitrepUuid::new_v4();
@@ -1060,7 +1140,7 @@ mod tests {
             cases: Default::default(),
         };
 
-        let result = datastore.fm_sitrep_insert(&opctx, &sitrep2).await;
+        let result = datastore.fm_sitrep_insert(&opctx, sitrep2).await;
 
         // Should fail with ParentNotCurrent error
         match result {
@@ -1094,7 +1174,7 @@ mod tests {
             },
             cases: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, &sitrep1).await.unwrap();
+        datastore.fm_sitrep_insert(&opctx, sitrep1.clone()).await.unwrap();
 
         // Create a second sitrep with the first as parent
         let sitrep2 = nexus_types::fm::Sitrep {
@@ -1108,7 +1188,7 @@ mod tests {
             },
             cases: Default::default(),
         };
-        datastore.fm_sitrep_insert(&opctx, &sitrep2).await.unwrap();
+        datastore.fm_sitrep_insert(&opctx, sitrep2.clone()).await.unwrap();
 
         // Try to create a third sitrep with sitrep1 (outdated) as parent.
         // This should fail, as sitrep2 is now the current sitrep.
@@ -1123,7 +1203,7 @@ mod tests {
             },
             cases: Default::default(),
         };
-        let result = datastore.fm_sitrep_insert(&opctx, &sitrep3).await;
+        let result = datastore.fm_sitrep_insert(&opctx, sitrep3.clone()).await;
 
         // Should fail with ParentNotCurrent error
         match result {
@@ -1165,7 +1245,7 @@ mod tests {
             cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep1)
+            .fm_sitrep_insert(&opctx, sitrep1.clone())
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -1206,7 +1286,7 @@ mod tests {
             cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep2)
+            .fm_sitrep_insert(&opctx, sitrep2.clone())
             .await
             .expect("inserting child sitrep should succeed");
 
@@ -1269,7 +1349,7 @@ mod tests {
             },
             cases: Default::default(),
         };
-        match datastore.fm_sitrep_insert(&opctx, &sitrep).await {
+        match datastore.fm_sitrep_insert(&opctx, sitrep).await {
             Ok(_) => {
                 panic!("inserting sitrep v{v} orphan {i} should not succeed")
             }
