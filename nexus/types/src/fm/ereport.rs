@@ -155,18 +155,17 @@ pub enum Reporter {
 
 impl fmt::Display for Reporter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Display format based on:
+        // https://rfd.shared.oxide.computer/rfd/200#_labeling
         match self {
-            Self::Sp { sp_type: SpType::Sled, slot } => {
-                write!(f, "Sled (SP) {slot:02}")
-            }
-            Self::Sp { sp_type: SpType::Switch, slot } => {
-                write!(f, "Switch {slot}")
-            }
-            Self::Sp { sp_type: SpType::Power, slot } => {
-                write!(f, "PSC {slot}")
+            Self::Sp { sp_type: sp_type @ SpType::Sled, slot } => {
+                write!(f, "{sp_type} {slot:<2} (SP)")
             }
             Self::HostOs { sled } => {
-                write!(f, "Sled (OS) {sled:?}")
+                write!(f, "{} {sled:?} (OS)", SpType::Sled)
+            }
+            Self::Sp { sp_type, slot } => {
+                write!(f, "{sp_type} {slot}")
             }
         }
     }
