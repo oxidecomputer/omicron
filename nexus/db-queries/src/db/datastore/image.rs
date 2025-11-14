@@ -169,15 +169,16 @@ impl DataStore {
     pub async fn project_image_promote(
         &self,
         opctx: &OpContext,
-        authz_silo_image_list: &authz::SiloImageList,
+        authz_silo: &authz::Silo,
         authz_project_image: &authz::ProjectImage,
         project_image: &ProjectImage,
     ) -> UpdateResult<Image> {
         // Check if the user can create silo images (promote from project images).
         // We use SiloImageList to allow limited-collaborators to promote images
         // without granting them the broader create_child permission on Silo.
+        let authz_silo_image_list = authz::SiloImageList::new(authz_silo.clone());
         opctx
-            .authorize(authz::Action::CreateChild, authz_silo_image_list)
+            .authorize(authz::Action::CreateChild, &authz_silo_image_list)
             .await?;
         opctx.authorize(authz::Action::Modify, authz_project_image).await?;
 
