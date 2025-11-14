@@ -1012,9 +1012,9 @@ impl DatasetKind {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
 
-            TransientZoneRoot | TransientZone { .. } | Debug => false,
-
-            LocalStorage => false,
+            TransientZoneRoot | TransientZone { .. } | Debug | LocalStorage => {
+                false
+            }
         }
     }
 
