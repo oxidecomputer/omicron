@@ -189,22 +189,16 @@ impl super::Nexus {
                 let (authz_silo, _, authz_project_image, project_image) =
                     lookup.fetch_for(authz::Action::Modify).await?;
 
-                // Check if the user can create silo images (promote from project images).
-                // We use SiloImageList to allow limited-collaborators to promote images
-                // without granting them the broader create_child permission on Silo.
+                // Construct SiloImageList for the authorization check in the datastore.
+                // This allows limited-collaborators to promote images without granting
+                // them the broader create_child permission on Silo.
                 let authz_silo_image_list =
                     authz::SiloImageList::new(authz_silo.clone());
-                opctx
-                    .authorize(
-                        authz::Action::CreateChild,
-                        &authz_silo_image_list,
-                    )
-                    .await?;
 
                 self.db_datastore
                     .project_image_promote(
                         opctx,
-                        &authz_silo,
+                        &authz_silo_image_list,
                         &authz_project_image,
                         &project_image,
                     )
