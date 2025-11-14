@@ -428,7 +428,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 .datastore()
                 .nat_changeset(&opctx, path.from_gen, query.limit)
                 .await?;
-            changeset.sort_by_key(|e| e.gen);
+            changeset.sort_by_key(|e| e.generation);
             Ok(HttpResponseOk(changeset))
         };
         apictx

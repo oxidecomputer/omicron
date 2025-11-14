@@ -570,7 +570,7 @@ impl DataStore {
 
     fn sitrep_version_list_query(
         pagparams: &DataPageParams<'_, SqlU32>,
-    ) -> impl RunnableQuery<model::SitrepVersion> {
+    ) -> impl RunnableQuery<model::SitrepVersion> + use<> {
         paginated(
             history_dsl::fm_sitrep_history,
             history_dsl::version,

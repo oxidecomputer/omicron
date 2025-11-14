@@ -41,7 +41,8 @@ pub struct DiskRuntimeState {
     /// runtime state of the Disk
     pub disk_state: DiskState,
     /// generation number for this state
-    pub gen: Generation,
+    #[serde(rename = "gen")]
+    pub generation: Generation,
     /// timestamp for this information
     pub time_updated: DateTime<Utc>,
 }
@@ -98,7 +99,8 @@ pub struct VmmRuntimeState {
     /// The last state reported by this VMM.
     pub state: VmmState,
     /// The generation number for this VMM's state.
-    pub gen: Generation,
+    #[serde(rename = "gen")]
+    pub generation: Generation,
     /// Timestamp for the VMM's state.
     pub time_updated: DateTime<Utc>,
 }
@@ -143,7 +145,8 @@ impl SledVmmState {
 pub struct MigrationRuntimeState {
     pub migration_id: Uuid,
     pub state: MigrationState,
-    pub gen: Generation,
+    #[serde(rename = "gen")]
+    pub generation: Generation,
 
     /// Timestamp for the migration state update.
     pub time_updated: DateTime<Utc>,

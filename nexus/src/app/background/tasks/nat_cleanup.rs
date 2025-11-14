@@ -46,7 +46,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
             let result = self.datastore.nat_current_version(opctx).await;
 
             let mut min_gen = match result {
-                Ok(gen) => gen,
+                Ok(r#gen) => r#gen,
                 Err(error) => {
                     warn!(
                         &log,
@@ -94,7 +94,7 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
             for client in dpd_clients.values() {
                 let response = client.ipv4_nat_generation().await;
                 match response {
-                    Ok(gen) => min_gen = std::cmp::min(min_gen, *gen),
+                    Ok(r#gen) => min_gen = std::cmp::min(min_gen, *r#gen),
                     Err(error) => {
                         warn!(
                             &log,

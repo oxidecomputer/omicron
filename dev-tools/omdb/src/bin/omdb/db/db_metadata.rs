@@ -93,14 +93,14 @@ fn get_intended_nexus_state(
     bp_nexus_generation_by_zone: &BTreeMap<OmicronZoneUuid, Generation>,
     id: OmicronZoneUuid,
 ) -> Option<DbMetadataNexusState> {
-    let Some(gen) = bp_nexus_generation_by_zone.get(&id) else {
+    let Some(generation) = bp_nexus_generation_by_zone.get(&id) else {
         return None;
     };
 
-    Some(if *gen < bp_nexus_generation {
+    Some(if *generation < bp_nexus_generation {
         // This Nexus is either quiescing, or has already quiesced
         DbMetadataNexusState::Quiesced
-    } else if *gen == bp_nexus_generation {
+    } else if *generation == bp_nexus_generation {
         // This Nexus is either active, or will become active once
         // the prior generation has quiesced
         DbMetadataNexusState::Active
@@ -222,13 +222,13 @@ pub async fn cmd_db_metadata_force_mark_nexus_quiesced(
                 }
             });
 
-        let Some(gen) = nexus_generation else {
+        let Some(generation) = nexus_generation else {
             bail!("Nexus {} not found in blueprint", args.id);
         };
         let bp_gen = current_target_blueprint.nexus_generation;
-        if bp_gen <= gen {
+        if bp_gen <= generation {
             bail!(
-                "Nexus {} not ready to quiesce (nexus generation {gen} >= blueprint gen {bp_gen})",
+                "Nexus {} not ready to quiesce (nexus generation {generation} >= blueprint gen {bp_gen})",
                 args.id
             );
         }

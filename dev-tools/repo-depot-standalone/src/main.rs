@@ -188,7 +188,7 @@ impl RepoMetadata {
     pub async fn data_for_hash(
         &self,
         requested_sha: &ArtifactHash,
-    ) -> Option<anyhow::Result<ReaderStream<impl AsyncRead>>> {
+    ) -> Option<anyhow::Result<ReaderStream<impl AsyncRead + use<>>>> {
         let (repo_index, artifact_hash_id) =
             self.targets_by_hash.get(requested_sha)?;
         let repo = &self.repos[*repo_index];

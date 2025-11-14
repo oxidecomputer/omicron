@@ -254,7 +254,8 @@ pub struct InstanceRuntimeState {
     /// including the fallback state, the instance's active Propolis ID, and its
     /// migration IDs.
     #[diesel(column_name = state_generation)]
-    pub gen: Generation,
+    #[serde(rename = "gen")]
+    pub generation: Generation,
 
     /// The ID of the Propolis server hosting the current incarnation of this
     /// instance, or None if the instance has no active VMM.
@@ -301,7 +302,7 @@ impl InstanceRuntimeState {
             propolis_id: None,
             dst_propolis_id: None,
             migration_id: None,
-            gen: Generation::new(),
+            generation: Generation::new(),
             time_last_auto_restarted: None,
         }
     }

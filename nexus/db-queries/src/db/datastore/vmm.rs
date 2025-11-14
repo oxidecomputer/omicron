@@ -166,7 +166,7 @@ impl DataStore {
         diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(dsl::state_generation.lt(new_runtime.generation))
             .set(new_runtime.clone())
             .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
             .execute_and_check(conn)
@@ -475,7 +475,7 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::Running,
                     },
                 },
@@ -497,7 +497,7 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::Running,
                     },
                 },
@@ -524,7 +524,7 @@ mod tests {
         let vmm1_migration_out = nexus::MigrationRuntimeState {
             migration_id: migration1.id,
             state: nexus::MigrationState::Completed,
-            r#gen: Generation::new().0.next(),
+            generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
         datastore
@@ -533,7 +533,7 @@ mod tests {
                 PropolisUuid::from_untyped_uuid(vmm1.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    r#gen: Generation(vmm1.runtime.r#gen.0.next()),
+                    generation: Generation(vmm1.runtime.generation.0.next()),
                     state: VmmState::Stopping,
                 },
                 Migrations {
@@ -546,7 +546,7 @@ mod tests {
         let vmm2_migration_in = nexus::MigrationRuntimeState {
             migration_id: migration1.id,
             state: nexus::MigrationState::Completed,
-            r#gen: Generation::new().0.next(),
+            generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
         datastore
@@ -555,7 +555,7 @@ mod tests {
                 PropolisUuid::from_untyped_uuid(vmm2.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    r#gen: Generation(vmm2.runtime.r#gen.0.next()),
+                    generation: Generation(vmm2.runtime.generation.0.next()),
                     state: VmmState::Running,
                 },
                 Migrations {
@@ -608,7 +608,7 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::Running,
                     },
                 },
@@ -634,7 +634,7 @@ mod tests {
         let vmm2_migration_out = nexus::MigrationRuntimeState {
             migration_id: migration2.id,
             state: nexus::MigrationState::Completed,
-            r#gen: Generation::new().0.next(),
+            generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
         datastore
@@ -643,7 +643,7 @@ mod tests {
                 PropolisUuid::from_untyped_uuid(vmm2.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    r#gen: Generation(vmm2.runtime.r#gen.0.next()),
+                    generation: Generation(vmm2.runtime.generation.0.next()),
                     state: VmmState::Destroyed,
                 },
                 Migrations {
@@ -658,7 +658,7 @@ mod tests {
             migration_id: migration2.id,
             // Let's make this fail, just for fun...
             state: nexus::MigrationState::Failed,
-            r#gen: Generation::new().0.next(),
+            generation: Generation::new().0.next(),
             time_updated: Utc::now(),
         };
         datastore
@@ -667,7 +667,7 @@ mod tests {
                 PropolisUuid::from_untyped_uuid(vmm3.id),
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    r#gen: Generation(vmm3.runtime.r#gen.0.next()),
+                    generation: Generation(vmm3.runtime.generation.0.next()),
                     state: VmmState::Destroyed,
                 },
                 Migrations {

@@ -385,7 +385,7 @@ impl Resolver {
     async fn lookup_service_targets(
         &self,
         service_lookup: SrvLookup,
-    ) -> impl Iterator<Item = SocketAddrV6> + Send {
+    ) -> impl Iterator<Item = SocketAddrV6> + Send + use<> {
         let futures =
             std::iter::repeat((self.log.clone(), self.resolver.clone()))
                 .zip(service_lookup.into_iter())

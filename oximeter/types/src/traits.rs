@@ -439,7 +439,7 @@ pub use crate::histogram::HistogramSupport;
 ///     let sample = producer.produce().unwrap().next().unwrap();
 ///     let datum = sample.measurement.datum();
 ///     match datum {
-///         Datum::CumulativeI64(ref d) => assert_eq!(d.value(), 0),
+///         Datum::CumulativeI64(d) => assert_eq!(d.value(), 0),
 ///         _ => panic!("Expected a CumulativeI64 datum"),
 ///     }
 ///
@@ -453,7 +453,7 @@ pub use crate::histogram::HistogramSupport;
 ///     let sample = producer.produce().unwrap().next().unwrap();
 ///     let datum = sample.measurement.datum();
 ///     match datum {
-///         Datum::CumulativeI64(ref d) => assert_eq!(d.value(), 1),
+///         Datum::CumulativeI64(d) => assert_eq!(d.value(), 1),
 ///         _ => panic!("Expected a CumulativeI64 datum"),
 ///     }
 /// }

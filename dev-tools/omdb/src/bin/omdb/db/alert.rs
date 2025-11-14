@@ -535,7 +535,7 @@ async fn cmd_db_webhook_delivery_list(
         query = query.filter(delivery_dsl::time_created.gt(after));
     }
 
-    if let Some(ref receiver) = receiver {
+    if let Some(receiver) = receiver {
         let rx =
             lookup_webhook_rx(datastore, receiver).await?.ok_or_else(|| {
                 anyhow::anyhow!("no webhook receiver {receiver} found")
@@ -688,7 +688,7 @@ async fn lookup_webhook_rx(
                 .get_result_async(&*conn)
                 .await
         }
-        NameOrId::Name(ref name) => {
+        NameOrId::Name(name) => {
             dsl::alert_receiver
                 .filter(dsl::name.eq(name.to_string()))
                 .limit(1)

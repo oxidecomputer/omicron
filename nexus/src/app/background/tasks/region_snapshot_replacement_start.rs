@@ -519,7 +519,7 @@ mod test {
                     volume_id: volume_id.into(),
                     destination_volume_id: VolumeUuid::new_v4().into(),
 
-                    gen: Generation::new(),
+                    generation: Generation::new(),
                     state: SnapshotState::Creating,
                     block_size: BlockSize::AdvancedFormat,
 
