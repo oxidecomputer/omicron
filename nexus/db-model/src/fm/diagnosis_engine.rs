@@ -27,24 +27,24 @@ impl_enum_type!(
 
 );
 
-impl From<DiagnosisEngine> for fm::DiagnosisEngine {
+impl From<DiagnosisEngine> for fm::DiagnosisEngineKind {
     fn from(de: DiagnosisEngine) -> Self {
         match de {
-            DiagnosisEngine::PowerShelf => fm::DiagnosisEngine::PowerShelf,
+            DiagnosisEngine::PowerShelf => fm::DiagnosisEngineKind::PowerShelf,
         }
     }
 }
 
-impl From<fm::DiagnosisEngine> for DiagnosisEngine {
-    fn from(fm_de: fm::DiagnosisEngine) -> Self {
+impl From<fm::DiagnosisEngineKind> for DiagnosisEngine {
+    fn from(fm_de: fm::DiagnosisEngineKind) -> Self {
         match fm_de {
-            fm::DiagnosisEngine::PowerShelf => DiagnosisEngine::PowerShelf,
+            fm::DiagnosisEngineKind::PowerShelf => DiagnosisEngine::PowerShelf,
         }
     }
 }
 
 impl fmt::Display for DiagnosisEngine {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fm::DiagnosisEngine::from(*self).fmt(f)
+        fm::DiagnosisEngineKind::from(*self).fmt(f)
     }
 }

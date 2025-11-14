@@ -4,4 +4,16 @@
 
 //! Diagnosis engines
 
+use crate::SitrepBuilder;
+use nexus_types::fm;
 pub mod power_shelf;
+use std::sync::Arc;
+
+pub trait DiagnosisEngine {
+    fn kind(&self) -> fm::DiagnosisEngineKind;
+    fn analyze_ereport(
+        &mut self,
+        sitrep: &mut SitrepBuilder<'_>,
+        ereport: &Arc<fm::Ereport>,
+    ) -> anyhow::Result<()>;
+}
