@@ -123,6 +123,32 @@ pub struct PortCreateParams<'a> {
     pub dhcp_config: DhcpCfg,
 }
 
+impl<'a> PortCreateParams<'a> {
+    fn ensure_no_external_ipv6_addresses(&self) -> Result<(), Error> {
+        self.ensure_no_external_addresses(IpAddr::is_ipv6)
+    }
+
+    fn ensure_no_external_ipv4_addresses(&self) -> Result<(), Error> {
+        self.ensure_no_external_addresses(IpAddr::is_ipv4)
+    }
+
+    fn ensure_no_external_addresses<F>(&self, f: F) -> Result<(), Error>
+    where
+        F: Fn(&IpAddr) -> bool,
+    {
+        if self.source_nat.map(|snat| f(&snat.ip)).unwrap_or(false) {
+            return Err(Error::InvalidPortIpConfig);
+        }
+        if self.ephemeral_ip.as_ref().map(&f).unwrap_or(false) {
+            return Err(Error::InvalidPortIpConfig);
+        }
+        if self.floating_ips.iter().any(f) {
+            return Err(Error::InvalidPortIpConfig);
+        }
+        Ok(())
+    }
+}
+
 impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
     type Error = Error;
 
@@ -137,9 +163,12 @@ impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
         // VPC-private configuration for each IP stack. That is, if we have an
         // IPv4 external Ephemeral IP, we also have an IPv4 VPC-private address.
         let v4 = match ip_config.ipv4_config() {
-            None => None,
+            None => {
+                params.ensure_no_external_ipv4_addresses()?;
+                None
+            }
             Some(ipv4_config) => {
-                let gateway_ip = ipv4_config.subnet().first_addr().into();
+                let gateway_ip = ipv4_config.subnet().first_host().into();
                 let vpc_subnet =
                     Ipv4Cidr::from(Ipv4Network::from(*ipv4_config.subnet()));
                 let private_ip = (*ipv4_config.ip()).into();
@@ -162,9 +191,17 @@ impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
         // if we have an external IPv6 address, we also have a VPC-private IPv6
         // address to translate that into.
         let v6 = match ip_config.ipv6_config() {
-            None => None,
+            None => {
+                params.ensure_no_external_ipv6_addresses()?;
+                None
+            }
             Some(ipv6_config) => {
-                let gateway_ip = ipv6_config.subnet().first_addr().into();
+                let gateway_ip = ipv6_config
+                    .subnet()
+                    .iter()
+                    .nth(1)
+                    .expect("must have at least 2 addresses")
+                    .into();
                 let vpc_subnet =
                     Ipv6Cidr::from(Ipv6Network::from(*ipv6_config.subnet()));
                 let private_ip = (*ipv6_config.ip()).into();
@@ -1015,12 +1052,13 @@ mod tests {
         external::{MacAddr, Vni},
         internal::shared::{
             InternetGatewayRouterTarget, NetworkInterface,
-            NetworkInterfaceKind, PrivateIpConfig, ResolvedVpcRoute,
-            ResolvedVpcRouteSet, RouterTarget, RouterVersion, SourceNatConfig,
+            NetworkInterfaceKind, PrivateIpConfig, PrivateIpv4Config,
+            PrivateIpv6Config, ResolvedVpcRoute, ResolvedVpcRouteSet,
+            RouterTarget, RouterVersion, SourceNatConfig,
         },
     };
     use omicron_test_utils::dev::test_setup_log;
-    use oxide_vpc::api::DhcpCfg;
+    use oxide_vpc::api::{DhcpCfg, IpCfg, Ipv4Cidr, Ipv6Cidr};
     use oxnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::{
         collections::HashSet,
@@ -1400,5 +1438,309 @@ mod tests {
         }
 
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn ip_cfg_from_ipv4_params() {
+        let priv_ip = Ipv4Addr::new(172, 30, 2, 5);
+        let priv_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(priv_ip, priv_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ip = Ipv4Addr::new(10, 151, 2, 169);
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let source_nat =
+            SourceNatConfig::new(IpAddr::V4(ext_ip), 0, 16383).unwrap();
+        let prs = PortCreateParams {
+            nic: &nic,
+            source_nat: Some(source_nat),
+            ephemeral_ip: None,
+            floating_ips: &[],
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+        };
+        let IpCfg::Ipv4(oxide_vpc::api::Ipv4Cfg {
+            vpc_subnet,
+            private_ip,
+            gateway_ip,
+            external_ips:
+                oxide_vpc::api::ExternalIpCfg { snat, ephemeral_ip, floating_ips },
+        }) = IpCfg::try_from(&prs).unwrap()
+        else {
+            panic!("Expected IPv4 config")
+        };
+
+        assert_eq!(private_ip, priv_ip.into());
+        assert_eq!(
+            vpc_subnet,
+            Ipv4Cidr::new(
+                priv_subnet.network().unwrap().into(),
+                priv_subnet.width().try_into().unwrap()
+            )
+        );
+        assert_eq!(gateway_ip, priv_subnet.first_host().into());
+        let oxide_vpc::api::SNatCfg { external_ip, ports } =
+            snat.expect("SNAT config for this port should be Some(_)");
+        assert_eq!(external_ip, ext_ip.into());
+        assert_eq!(ports, source_nat.port_range());
+        assert!(ephemeral_ip.is_none());
+        assert!(floating_ips.is_empty());
+    }
+
+    #[test]
+    fn ip_cfg_from_ipv6_params() {
+        let priv_ip = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5);
+        let priv_subnet =
+            Ipv6Net::new(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0), 64)
+                .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv6(priv_ip, priv_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let source_nat =
+            SourceNatConfig::new(IpAddr::V6(ext_ip), 0, 16383).unwrap();
+        let prs = PortCreateParams {
+            nic: &nic,
+            source_nat: Some(source_nat),
+            ephemeral_ip: None,
+            floating_ips: &[],
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+        };
+        let IpCfg::Ipv6(oxide_vpc::api::Ipv6Cfg {
+            vpc_subnet,
+            private_ip,
+            gateway_ip,
+            external_ips:
+                oxide_vpc::api::ExternalIpCfg { snat, ephemeral_ip, floating_ips },
+        }) = IpCfg::try_from(&prs).unwrap()
+        else {
+            panic!("Expected IPv4 config")
+        };
+
+        assert_eq!(private_ip, priv_ip.into());
+        assert_eq!(
+            vpc_subnet,
+            Ipv6Cidr::new(
+                priv_subnet.first_addr().into(),
+                priv_subnet.width().try_into().unwrap()
+            )
+        );
+        assert_eq!(gateway_ip, priv_subnet.iter().nth(1).unwrap().into());
+        let oxide_vpc::api::SNatCfg { external_ip, ports } =
+            snat.expect("SNAT config for this port should be Some(_)");
+        assert_eq!(external_ip, ext_ip.into());
+        assert_eq!(ports, source_nat.port_range());
+        assert!(ephemeral_ip.is_none());
+        assert!(floating_ips.is_empty());
+    }
+
+    #[test]
+    fn ip_cfg_from_dual_stack_params() {
+        let priv_ipv4 = Ipv4Addr::new(172, 30, 2, 5);
+        let priv_ipv4_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap();
+        let ipv4_config =
+            PrivateIpv4Config::new(priv_ipv4, priv_ipv4_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ipv4 = Ipv4Addr::new(10, 151, 2, 169);
+        let priv_ipv6 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5);
+        let priv_ipv6_subnet =
+            Ipv6Net::new(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0), 64)
+                .unwrap();
+        let ipv6_config =
+            PrivateIpv6Config::new(priv_ipv6, priv_ipv6_subnet).unwrap();
+        let ext_ipv6 = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let ip_config =
+            PrivateIpConfig::DualStack { v4: ipv4_config, v6: ipv6_config };
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+
+        // Ipv4 source NAT, Ipv6 ephemeral
+        let source_nat =
+            SourceNatConfig::new(IpAddr::V4(ext_ipv4), 0, 16383).unwrap();
+        let prs = PortCreateParams {
+            nic: &nic,
+            source_nat: Some(source_nat),
+            ephemeral_ip: Some(ext_ipv6.into()),
+            floating_ips: &[],
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+        };
+        let IpCfg::DualStack { ipv4, ipv6 } = IpCfg::try_from(&prs).unwrap()
+        else {
+            panic!("Expected DualStack config")
+        };
+
+        // Check IPv4 configuration
+        assert_eq!(ipv4.private_ip, priv_ipv4.into());
+        assert_eq!(
+            ipv4.vpc_subnet,
+            Ipv4Cidr::new(
+                priv_ipv4_subnet.network().unwrap().into(),
+                priv_ipv4_subnet.width().try_into().unwrap()
+            )
+        );
+        assert_eq!(ipv4.gateway_ip, priv_ipv4_subnet.first_host().into());
+        let oxide_vpc::api::SNatCfg { external_ip, ports } = ipv4
+            .external_ips
+            .snat
+            .expect("SNAT config for this port should be Some(_)");
+        assert_eq!(external_ip, ext_ipv4.into());
+        assert_eq!(ports, source_nat.port_range());
+        assert!(ipv4.external_ips.ephemeral_ip.is_none());
+        assert!(ipv4.external_ips.floating_ips.is_empty());
+
+        // Check IPv6 configuration
+        assert_eq!(ipv6.private_ip, priv_ipv6.into());
+        assert_eq!(
+            ipv6.vpc_subnet,
+            Ipv6Cidr::new(
+                priv_ipv6_subnet.first_addr().into(),
+                priv_ipv6_subnet.width().try_into().unwrap()
+            )
+        );
+        assert_eq!(
+            ipv6.gateway_ip,
+            priv_ipv6_subnet.iter().nth(1).unwrap().into()
+        );
+        assert!(
+            ipv6.external_ips.snat.is_none(),
+            "Should not have SNAT config for the IPv6 stack"
+        );
+        assert_eq!(
+            ipv6.external_ips
+                .ephemeral_ip
+                .expect("Should have IPv6 ephemeral address"),
+            ext_ipv6.into(),
+        );
+        assert!(ipv6.external_ips.floating_ips.is_empty());
+    }
+
+    #[test]
+    fn ip_cfg_from_port_params_fails_with_private_ipv4_and_public_ipv6() {
+        let priv_ip = Ipv4Addr::new(172, 30, 2, 5);
+        let priv_subnet =
+            Ipv4Net::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(priv_ip, priv_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let source_nat =
+            SourceNatConfig::new(IpAddr::V6(ext_ip), 0, 16383).unwrap();
+        let prs = PortCreateParams {
+            nic: &nic,
+            source_nat: Some(source_nat),
+            ephemeral_ip: None,
+            floating_ips: &[],
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+        };
+        let _ = IpCfg::try_from(&prs).expect_err(
+            "Should fail to convert with public IPv6 and private IPv4",
+        );
+    }
+
+    #[test]
+    fn ip_cfg_from_port_params_fails_with_private_ipv6_and_public_ipv4() {
+        let priv_ip = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5);
+        let priv_subnet =
+            Ipv6Net::new(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0), 64)
+                .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv6(priv_ip, priv_subnet).unwrap();
+        let mac = "a8:40:25:ff:ff:ff".parse().unwrap();
+        let ext_ip = Ipv4Addr::new(1, 1, 1, 1);
+        let nic = NetworkInterface {
+            id: Uuid::new_v4(),
+            kind: NetworkInterfaceKind::Instance { id: Uuid::new_v4() },
+            name: "opte0".parse().unwrap(),
+            ip_config,
+            mac,
+            vni: 100.try_into().unwrap(),
+            primary: true,
+            slot: 0,
+        };
+        let source_nat =
+            SourceNatConfig::new(IpAddr::V4(ext_ip), 0, 16383).unwrap();
+        let prs = PortCreateParams {
+            nic: &nic,
+            source_nat: Some(source_nat),
+            ephemeral_ip: None,
+            floating_ips: &[],
+            firewall_rules: &[],
+            dhcp_config: DhcpCfg {
+                hostname: None,
+                host_domain: None,
+                domain_search_list: vec![],
+                dns4_servers: vec![],
+                dns6_servers: vec![],
+            },
+        };
+        let _ = IpCfg::try_from(&prs).expect_err(
+            "Should fail to convert with public IPv4 and private IPv6",
+        );
     }
 }
