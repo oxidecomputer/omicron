@@ -1,0 +1,20 @@
+[package]
+name = "nexus-fm"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+iddqd.workspace = true
+nexus-types.workspace = true
+omicron-uuid-kinds.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slog.workspace = true
+
+omicron-workspace-hack.workspace = true
