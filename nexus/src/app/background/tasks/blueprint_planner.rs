@@ -638,10 +638,10 @@ mod test {
         // Create a large number of blueprints (49), which we'll use to test the
         // limit (see below).
         for i in 0..49 {
-            let blueprint = BlueprintBuilder::build_empty_with_sleds(
-                std::iter::empty(),
-                &format!("test_blueprint_planner_limit blueprint {}", i),
-            );
+            let blueprint = BlueprintBuilder::build_empty(&format!(
+                "test_blueprint_planner_limit blueprint {}",
+                i
+            ));
             datastore
                 .blueprint_insert(&opctx, &blueprint)
                 .await
@@ -691,8 +691,7 @@ mod test {
 
         // Insert one more blueprint, pushing the number of blueprints to the
         // limit (50).
-        let blueprint = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
+        let blueprint = BlueprintBuilder::build_empty(
             "test_blueprint_planner_limit 50th blueprint",
         );
         datastore.blueprint_insert(&opctx, &blueprint).await.unwrap_or_else(
@@ -715,8 +714,7 @@ mod test {
         );
 
         // But manual planning should continue to work.
-        let blueprint = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
+        let blueprint = BlueprintBuilder::build_empty(
             "test_blueprint_planner_limit 51st blueprint",
         );
         datastore.blueprint_insert(&opctx, &blueprint).await.unwrap_or_else(

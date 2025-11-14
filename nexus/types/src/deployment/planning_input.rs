@@ -1189,6 +1189,19 @@ impl ExternalIpPolicy {
     pub fn external_dns_ips(&self) -> &BTreeSet<IpAddr> {
         &self.external_dns_ips
     }
+
+    /// Consume this `ExternalIpPolicy`, returning an iterator of all of the
+    /// ranges contained in it.
+    ///
+    /// This destroys all meaningful information (e.g., v4 vs v6 pool; which IPs
+    /// are reserved for external DNS) and should only be used by tests.
+    pub fn into_raw_ranges(self) -> impl Iterator<Item = IpRange> {
+        let v4_ranges =
+            self.service_pool_ipv4_ranges.into_iter().map(IpRange::from);
+        let v6_ranges =
+            self.service_pool_ipv6_ranges.into_iter().map(IpRange::from);
+        v4_ranges.chain(v6_ranges)
+    }
 }
 
 #[derive(Debug, Clone, Default)]

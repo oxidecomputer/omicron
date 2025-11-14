@@ -694,16 +694,16 @@ external DNS:
 from: blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
 to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
 
- MODIFIED SLEDS:
+ ADDED SLEDS:
 
-  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 1 -> 2):
+  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2):
 
     host phase 2 contents:
     ------------------------
     slot   boot image source
     ------------------------
-    A      current contents 
-    B      current contents 
++   A      current contents 
++   B      current contents 
 
 
     physical disks:
@@ -914,16 +914,16 @@ external DNS:
 from: blueprint 86db3308-f817-4626-8838-4085949a6a41
 to:   blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
- MODIFIED SLEDS:
+ REMOVED SLEDS:
 
-  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2 -> 1):
+  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (was active, config generation 2):
 
     host phase 2 contents:
     ------------------------
     slot   boot image source
     ------------------------
-    A      current contents 
-    B      current contents 
+-   A      current contents 
+-   B      current contents 
 
 
     physical disks:
