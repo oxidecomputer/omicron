@@ -221,6 +221,20 @@ impl CaseBuilder {
 
         Ok(())
     }
+
+    /// Returns an iterator over all ereports that were assigned to this case in
+    /// the current sitrep.
+    pub fn new_ereports(
+        &self,
+    ) -> impl Iterator<Item = &'_ Arc<fm::Ereport>> + '_ {
+        self.ereports.iter().filter_map(|ereport| {
+            if ereport.assigned_sitrep_id == self.sitrep_id {
+                Some(&ereport.ereport)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 impl From<CaseBuilder> for fm::Case {

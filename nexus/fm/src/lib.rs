@@ -15,6 +15,7 @@ pub mod alert;
 pub mod case;
 pub use case::CaseBuilder;
 pub mod de;
+pub mod ereport_analysis;
 
 #[derive(Debug)]
 pub struct SitrepBuilder<'a> {

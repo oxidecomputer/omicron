@@ -11,9 +11,15 @@ use std::sync::Arc;
 
 pub trait DiagnosisEngine {
     fn kind(&self) -> fm::DiagnosisEngineKind;
+
     fn analyze_ereport(
         &mut self,
         sitrep: &mut SitrepBuilder<'_>,
         ereport: &Arc<fm::Ereport>,
+    ) -> anyhow::Result<()>;
+
+    fn process_cases(
+        &mut self,
+        sitrep: &mut SitrepBuilder<'_>,
     ) -> anyhow::Result<()>;
 }
