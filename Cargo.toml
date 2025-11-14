@@ -654,7 +654,7 @@ proptest = "1.7.0"
 qorb = "0.4.1"
 quote = "1.0"
 # Some dependencies still require rand 0.8.x.
-rand08 = { package = "rand", version = "0.8.5" }
+rand08 = { package = "rand", version = "0.9.2" }
 rand = "0.9.2"
 rand_core = "0.9.3"
 rand_distr = "0.5.1"
