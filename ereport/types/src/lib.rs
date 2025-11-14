@@ -110,7 +110,7 @@ pub struct EreportId {
 
 impl fmt::Display for EreportId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}:{:x}", self.restart_id, self.ena)
+        write!(f, "{}:{:x}", self.restart_id, self.ena.0)
     }
 }
 
