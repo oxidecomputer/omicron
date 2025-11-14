@@ -453,7 +453,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
     let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
-    let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
+    let dns_sockaddr = cptestctx.internal_dns.dns_server.tcp_local_address();
     let mut output = String::new();
 
     // Database URL

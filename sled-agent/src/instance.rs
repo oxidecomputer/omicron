@@ -2349,7 +2349,7 @@ mod tests {
             let resolver = Arc::new(
                 Resolver::new_from_addrs(
                     log.clone(),
-                    &[_dns_server.dns_server.local_address()],
+                    &[_dns_server.dns_server.tcp_local_address()],
                 )
                 .unwrap(),
             );

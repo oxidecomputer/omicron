@@ -128,8 +128,9 @@ impl Resolver {
         log: slog::Logger,
     ) -> Result<Self, ResolveError> {
         let mut builder = TokioResolver::builder_tokio()?;
-        // Enable edns for potentially larger records
+        // Enable edns and TCP for potentially larger records
         builder.options_mut().edns0 = true;
+        builder.options_mut().try_tcp_on_error = true;
 
         let resolver = builder.build();
 
@@ -148,7 +149,7 @@ impl Resolver {
         for &socket_addr in dns_addrs.into_iter() {
             let mut ns_config = NameServerConfig::new(
                 socket_addr,
-                hickory_resolver::proto::xfer::Protocol::Udp,
+                hickory_resolver::proto::xfer::Protocol::Tcp,
             );
             // Intentionally continue trying other DNS servers if we get an
             // NXDOMAIN or NOERROR with no answer.  This should be a rare
@@ -161,8 +162,9 @@ impl Resolver {
             rc.add_name_server(ns_config);
         }
         let mut opts = ResolverOpts::default();
-        // Enable edns for potentially larger records
+        // Enable edns and TCP for potentially larger records
         opts.edns0 = true;
+        opts.try_tcp_on_error = true;
         opts.use_hosts_file = ResolveHosts::Never;
         opts.num_concurrent_reqs = dns_server_count;
         // The underlay is IPv6 only, so this helps avoid needless lookups of
@@ -542,7 +544,7 @@ mod test {
         }
 
         fn dns_server_address(&self) -> SocketAddr {
-            self.dns_server.local_address()
+            self.dns_server.tcp_local_address()
         }
 
         fn cleanup_successful(mut self) {
@@ -896,7 +898,7 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            &[dns_server.dns_server.local_address()],
+            &[dns_server.dns_server.tcp_local_address()],
         )
         .unwrap();
 
@@ -974,8 +976,8 @@ mod test {
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
             &[
-                dns_server1.dns_server.local_address(),
-                dns_server2.dns_server.local_address(),
+                dns_server1.dns_server.tcp_local_address(),
+                dns_server2.dns_server.tcp_local_address(),
             ],
         )
         .unwrap();
@@ -1049,7 +1051,7 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            &[dns_server.dns_server.local_address()],
+            &[dns_server.dns_server.tcp_local_address()],
         )
         .unwrap();
 

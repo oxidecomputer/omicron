@@ -145,8 +145,12 @@ impl RunAllArgs {
             cptestctx.internal_dns.dropshot_server.local_addr()
         );
         println!(
-            "omicron-dev: internal DNS:           {}",
-            cptestctx.internal_dns.dns_server.local_address()
+            "omicron-dev: internal DNS (UDP):     {}",
+            cptestctx.internal_dns.dns_server.udp_local_address()
+        );
+        println!(
+            "omicron-dev: internal DNS (TCP):     {}",
+            cptestctx.internal_dns.dns_server.tcp_local_address()
         );
         println!(
             "omicron-dev: external DNS name:      {}",
@@ -157,13 +161,17 @@ impl RunAllArgs {
             cptestctx.external_dns.dropshot_server.local_addr()
         );
         println!(
-            "omicron-dev: external DNS:           {}",
-            cptestctx.external_dns.dns_server.local_address()
+            "omicron-dev: external DNS (UDP):     {}",
+            cptestctx.external_dns.dns_server.udp_local_address()
+        );
+        println!(
+            "omicron-dev: external DNS (TCP):     {}",
+            cptestctx.external_dns.dns_server.tcp_local_address()
         );
         println!(
             "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
-            cptestctx.external_dns.dns_server.local_address().ip(),
-            cptestctx.external_dns.dns_server.local_address().port(),
+            cptestctx.external_dns.dns_server.udp_local_address().ip(),
+            cptestctx.external_dns.dns_server.udp_local_address().port(),
             cptestctx.silo_name,
             cptestctx.external_dns_zone_name,
         );

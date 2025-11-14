@@ -42,7 +42,8 @@ impl Default for Config {
 ///
 /// Dropping this handle shuts down the DNS server.
 pub struct ServerHandle {
-    local_address: SocketAddr,
+    udp_local_address: SocketAddr,
+    tcp_local_address: SocketAddr,
     handle: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
@@ -53,8 +54,11 @@ impl Drop for ServerHandle {
 }
 
 impl ServerHandle {
-    pub fn local_address(&self) -> SocketAddr {
-        self.local_address
+    pub fn udp_local_address(&self) -> SocketAddr {
+        self.udp_local_address
+    }
+    pub fn tcp_local_address(&self) -> SocketAddr {
+        self.tcp_local_address
     }
 }
 
@@ -105,12 +109,12 @@ impl Server {
                 )
             })?;
 
-        let local_address = udp_socket.local_addr().context(
-            "DNS server start: failed to get local address of bound socket",
+        let udp_local_address = udp_socket.local_addr().context(
+            "DNS server start: failed to get local address of bound UDP socket",
         )?;
 
         info!(&log, "DNS server bound to UDP address";
-            "local_address" => ?local_address
+            "udp_local_address" => ?udp_local_address
         );
 
         // Bind TCP socket on the same address.
@@ -122,9 +126,12 @@ impl Server {
                     config.bind_address
                 )
             })?;
+        let tcp_local_address = tcp_listener.local_addr().context(
+            "DNS server start: failed to get local address of bound TCP socket",
+        )?;
 
         info!(&log, "DNS server bound to TCP address";
-            "local_address" => ?local_address,
+            "tcp_local_address" => ?tcp_local_address,
             "timeout_idle_tcp_conns" => config.timeout_idle_tcp_conns
         );
 
@@ -157,6 +164,6 @@ impl Server {
             result
         });
 
-        Ok(ServerHandle { local_address, handle })
+        Ok(ServerHandle { udp_local_address, tcp_local_address, handle })
     }
 }

@@ -1214,7 +1214,7 @@ mod tests {
         {
             let resolver = Resolver::new_from_addrs(
                 logctx.log.clone(),
-                &[dns.dns_server.local_address()],
+                &[dns.dns_server.tcp_local_address()],
             )
             .expect("created DNS resolver");
 
@@ -1319,8 +1319,13 @@ mod tests {
 
         // Query with the qorb DNS resolver.
         {
+            // XXX-dap need to fix qorb -- it's hardcoded to use Udp.
+            //
+            // This test seemed to work when it was being given the *UDP*
+            // address, even for InternalNTP (which shouldn't work).  I'm not
+            // sure why that did appear to work.
             let resolver =
-                QorbResolver::new(vec![dns.dns_server.local_address()]);
+                QorbResolver::new(vec![dns.dns_server.tcp_local_address()]);
 
             // Ensure that service names can be looked up via the qorb resolver.
             let mut services_with_errors = BTreeMap::new();
@@ -1379,6 +1384,7 @@ mod tests {
                 | ServiceName::ClickhouseAdminSingleServer
                 | ServiceName::ClickhouseNative
                 | ServiceName::InternalDns
+                | ServiceName::InternalNtp
                 | ServiceName::Nexus
                 | ServiceName::NexusLockstep
                 | ServiceName::OximeterReader
@@ -1407,12 +1413,6 @@ mod tests {
                 | ServiceName::Maghemite
                 | ServiceName::Mgd => {
                     out.insert(service, Err(QueryError::NoRecordsFound));
-                }
-                // InternalNtp is too large to fit in a single DNS packet and
-                // therefore times out, but DNS lookups for it aren't used
-                // anywhere. See #9178.
-                ServiceName::InternalNtp => {
-                    out.insert(service, Err(QueryError::PacketFragmented));
                 }
                 ServiceName::SledAgent(_) => {
                     // Sled Agent DNS records don't currently exist. (Maybe they

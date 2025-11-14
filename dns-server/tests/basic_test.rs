@@ -69,7 +69,7 @@ pub async fn a_crud() -> Result<(), anyhow::Error> {
     // is authoritative, so we'll have to query again with a lower level
     // interface to validate that.
     let raw_response = raw_dns_client_query(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.udp_local_address(),
         Name::from_ascii(&fqdn).expect("name is valid"),
         RecordType::A,
     )
@@ -114,7 +114,7 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     // is authoritative, so we'll have to query again with a lower level
     // interface to validate that.
     let raw_response = raw_dns_client_query(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.udp_local_address(),
         Name::from_ascii(&fqdn).expect("name is valid"),
         RecordType::AAAA,
     )
@@ -160,7 +160,7 @@ pub async fn answers_match_question() -> Result<(), anyhow::Error> {
     // `raw_dns_client_query` avoids using a hickory Resolver, so we can assert
     // on the exact answer from our server.
     let raw_response = raw_dns_client_query(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.udp_local_address(),
         name,
         RecordType::A,
     )
@@ -245,7 +245,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
         .expect("can construct name for query");
 
     let response = raw_dns_client_query(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.udp_local_address(),
         name,
         RecordType::SRV,
     )
@@ -422,7 +422,7 @@ pub async fn name_contains_zone() -> Result<(), anyhow::Error> {
 
     // A lookup shouldn't work without the zone's name appended twice.
     lookup_ip_expect_error_code(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.udp_local_address(),
         resolver,
         "epsilon3.oxide.test",
         ResponseCode::NXDomain,
@@ -452,7 +452,7 @@ pub async fn empty_record() -> Result<(), anyhow::Error> {
 
     // resolve the name
     lookup_ip_expect_error_code(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.udp_local_address(),
         &resolver,
         &(name + "." + TEST_ZONE + "."),
         ResponseCode::NXDomain,
@@ -554,7 +554,7 @@ pub async fn soa() -> Result<(), anyhow::Error> {
 
     // As with other NXDomain answers, we should see the authoritative bit.
     let raw_response = raw_query_expect_err(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.udp_local_address(),
         &no_soa_name,
         RecordType::A,
     )
@@ -605,7 +605,7 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
     // asking for a nonexistent record within the domain of the internal DNS
     // server should result in an NXDOMAIN
     lookup_ip_expect_error_code(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.udp_local_address(),
         &resolver,
         &format!("unicorn.{}.", TEST_ZONE),
         ResponseCode::NXDomain,
@@ -626,7 +626,7 @@ pub async fn servfail() -> Result<(), anyhow::Error> {
     // SERVFAIL.  Further, `lookup_ip_expect_error_code` will check that the
     // error is not authoritative.
     lookup_ip_expect_error_code(
-        test_ctx.dns_server.local_address(),
+        test_ctx.dns_server.udp_local_address(),
         &resolver,
         "unicorn.oxide.internal",
         ResponseCode::ServFail,
@@ -686,7 +686,7 @@ async fn init_client_server(
 
     let mut resolver_config = ResolverConfig::new();
     resolver_config.add_name_server(NameServerConfig::new(
-        dns_server.local_address(),
+        dns_server.udp_local_address(),
         Protocol::Udp,
     ));
     let mut resolver_opts = ResolverOpts::default();

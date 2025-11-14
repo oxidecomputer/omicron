@@ -183,8 +183,8 @@ impl TransientServer {
     pub async fn resolver(&self) -> Result<TokioResolver, anyhow::Error> {
         let mut resolver_config = ResolverConfig::new();
         resolver_config.add_name_server(NameServerConfig::new(
-            self.dns_server.local_address(),
-            hickory_proto::xfer::Protocol::Udp,
+            self.dns_server.tcp_local_address(),
+            hickory_proto::xfer::Protocol::Tcp,
         ));
         let mut resolver_opts = ResolverOpts::default();
         // Enable edns for potentially larger records
