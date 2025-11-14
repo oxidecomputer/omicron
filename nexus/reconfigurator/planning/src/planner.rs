@@ -1835,7 +1835,9 @@ impl<'a> Planner<'a> {
 
         // We use the list of in-service sleds here -- we don't want to alter
         // expunged or decommissioned sleds.
-        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+        for (sled_id, sled_details) in
+            self.input.all_sleds(SledFilter::InService)
+        {
             let log = log.new(o!("sled_id" => sled_id.to_string()));
             let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
             else {
@@ -1844,6 +1846,7 @@ impl<'a> Planner<'a> {
             };
             let action = self.blueprint.sled_ensure_mupdate_override(
                 sled_id,
+                &sled_details.baseboard_id,
                 inv_sled
                     .zone_image_resolver
                     .mupdate_override
