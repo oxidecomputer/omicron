@@ -44,6 +44,7 @@ pub struct Sitrep {
     /// ID, and which Nexus produced it.
     pub metadata: SitrepMetadata,
     pub cases: IdOrdMap<Case>,
+    // pub cases_by_sp:
 }
 
 impl Sitrep {
