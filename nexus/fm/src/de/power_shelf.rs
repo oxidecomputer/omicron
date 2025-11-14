@@ -7,6 +7,7 @@
 use super::DiagnosisEngine;
 use crate::SitrepBuilder;
 use crate::alert;
+use crate::ereport_analysis;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::Ereport;
 use nexus_types::fm::ereport;
@@ -115,6 +116,13 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
 
         Ok(())
     }
+
+    fn process_cases(
+        &mut self,
+        sitrep: &mut SitrepBuilder<'_>,
+    ) -> anyhow::Result<()> {
+        todo!()
+    }
 }
 
 fn extract_psc_psu(
@@ -140,17 +148,7 @@ fn extract_psu_id(
     ereport: &Ereport,
     log: &slog::Logger,
 ) -> alert::power_shelf::PsuIdentity {
-    // These are the same field names that Hubris uses in the ereport. See:
-    // https://github.com/oxidecomputer/hubris/blob/ec18e4f11aaa14600c61f67335c32b250ef38269/drv/psc-seq-server/src/main.rs#L1107-L1117
-    #[derive(serde::Deserialize, Default)]
-    struct Fruid {
-        mfr: Option<String>,
-        mpn: Option<String>,
-        serial: Option<String>,
-        fw_rev: Option<String>,
-    }
-
-    let Fruid { mfr, mpn, serial, fw_rev } =
+    let PsuFruid { mfr, mpn, serial, fw_rev } =
         grab_json_value(ereport, "fruid", &ereport.report, log)
             .unwrap_or_default();
 
@@ -193,5 +191,87 @@ fn grab_json_value<T: DeserializeOwned>(
             );
             None
         }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
+struct PscEreport {
+    #[serde(flatten)]
+    metadata: ereport_analysis::HubrisMetadata,
+    #[serde(flatten)]
+    class: EreportClass,
+}
+
+#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(tag = "k")]
+enum EreportClass {
+    #[serde(rename = "hw.insert.psu")]
+    PsuInserted {
+        #[serde(flatten)]
+        ereport: PsuInsertedEreport,
+    },
+    #[serde(rename = "hw.remove.psu")]
+    PsuRemoved {
+        #[serde(flatten)]
+        ereport: PsuInsertedEreport,
+    },
+    #[serde(rename = "hw.pwr.pwr_good.bad")]
+    PwrBad {
+        #[serde(flatten)]
+        ereport: PwrGoodEreport,
+    },
+}
+
+#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
+struct PsuInsertedEreport {
+    refdes: String,
+    rail: String,
+    slot: u8,
+    fruid: PsuFruid,
+}
+
+#[derive(Debug, Eq, PartialEq, serde::Deserialize)]
+struct PwrGoodEreport {
+    refdes: String,
+    rail: String,
+    slot: u8,
+    fruid: PsuFruid,
+    pmbus_status: PmbusStatus,
+}
+
+// These are the same field names that Hubris uses in the ereport. See:
+// https://github.com/oxidecomputer/hubris/blob/ec18e4f11aaa14600c61f67335c32b250ef38269/drv/psc-seq-server/src/main.rs#L1107-L1117
+#[derive(serde::Deserialize, Debug, PartialEq, Eq, Default)]
+struct PsuFruid {
+    mfr: Option<String>,
+    mpn: Option<String>,
+    serial: Option<String>,
+    fw_rev: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+// TODO(eliza): bitflags types for these?
+struct PmbusStatus {
+    word: Option<u16>,
+    input: Option<u8>,
+    iout: Option<u8>,
+    vout: Option<u8>,
+    temp: Option<u8>,
+    cml: Option<u8>,
+    mfr: Option<u8>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_pwr_bad_ereport() {
+        let json_value: serde_json::Value =
+            serde_json::from_str(ereport_analysis::test::PSU_PWR_BAD_JSON)
+                .expect("JSON should parse");
+        let ereport: PscEreport = serde_json::from_value(dbg!(json_value))
+            .expect("JSON value should be interpretable");
+        eprintln!("{ereport:?}");
     }
 }
