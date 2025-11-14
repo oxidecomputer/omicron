@@ -459,7 +459,9 @@ pub async fn run_standalone_server(
                             SocketAddr::V6(a) => a,
                         },
                         lockstep_port: nexus_lockstep_port,
-                        external_ip: from_ipaddr_to_external_floating_ip(ip),
+                        external_ip: from_ipaddr_to_external_floating_ip(
+                            external_ip,
+                        ),
                         nic: nexus_types::inventory::NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
