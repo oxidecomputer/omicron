@@ -4,9 +4,10 @@
 
 //! Power shelf diagnosis
 
+use super::DiagnosisEngine;
 use crate::SitrepBuilder;
 use crate::alert;
-use nexus_types::fm::DiagnosisEngine;
+use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::Ereport;
 use nexus_types::fm::ereport;
 use nexus_types::inventory::SpType;
@@ -14,39 +15,78 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::sync::Arc;
 
-pub fn diagnose(
-    sitrep: &mut SitrepBuilder<'_>,
-    new_ereports: &[Arc<Ereport>],
-) -> anyhow::Result<()> {
-    for ereport in new_ereports {
+pub struct PowerShelfDiagnosis {
+    log: slog::Logger,
+    // TODO(eliza): does this need/want any internal state?
+}
+
+impl PowerShelfDiagnosis {
+    pub fn new(log: &slog::Logger) -> Self {
+        Self { log: log.new(slog::o!("de" => "power_shelf")) }
+    }
+}
+
+impl DiagnosisEngine for PowerShelfDiagnosis {
+    fn kind(&self) -> DiagnosisEngineKind {
+        DiagnosisEngineKind::PowerShelf
+    }
+
+    fn analyze_ereport(
+        &mut self,
+        sitrep: &mut SitrepBuilder<'_>,
+        ereport: &Arc<Ereport>,
+    ) -> anyhow::Result<()> {
         // Skip non-power shelf reports
         let ereport::Reporter::Sp { sp_type: SpType::Power, slot } =
             ereport.reporter
         else {
-            continue;
+            slog::debug!(
+                self.log,
+                "skipping ereport that was not reported by a power shelf";
+                "ereport_id" => %ereport.id,
+                "reporter" => %ereport.reporter,
+            );
+            return Ok(());
         };
-
-        // TODO: check for existing cases tracked for this power shelf and see
-        // if the ereport is related to them...
 
         match ereport.data.class.as_deref() {
             // PSU inserted
             Some("hw.insert.psu") => {
+                // TODO: Check for existing cases tracked for this power shelf
+                // and see if the ereport is related to them.
+
                 let psc_psu = extract_psc_psu(&ereport, slot, &sitrep.log);
-                let mut case = sitrep.open_case(DiagnosisEngine::PowerShelf)?;
+                let mut case =
+                    sitrep.cases.open_case(DiagnosisEngineKind::PowerShelf)?;
                 case.add_ereport(ereport, "PSU inserted ereport");
                 case.comment =
                     format!("PSC {slot} PSU {:?} inserted", psc_psu.psu_slot);
                 case.request_alert(&alert::power_shelf::PsuInserted::V0 {
                     psc_psu,
                 })?;
+                case.impacts_sp(
+                    &mut sitrep.impact_lists,
+                    SpType::Power,
+                    slot,
+                    "this is the PSC on the power shelf where the PSU was inserted",
+                )?;
                 // Nothing else to do at this time.
                 case.close();
             }
             Some("hw.remove.psu") => {
+                // TODO: Check for existing cases tracked for this power shelf
+                // and see if the ereport is related to them.
+
                 let psc_psu = extract_psc_psu(&ereport, slot, &sitrep.log);
-                let mut case = sitrep.open_case(DiagnosisEngine::PowerShelf)?;
+                let mut case =
+                    sitrep.cases.open_case(DiagnosisEngineKind::PowerShelf)?;
                 case.add_ereport(ereport, "PSU removed ereport");
+                case.impacts_sp(
+                    &mut sitrep.impact_lists,
+                    SpType::Power,
+                    slot,
+                    "this is the PSC on the power shelf where the PSU was inserted",
+                )?;
                 case.comment =
                     format!("PSC {slot} PSU {:?} removed", psc_psu.psu_slot);
                 case.request_alert(&alert::power_shelf::PsuRemoved::V0 {
@@ -72,9 +112,9 @@ pub fn diagnose(
                 );
             }
         }
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
 
 fn extract_psc_psu(
