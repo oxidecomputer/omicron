@@ -2218,7 +2218,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -2338,7 +2338,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -2570,14 +2570,14 @@ async fn test_snapshot_create_saga_unwinds_correctly(
 // and UUID you passed in.
 fn create_region(
     block_size: u64,
-    gen: u64,
+    generation: u64,
     id: Uuid,
 ) -> VolumeConstructionRequest {
     VolumeConstructionRequest::Region {
         block_size,
         blocks_per_extent: 1,
         extent_count: 1,
-        gen,
+        generation,
         opts: CrucibleOpts {
             id,
             target: Vec::new(),
@@ -2620,10 +2620,10 @@ fn volume_match_gen(
                         block_size: _,
                         blocks_per_extent: _,
                         extent_count: _,
-                        gen,
+                        generation,
                         opts: _,
                     } => {
-                        assert_eq!(*gen, expected_gen[index].unwrap());
+                        assert_eq!(*generation, expected_gen[index].unwrap());
                     }
                     _ => {
                         assert!(expected_gen[index].is_none());
@@ -3466,7 +3466,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         block_size: 512,
                         blocks_per_extent: self.region.blocks_per_extent(),
                         extent_count: self.region.extent_count() as u32,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![self.region_address.into()],
@@ -3604,7 +3604,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             block_size: 512,
                             blocks_per_extent: self.region.blocks_per_extent(),
                             extent_count: self.region.extent_count() as u32,
-                            gen: 1,
+                            generation: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![self.region_address.into()],
@@ -3636,7 +3636,7 @@ impl TestReadOnlyRegionReferenceUsage {
                         block_size: 512,
                         blocks_per_extent: self.region.blocks_per_extent(),
                         extent_count: self.region.extent_count() as u32,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![self.region_address.into()],
@@ -3670,7 +3670,7 @@ impl TestReadOnlyRegionReferenceUsage {
                             block_size: 512,
                             blocks_per_extent: self.region.blocks_per_extent(),
                             extent_count: self.region.extent_count() as u32,
-                            gen: 1,
+                            generation: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![self.region_address.into()],
@@ -5289,7 +5289,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -5326,7 +5326,7 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
                         block_size: 512,
                         blocks_per_extent: 1,
                         extent_count: 1,
-                        gen: 1,
+                        generation: 1,
                         opts: CrucibleOpts {
                             id: Uuid::new_v4(),
                             target: vec![
@@ -5898,7 +5898,7 @@ async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    generation: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
@@ -6083,7 +6083,7 @@ async fn test_no_zombie_read_write_regions(
                     block_size: 512,
                     blocks_per_extent: 1,
                     extent_count: 1,
-                    gen: 1,
+                    generation: 1,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         target: vec![
@@ -6335,4 +6335,91 @@ async fn test_volume_create_wont_use_deleted_region_snapshots(
         serde_json::from_str(volume_copy.data()).unwrap();
 
     assert!(datastore.volume_create(VolumeUuid::new_v4(), vcr).await.is_err());
+}
+
+// Test VolumeConstructionRequest::Region generation/gen field
+// serialization compatibility
+#[test]
+fn test_volume_construction_request_region_gen_serialization() {
+    // Test that VolumeConstructionRequest::Region with Rust field
+    // "generation" serializes to JSON as "gen" and can be deserialized back
+    let vcr = VolumeConstructionRequest::Region {
+        block_size: 512,
+        blocks_per_extent: 100,
+        extent_count: 10,
+        opts: CrucibleOpts {
+            id: uuid::Uuid::parse_str("12345678-1234-1234-1234-123456789abc")
+                .unwrap(),
+            target: vec![
+                "[::1]:3810".parse::<SocketAddr>().unwrap(),
+                "[::1]:3820".parse::<SocketAddr>().unwrap(),
+                "[::1]:3830".parse::<SocketAddr>().unwrap(),
+            ],
+            lossy: false,
+            flush_timeout: None,
+            key: None,
+            cert_pem: None,
+            key_pem: None,
+            root_cert_pem: None,
+            control: None,
+            read_only: false,
+        },
+        generation: 42,
+    };
+
+    // Serialize to JSON
+    let json = serde_json::to_string(&vcr).unwrap();
+
+    // Verify JSON uses "gen" not "generation"
+    assert!(
+        json.contains("\"gen\""),
+        "JSON should contain 'gen' field, got: {}",
+        json
+    );
+    assert!(
+        !json.contains("\"generation\""),
+        "JSON should not contain 'generation' field, got: {}",
+        json
+    );
+
+    // Deserialize back and verify value
+    let deserialized: VolumeConstructionRequest =
+        serde_json::from_str(&json).expect("Failed to deserialize");
+
+    if let VolumeConstructionRequest::Region { generation, .. } = deserialized {
+        assert_eq!(generation, 42, "generation field should be 42");
+    } else {
+        panic!("Expected Region variant");
+    }
+
+    // Also verify that manually created JSON with "gen" works
+    let manual_json = r#"{
+        "type": "region",
+        "block_size": 512,
+        "blocks_per_extent": 100,
+        "extent_count": 10,
+        "opts": {
+            "id": "12345678-1234-1234-1234-123456789abc",
+            "target": ["[::1]:3810", "[::1]:3820", "[::1]:3830"],
+            "lossy": false,
+            "flush_timeout": null,
+            "key": null,
+            "cert_pem": null,
+            "key_pem": null,
+            "root_cert_pem": null,
+            "control": null,
+            "read_only": false
+        },
+        "gen": 99
+    }"#;
+
+    let manual_vcr: VolumeConstructionRequest =
+        serde_json::from_str(manual_json)
+            .expect("Failed to deserialize manual JSON");
+
+    if let VolumeConstructionRequest::Region { generation, .. } = manual_vcr {
+        assert_eq!(generation, 99, "generation field should be 99");
+    } else {
+        panic!("Expected Region variant");
+    }
 }

@@ -4,7 +4,8 @@
 
 //! Plan generation for "where should services be initialized".
 
-use id_map::IdMap;
+use iddqd::IdOrdMap;
+use iddqd::errors::DuplicateItem;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::{
     DnsConfigBuilder, DnsConfigParams, Host, Zone,
@@ -100,19 +101,22 @@ pub enum PlanError {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct SledConfig {
     /// Control plane disks configured for this sled
-    pub disks: IdMap<BlueprintPhysicalDiskConfig>,
+    pub disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
 
     /// Datasets configured for this sled
     pub datasets: BTreeMap<DatasetUuid, DatasetConfig>,
 
     /// zones configured for this sled
-    pub zones: IdMap<BlueprintZoneConfig>,
+    pub zones: IdOrdMap<BlueprintZoneConfig>,
 }
 
 impl SledConfig {
     /// Adds a zone to the Sled's configuration, as well as any number of
     /// durable datasets.
-    pub fn add_zone_and_datasets(&mut self, zone: BlueprintZoneConfig) {
+    pub fn add_zone_and_datasets(
+        &mut self,
+        zone: BlueprintZoneConfig,
+    ) -> Result<(), DuplicateItem<BlueprintZoneConfig>> {
         let fs_dataset_name = DatasetName::new(
             zone.filesystem_pool,
             DatasetKind::TransientZone {
@@ -153,11 +157,7 @@ impl SledConfig {
         }
 
         // Add the zone.
-        //
-        // Currently this is pushing back to a Vec; we could inspect to
-        // ensure this function is idempotent, but it currently is not
-        // re-callable.
-        self.zones.insert(zone);
+        self.zones.insert_unique(zone).map_err(|e| e.into_owned())
     }
 }
 
@@ -447,23 +447,27 @@ impl Plan {
                 sled.alloc_dataset_from_u2s(DatasetKind::InternalDns)?;
             let filesystem_pool = *dataset_name.pool();
 
-            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                filesystem_pool,
-                zone_type: BlueprintZoneType::InternalDns(
-                    blueprint_zone_type::InternalDns {
-                        dataset: OmicronZoneDataset {
-                            pool_name: *dataset_name.pool(),
+            sled.request
+                .add_zone_and_datasets(BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id,
+                    filesystem_pool,
+                    zone_type: BlueprintZoneType::InternalDns(
+                        blueprint_zone_type::InternalDns {
+                            dataset: OmicronZoneDataset {
+                                pool_name: *dataset_name.pool(),
+                            },
+                            http_address,
+                            dns_address,
+                            gz_address: dns_subnet.gz_address(),
+                            gz_address_index: i
+                                .try_into()
+                                .expect("Giant indices?"),
                         },
-                        http_address,
-                        dns_address,
-                        gz_address: dns_subnet.gz_address(),
-                        gz_address_index: i.try_into().expect("Giant indices?"),
-                    },
-                ),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            });
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                })
+                .expect("freshly generated zone IDs are unique");
         }
 
         // Provision CockroachDB zones, continuing to stripe across Sleds.
@@ -483,20 +487,22 @@ impl Plan {
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Cockroach)?;
             let filesystem_pool = *dataset_name.pool();
-            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                zone_type: BlueprintZoneType::CockroachDb(
-                    blueprint_zone_type::CockroachDb {
-                        address,
-                        dataset: OmicronZoneDataset {
-                            pool_name: *dataset_name.pool(),
+            sled.request
+                .add_zone_and_datasets(BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id,
+                    zone_type: BlueprintZoneType::CockroachDb(
+                        blueprint_zone_type::CockroachDb {
+                            address,
+                            dataset: OmicronZoneDataset {
+                                pool_name: *dataset_name.pool(),
+                            },
                         },
-                    },
-                ),
-                filesystem_pool,
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            });
+                    ),
+                    filesystem_pool,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                })
+                .expect("freshly generated zone IDs are unique");
         }
 
         // Provision external DNS zones, continuing to stripe across sleds.
@@ -535,22 +541,24 @@ impl Plan {
             let dataset_name = sled.alloc_dataset_from_u2s(dataset_kind)?;
             let filesystem_pool = *dataset_name.pool();
 
-            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                zone_type: BlueprintZoneType::ExternalDns(
-                    blueprint_zone_type::ExternalDns {
-                        dataset: OmicronZoneDataset {
-                            pool_name: *dataset_name.pool(),
+            sled.request
+                .add_zone_and_datasets(BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id,
+                    zone_type: BlueprintZoneType::ExternalDns(
+                        blueprint_zone_type::ExternalDns {
+                            dataset: OmicronZoneDataset {
+                                pool_name: *dataset_name.pool(),
+                            },
+                            http_address,
+                            dns_address,
+                            nic,
                         },
-                        http_address,
-                        dns_address,
-                        nic,
-                    },
-                ),
-                filesystem_pool,
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            });
+                    ),
+                    filesystem_pool,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                })
+                .expect("freshly generated zone IDs are unique");
         }
 
         // Provision Nexus zones, continuing to stripe across sleds.
@@ -569,31 +577,35 @@ impl Plan {
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
             let filesystem_pool = sled.alloc_zpool_from_u2s()?;
-            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                zone_type: BlueprintZoneType::Nexus(
-                    blueprint_zone_type::Nexus {
-                        internal_address,
-                        lockstep_port: NEXUS_LOCKSTEP_PORT,
-                        external_ip: from_ipaddr_to_external_floating_ip(
-                            external_ip,
-                        ),
-                        nic,
-                        // Tell Nexus to use TLS if and only if the caller
-                        // provided TLS certificates.  This effectively
-                        // determines the status of TLS for the lifetime of
-                        // the rack.  In production-like deployments, we'd
-                        // always expect TLS to be enabled.  It's only in
-                        // development that it might not be.
-                        external_tls: !config.external_certificates.is_empty(),
-                        external_dns_servers: config.dns_servers.clone(),
-                        nexus_generation: Generation::new(),
-                    },
-                ),
-                filesystem_pool,
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            });
+            sled.request
+                .add_zone_and_datasets(BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id,
+                    zone_type: BlueprintZoneType::Nexus(
+                        blueprint_zone_type::Nexus {
+                            internal_address,
+                            lockstep_port: NEXUS_LOCKSTEP_PORT,
+                            external_ip: from_ipaddr_to_external_floating_ip(
+                                external_ip,
+                            ),
+                            nic,
+                            // Tell Nexus to use TLS if and only if the caller
+                            // provided TLS certificates.  This effectively
+                            // determines the status of TLS for the lifetime of
+                            // the rack.  In production-like deployments, we'd
+                            // always expect TLS to be enabled.  It's only in
+                            // development that it might not be.
+                            external_tls: !config
+                                .external_certificates
+                                .is_empty(),
+                            external_dns_servers: config.dns_servers.clone(),
+                            nexus_generation: Generation::new(),
+                        },
+                    ),
+                    filesystem_pool,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                })
+                .expect("freshly generated zone IDs are unique");
         }
 
         // Provision Oximeter zones, continuing to stripe across sleds.
@@ -616,15 +628,17 @@ impl Plan {
                 .host_zone_with_one_backend(id, ServiceName::Oximeter, address)
                 .unwrap();
             let filesystem_pool = sled.alloc_zpool_from_u2s()?;
-            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                zone_type: BlueprintZoneType::Oximeter(
-                    blueprint_zone_type::Oximeter { address },
-                ),
-                filesystem_pool,
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            })
+            sled.request
+                .add_zone_and_datasets(BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id,
+                    zone_type: BlueprintZoneType::Oximeter(
+                        blueprint_zone_type::Oximeter { address },
+                    ),
+                    filesystem_pool,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                })
+                .expect("freshly generated zone IDs are unique");
         }
 
         // Provision Clickhouse zones, continuing to stripe across sleds.
@@ -651,20 +665,22 @@ impl Plan {
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;
             let filesystem_pool = *dataset_name.pool();
-            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                zone_type: BlueprintZoneType::Clickhouse(
-                    blueprint_zone_type::Clickhouse {
-                        address: http_address,
-                        dataset: OmicronZoneDataset {
-                            pool_name: *dataset_name.pool(),
+            sled.request
+                .add_zone_and_datasets(BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id,
+                    zone_type: BlueprintZoneType::Clickhouse(
+                        blueprint_zone_type::Clickhouse {
+                            address: http_address,
+                            dataset: OmicronZoneDataset {
+                                pool_name: *dataset_name.pool(),
+                            },
                         },
-                    },
-                ),
-                filesystem_pool,
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            });
+                    ),
+                    filesystem_pool,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                })
+                .expect("freshly generated zone IDs are unique");
         }
 
         // Provision Crucible Pantry zones, continuing to stripe across sleds.
@@ -687,15 +703,17 @@ impl Plan {
                     address,
                 )
                 .unwrap();
-            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                zone_type: BlueprintZoneType::CruciblePantry(
-                    blueprint_zone_type::CruciblePantry { address },
-                ),
-                filesystem_pool,
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            });
+            sled.request
+                .add_zone_and_datasets(BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id,
+                    zone_type: BlueprintZoneType::CruciblePantry(
+                        blueprint_zone_type::CruciblePantry { address },
+                    ),
+                    filesystem_pool,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                })
+                .expect("freshly generated zone IDs are unique");
         }
 
         // Provision a Crucible zone on every zpool on every Sled.
@@ -714,18 +732,22 @@ impl Plan {
                     )
                     .unwrap();
 
-                sled.request.add_zone_and_datasets(BlueprintZoneConfig {
-                    disposition: BlueprintZoneDisposition::InService,
-                    id,
-                    zone_type: BlueprintZoneType::Crucible(
-                        blueprint_zone_type::Crucible {
-                            address,
-                            dataset: OmicronZoneDataset { pool_name: *pool },
-                        },
-                    ),
-                    filesystem_pool: *pool,
-                    image_source: BlueprintZoneImageSource::InstallDataset,
-                });
+                sled.request
+                    .add_zone_and_datasets(BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id,
+                        zone_type: BlueprintZoneType::Crucible(
+                            blueprint_zone_type::Crucible {
+                                address,
+                                dataset: OmicronZoneDataset {
+                                    pool_name: *pool,
+                                },
+                            },
+                        ),
+                        filesystem_pool: *pool,
+                        image_source: BlueprintZoneImageSource::InstallDataset,
+                    })
+                    .expect("freshly generated zone IDs are unique");
             }
         }
 
@@ -774,13 +796,15 @@ impl Plan {
                 .host_zone_with_one_backend(id, svcname, ntp_address)
                 .unwrap();
 
-            sled.request.add_zone_and_datasets(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                zone_type,
-                filesystem_pool,
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            });
+            sled.request
+                .add_zone_and_datasets(BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id,
+                    zone_type,
+                    filesystem_pool,
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                })
+                .expect("freshly generated zone IDs are unique");
         }
 
         let services: HashMap<_, _> = sled_info

@@ -568,7 +568,7 @@ impl BackgroundTasksInitializer {
             watchers: vec![
                 Box::new(inventory_load_watcher.clone()),
                 Box::new(rx_blueprint.clone()),
-                Box::new(reconfigurator_config_watcher),
+                Box::new(reconfigurator_config_watcher.clone()),
             ],
             activator: task_blueprint_planner,
         });
@@ -981,9 +981,10 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(tuf_repo_pruner::TufRepoPruner::new(
                 datastore.clone(),
                 config.tuf_repo_pruner.clone(),
+                reconfigurator_config_watcher.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
+            watchers: vec![Box::new(reconfigurator_config_watcher)],
             activator: task_tuf_repo_pruner,
         });
 

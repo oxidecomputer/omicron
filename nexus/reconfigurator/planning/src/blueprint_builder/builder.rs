@@ -631,7 +631,6 @@ impl<'a> BlueprintBuilder<'a> {
                             )
                         })?;
                     SledEditor::for_existing_active(
-                        Arc::new(details.baseboard_id.clone()),
                         details.resources.subnet,
                         sled_cfg.clone(),
                     )
@@ -652,7 +651,6 @@ impl<'a> BlueprintBuilder<'a> {
         for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
             if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
                 slot.insert(SledEditor::for_new_active(
-                    Arc::new(details.baseboard_id.clone()),
                     details.resources.subnet,
                 ));
             }
@@ -1299,6 +1297,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub(crate) fn sled_ensure_mupdate_override(
         &mut self,
         sled_id: SledUuid,
+        baseboard_id: &BaseboardId,
         // inv_mupdate_override_info has a weird type (not Option<&T>, not &str)
         // because this is what `Result::as_ref` returns.
         inv_mupdate_override_info: Result<
@@ -1310,13 +1309,6 @@ impl<'a> BlueprintBuilder<'a> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "tried to ensure mupdate override for unknown sled {sled_id}"
-            ))
-        })?;
-        let baseboard_id = editor.baseboard_id().ok_or_else(|| {
-            // All commissioned sleds have baseboards; this should never fail.
-            Error::Planner(anyhow!(
-                "tried to ensure mupdate override for \
-                 decommissioned sled {sled_id}"
             ))
         })?;
 
