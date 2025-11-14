@@ -134,6 +134,6 @@ pub struct SitrepVersion {
 )]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
-pub enum DiagnosisEngine {
+pub enum DiagnosisEngineKind {
     PowerShelf,
 }

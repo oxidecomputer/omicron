@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::fm::AlertRequest;
-use crate::fm::DiagnosisEngine;
+use crate::fm::DiagnosisEngineKind;
 use crate::fm::Ereport;
 use crate::inventory::SpType;
 use chrono::{DateTime, Utc};
@@ -22,7 +22,7 @@ pub struct Case {
     pub closed_sitrep_id: Option<SitrepUuid>,
     pub time_closed: Option<DateTime<Utc>>,
 
-    pub de: DiagnosisEngine,
+    pub de: DiagnosisEngineKind,
 
     pub ereports: IdOrdMap<CaseEreport>,
     pub alerts_requested: IdOrdMap<AlertRequest>,
@@ -79,15 +79,15 @@ impl IdOrdItem for CaseEreport {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ImpactedSpSlot {
     pub sp_type: SpType,
-    pub slot: u8,
+    pub slot: u16,
     pub created_sitrep_id: SitrepUuid,
     pub comment: String,
 }
 
 impl IdOrdItem for ImpactedSpSlot {
-    type Key<'a> = (&'a SpType, &'a u8);
+    type Key<'a> = (SpType, u16);
     fn key(&self) -> Self::Key<'_> {
-        (&self.sp_type, &self.slot)
+        (self.sp_type, self.slot)
     }
 
     iddqd::id_upcast!();
@@ -235,7 +235,7 @@ impl fmt::Display for DisplayCase<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fm::{AlertClass, AlertRequest, DiagnosisEngine};
+    use crate::fm::{AlertClass, AlertRequest, DiagnosisEngineKind};
     use chrono::Utc;
     use ereport_types::{Ena, EreportId};
     use omicron_uuid_kinds::{
@@ -338,7 +338,7 @@ mod tests {
             time_created,
             closed_sitrep_id: Some(closed_sitrep_id),
             time_closed: Some(time_closed),
-            de: DiagnosisEngine::PowerShelf,
+            de: DiagnosisEngineKind::PowerShelf,
             ereports,
             alerts_requested,
             impacted_sp_slots,
