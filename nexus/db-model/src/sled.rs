@@ -14,6 +14,7 @@ use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, sled, zpool};
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::execution;
+use nexus_types::inventory::BaseboardId;
 use nexus_types::{
     external_api::{shared, views},
     identity::Asset,
@@ -124,6 +125,13 @@ impl Sled {
 
     pub fn part_number(&self) -> &str {
         &self.part_number
+    }
+
+    pub fn to_baseboard_id(&self) -> BaseboardId {
+        BaseboardId {
+            part_number: self.part_number().to_owned(),
+            serial_number: self.serial_number().to_owned(),
+        }
     }
 
     /// The policy here is the `views::SledPolicy` because we expect external

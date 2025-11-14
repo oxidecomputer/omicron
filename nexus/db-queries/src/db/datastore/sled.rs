@@ -31,6 +31,7 @@ use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::ApplySledFilterExt;
+use nexus_db_model::HwBaseboardId;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
@@ -288,6 +289,7 @@ impl DataStore {
         &self,
         sled_update: SledUpdate,
     ) -> CreateResult<(Sled, bool)> {
+        use nexus_db_schema::schema::hw_baseboard_id::dsl as bb_dsl;
         use nexus_db_schema::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
@@ -295,28 +297,62 @@ impl DataStore {
         let insertable_sled = sled_update.clone().into_insertable();
         let now = insertable_sled.time_modified();
 
-        let sled = diesel::insert_into(dsl::sled)
-            .values(insertable_sled)
-            .on_conflict(dsl::id)
-            .do_update()
-            .set((
-                dsl::time_modified.eq(now),
-                dsl::ip.eq(sled_update.ip),
-                dsl::port.eq(sled_update.port),
-                dsl::repo_depot_port.eq(sled_update.repo_depot_port),
-                dsl::rack_id.eq(sled_update.rack_id),
-                dsl::is_scrimlet.eq(sled_update.is_scrimlet()),
-                dsl::usable_hardware_threads
-                    .eq(sled_update.usable_hardware_threads),
-                dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
-                dsl::reservoir_size.eq(sled_update.reservoir_size),
-                dsl::cpu_family.eq(sled_update.cpu_family),
-                dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
-            ))
-            .filter(dsl::sled_agent_gen.lt(sled_update.sled_agent_gen))
-            .filter(dsl::sled_state.ne(SledState::Decommissioned))
-            .returning(Sled::as_returning())
-            .get_result_async(&*self.pool_connection_unauthorized().await?)
+        let conn = self.pool_connection_unauthorized().await?;
+        let sled = self
+            .transaction_retry_wrapper("sled_upsert")
+            .transaction(&conn, |conn| {
+                let sled_update = sled_update.clone();
+                let insertable_sled = insertable_sled.clone();
+
+                async move {
+                    // The `sled` table contains denormalized columns for its
+                    // baseboard (`part_number`, `serial_number`), but other
+                    // parts of the system want to refer to sled baseboards via
+                    // the `hw_baseboard_id` table. As a half-measure to
+                    // normalizing the `sled` table, insert a `hw_baseboard_id`
+                    // row for this sled's baseboard (if one doesn't exist
+                    // already), even though we don't reference that ID directly
+                    // in `sled`.
+                    diesel::insert_into(bb_dsl::hw_baseboard_id)
+                        .values(HwBaseboardId::from(
+                            insertable_sled.to_baseboard_id(),
+                        ))
+                        .on_conflict_do_nothing()
+                        .execute_async(&conn)
+                        .await?;
+
+                    // ... and upsert the sled itself.
+                    let sled = diesel::insert_into(dsl::sled)
+                        .values(insertable_sled)
+                        .on_conflict(dsl::id)
+                        .do_update()
+                        .set((
+                            dsl::time_modified.eq(now),
+                            dsl::ip.eq(sled_update.ip),
+                            dsl::port.eq(sled_update.port),
+                            dsl::repo_depot_port
+                                .eq(sled_update.repo_depot_port),
+                            dsl::rack_id.eq(sled_update.rack_id),
+                            dsl::is_scrimlet.eq(sled_update.is_scrimlet()),
+                            dsl::usable_hardware_threads
+                                .eq(sled_update.usable_hardware_threads),
+                            dsl::usable_physical_ram
+                                .eq(sled_update.usable_physical_ram),
+                            dsl::reservoir_size.eq(sled_update.reservoir_size),
+                            dsl::cpu_family.eq(sled_update.cpu_family),
+                            dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
+                        ))
+                        .filter(
+                            dsl::sled_agent_gen.lt(sled_update.sled_agent_gen),
+                        )
+                        .filter(dsl::sled_state.ne(SledState::Decommissioned))
+                        .returning(Sled::as_returning())
+                        .get_result_async(&conn)
+                        .await?;
+
+                    Ok(sled)
+                }
+            })
             .await
             .map_err(|e| {
                 public_error_from_diesel(
