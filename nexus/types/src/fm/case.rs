@@ -36,14 +36,14 @@ impl Case {
         self.time_closed.is_none()
     }
 
-    pub fn display_indented(&self, indent: usize) -> impl fmt::Display + '_ {
-        DisplayCase { case: self, indent }
+    pub fn display_indented(&self, indent: usize, sitrep_id: Option<SitrepUuid>) -> impl fmt::Display + '_ {
+        DisplayCase { case: self, indent, sitrep_id }
     }
 }
 
 impl fmt::Display for Case {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.display_indented(0).fmt(f)
+        self.display_indented(0, None).fmt(f)
     }
 }
 
@@ -92,6 +92,7 @@ impl IdOrdItem for ImpactedSpSlot {
 struct DisplayCase<'a> {
     case: &'a Case,
     indent: usize,
+    sitrep_id: Option<SitrepUuid>,
 }
 
 impl fmt::Display for DisplayCase<'_> {
@@ -114,17 +115,28 @@ impl fmt::Display for DisplayCase<'_> {
                     ref comment,
                 },
             indent,
+            sitrep_id,
         } = self;
+
+        let this_sitrep = move |s| {
+            if Some(s) == sitrep_id {
+                " <-- this sitrep"
+            } else {
+                ""
+            }
+        };
+
         writeln!(
             f,
-            "{:>indent$}case: {id}",
+            "{:>indent$}case {id}",
             if indent > 0 { BULLET } else { "" }
         )?;
+        writeln!(f, "{:>indent$}-----------------------------------------", "")?;
         writeln!(f, "{:>indent$}diagnosis engine: {de}", "")?;
-        writeln!(f, "{:>indent$}created in sitrep: {created_sitrep_id}", "")?;
+        writeln!(f, "{:>indent$}created in sitrep: {created_sitrep_id}{}", "", this_sitrep(*created_sitrep_id))?;
         writeln!(f, "{:>indent$}  at: {time_created}", "")?;
         if let Some(closed_id) = closed_sitrep_id {
-            writeln!(f, "{:>indent$}closed in sitrep: {closed_id}", "")?;
+            writeln!(f, "{:>indent$}closed in sitrep: {closed_id}{}", "", this_sitrep(*closed_id))?;
             if let Some(time_closed) = time_closed {
                 writeln!(f, "{:>indent$}  at: {time_closed}", "")?;
             } else {
@@ -145,7 +157,7 @@ impl fmt::Display for DisplayCase<'_> {
                     .serial_number
                     .as_deref()
                     .unwrap_or("<UNKNOWN SERIAL>");
-                writeln!(f, "{BULLET:>indent$}{}", ereport.id())?;
+                writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id())?;
                 writeln!(
                     f,
                     "{:>indent$}class: {}",
@@ -158,8 +170,9 @@ impl fmt::Display for DisplayCase<'_> {
                 writeln!(f, "{:>indent$}  identity: {pn}:{sn}", "")?;
                 writeln!(
                     f,
-                    "{:>indent$}added in sitrep: {assigned_sitrep_id}",
-                    ""
+                    "{:>indent$}added in sitrep: {assigned_sitrep_id}{}",
+                    "",
+                     this_sitrep(*assigned_sitrep_id)
                 )?;
                 writeln!(f, "{:>indent$}comment: {comment}\n", "")?;
             }
@@ -174,8 +187,9 @@ impl fmt::Display for DisplayCase<'_> {
                 writeln!(f, "{BULLET:>indent$}{sp_type:<6} {slot:02}")?;
                 writeln!(
                     f,
-                    "{:>indent$}added in sitrep: {created_sitrep_id}",
-                    ""
+                    "{:>indent$}added in sitrep: {created_sitrep_id}{}",
+                    "",
+                     this_sitrep(*created_sitrep_id)
                 )?;
                 writeln!(f, "{:>indent$}comment: {comment}\n", "")?;
             }
@@ -187,12 +201,13 @@ impl fmt::Display for DisplayCase<'_> {
             for AlertRequest { id, class, requested_sitrep_id, .. } in
                 alerts_requested
             {
-                writeln!(f, "{BULLET:>indent$}{id}")?;
+                writeln!(f, "{BULLET:>indent$}alert {id}")?;
                 writeln!(f, "{:>indent$}class: {class:?}", "")?;
                 writeln!(
                     f,
-                    "{:>indent$}requested in sitrep: {requested_sitrep_id}\n",
-                    ""
+                    "{:>indent$}requested in sitrep: {requested_sitrep_id}{}\n",
+                    "",
+                     this_sitrep(*requested_sitrep_id)
                 )?;
             }
         }
@@ -318,11 +333,11 @@ mod tests {
         };
 
         eprintln!("example case display:");
-        eprintln!("=====================");
+        eprintln!("=====================\n");
         eprintln!("{case}");
 
         eprintln!("example case display (indented by 4):");
-        eprintln!("======================================");
-        eprintln!("{}", case.display_indented(4));
+        eprintln!("======================================\n");
+        eprintln!("{}", case.display_indented(4, Some(closed_sitrep_id)));
     }
 }

@@ -348,7 +348,7 @@ async fn cmd_db_sitrep_show(
     if !cases.is_empty() {
         println!("\n{:-<80}\n", "== CASES");
         for case in cases {
-            println!("{}", case.display_indented(4));
+            println!("{}", case.display_indented(4, Some(id)));
         }
     }
 
