@@ -35,6 +35,8 @@ use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::ZpoolUuid;
 use range_requests::PotentialRange;
 use sled_agent_api::*;
 use sled_agent_types::bootstore::BootstoreStatus;
@@ -603,6 +605,42 @@ impl SledAgentApi for SledAgentSimImpl {
             .await?;
 
         Ok(HttpResponseDeleted())
+    }
+
+    async fn local_storage_dataset_ensure(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+
+        let LocalStoragePathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        sa.ensure_local_storage_dataset(
+            zpool_id,
+            dataset_id,
+            body.into_inner(),
+        );
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn local_storage_dataset_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+
+        let LocalStoragePathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        sa.drop_dataset(
+            ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid()),
+            dataset_id,
+        );
+
+        Ok(HttpResponseUpdatedNoContent())
     }
 
     // --- Unimplemented endpoints ---

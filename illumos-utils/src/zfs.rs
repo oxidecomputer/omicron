@@ -220,6 +220,15 @@ pub struct DestroySnapshotError {
     err: crate::ExecutionError,
 }
 
+/// Error returned by [`Zfs::ensure_dataset_volume`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to ensure volume '{name}': {err}")]
+pub struct EnsureDatasetVolumeError {
+    name: String,
+    #[source]
+    err: crate::ExecutionError,
+}
+
 /// Wraps commands for interacting with ZFS.
 pub struct Zfs {}
 
@@ -1338,6 +1347,39 @@ impl Zfs {
             result[i] = value.to_string();
         }
         Ok(result)
+    }
+
+    pub async fn ensure_dataset_volume(
+        name: String,
+        size: ByteCount,
+        block_size: u32,
+    ) -> Result<(), EnsureDatasetVolumeError> {
+        let mut command = Command::new(PFEXEC);
+        let cmd = command.args(&[ZFS, "create"]);
+
+        cmd.args(&[
+            "-V",
+            &size.to_bytes().to_string(),
+            "-o",
+            &format!("volblocksize={}", block_size),
+            &name,
+        ]);
+
+        // The command to create a dataset is not idempotent and will fail with
+        // "dataset already exists" if the volume is created already. Eat this
+        // and return Ok instead.
+
+        match execute_async(cmd).await {
+            Ok(_) => Ok(()),
+
+            Err(crate::ExecutionError::CommandFailure(info))
+                if info.stderr.contains("dataset already exists") =>
+            {
+                Ok(())
+            }
+
+            Err(err) => Err(EnsureDatasetVolumeError { name, err }),
+        }
     }
 }
 

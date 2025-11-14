@@ -32,6 +32,11 @@ use futures::stream::FuturesUnordered;
 use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
+use illumos_utils::zfs::CanMount;
+use illumos_utils::zfs::DatasetEnsureArgs;
+use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::SizeDetails;
+use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use itertools::Itertools as _;
 use nexus_sled_agent_shared::inventory::{
@@ -50,9 +55,11 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
+use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
-    GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
+    DatasetUuid, ExternalZpoolUuid, GenericUuid, MupdateOverrideUuid,
+    PropolisUuid, SledUuid,
 };
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
@@ -1187,6 +1194,71 @@ impl SledAgent {
     /// Completely replace the set of probes managed by this sled.
     pub(crate) fn set_probes(&self, probes: IdHashMap<ProbeCreate>) {
         self.inner.probes.set_probes(probes);
+    }
+
+    pub(crate) async fn create_local_storage_dataset(
+        &self,
+        zpool_id: ExternalZpoolUuid,
+        dataset_id: DatasetUuid,
+        request: sled_agent_api::LocalStorageDatasetEnsureRequest,
+    ) -> Result<(), HttpError> {
+        let zpool_name = ZpoolName::External(zpool_id);
+
+        let name = format!("{zpool_name}/crypt/local_storage/{dataset_id}");
+
+        let sled_agent_api::LocalStorageDatasetEnsureRequest {
+            dataset_size,
+            volume_size,
+            block_size,
+        } = request;
+
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: &name,
+            // dataset will never be mounted but a unique value is required here
+            // just in case.
+            mountpoint: Mountpoint(format!("/{dataset_id}").into()),
+            can_mount: CanMount::Off,
+            zoned: true,
+            // encryption details not required, will inherit from parent
+            // "oxp_UUID/crypt/local_storage", which inherits from
+            // "oxp_UUID/crypt"
+            encryption_details: None,
+            size_details: Some(SizeDetails {
+                quota: Some(dataset_size),
+                reservation: Some(dataset_size),
+                compression: omicron_common::disk::CompressionAlgorithm::Off,
+            }),
+            id: None,
+            additional_options: None,
+        })
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Zfs::ensure_dataset_volume(
+            format!("{}/vol", name),
+            volume_size,
+            block_size,
+        )
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn delete_local_storage_dataset(
+        &self,
+        zpool_id: ExternalZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> Result<(), HttpError> {
+        let zpool_name = ZpoolName::External(zpool_id);
+
+        let name = format!("{zpool_name}/crypt/local_storage/{dataset_id}");
+
+        Zfs::destroy_dataset(&name)
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(())
     }
 }
 
