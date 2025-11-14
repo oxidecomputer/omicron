@@ -227,7 +227,7 @@ mod test {
             cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep1)
+            .fm_sitrep_insert(&opctx, sitrep1.clone())
             .await
             .expect("sitrep should be inserted successfully");
 
@@ -292,7 +292,7 @@ mod test {
             cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep2)
+            .fm_sitrep_insert(&opctx, sitrep2.clone())
             .await
             .expect("sitrep2 should be inserted successfully");
 
