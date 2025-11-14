@@ -1041,8 +1041,10 @@ mod tests {
         assert_eq!(sitrep.metadata.comment, current_sitrep.metadata.comment);
 
         // Trying to insert the same sitrep again should fail.
-        let err =
-            datastore.fm_sitrep_insert(&opctx, sitrep.clone()).await.unwrap_err();
+        let err = datastore
+            .fm_sitrep_insert(&opctx, sitrep.clone())
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("duplicate key"));
 
         // Clean up.
