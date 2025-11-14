@@ -608,7 +608,13 @@ pub async fn run_standalone_server(
         });
 
         let plan = ServicePlan { all_sleds, dns_config: dns_config.clone() };
-        plan.to_blueprint(inventory.ledgered_sled_config.unwrap().generation)
+        let generation = inventory
+            .ledgered_sled_config
+            .context(
+                "simulated inventory does not have a ledgered sled config",
+            )?
+            .generation;
+        plan.to_blueprint(generation)
             .context("could not construct initial blueprint")?
     };
 
