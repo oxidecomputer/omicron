@@ -7,8 +7,12 @@
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
     api::external::{self, BfdMode, ImportExportPolicy, Name, Vni},
+    disk::DatasetName,
+    zpool_name::ZpoolName,
 };
 use daft::Diffable;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::ExternalZpoolUuid;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -1111,12 +1115,58 @@ pub struct SledIdentifiers {
 
 /// Delegate a ZFS volume to a zone
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct DelegatedZvol {
-    /// The fully qualified name of the parent dataset
-    pub parent_dataset: String,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DelegatedZvol {
+    /// Delegate a slice of the local storage dataset present on this pool into
+    /// the zone.
+    LocalStorage { zpool_id: ExternalZpoolUuid, dataset_id: DatasetUuid },
+}
 
-    /// The volume name
-    pub name: String,
+impl DelegatedZvol {
+    /// Return the fully qualified dataset name that the volume is in.
+    pub fn parent_dataset_name(&self) -> String {
+        match &self {
+            DelegatedZvol::LocalStorage { zpool_id, dataset_id } => {
+                // The local storage dataset is the parent for an allocation
+                let local_storage_parent = DatasetName::new(
+                    ZpoolName::External(*zpool_id),
+                    DatasetKind::LocalStorage,
+                );
+
+                format!("{}/{}", local_storage_parent.full_name(), dataset_id)
+            }
+        }
+    }
+
+    /// Return the mountpoint for the parent dataset in the zone
+    pub fn parent_dataset_mountpoint(&self) -> String {
+        match &self {
+            DelegatedZvol::LocalStorage { dataset_id, .. } => {
+                format!("/{}", dataset_id)
+            }
+        }
+    }
+
+    /// Return the fully qualified volume name
+    pub fn volume_name(&self) -> String {
+        match &self {
+            DelegatedZvol::LocalStorage { .. } => {
+                // For now, all local storage zvols use the same name
+                format!("{}/vol", self.parent_dataset_name())
+            }
+        }
+    }
+
+    /// Return the device that should be delegated into the zone
+    pub fn zvol_device(&self) -> String {
+        match &self {
+            DelegatedZvol::LocalStorage { .. } => {
+                // Use the `rdsk` device to avoid interacting with an additional
+                // buffer cache that would be used if we used `dsk`.
+                format!("/dev/zvol/rdsk/{}", self.volume_name())
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1211,5 +1261,24 @@ mod tests {
                 "{kind} does not match stringification/serialization"
             );
         }
+    }
+
+    #[test]
+    fn test_delegated_zvol_device_name() {
+        let delegated_zvol = DelegatedZvol::LocalStorage {
+            zpool_id: "cb832c2e-fa94-4911-89a9-895ac8b1e8f3".parse().unwrap(),
+            dataset_id: "2bbf0908-21da-4bc3-882b-1a1e715c54bd".parse().unwrap(),
+        };
+
+        assert_eq!(
+            delegated_zvol.zvol_device(),
+            [
+                String::from("/dev/zvol/rdsk"),
+                String::from("oxp_cb832c2e-fa94-4911-89a9-895ac8b1e8f3/crypt"),
+                String::from("local_storage"),
+                String::from("2bbf0908-21da-4bc3-882b-1a1e715c54bd/vol"),
+            ]
+            .join("/"),
+        );
     }
 }

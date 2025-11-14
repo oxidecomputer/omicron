@@ -4006,20 +4006,30 @@
       },
       "DelegatedZvol": {
         "description": "Delegate a ZFS volume to a zone",
-        "type": "object",
-        "properties": {
-          "name": {
-            "description": "The volume name",
-            "type": "string"
-          },
-          "parent_dataset": {
-            "description": "The fully qualified name of the parent dataset",
-            "type": "string"
+        "oneOf": [
+          {
+            "description": "Delegate a slice of the local storage dataset present on this pool into the zone.",
+            "type": "object",
+            "properties": {
+              "dataset_id": {
+                "$ref": "#/components/schemas/DatasetUuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "local_storage"
+                ]
+              },
+              "zpool_id": {
+                "$ref": "#/components/schemas/ExternalZpoolUuid"
+              }
+            },
+            "required": [
+              "dataset_id",
+              "type",
+              "zpool_id"
+            ]
           }
-        },
-        "required": [
-          "name",
-          "parent_dataset"
         ]
       },
       "DhcpConfig": {
@@ -4577,6 +4587,15 @@
         "required": [
           "mappings"
         ]
+      },
+      "ExternalZpoolUuid": {
+        "x-rust-type": {
+          "crate": "omicron-uuid-kinds",
+          "path": "omicron_uuid_kinds::ExternalZpoolUuid",
+          "version": "*"
+        },
+        "type": "string",
+        "format": "uuid"
       },
       "FileStorageBackend": {
         "description": "A storage backend backed by a file in the host system's file system.",
@@ -8688,15 +8707,6 @@
         "x-rust-type": {
           "crate": "omicron-uuid-kinds",
           "path": "omicron_uuid_kinds::ZpoolUuid",
-          "version": "*"
-        },
-        "type": "string",
-        "format": "uuid"
-      },
-      "ExternalZpoolUuid": {
-        "x-rust-type": {
-          "crate": "omicron-uuid-kinds",
-          "path": "omicron_uuid_kinds::ExternalZpoolUuid",
           "version": "*"
         },
         "type": "string",

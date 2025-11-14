@@ -55,7 +55,6 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
-use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     DatasetUuid, ExternalZpoolUuid, GenericUuid, MupdateOverrideUuid,
@@ -66,6 +65,7 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
+use omicron_common::api::internal::shared::DelegatedZvol;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
@@ -1202,9 +1202,8 @@ impl SledAgent {
         dataset_id: DatasetUuid,
         request: sled_agent_api::LocalStorageDatasetEnsureRequest,
     ) -> Result<(), HttpError> {
-        let zpool_name = ZpoolName::External(zpool_id);
-
-        let name = format!("{zpool_name}/crypt/local_storage/{dataset_id}");
+        let delegated_zvol =
+            DelegatedZvol::LocalStorage { zpool_id, dataset_id };
 
         let sled_agent_api::LocalStorageDatasetEnsureRequest {
             dataset_size,
@@ -1213,10 +1212,12 @@ impl SledAgent {
         } = request;
 
         Zfs::ensure_dataset(DatasetEnsureArgs {
-            name: &name,
+            name: &delegated_zvol.parent_dataset_name(),
             // dataset will never be mounted but a unique value is required here
             // just in case.
-            mountpoint: Mountpoint(format!("/{dataset_id}").into()),
+            mountpoint: Mountpoint(
+                delegated_zvol.parent_dataset_mountpoint().into(),
+            ),
             can_mount: CanMount::Off,
             zoned: false,
             // encryption details not required, will inherit from parent
@@ -1235,7 +1236,7 @@ impl SledAgent {
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 
         Zfs::ensure_dataset_volume(
-            format!("{}/vol", name),
+            delegated_zvol.volume_name(),
             volume_size,
             block_size,
         )
@@ -1250,11 +1251,10 @@ impl SledAgent {
         zpool_id: ExternalZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<(), HttpError> {
-        let zpool_name = ZpoolName::External(zpool_id);
+        let delegated_zvol =
+            DelegatedZvol::LocalStorage { zpool_id, dataset_id };
 
-        let name = format!("{zpool_name}/crypt/local_storage/{dataset_id}");
-
-        Zfs::destroy_dataset(&name)
+        Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name())
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
 

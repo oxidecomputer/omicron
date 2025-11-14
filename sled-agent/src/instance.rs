@@ -1992,12 +1992,16 @@ impl InstanceRunner {
             opte_ports.push(port);
         }
 
-        // Each delegated Zvol requires delegating the parent dataset
+        // Each delegated Zvol requires (optionally) delegating the parent dataset
         let datasets: Vec<_> = self
             .delegated_zvols
             .iter()
-            .map(|delegated_zvol| zone::Dataset {
-                name: delegated_zvol.parent_dataset.clone(),
+            .filter_map(|delegated_zvol| match delegated_zvol {
+                DelegatedZvol::LocalStorage { .. } => {
+                    // Delegating the rdsk device does _not_ require delegating
+                    // the parent dataset.
+                    None
+                }
             })
             .collect();
 
@@ -2010,12 +2014,7 @@ impl InstanceRunner {
         ];
 
         for delegated_zvol in &self.delegated_zvols {
-            devices.push(zone::Device {
-                name: format!(
-                    "/dev/zvol/rdsk/{}/{}",
-                    delegated_zvol.parent_dataset, delegated_zvol.name,
-                ),
-            });
+            devices.push(zone::Device { name: delegated_zvol.zvol_device() });
         }
 
         // Create a zone for the propolis instance, using the previously
