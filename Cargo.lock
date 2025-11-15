@@ -2146,7 +2146,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=7103cd3a3d7b0112d2949dd135db06fef0c156bb#7103cd3a3d7b0112d2949dd135db06fef0c156bb"
+source = "git+https://github.com/oxidecomputer/crucible?rev=ee6d6e3628f4552e7d9c0e0a474e0ca4bf31a057#ee6d6e3628f4552e7d9c0e0a474e0ca4bf31a057"
 dependencies = [
  "anyhow",
  "atty",
@@ -2166,7 +2166,7 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tokio-rustls 0.24.1",
- "toml 0.8.23",
+ "toml 0.9.5",
  "twox-hash",
  "uuid",
  "vergen",
