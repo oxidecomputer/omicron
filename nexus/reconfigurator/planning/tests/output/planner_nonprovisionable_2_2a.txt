@@ -352,7 +352,7 @@ mismatched zone type: after: Nexus(
             name: Name(
                 "nexus-5a8e9719-62bd-40be-81b1-20b85970740b",
             ),
-            ip: V4(
+            ip_config: V4(
                 PrivateIpv4Config {
                     ip: 172.30.2.5,
                     subnet: Ipv4Net {
