@@ -466,6 +466,7 @@ async fn test_limited_collaborator_can_create_instance(
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
+            multicast_groups: vec![],
             disks: vec![],
             boot_disk: None,
             cpu_platform: None,
