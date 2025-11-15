@@ -23,7 +23,7 @@ use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{Logger, error, info, o, warn};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 #[cfg(target_os = "illumos")]
 use std::sync::OnceLock;
@@ -572,7 +572,7 @@ impl RunningZone {
             }
         })?;
         let zone = Some(self.inner.name.as_ref());
-        if let IpAddr::V4(gateway) = port.gateway().ip() {
+        if let Some(gateway) = port.gateway().ipv4_addr() {
             let addr =
                 Zones::ensure_address(zone, &addrobj, AddressRequest::Dhcp)
                     .await?;

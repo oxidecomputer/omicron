@@ -17,9 +17,9 @@ mod port;
 mod port_manager;
 
 pub use firewall_rules::opte_firewall_rules;
-use ipnetwork::IpNetwork;
 use macaddr::MacAddr6;
 use omicron_common::api::internal::shared;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 pub use oxide_vpc::api::BoundaryServices;
 pub use oxide_vpc::api::DhcpCfg;
 use oxide_vpc::api::IpCidr;
@@ -34,14 +34,26 @@ pub use port::Port;
 pub use port_manager::PortCreateParams;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
-use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 
 /// Information about the gateway for an OPTE port
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct Gateway {
     mac: MacAddr6,
-    ip: IpAddr,
+    ips: GatewayIps,
+}
+
+// IP addresses for an OPTE gateway.
+#[derive(Clone, Copy, Debug)]
+enum GatewayIps {
+    // IPv4-only gateway.
+    V4(Ipv4Addr),
+    // IPv6-only gateway.
+    V6(Ipv6Addr),
+    // Dual-stack gateway.
+    DualStack { v4: Ipv4Addr, v6: Ipv6Addr },
 }
 
 // The MAC address that OPTE exposes to guest NICs, i.e., the MAC of the virtual
@@ -54,20 +66,47 @@ const OPTE_VIRTUAL_GATEWAY_MAC: MacAddr6 =
     MacAddr6::new(0xa8, 0x40, 0x25, 0xff, 0x77, 0x77);
 
 impl Gateway {
-    pub fn from_subnet(subnet: &IpNetwork) -> Self {
-        Self {
-            mac: OPTE_VIRTUAL_GATEWAY_MAC,
+    /// Construct information about the gateway from an IP configuration.
+    pub fn from_ip_config(ip: &PrivateIpConfig) -> Self {
+        let ips =
+            match ip {
+                PrivateIpConfig::V4(v4) => {
+                    let ip = v4.subnet().first_host();
+                    GatewayIps::V4(ip)
+                }
+                PrivateIpConfig::V6(v6) => {
+                    let ip =
+                        v6.subnet().iter().nth(1).expect(
+                            "IPv6 subnet must have at least 2 addresses",
+                        );
+                    GatewayIps::V6(ip)
+                }
+                PrivateIpConfig::DualStack { v4, v6 } => {
+                    let v4 = v4.subnet().first_host();
+                    let v6 =
+                        v6.subnet().iter().nth(1).expect(
+                            "IPv6 subnet must have at least 2 addresses",
+                        );
+                    GatewayIps::DualStack { v4, v6 }
+                }
+            };
+        Self { mac: OPTE_VIRTUAL_GATEWAY_MAC, ips }
+    }
 
-            // See RFD 21, section 2.2 table 1
-            ip: subnet
-                .iter()
-                .nth(1)
-                .expect("IP subnet must have at least 2 addresses"),
+    /// Return the gateway's IPv4 address, if it exists.
+    pub fn ipv4_addr(&self) -> Option<&Ipv4Addr> {
+        match &self.ips {
+            GatewayIps::V4(v4) | GatewayIps::DualStack { v4, .. } => Some(&v4),
+            GatewayIps::V6(_) => None,
         }
     }
 
-    pub fn ip(&self) -> &IpAddr {
-        &self.ip
+    /// Return the gateway's IPv6 address, if it exists.
+    pub fn ipv6_addr(&self) -> Option<&Ipv6Addr> {
+        match &self.ips {
+            GatewayIps::V6(v6) | GatewayIps::DualStack { v6, .. } => Some(&v6),
+            GatewayIps::V4(_) => None,
+        }
     }
 }
 
@@ -104,5 +143,57 @@ fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
         }
         Ip(ip) => RouterTarget::Ip((*ip).into()),
         VpcSubnet(net) => RouterTarget::VpcSubnet(net_to_cidr(*net)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Gateway;
+    use super::GatewayIps;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
+
+    #[test]
+    fn convert_private_ip_config_to_gateway_ips() {
+        let v4 = PrivateIpv4Config::new(
+            Ipv4Addr::new(10, 0, 0, 5),
+            Ipv4Net::new(Ipv4Addr::new(10, 0, 0, 0), 24).unwrap(),
+        )
+        .unwrap();
+        let v6 = PrivateIpv6Config::new(
+            Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5),
+            Ipv6Net::new(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0), 64)
+                .unwrap(),
+        )
+        .unwrap();
+        let cfg = PrivateIpConfig::DualStack { v4: v4.clone(), v6: v6.clone() };
+
+        let expected_v4_gateway = Ipv4Addr::new(10, 0, 0, 1);
+        let expected_v6_gateway = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
+        let GatewayIps::V4(gateway) =
+            Gateway::from_ip_config(&PrivateIpConfig::V4(v4)).ips
+        else {
+            panic!("Expected IPv4 OPTE gateway IP addresses");
+        };
+        assert_eq!(gateway, expected_v4_gateway);
+        let GatewayIps::V6(gateway) =
+            Gateway::from_ip_config(&PrivateIpConfig::V6(v6)).ips
+        else {
+            panic!("Expected IPv6 OPTE gateway IP addresses");
+        };
+        assert_eq!(gateway, expected_v6_gateway);
+
+        let GatewayIps::DualStack { v4: ipv4, v6: ipv6 } =
+            Gateway::from_ip_config(&cfg).ips
+        else {
+            panic!("Expected dual-stack OPTE gateway IP addresses");
+        };
+        assert_eq!(ipv4, expected_v4_gateway);
+        assert_eq!(ipv6, expected_v6_gateway);
     }
 }

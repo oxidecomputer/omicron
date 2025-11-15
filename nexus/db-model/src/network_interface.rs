@@ -19,6 +19,10 @@ use nexus_db_schema::schema::service_network_interface;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
+use omicron_common::api::external::Error;
+use omicron_common::api::internal::shared::PrivateIpConfig;
+use omicron_common::api::internal::shared::PrivateIpv4Config;
+use omicron_common::api::internal::shared::PrivateIpv6Config;
 use omicron_common::api::{external, internal};
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -102,15 +106,86 @@ pub struct NetworkInterface {
 impl NetworkInterface {
     pub fn into_internal(
         self,
-        subnet: oxnet::IpNet,
-    ) -> internal::shared::NetworkInterface {
-        // TODO-completeness: Handle IP Subnets of either version.
-        // https://github.com/oxidecomputer/omicron/issues/9246.
-        assert!(
-            matches!(subnet, oxnet::IpNet::V4(_)),
-            "Only IPv4 VPC Subnets are currently supported"
-        );
-        internal::shared::NetworkInterface {
+        ipv4_subnet: oxnet::Ipv4Net,
+        ipv6_subnet: oxnet::Ipv6Net,
+    ) -> Result<internal::shared::NetworkInterface, Error> {
+        let ip_config = match (self.ipv4, self.ipv6) {
+            (None, None) => unreachable!(),
+            (None, Some(ip)) => {
+                // Check that all transit IPs are IPv6.
+                let transit_ips = self
+                    .transit_ips
+                    .iter()
+                    .map(|net| {
+                        let IpNetwork::V6(net) = net else {
+                            return Err(Error::internal_error(&format!(
+                                "NIC with ID '{}' is IPv6-only, but has \
+                                IPv4 transit IPs",
+                                self.id(),
+                            )));
+                        };
+                        Ok(Ipv6Net::from(*net))
+                    })
+                    .collect::<Result<_, _>>()?;
+                PrivateIpConfig::V6(PrivateIpv6Config::new_with_transit_ips(
+                    *ip,
+                    ipv6_subnet,
+                    transit_ips,
+                )?)
+            }
+            (Some(ip), None) => {
+                // Check that all transit IPs are IPv4.
+                let transit_ips = self
+                    .transit_ips
+                    .iter()
+                    .map(|net| {
+                        let IpNetwork::V4(net) = net else {
+                            return Err(Error::internal_error(&format!(
+                                "NIC with ID '{}' is IPv4-only, but has \
+                                IPv6 transit IPs",
+                                self.id(),
+                            )));
+                        };
+                        Ok(Ipv4Net::from(*net))
+                    })
+                    .collect::<Result<_, _>>()?;
+                PrivateIpConfig::V4(PrivateIpv4Config::new_with_transit_ips(
+                    *ip,
+                    ipv4_subnet,
+                    transit_ips,
+                )?)
+            }
+            (Some(ipv4), Some(ipv6)) => {
+                let ipv4_transit_ips = self
+                    .transit_ips
+                    .iter()
+                    .filter_map(|net| match net {
+                        IpNetwork::V4(net) => Some(Ipv4Net::from(*net)),
+                        IpNetwork::V6(_) => None,
+                    })
+                    .collect();
+                let ipv6_transit_ips = self
+                    .transit_ips
+                    .iter()
+                    .filter_map(|net| match net {
+                        IpNetwork::V6(net) => Some(Ipv6Net::from(*net)),
+                        IpNetwork::V4(_) => None,
+                    })
+                    .collect();
+                let v4 = PrivateIpv4Config::new_with_transit_ips(
+                    *ipv4,
+                    ipv4_subnet,
+                    ipv4_transit_ips,
+                )?;
+                let v6 = PrivateIpv6Config::new_with_transit_ips(
+                    *ipv6,
+                    ipv6_subnet,
+                    ipv6_transit_ips,
+                )?;
+                PrivateIpConfig::DualStack { v4, v6 }
+            }
+        };
+        Ok(internal::shared::NetworkInterface {
             id: self.id(),
             kind: match self.kind {
                 NetworkInterfaceKind::Instance => {
@@ -130,16 +205,12 @@ impl NetworkInterface {
                 }
             },
             name: self.name().clone(),
-            // TODO-completeness: Handle one or both IP addresses when
-            // addressing https://github.com/oxidecomputer/omicron/issues/9246.
-            ip: self.ipv4.expect("only IPv4 interfaces are supported").into(),
+            ip_config,
             mac: self.mac.into(),
-            subnet,
             vni: external::Vni::try_from(0).unwrap(),
             primary: self.primary,
             slot: *self.slot,
-            transit_ips: self.transit_ips.into_iter().map(Into::into).collect(),
-        }
+        })
     }
 }
 
@@ -208,36 +279,34 @@ impl ServiceNetworkInterface {
 }
 
 // TODO-remove: Remove this when we support dual-stack service NICs. See
-// https://github.com/oxidecomputer/omicron/issues/9246.
+// https://github.com/oxidecomputer/omicron/issues/9314.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "Service NIC {nic_id} has an IPv6 address ({ip}); \
-    only a single IPv4 address is supported"
+    "Service NIC {nic_id} is dual-stack, \
+    only a single IPv4 or IPv6 address is supported"
 )]
-pub struct ServiceNicNotIpv4OnlyError {
+pub struct DualStackServiceNicError {
     pub nic_id: Uuid,
-    pub ip: std::net::Ipv6Addr,
 }
 
 impl TryFrom<&'_ ServiceNetworkInterface>
     for nexus_types::deployment::OmicronZoneNic
 {
-    type Error = ServiceNicNotIpv4OnlyError;
+    type Error = DualStackServiceNicError;
 
     fn try_from(nic: &ServiceNetworkInterface) -> Result<Self, Self::Error> {
-        if let Some(ipv6) = nic.ipv6 {
-            return Err(ServiceNicNotIpv4OnlyError {
-                nic_id: nic.id(),
-                ip: *ipv6,
-            });
-        }
-        let Some(ip) = nic.ipv4 else {
-            unreachable!("must be single-stack IPv4");
+        let ip = match (nic.ipv4, nic.ipv6) {
+            (None, None) => unreachable!("database constraint ensures this"),
+            (None, Some(ip)) => ip.into(),
+            (Some(ip), None) => ip.into(),
+            (Some(_), Some(_)) => {
+                return Err(DualStackServiceNicError { nic_id: nic.id() });
+            }
         };
         Ok(Self {
             id: VnicUuid::from_untyped_uuid(nic.id()),
             mac: *nic.mac,
-            ip: ip.into(),
+            ip,
             slot: *nic.slot,
             primary: nic.primary,
         })
@@ -493,6 +562,23 @@ impl IpConfig {
                 .map(Into::into)
                 .chain(ipv6_addrs.iter().copied().map(Into::into))
                 .collect(),
+        }
+    }
+
+    /// Construct a dual-stack IP configuration with explicit IP addresses.
+    pub fn new_dual_stack(
+        ipv4: std::net::Ipv4Addr,
+        ipv6: std::net::Ipv6Addr,
+    ) -> Self {
+        IpConfig::DualStack {
+            v4: Ipv4Config {
+                ip: Ipv4Assignment::Explicit(ipv4),
+                transit_ips: Vec::new(),
+            },
+            v6: Ipv6Config {
+                ip: Ipv6Assignment::Explicit(ipv6),
+                transit_ips: Vec::new(),
+            },
         }
     }
 

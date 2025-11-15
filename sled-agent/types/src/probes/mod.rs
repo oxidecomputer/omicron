@@ -14,6 +14,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::net::IpAddr;
 
+/// Version 1 of the probe API types.
+pub mod v1;
+
 /// Parameters used to create a probe.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct ProbeCreate {

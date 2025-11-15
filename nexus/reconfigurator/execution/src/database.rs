@@ -89,6 +89,7 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -110,6 +111,11 @@ mod test {
         let blueprint_id = BlueprintUuid::new_v4();
         let sled_id = SledUuid::new_v4();
 
+        let ip_config = PrivateIpConfig::new_ipv4(
+            "192.168.1.1".parse().unwrap(),
+            "192.168.1.0/24".parse().unwrap(),
+        )
+        .unwrap();
         let zones: IdOrdMap<BlueprintZoneConfig> = nexus_zones
             .into_iter()
             .map(|(zone_id, disposition, nexus_generation)| BlueprintZoneConfig {
@@ -131,15 +137,11 @@ mod test {
                             id: zone_id.into_untyped_uuid(),
                         },
                         name: "test-nic".parse().unwrap(),
-                        ip: "192.168.1.1".parse().unwrap(),
+                        ip_config: ip_config.clone(),
                         mac: MacAddr::random_system(),
-                        subnet: ipnetwork::IpNetwork::V4(
-                            "192.168.1.0/24".parse().unwrap()
-                        ).into(),
                         vni: Vni::try_from(100).unwrap(),
                         primary: true,
                         slot: 0,
-                        transit_ips: Vec::new(),
                     },
                     nexus_generation,
                 }),

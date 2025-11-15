@@ -24,6 +24,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IpVersion;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use slog::Logger;
@@ -281,7 +282,21 @@ impl DataStore {
         log: &Logger,
     ) -> Result<bool, Error> {
         // See the comment in is_external_ip_already_allocated().
-        if cfg!(any(test, feature = "testing")) && nic.ip.is_loopback() {
+        //
+        // TODO-completeness: Ensure this works for dual-stack Omicron service
+        // zone NICs. See https://github.com/oxidecomputer/omicron/issues/9313.
+        if cfg!(any(test, feature = "testing"))
+            && nic
+                .ip_config
+                .ipv4_addr()
+                .map(|ip| ip.is_loopback())
+                .unwrap_or(false)
+            && nic
+                .ip_config
+                .ipv6_addr()
+                .map(|ip| ip.is_loopback())
+                .unwrap_or(false)
+        {
             return Ok(true);
         }
 
@@ -301,20 +316,10 @@ impl DataStore {
             // because that would require an extra DB lookup. We'll assume if
             // these main properties are correct, the subnet is too.
             for allocated_nic in &allocated_nics {
-                // TODO-completeness: Need support for dual-stack internal
-                // network interfaces. See
-                // https://github.com/oxidecomputer/omicron/issues/9246.
-                //
-                // This should not be possible to hit until we actually allow
-                // creating a NIC with a VPC-private IP address.
-                let Some(ipv4) = allocated_nic.ipv4 else {
-                    return Err(Error::internal_error(&format!(
-                        "Allocated NICs should be single-stack IPv4, but \
-                        NIC with id '{}' is missing an IPv4 address",
-                        allocated_nic.identity.id,
-                    )));
-                };
-                if std::net::IpAddr::from(ipv4) == nic.ip
+                if allocated_nic.ipv4.map(Into::into).as_ref()
+                    == nic.ip_config.ipv4_addr()
+                    && allocated_nic.ipv6.map(Into::into).as_ref()
+                        == nic.ip_config.ipv6_addr()
                     && *allocated_nic.mac == nic.mac
                     && *allocated_nic.slot == nic.slot
                     && allocated_nic.primary == nic.primary
@@ -437,14 +442,12 @@ impl DataStore {
             return Ok(());
         }
 
-        // TODO-completeness: Handle dual-stack `shared::NetworkInterface`s.
-        // See https://github.com/oxidecomputer/omicron/issues/9246.
-        let std::net::IpAddr::V4(ip) = nic.ip else {
-            return Err(Error::internal_error(&format!(
-                "Unexpectedly found a service NIC without an IPv4 \
-                address, nic_id=\"{}\"",
-                nic.id,
-            )));
+        let ip_config = match &nic.ip_config {
+            PrivateIpConfig::V4(ipv4) => IpConfig::from_ipv4(*ipv4.ip()),
+            PrivateIpConfig::V6(ipv6) => IpConfig::from_ipv6(*ipv6.ip()),
+            PrivateIpConfig::DualStack { v4, v6 } => {
+                IpConfig::new_dual_stack(*v4.ip(), *v6.ip())
+            }
         };
         let nic_arg = IncompleteNetworkInterface::new_service(
             nic.id,
@@ -454,7 +457,7 @@ impl DataStore {
                 name: nic.name.clone(),
                 description: format!("{} service vNIC", zone_kind.report_str()),
             },
-            IpConfig::from_ipv4(ip),
+            ip_config,
             nic.mac,
             nic.slot,
         )?;
@@ -540,7 +543,7 @@ mod tests {
     use omicron_uuid_kinds::ExternalZpoolUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use oxnet::IpNet;
+    use std::collections::BTreeSet;
     use std::net::IpAddr;
     use std::net::SocketAddr;
     use uuid::Uuid;
@@ -599,22 +602,24 @@ mod tests {
                 id: ExternalIpUuid::new_v4(),
                 ip: external_ips.next().expect("exhausted external_ips"),
             };
+            let nexus_private_ip_config = PrivateIpConfig::new_ipv4(
+                NEXUS_OPTE_IPV4_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                    .unwrap(),
+                *NEXUS_OPTE_IPV4_SUBNET,
+            )
+            .unwrap();
             let nexus_nic = NetworkInterface {
                 id: Uuid::new_v4(),
                 kind: NetworkInterfaceKind::Service {
                     id: nexus_id.into_untyped_uuid(),
                 },
                 name: "test-nexus".parse().expect("bad name"),
-                ip: NEXUS_OPTE_IPV4_SUBNET
-                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                    .unwrap()
-                    .into(),
+                ip_config: nexus_private_ip_config,
                 mac: random_system_mac_iter.next().unwrap(),
-                subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                 vni: Vni::SERVICES_VNI,
                 primary: true,
                 slot: 0,
-                transit_ips: vec![],
             };
 
             let dns_id = OmicronZoneUuid::new_v4();
@@ -625,22 +630,24 @@ mod tests {
                     0,
                 ),
             };
+            let dns_private_ip_config = PrivateIpConfig::new_ipv4(
+                DNS_OPTE_IPV4_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                    .unwrap(),
+                *DNS_OPTE_IPV4_SUBNET,
+            )
+            .unwrap();
             let dns_nic = NetworkInterface {
                 id: Uuid::new_v4(),
                 kind: NetworkInterfaceKind::Service {
                     id: dns_id.into_untyped_uuid(),
                 },
                 name: "test-external-dns".parse().expect("bad name"),
-                ip: DNS_OPTE_IPV4_SUBNET
-                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                    .unwrap()
-                    .into(),
+                ip_config: dns_private_ip_config,
                 mac: random_system_mac_iter.next().unwrap(),
-                subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                 vni: Vni::SERVICES_VNI,
                 primary: true,
                 slot: 0,
-                transit_ips: vec![],
             };
 
             // Boundary NTP:
@@ -654,22 +661,24 @@ mod tests {
                 )
                 .unwrap(),
             };
+            let ntp_private_ip_config = PrivateIpConfig::new_ipv4(
+                NTP_OPTE_IPV4_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+                    .unwrap(),
+                *NTP_OPTE_IPV4_SUBNET,
+            )
+            .unwrap();
             let ntp_nic = NetworkInterface {
                 id: Uuid::new_v4(),
                 kind: NetworkInterfaceKind::Service {
                     id: ntp_id.into_untyped_uuid(),
                 },
                 name: "test-external-ntp".parse().expect("bad name"),
-                ip: NTP_OPTE_IPV4_SUBNET
-                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                    .unwrap()
-                    .into(),
+                ip_config: ntp_private_ip_config,
                 mac: random_system_mac_iter.next().unwrap(),
-                subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
                 vni: Vni::SERVICES_VNI,
                 primary: true,
                 slot: 0,
-                transit_ips: vec![],
             };
 
             Self {
@@ -861,13 +870,14 @@ mod tests {
             assert_eq!(db_nexus_nics[0].vpc_id, NEXUS_VPC_SUBNET.vpc_id);
             assert_eq!(db_nexus_nics[0].subnet_id, NEXUS_VPC_SUBNET.id());
             assert_eq!(*db_nexus_nics[0].mac, self.nexus_nic.mac);
-            // TODO-completeness: Handle the `nexus_nic` being dual-stack as
-            // well. See https://github.com/oxidecomputer/omicron/issues/9246.
             assert_eq!(
-                db_nexus_nics[0].ipv4.map(IpAddr::from),
-                Some(self.nexus_nic.ip)
+                db_nexus_nics[0].ipv4,
+                self.nexus_nic.ip_config.ipv4_addr().copied().map(Into::into),
             );
-            assert!(db_nexus_nics[0].ipv6.is_none());
+            assert_eq!(
+                db_nexus_nics[0].ipv6,
+                self.nexus_nic.ip_config.ipv6_addr().copied().map(Into::into),
+            );
             assert_eq!(*db_nexus_nics[0].slot, self.nexus_nic.slot);
             assert_eq!(db_nexus_nics[0].primary, self.nexus_nic.primary);
 
@@ -887,11 +897,13 @@ mod tests {
             assert_eq!(db_dns_nics[0].vpc_id, DNS_VPC_SUBNET.vpc_id);
             assert_eq!(db_dns_nics[0].subnet_id, DNS_VPC_SUBNET.id());
             assert_eq!(*db_dns_nics[0].mac, self.dns_nic.mac);
-            // TODO-completeness: Handle the `nexus_nic` being dual-stack as
-            // well. See https://github.com/oxidecomputer/omicron/issues/9246.
             assert_eq!(
-                db_nexus_nics[0].ipv4.map(IpAddr::from),
-                Some(self.nexus_nic.ip)
+                db_nexus_nics[0].ipv4,
+                self.nexus_nic.ip_config.ipv4_addr().copied().map(Into::into),
+            );
+            assert_eq!(
+                db_nexus_nics[0].ipv6,
+                self.nexus_nic.ip_config.ipv6_addr().copied().map(Into::into),
             );
             assert!(db_nexus_nics[0].ipv6.is_none());
             assert_eq!(*db_dns_nics[0].slot, self.dns_nic.slot);
@@ -913,11 +925,13 @@ mod tests {
             assert_eq!(db_ntp_nics[0].vpc_id, NTP_VPC_SUBNET.vpc_id);
             assert_eq!(db_ntp_nics[0].subnet_id, NTP_VPC_SUBNET.id());
             assert_eq!(*db_ntp_nics[0].mac, self.ntp_nic.mac);
-            // TODO-completeness: Handle the `nexus_nic` being dual-stack as
-            // well. See https://github.com/oxidecomputer/omicron/issues/9246.
             assert_eq!(
-                db_nexus_nics[0].ipv4.map(IpAddr::from),
-                Some(self.nexus_nic.ip)
+                db_nexus_nics[0].ipv4,
+                self.nexus_nic.ip_config.ipv4_addr().copied().map(Into::into),
+            );
+            assert_eq!(
+                db_nexus_nics[0].ipv6,
+                self.nexus_nic.ip_config.ipv6_addr().copied().map(Into::into),
             );
             assert!(db_nexus_nics[0].ipv6.is_none());
             assert_eq!(*db_ntp_nics[0].slot, self.ntp_nic.slot);
@@ -1192,7 +1206,22 @@ mod tests {
                 as &dyn Fn(OmicronZoneUuid, &mut NetworkInterface) -> String,
             // non-matching IP
             &|zone_id, nic| {
-                nic.ip = bogus_ip;
+                // Take the last IP still in the subnet.
+                if let Some(subnet) = nic.ip_config.ipv4_subnet() {
+                    let new =
+                        PrivateIpConfig::new_ipv4(subnet.last_addr(), *subnet)
+                            .unwrap();
+                    nic.ip_config = new;
+                } else if let Some(subnet) = nic.ip_config.ipv6_subnet() {
+                    let new =
+                        PrivateIpConfig::new_ipv6(subnet.last_addr(), *subnet)
+                            .unwrap();
+                    nic.ip_config = new;
+                } else {
+                    todo!(
+                        "See https://github.com/oxidecomputer/omicron/issues/9313"
+                    );
+                }
                 format!("zone {zone_id} already has 1 non-matching NIC")
             },
         ] {
@@ -1381,13 +1410,15 @@ mod tests {
                                 id: zone_id.into_untyped_uuid(),
                             },
                             name: "test-external-dns".parse().unwrap(),
-                            ip: opte_ip_iter.next().unwrap().into(),
+                            ip_config: PrivateIpConfig::new_ipv4(
+                                opte_ip_iter.next().unwrap(),
+                                *DNS_OPTE_IPV4_SUBNET,
+                            )
+                            .unwrap(),
                             mac: mac_iter.next().unwrap(),
-                            subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
                             vni: Vni::SERVICES_VNI,
                             primary: true,
                             slot: 0,
-                            transit_ips: vec![],
                         },
                     },
                 ),

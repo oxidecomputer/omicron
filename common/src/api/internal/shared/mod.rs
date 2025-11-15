@@ -4,6 +4,7 @@
 
 //! Types shared between Nexus and Sled Agent.
 
+use super::nexus::HostIdentifier;
 use crate::{
     address::NUM_SOURCE_NAT_PORTS,
     api::external::{self, BfdMode, ImportExportPolicy, Name, Vni},
@@ -21,60 +22,11 @@ use std::{
 use strum::EnumCount;
 use uuid::Uuid;
 
-use super::nexus::HostIdentifier;
+pub mod network_interface;
 
-/// The type of network interface
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    Hash,
-    Diffable,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum NetworkInterfaceKind {
-    /// A vNIC attached to a guest instance
-    Instance { id: Uuid },
-    /// A vNIC associated with an internal service
-    Service { id: Uuid },
-    /// A vNIC associated with a probe
-    Probe { id: Uuid },
-}
-
-/// Information required to construct a virtual network interface
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Diffable,
-)]
-pub struct NetworkInterface {
-    pub id: Uuid,
-    pub kind: NetworkInterfaceKind,
-    pub name: Name,
-    pub ip: IpAddr,
-    pub mac: external::MacAddr,
-    pub subnet: IpNet,
-    pub vni: Vni,
-    pub primary: bool,
-    pub slot: u8,
-    #[serde(default)]
-    pub transit_ips: Vec<IpNet>,
-}
+// Re-export latest version of all NIC-related types.
+pub use network_interface::NetworkInterfaceKind;
+pub use network_interface::v2::*;
 
 /// An IP address and port range used for source NAT, i.e., making
 /// outbound network connections from guests or services.
@@ -776,7 +728,7 @@ impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
 
 /// A VPC route resolved into a concrete target.
 #[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+    Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct ResolvedVpcRoute {
     pub dest: IpNet,
@@ -973,12 +925,12 @@ impl JsonSchema for DatasetKind {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         // The schema is a bit more complicated than this -- it's either one of
         // the fixed values or a string starting with "zone/" -- but this is
         // good enough for now.
-        let mut schema = <String>::json_schema(gen).into_object();
+        let mut schema = <String>::json_schema(generator).into_object();
         schema.metadata().description = Some(
             "The kind of dataset. See the `DatasetKind` enum \
              in omicron-common for possible values."
