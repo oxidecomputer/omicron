@@ -5607,7 +5607,7 @@
             "type": "string",
             "format": "uuid"
           },
-          "ip": {
+          "ip_config": {
             "$ref": "#/components/schemas/PrivateIpConfig"
           },
           "kind": {
@@ -5633,7 +5633,7 @@
         },
         "required": [
           "id",
-          "ip",
+          "ip_config",
           "kind",
           "mac",
           "name",

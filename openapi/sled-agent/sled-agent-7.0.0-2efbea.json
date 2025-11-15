@@ -4751,24 +4751,6 @@
         "minLength": 1,
         "maxLength": 7
       },
-      "IdMapDatasetConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/DatasetConfig"
-        }
-      },
-      "IdMapOmicronPhysicalDiskConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-        }
-      },
-      "IdMapOmicronZoneConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronZoneConfig"
-        }
-      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -5695,7 +5677,7 @@
             "type": "string",
             "format": "uuid"
           },
-          "ip": {
+          "ip_config": {
             "$ref": "#/components/schemas/PrivateIpConfig"
           },
           "kind": {
@@ -5721,7 +5703,7 @@
         },
         "required": [
           "id",
-          "ip",
+          "ip_config",
           "kind",
           "mac",
           "name",
@@ -5858,10 +5840,38 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "$ref": "#/components/schemas/IdMapDatasetConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/DatasetConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatasetConfig"
+            }
           },
           "disks": {
-            "$ref": "#/components/schemas/IdMapOmicronPhysicalDiskConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
@@ -5890,7 +5900,21 @@
             ]
           },
           "zones": {
-            "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronZoneConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronZoneConfig"
+            }
           }
         },
         "required": [
