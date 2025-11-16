@@ -6,7 +6,8 @@
 //! [`trust_quorum_protocol::Node`]
 
 use crate::connection_manager::{
-    ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner, ProxyConnState,
+    ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner,
+    DisconnectedPeer, ProxyConnState,
 };
 use crate::ledgers::PersistentStateLedger;
 use crate::proxy;
@@ -482,9 +483,15 @@ impl NodeTask {
                     self.on_api_request(request).await;
                 }
                 res = self.conn_mgr.step(corpus.clone()) => {
-                    if let Err(err) = res {
-                        error!(self.log, "Failed to accept connection"; &err);
-                        continue;
+                    match res {
+                        Ok(Some(disconnected_peer)) => {
+                            self.on_disconnect(disconnected_peer);
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            error!(self.log, "Failed to accept connection"; &err);
+                            continue;
+                        }
                     }
                 }
                 Some(msg) = self.conn_mgr_rx.recv() => {
@@ -495,6 +502,14 @@ impl NodeTask {
             for envelope in self.ctx.drain_envelopes() {
                 self.conn_mgr.send(envelope).await;
             }
+        }
+    }
+
+    /// A task managing an established connenction to a peer has just exited
+    fn on_disconnect(&mut self, disconnected_peer: DisconnectedPeer) {
+        self.proxy_tracker.on_disconnect(disconnected_peer.task_id);
+        if let Some(peer_id) = disconnected_peer.peer_id {
+            self.node.on_disconnect(&mut self.ctx, peer_id);
         }
     }
 
@@ -519,11 +534,6 @@ impl NodeTask {
                     .await;
                 self.send_network_config(&peer_id).await;
                 self.node.on_connect(&mut self.ctx, peer_id);
-            }
-            ConnToMainMsgInner::Disconnected { peer_id } => {
-                self.conn_mgr.on_disconnected(task_id, peer_id.clone()).await;
-                self.proxy_tracker.on_disconnect(&peer_id);
-                self.node.on_disconnect(&mut self.ctx, peer_id);
             }
             ConnToMainMsgInner::Received { from, msg } => {
                 self.node.handle(&mut self.ctx, from, msg);
@@ -619,9 +629,9 @@ impl NodeTask {
                     .conn_mgr
                     .update_bootstrap_connections(addrs, corpus)
                     .await;
-                for peer_id in disconnected {
-                    self.proxy_tracker.on_disconnect(&peer_id);
-                    self.node.on_disconnect(&mut self.ctx, peer_id);
+                for handle in disconnected {
+                    self.proxy_tracker.on_disconnect(handle.task_id());
+                    self.node.on_disconnect(&mut self.ctx, handle.baseboard_id);
                 }
             }
             NodeApiRequest::ClearSecrets => {
@@ -685,14 +695,12 @@ impl NodeTask {
                     .proxy_request(&destination, wire_request)
                     .await
                 {
-                    ProxyConnState::Connected => {
+                    ProxyConnState::Connected(task_id) => {
                         // Track the request. If the connection is disconnected
                         // before the response is received, then the caller will
                         // get notified about this.
                         let req = proxy::TrackableRequest::new(
-                            destination.clone(),
-                            request_id,
-                            tx,
+                            task_id, request_id, tx,
                         );
                         self.proxy_tracker.insert(req);
                     }

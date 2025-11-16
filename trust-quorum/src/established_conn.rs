@@ -155,14 +155,6 @@ impl EstablishedConn {
     }
 
     async fn close(&mut self) {
-        if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
-            task_id: self.task_id,
-            msg: ConnToMainMsgInner::Disconnected {
-                peer_id: self.peer_id.clone(),
-            },
-        }) {
-            warn!(self.log, "Failed to send to main task");
-        }
         let _ = self.writer.shutdown().await;
     }
 

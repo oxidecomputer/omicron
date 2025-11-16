@@ -23,6 +23,7 @@ use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::sync::{mpsc, oneshot};
+use tokio::task;
 use trust_quorum_protocol::{
     BaseboardId, CommitError, Configuration, Epoch, PrepareAndCommitError,
 };
@@ -246,8 +247,15 @@ pub enum TrackerError {
 /// A trackable in-flight proxy request, owned by the `Tracker`
 #[derive(Debug)]
 pub struct TrackableRequest {
+    /// Each `TrackableRequest` is bound to a
+    /// [`crate::established_conn::EstablishedConn`] that is uniquely identified
+    /// by its `tokio::task::Id`. This is useful because it disambiguates
+    /// connect and disconnect operations for the same `destination` such that
+    /// they don't have to be totally ordered. It is enough to know that a
+    /// disconnect for a given `task_id` only occurs after a connect.
+    task_id: task::Id,
+    /// A unique id for a given proxy request
     request_id: Uuid,
-    destination: BaseboardId,
     // The option exists so we can take the sender out in `on_disconnect`, when
     // the request is borrowed, but about to be discarded.
     tx: DebugIgnore<Option<oneshot::Sender<Result<WireValue, TrackerError>>>>,
@@ -255,11 +263,11 @@ pub struct TrackableRequest {
 
 impl TrackableRequest {
     pub fn new(
-        destination: BaseboardId,
+        task_id: task::Id,
         request_id: Uuid,
         tx: oneshot::Sender<Result<WireValue, TrackerError>>,
     ) -> TrackableRequest {
-        TrackableRequest { request_id, destination, tx: DebugIgnore(Some(tx)) }
+        TrackableRequest { task_id, request_id, tx: DebugIgnore(Some(tx)) }
     }
 }
 
@@ -306,9 +314,9 @@ impl Tracker {
     }
 
     /// A remote peer has disconnected
-    pub fn on_disconnect(&mut self, from: &BaseboardId) {
+    pub fn on_disconnect(&mut self, task_id: task::Id) {
         self.ops.retain(|mut req| {
-            if &req.destination == from {
+            if req.task_id == task_id {
                 let tx = req.tx.take().unwrap();
                 let _ = tx.send(Err(TrackerError::Disconnected));
                 false
@@ -335,15 +343,15 @@ mod tests {
     async fn recv_and_insert(
         rx: &mut mpsc::Receiver<NodeApiRequest>,
         tracker: &mut Tracker,
+        task_id: task::Id,
     ) {
-        let Some(NodeApiRequest::Proxy { destination, wire_request, tx }) =
+        let Some(NodeApiRequest::Proxy { wire_request, tx, .. }) =
             rx.recv().await
         else {
             panic!("Invalid NodeApiRequest")
         };
 
-        let req =
-            TrackableRequest::new(destination, wire_request.request_id, tx);
+        let req = TrackableRequest::new(task_id, wire_request.request_id, tx);
         tracker.insert(req);
     }
 
@@ -354,6 +362,11 @@ mod tests {
             serial_number: "test".to_string(),
         };
         let rack_id = RackUuid::new_v4();
+
+        // In real code, the `tokio::task::ID` is the id of the
+        // `EstablishedConnectionTask`. However, we are simulating those
+        // connections here, so just use an ID of an arbitrary task.
+        let task_id = task::spawn(async {}).id();
 
         // Test channel where the sender is usually cloned from the [`crate::NodeTaskHandle`],
         // and the receiver is owned by the local [`crate::NodeTask`]
@@ -378,7 +391,7 @@ mod tests {
         assert_eq!(tracker.len(), 0);
 
         // Simulate receiving a request by the [`NodeTask`]
-        recv_and_insert(&mut rx, &mut tracker).await;
+        recv_and_insert(&mut rx, &mut tracker, task_id).await;
 
         // We now have a request in the tracker
         assert_eq!(tracker.len(), 1);
@@ -401,7 +414,7 @@ mod tests {
         });
 
         // Simulate receiving a request by the [`NodeTask`]
-        recv_and_insert(&mut rx, &mut tracker).await;
+        recv_and_insert(&mut rx, &mut tracker, task_id).await;
         assert_eq!(tracker.len(), 2);
 
         // We still haven't actually completed any operations yet
@@ -456,6 +469,11 @@ mod tests {
         let proxy = Proxy::new(tx.clone());
         let mut tracker = Tracker::new();
 
+        // In real code, the `tokio::task::ID` is the id of the
+        // `EstablishedConnectionTask`. However, we are simulating those
+        // connections here, so just use an ID of an arbitrary task.
+        let task_id = task::spawn(async {}).id();
+
         let requests_completed = Arc::new(AtomicUsize::new(0));
 
         // This is the first "user" task that will issue proxy operations
@@ -473,7 +491,7 @@ mod tests {
         assert_eq!(tracker.len(), 0);
 
         // Simulate receiving a request by the [`NodeTask`]
-        recv_and_insert(&mut rx, &mut tracker).await;
+        recv_and_insert(&mut rx, &mut tracker, task_id).await;
 
         // We now have a request in the tracker
         assert_eq!(tracker.len(), 1);
@@ -517,6 +535,11 @@ mod tests {
         };
         let rack_id = RackUuid::new_v4();
 
+        // In real code, the `tokio::task::ID` is the id of the
+        // `EstablishedConnectionTask`. However, we are simulating those
+        // connections here, so just use an ID of an arbitrary task.
+        let task_id = task::spawn(async {}).id();
+
         // Test channel where the sender is usually cloned from the [`crate::NodeTaskHandle`],
         // and the receiver is owned by the local [`crate::NodeTask`]
         let (tx, mut rx) = mpsc::channel(5);
@@ -540,7 +563,7 @@ mod tests {
         assert_eq!(tracker.len(), 0);
 
         // Simulate receiving a request by the [`NodeTask`]
-        recv_and_insert(&mut rx, &mut tracker).await;
+        recv_and_insert(&mut rx, &mut tracker, task_id).await;
 
         // We now have a request in the tracker
         assert_eq!(tracker.len(), 1);
@@ -560,14 +583,15 @@ mod tests {
         });
 
         // Simulate receiving a request by the [`NodeTask`]
-        recv_and_insert(&mut rx, &mut tracker).await;
+        recv_and_insert(&mut rx, &mut tracker, task_id).await;
         assert_eq!(tracker.len(), 2);
 
         // We still haven't actually completed any operations yet
         assert_eq!(requests_completed.load(Ordering::Relaxed), 0);
 
-        // Now simulate a disconnection to the proxy destination
-        tracker.on_disconnect(&destination);
+        // Now simulate a disconnection to the proxy destination for this
+        // specific connection task.
+        tracker.on_disconnect(task_id);
 
         // Now wait for both responses to be processed
         wait_for_condition(
