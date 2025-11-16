@@ -62,7 +62,7 @@ pub enum MainToConnMsg {
 /// `Node::on_disconnect`.
 ///
 /// By always returning the `task_id`, we allow cleanup of proxy requests for
-/// stale nodes that will never complete.
+/// stale connections that will never complete.
 pub struct DisconnectedPeer {
     pub task_id: task::Id,
     pub peer_id: Option<BaseboardId>,
