@@ -7,6 +7,8 @@
 #: output_rules = [
 #:  "=/out/a4x2-package.tar.gz",
 #:  "=/out/xtask",
+#:  "=/out/commtest",
+#:  "=/out/dhcp-server",
 #: ]
 #: access_repos = [
 #:	"oxidecomputer/testbed",
