@@ -190,7 +190,7 @@ impl EstablishedConn {
             debug!(self.log, "Received {msg:?}");
             match msg {
                 WireMsg::Tq(msg) => {
-                    if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
+                    if let Err(e) = self.main_tx.try_send(ConnToMainMsg {
                         task_id: self.task_id,
                         msg: ConnToMainMsgInner::Received {
                             from: self.peer_id.clone(),
@@ -201,7 +201,7 @@ impl EstablishedConn {
                             self.log,
                             "Failed to send received fsm msg to main task"
                         );
-                        panic!("Connection to main task channel full");
+                        panic!("Connection to main task channel error: {e:#?}");
                     }
                 }
                 WireMsg::Ping => {
@@ -210,7 +210,7 @@ impl EstablishedConn {
                 }
                 WireMsg::NetworkConfig(config) => {
                     let generation = config.generation;
-                    if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
+                    if let Err(e) = self.main_tx.try_send(ConnToMainMsg {
                         task_id: self.task_id,
                         msg: ConnToMainMsgInner::ReceivedNetworkConfig {
                             from: self.peer_id.clone(),
@@ -222,11 +222,11 @@ impl EstablishedConn {
                             "Failed to send received NetworkConfig with
                              generation {generation} to main task"
                         );
-                        panic!("Connection to main task channnel full");
+                        panic!("Connection to main task channel error: {e:#?}");
                     }
                 }
                 WireMsg::ProxyRequest(req) => {
-                    if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
+                    if let Err(e) = self.main_tx.try_send(ConnToMainMsg {
                         task_id: self.task_id,
                         msg: ConnToMainMsgInner::ProxyRequestReceived {
                             from: self.peer_id.clone(),
@@ -235,13 +235,13 @@ impl EstablishedConn {
                     }) {
                         error!(
                             self.log,
-                            "Failed to send received proxy msg to the main task"
+                            "Failed to send received proxy request to the main task"
                         );
-                        panic!("Connection to main task channel full");
+                        panic!("Connection to main task channel error: {e:#?}");
                     }
                 }
                 WireMsg::ProxyResponse(rsp) => {
-                    if let Err(_) = self.main_tx.try_send(ConnToMainMsg {
+                    if let Err(e) = self.main_tx.try_send(ConnToMainMsg {
                         task_id: self.task_id,
                         msg: ConnToMainMsgInner::ProxyResponseReceived {
                             from: self.peer_id.clone(),
@@ -250,9 +250,9 @@ impl EstablishedConn {
                     }) {
                         error!(
                             self.log,
-                            "Failed to send received proxy msg to the main task"
+                            "Failed to send received proxy resposne to the main task"
                         );
-                        panic!("Connection to main task channel full");
+                        panic!("Connection to main task channel error: {e:#?}");
                     }
                 }
             }

@@ -374,6 +374,10 @@ mod tests {
         let proxy = Proxy::new(tx.clone());
         let mut tracker = Tracker::new();
 
+        // All spawned tasks will increment this value when processing a
+        // request. The result is polled with `wait_for_condition` at the end
+        // of the test, and therefore there is no reason to join on any of the
+        // spawned test tasks.
         let requests_completed = Arc::new(AtomicUsize::new(0));
 
         // This is the first "user" task that will issue proxy operations
@@ -474,6 +478,10 @@ mod tests {
         // connections here, so just use an ID of an arbitrary task.
         let task_id = task::spawn(async {}).id();
 
+        // All spawned tasks will increment this value when processing a
+        // request. The result is polled with `wait_for_condition` at the end
+        // of the test, and therefore there is no reason to join on any of the
+        // spawned test tasks.
         let requests_completed = Arc::new(AtomicUsize::new(0));
 
         // This is the first "user" task that will issue proxy operations
@@ -481,8 +489,6 @@ mod tests {
         let dest = destination.clone();
         let _ = spawn(async move {
             let s = proxy.commit(dest, rack_id, Epoch(1)).await.unwrap_err();
-
-            // The first attempt should succeed
             assert_matches!(s, ProxyError::InvalidResponse(_));
             let _ = count.fetch_add(1, Ordering::Relaxed);
         });
@@ -546,6 +552,10 @@ mod tests {
         let proxy = Proxy::new(tx.clone());
         let mut tracker = Tracker::new();
 
+        // All spawned tasks will increment this value when processing a
+        // request. The result is polled with `wait_for_condition` at the end
+        // of the test, and therefore there is no reason to join on any of the
+        // spawned test tasks.
         let requests_completed = Arc::new(AtomicUsize::new(0));
 
         // This is the first "user" task that will issue proxy operations
@@ -553,8 +563,6 @@ mod tests {
         let dest = destination.clone();
         let _ = spawn(async move {
             let s = proxy.commit(dest, rack_id, Epoch(1)).await.unwrap_err();
-
-            // The first attempt should succeed
             assert_eq!(s, ProxyError::Disconnected);
             let _ = count.fetch_add(1, Ordering::Relaxed);
         });

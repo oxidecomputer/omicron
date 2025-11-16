@@ -1391,7 +1391,7 @@ mod tests {
     /// at the first 3 nodes. Then we go and issue a `PrepareAndCommit` to the last
     /// node and ensure it commits.
     #[tokio::test]
-    pub async fn tq_initial_config_prepare_and_commit() {
+    async fn tq_initial_config_prepare_and_commit() {
         let num_nodes = 4;
         let setup = TestSetup::spawn_nodes(
             "tq_initial_config_prepare_and_commit",
@@ -1526,7 +1526,7 @@ mod tests {
     /// the configuration for the prior epoch. This should result in commit
     /// advancing to the latest epoch.
     #[tokio::test]
-    pub async fn tq_reconfig_with_commit_advance() {
+    async fn tq_reconfig_with_commit_advance() {
         let num_nodes = 4;
         let setup = TestSetup::spawn_nodes(
             "tq_recofnig_with_commit_advance",
@@ -1744,7 +1744,7 @@ mod tests {
     }
 
     #[tokio::test]
-    pub async fn tq_upgrade_from_lrtq() {
+    async fn tq_upgrade_from_lrtq() {
         let num_nodes = 4;
         let (setup, rack_id) = TestSetup::spawn_nodes_with_lrtq_shares(
             "tq_upgrade_from_lrtq",
@@ -1831,7 +1831,7 @@ mod tests {
 
     /// Ensure state is persisted as we expect
     #[tokio::test]
-    pub async fn tq_persistent_state() {
+    async fn tq_persistent_state() {
         let num_nodes = 4;
         let mut setup =
             TestSetup::spawn_nodes("tq_initial_config", num_nodes).await;
@@ -2117,7 +2117,7 @@ mod tests {
 
     /// Proxy API requests to other nodes
     #[tokio::test]
-    pub async fn tq_proxy() {
+    async fn tq_proxy() {
         let num_nodes = 4;
         let mut setup = TestSetup::spawn_nodes("tq_proxy", num_nodes).await;
         let rack_id = RackUuid::new_v4();
