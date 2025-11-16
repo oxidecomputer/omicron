@@ -47,9 +47,10 @@ banner "prerequisites"
 # Build the commtest program and place in the output
 #
 # banner "commtest"
-# cargo build -p end-to-end-tests --bin commtest --bin dhcp-server --release
-# cp target/release/commtest /out/
-# cp target/release/dhcp-server /out/
+# YYY yoink this back out of a4x2_package, I get it now
+cargo build -p end-to-end-tests --bin commtest --bin dhcp-server --release
+cp target/release/commtest /out/
+cp target/release/dhcp-server /out/
 
 #
 # Clone the testbed repo

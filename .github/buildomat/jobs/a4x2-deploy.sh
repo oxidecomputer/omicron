@@ -2,7 +2,7 @@
 #:
 #: name = "a4x2-deploy"
 #: variety = "basic"
-#: target = "lab-2.0-gimlet-opte-0.36"
+#: target = "lab-2.0-gimlet-opte-0.37"
 #: output_rules = [
 #:	"/out/logs/**/*",
 #:  "/out/connectivity-report.json",
@@ -10,9 +10,8 @@
 #: skip_clone = true
 #: enable = true
 #:
-#: # TEMPORARY: re-enable later
-#: # [dependencies.a4x2]
-#: # job = "a4x2-prepare"
+#: [dependencies.a4x2]
+#: job = "a4x2-prepare"
 
 set -o errexit
 set -o pipefail
@@ -25,20 +24,21 @@ pfexec mkdir -p /out
 pfexec mkdir -p /out/logs
 pfexec chown -R "$UID" /out
 
+INPUT=/input
 # === TEMPORARY: - see: https://github.com/oxidecomputer/buildomat/issues/72
 # just doing this to try out the rest of the script
-POOL=/pool/int/"$(ls /pool/int | head -n1)" # aaaaaaaaaaaaaaaaaaaaaaaaaa
-INPUT=$POOL/input
-pfexec mkdir -p $INPUT/a4x2
-pfexec chown "$UID" "$INPUT/a4x2"
+# POOL=/pool/int/"$(ls /pool/int | head -n1)" # aaaaaaaaaaaaaaaaaaaaaaaaaa
+# INPUT=$POOL/input
+# pfexec mkdir -p $INPUT/a4x2
+# pfexec chown "$UID" "$INPUT/a4x2"
 
-(
-    cd $INPUT/a4x2
-    curl -LO https://buildomat.eng.oxide.computer/wg/0/artefact/01K7GGHDNM61M4RHXEAXSXHK1Q/OUbkXdqkWSzGqNrgcb7U5X5PahvEYNgNRGhZmIPCzTH1TbI5/01K7GGHT6NHC3NT8HDCC3QS26E/01K7GMQA3V38ZDD82QQWCM8ZSJ/a4x2-package.tar.gz
-    curl -LO https://buildomat.eng.oxide.computer/wg/0/artefact/01K7GGHDNM61M4RHXEAXSXHK1Q/OUbkXdqkWSzGqNrgcb7U5X5PahvEYNgNRGhZmIPCzTH1TbI5/01K7GGHT6NHC3NT8HDCC3QS26E/01K7GMRGN7TSZWWQF510C0MZQE/xtask
-    pwd
-    ls
-)
+# (
+#     cd $INPUT/a4x2
+#     curl -LO https://buildomat.eng.oxide.computer/wg/0/artefact/01K7GGHDNM61M4RHXEAXSXHK1Q/OUbkXdqkWSzGqNrgcb7U5X5PahvEYNgNRGhZmIPCzTH1TbI5/01K7GGHT6NHC3NT8HDCC3QS26E/01K7GMQA3V38ZDD82QQWCM8ZSJ/a4x2-package.tar.gz
+#     curl -LO https://buildomat.eng.oxide.computer/wg/0/artefact/01K7GGHDNM61M4RHXEAXSXHK1Q/OUbkXdqkWSzGqNrgcb7U5X5PahvEYNgNRGhZmIPCzTH1TbI5/01K7GGHT6NHC3NT8HDCC3QS26E/01K7GMRGN7TSZWWQF510C0MZQE/xtask
+#     pwd
+#     ls
+# )
 # ===
 
 
@@ -120,15 +120,15 @@ trap _exit_trap EXIT
 #
 # Run the VM dhcp server
 #
-#export EXT_INTERFACE=${EXT_INTERFACE:-igb0}
+export EXT_INTERFACE=${EXT_INTERFACE:-igb0}
 
-# cp /input/a4x2/out/dhcp-server .
-# chmod +x dhcp-server
-# first=`bmat address ls -f extra -Ho first`
-# last=`bmat address ls -f extra -Ho last`
-# gw=`bmat address ls -f extra -Ho gateway`
-# server=`ipadm show-addr $EXT_INTERFACE/dhcp -po ADDR | sed 's#/.*##g'`
-# pfexec ./dhcp-server $first $last $gw $server &> /out/dhcp-server.log &
+cp /input/a4x2/out/dhcp-server .
+chmod +x dhcp-server
+first=`bmat address ls -f extra -Ho first`
+last=`bmat address ls -f extra -Ho last`
+gw=`bmat address ls -f extra -Ho gateway`
+server=`ipadm show-addr $EXT_INTERFACE/dhcp -po ADDR | sed 's#/.*##g'`
+pfexec ./dhcp-server $first $last $gw $server &> /out/dhcp-server.log &
 
 #
 # Run the topology
@@ -149,16 +149,16 @@ pfexec netstat -nr
 #
 # XXX leave here? move to a4x2_deploy? dunno, stubbed out until we confirm
 # CI runs at all on the gimlet
-# cp /input/a4x2/out/commtest .
-# chmod +x commtest
-# NO_COLOR=1 pfexec ./commtest \
-#     --api-timeout 30m \
-#     http://198.51.100.23 run \
-#     --ip-pool-begin 198.51.100.40 \
-#     --ip-pool-end 198.51.100.70 \
-#     --icmp-loss-tolerance 500 \
-#     --test-duration 200s \
-#     --packet-rate 10
+cp /input/a4x2/out/commtest .
+chmod +x commtest
+NO_COLOR=1 pfexec ./commtest \
+    --api-timeout 30m \
+    http://198.51.100.23 run \
+    --ip-pool-begin 198.51.100.40 \
+    --ip-pool-end 198.51.100.70 \
+    --icmp-loss-tolerance 500 \
+    --test-duration 200s \
+    --packet-rate 10
 
 pfexec ./xtask a4x2 deploy run-live-tests
 
