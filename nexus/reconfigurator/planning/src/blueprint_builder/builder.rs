@@ -580,31 +580,10 @@ impl<'a> BlueprintBuilder<'a> {
         // Convert our parent blueprint's sled configs into `SledEditor`s.
         let mut sled_editors = BTreeMap::new();
         for (sled_id, sled_cfg) in &parent_blueprint.sleds {
-            let state = sled_cfg.state;
-
-            let editor = match state {
-                SledState::Active => {
-                    let details = input
-                        .sled_lookup(SledFilter::Commissioned, *sled_id)
-                        .with_context(|| {
-                            format!(
-                                "failed to find sled details for \
-                                 active sled in parent blueprint {sled_id}"
-                            )
-                        })?;
-                    SledEditor::for_existing_active(
-                        details.resources.subnet,
-                        sled_cfg.clone(),
-                    )
-                }
-                SledState::Decommissioned => {
-                    SledEditor::for_existing_decommissioned(sled_cfg.clone())
-                }
-            }
-            .with_context(|| {
-                format!("failed to construct SledEditor for sled {sled_id}")
-            })?;
-
+            let editor = SledEditor::for_existing(sled_cfg.clone())
+                .with_context(|| {
+                    format!("failed to construct SledEditor for sled {sled_id}")
+                })?;
             sled_editors.insert(*sled_id, editor);
         }
 

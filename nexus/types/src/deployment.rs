@@ -34,6 +34,8 @@ use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufArtifactMeta;
@@ -814,6 +816,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         for (sled_id, config) in sleds {
             let BlueprintSledConfig {
                 state,
+                subnet,
                 sled_agent_generation,
                 disks,
                 datasets,
@@ -822,14 +825,13 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 host_phase_2,
             } = config;
 
-            // Report the sled state
-            writeln!(
-                f,
-                "\n  sled: {sled_id} ({state}, config generation \
-                 {sled_agent_generation})",
-            )?;
-
+            // Report toplevel sled info
+            writeln!(f, "\n  sled: {sled_id}")?;
             let mut rows = Vec::new();
+            rows.push((STATE, state.to_string()));
+            rows.push((CONFIG_GENERATION, sled_agent_generation.to_string()));
+            rows.push((SUBNET, subnet.to_string()));
+
             if let Some(id) = remove_mupdate_override {
                 rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
             }
@@ -926,6 +928,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
 )]
 pub struct BlueprintSledConfig {
     pub state: SledState,
+    pub subnet: Ipv6Subnet<SLED_PREFIX>,
 
     /// Generation number used when this type is converted into an
     /// `OmicronSledConfig` for use by sled-agent.

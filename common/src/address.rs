@@ -9,6 +9,7 @@
 
 use crate::api::external::{self, Error};
 use crate::policy::INTERNAL_DNS_REDUNDANCY;
+use daft::Diffable;
 use ipnetwork::Ipv6Network;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -273,10 +274,17 @@ pub const SLED_RESERVED_ADDRESSES: u16 = 32;
     Eq,
     PartialOrd,
     Ord,
+    Diffable,
 )]
 #[schemars(rename = "Ipv6Subnet")]
 pub struct Ipv6Subnet<const N: u8> {
     net: Ipv6Net,
+}
+
+impl<const N: u8> std::fmt::Display for Ipv6Subnet<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.net.fmt(f)
+    }
 }
 
 impl<const N: u8> Ipv6Subnet<N> {
