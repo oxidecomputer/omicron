@@ -19,7 +19,10 @@ use http::Response;
 use ipnetwork::IpNetwork;
 use nexus_types::{
     authn::cookies::Cookies,
-    external_api::{headers, params, shared, views},
+    external_api::{
+        headers, params, shared,
+        views::{self, MulticastGroupMember},
+    },
 };
 use omicron_common::api::external::{
     http_pagination::{
@@ -140,6 +143,12 @@ const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
                 description = "Silo-scoped metrics",
                 external_docs = {
                     url = "http://docs.oxide.computer/api/metrics"
+                }
+            },
+            "multicast-groups" = {
+                description = "Multicast groups provide efficient one-to-many network communication.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/multicast-groups"
                 }
             },
             "policy" = {
@@ -1225,6 +1234,128 @@ pub trait NexusExternalApi {
         path_params: Path<params::FloatingIpPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError>;
+
+    // Multicast Groups
+
+    /// List all multicast groups.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+    }]
+    async fn multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>;
+
+    /// Create a multicast group.
+    ///
+    /// Multicast groups are fleet-scoped resources that can be joined by
+    /// instances across projects and silos. A single multicast IP serves
+    /// all group members regardless of project or silo boundaries.
+    #[endpoint {
+        method = POST,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+    }]
+    async fn multicast_group_create(
+        rqctx: RequestContext<Self::Context>,
+        group_params: TypedBody<params::MulticastGroupCreate>,
+    ) -> Result<HttpResponseCreated<views::MulticastGroup>, HttpError>;
+
+    /// Fetch a multicast group.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+    }]
+    async fn multicast_group_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupPath>,
+    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+
+    /// Update a multicast group.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+    }]
+    async fn multicast_group_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupPath>,
+        updated_group: TypedBody<params::MulticastGroupUpdate>,
+    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+
+    /// Delete a multicast group.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+    }]
+    async fn multicast_group_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Look up multicast group by IP address.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/multicast-groups/by-ip/{address}",
+        tags = ["experimental"],
+    }]
+    async fn lookup_multicast_group_by_ip(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupIpLookupPath>,
+    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+
+    /// List members of a multicast group.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+    }]
+    async fn multicast_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<HttpResponseOk<ResultsPage<MulticastGroupMember>>, HttpError>;
+
+    /// Add instance to a multicast group.
+    ///
+    /// Functionally equivalent to updating the instance's `multicast_groups` field.
+    /// Both approaches modify the same underlying membership and trigger the same
+    /// reconciliation logic.
+    ///
+    /// Specify instance by name (requires `?project=<name>`) or UUID.
+    #[endpoint {
+        method = POST,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+    }]
+    async fn multicast_group_member_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        member_params: TypedBody<params::MulticastGroupMemberAdd>,
+    ) -> Result<HttpResponseCreated<MulticastGroupMember>, HttpError>;
+
+    /// Remove instance from a multicast group.
+    ///
+    /// Functionally equivalent to removing the group from the instance's
+    /// `multicast_groups` field. Both approaches modify the same underlying
+    /// membership and trigger reconciliation.
+    ///
+    /// Specify instance by name (requires `?project=<name>`) or UUID.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/multicast-groups/{multicast_group}/members/{instance}",
+        tags = ["experimental"],
+    }]
+    async fn multicast_group_member_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::MulticastGroupMemberPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Disks
 
@@ -2434,6 +2565,55 @@ pub trait NexusExternalApi {
     async fn instance_ephemeral_ip_detach(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    // Instance Multicast Groups
+
+    /// List multicast groups for instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/multicast-groups",
+        tags = ["experimental"],
+    }]
+    async fn instance_multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<views::MulticastGroupMember>>,
+        HttpError,
+    >;
+
+    /// Join multicast group.
+    ///
+    /// This is functionally equivalent to adding the instance via the group's
+    /// member management endpoint or updating the instance's `multicast_groups`
+    /// field. All approaches modify the same membership and trigger reconciliation.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+    }]
+    async fn instance_multicast_group_join(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstanceMulticastGroupPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>;
+
+    /// Leave multicast group.
+    ///
+    /// This is functionally equivalent to removing the instance via the group's
+    /// member management endpoint or updating the instance's `multicast_groups`
+    /// field. All approaches modify the same membership and trigger reconciliation.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+    }]
+    async fn instance_multicast_group_leave(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 

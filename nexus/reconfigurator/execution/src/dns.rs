@@ -316,7 +316,6 @@ mod test {
     use crate::Sled;
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
-    use id_map::IdMap;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::config::Host;
     use internal_dns_types::config::Zone;
@@ -691,7 +690,7 @@ mod test {
             // Convert the inventory `OmicronZonesConfig`s into
             // `BlueprintZoneConfig`s. This is going to get more painful over
             // time as we add to blueprints, but for now we can make this work.
-            let zones = ledgered_sled_config
+            let zones: IdOrdMap<_> = ledgered_sled_config
                 .zones
                 .into_iter()
                 .map(|config| -> BlueprintZoneConfig {
@@ -711,8 +710,8 @@ mod test {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     sled_agent_generation: ledgered_sled_config.generation,
-                    disks: IdMap::new(),
-                    datasets: IdMap::new(),
+                    disks: IdOrdMap::new(),
+                    datasets: IdOrdMap::new(),
                     zones,
                     remove_mupdate_override: None,
                     host_phase_2:
@@ -749,8 +748,13 @@ mod test {
         // not currently in service.
         let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
-        blueprint.sleds.values_mut().next().unwrap().zones.insert(
-            BlueprintZoneConfig {
+        blueprint
+            .sleds
+            .values_mut()
+            .next()
+            .unwrap()
+            .zones
+            .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
                     ready_for_cleanup: false,
@@ -768,8 +772,8 @@ mod test {
                     },
                 ),
                 image_source: BlueprintZoneImageSource::InstallDataset,
-            },
-        );
+            })
+            .expect("duplicate zone");
 
         // To generate the blueprint's DNS config, we need to make up a
         // different set of information about the Quiesced fake system.

@@ -516,7 +516,7 @@ async fn ssc_regions_ensure(
             block_size,
             blocks_per_extent,
             extent_count,
-            gen: 1,
+            generation: 1,
             opts: CrucibleOpts {
                 id: *destination_volume_id.as_untyped_uuid(),
                 target: datasets_and_regions
@@ -1767,7 +1767,7 @@ mod test {
                             block_size: 512,
                             blocks_per_extent: 10,
                             extent_count: 20,
-                            gen: 1,
+                            generation: 1,
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 key: Some("tkBksPOA519q11jvLCCX5P8t8+kCX4ZNzr+QP8M+TSg=".into()),
@@ -1793,7 +1793,7 @@ mod test {
                     block_size: 512,
                     blocks_per_extent: 10,
                     extent_count: 80,
-                    gen: 100,
+                    generation: 100,
                     opts: CrucibleOpts {
                         id: Uuid::new_v4(),
                         key: Some("jVex5Zfm+avnFMyezI6nCVPRPs53EWwYMN844XETDBM=".into()),
@@ -2132,6 +2132,7 @@ mod test {
                 start: true,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
         )
         .await;

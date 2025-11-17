@@ -2999,7 +2999,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
         bs: String,
         bpe: u64,
         ec: u32,
-        gen: u64,
+        generation: u64,
         read_only: bool,
     }
 
@@ -3045,7 +3045,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
             block_size,
             blocks_per_extent,
             extent_count,
-            gen,
+            generation,
             opts,
         } => {
             let row = VCRRegion {
@@ -3053,7 +3053,7 @@ fn print_vcr(vcr: VolumeConstructionRequest, pad: usize) {
                 bs: block_size.to_string(),
                 bpe: blocks_per_extent,
                 ec: extent_count,
-                gen,
+                generation,
                 read_only: opts.read_only,
             };
             let table = tabled::Table::new(&[row])

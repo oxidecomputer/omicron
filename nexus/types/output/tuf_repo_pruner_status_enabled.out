@@ -1,3 +1,4 @@
+    status: enabled
     configuration:
         nkeep_recent_releases: 1
         nkeep_recent_uploads:  1

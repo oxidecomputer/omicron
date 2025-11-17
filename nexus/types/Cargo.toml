@@ -25,7 +25,6 @@ futures.workspace = true
 http.workspace = true
 humantime.workspace = true
 iddqd.workspace = true
-id-map.workspace = true
 illumos-utils.workspace = true
 indent_write.workspace = true
 ipnetwork.workspace = true
@@ -42,6 +41,7 @@ schemars = { workspace = true, features = ["chrono", "uuid1", "url"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 steno.workspace = true

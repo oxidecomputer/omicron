@@ -20,6 +20,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::PropolisUuid;
+use sled_agent_api::v7::{InstanceEnsureBody, InstanceMulticastBody};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
 use sled_agent_types::instance::*;
@@ -300,6 +301,44 @@ impl InstanceManager {
         rx.await?
     }
 
+    pub async fn join_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::JoinMulticastGroup {
+                propolis_id,
+                multicast_body: multicast_body.clone(),
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+
+        rx.await?
+    }
+
+    pub async fn leave_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::LeaveMulticastGroup {
+                propolis_id,
+                multicast_body: multicast_body.clone(),
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+
+        rx.await?
+    }
+
     /// Returns the last-set size of the reservoir
     pub fn reservoir_size(&self) -> ByteCount {
         self.inner.vmm_reservoir_manager.reservoir_size()
@@ -365,6 +404,16 @@ enum InstanceManagerRequest {
         tx: oneshot::Sender<Result<(), Error>>,
     },
     RefreshExternalIps {
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    JoinMulticastGroup {
+        propolis_id: PropolisUuid,
+        multicast_body: InstanceMulticastBody,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    LeaveMulticastGroup {
+        propolis_id: PropolisUuid,
+        multicast_body: InstanceMulticastBody,
         tx: oneshot::Sender<Result<(), Error>>,
     },
     GetState {
@@ -485,6 +534,12 @@ impl InstanceManagerRunner {
                         },
                         Some(RefreshExternalIps { tx }) => {
                             self.refresh_external_ips(tx)
+                        },
+                        Some(JoinMulticastGroup { propolis_id, multicast_body, tx }) => {
+                            self.join_multicast_group(tx, propolis_id, &multicast_body)
+                        },
+                        Some(LeaveMulticastGroup { propolis_id, multicast_body, tx }) => {
+                            self.leave_multicast_group(tx, propolis_id, &multicast_body)
                         }
                         Some(GetState { propolis_id, tx }) => {
                             // TODO(eliza): it could potentially be nice to
@@ -738,6 +793,48 @@ impl InstanceManagerRunner {
             let _ = tx.send(Ok(()));
         });
 
+        Ok(())
+    }
+
+    fn join_multicast_group(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+
+        match multicast_body {
+            InstanceMulticastBody::Join(membership) => {
+                instance.join_multicast_group(tx, membership)?;
+            }
+            InstanceMulticastBody::Leave(membership) => {
+                instance.leave_multicast_group(tx, membership)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn leave_multicast_group(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        let Some(instance) = self.get_propolis(propolis_id) else {
+            return Err(Error::NoSuchVmm(propolis_id));
+        };
+
+        match multicast_body {
+            InstanceMulticastBody::Join(membership) => {
+                instance.join_multicast_group(tx, membership)?;
+            }
+            InstanceMulticastBody::Leave(membership) => {
+                instance.leave_multicast_group(tx, membership)?;
+            }
+        }
         Ok(())
     }
 

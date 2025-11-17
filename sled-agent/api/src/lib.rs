@@ -40,8 +40,8 @@ use sled_agent_types::{
     early_networking::EarlyNetworkConfig,
     firewall_rules::VpcFirewallRulesEnsureBody,
     instance::{
-        InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
-        VmmPutStateResponse, VmmUnregisterResponse,
+        InstanceExternalIpBody, VmmPutStateBody, VmmPutStateResponse,
+        VmmUnregisterResponse,
     },
     sled::AddSledRequest,
     zone_bundle::{
@@ -55,6 +55,8 @@ use uuid::Uuid;
 
 /// Copies of data types that changed between v3 and v4.
 mod v3;
+/// Copies of data types that changed between previous versions and v7.
+pub mod v7;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -68,6 +70,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (7, MULTICAST_SUPPORT),
     (6, ADD_PROBE_PUT_ENDPOINT),
     (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
@@ -359,16 +362,30 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vmms/{propolis_id}",
+        operation_id = "vmm_register",
+        versions = VERSION_INITIAL..VERSION_MULTICAST_SUPPORT
     }]
-    async fn vmm_register(
+    async fn vmm_register_v1(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceEnsureBody>,
+        body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        operation_id = "vmm_register",
+        versions = VERSION_MULTICAST_SUPPORT..
+    }]
+    async fn vmm_register_v7(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<v7::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
 
     #[endpoint {
         method = DELETE,
-        path = "/vmms/{propolis_id}",
+        path = "/vmms/{propolis_id}"
     }]
     async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
@@ -412,6 +429,28 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceExternalIpBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/multicast-group",
+        versions = VERSION_MULTICAST_SUPPORT..,
+    }]
+    async fn vmm_join_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<v7::InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/multicast-group",
+        versions = VERSION_MULTICAST_SUPPORT..,
+    }]
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<v7::InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {

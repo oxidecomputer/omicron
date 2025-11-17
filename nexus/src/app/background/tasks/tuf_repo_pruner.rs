@@ -4,6 +4,7 @@
 
 //! Background task for determining when to prune artifacts from TUF repos
 
+use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
 use futures::future::BoxFuture;
@@ -12,6 +13,7 @@ use nexus_config::TufRepoPrunerConfig;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::TufRepoInfo;
+use nexus_types::internal_api::background::TufRepoPrunerDetails;
 use nexus_types::internal_api::background::TufRepoPrunerStatus;
 use omicron_uuid_kinds::TufRepoUuid;
 use serde_json::json;
@@ -19,6 +21,7 @@ use slog_error_chain::InlineErrorChain;
 use std::cmp::Reverse;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use tokio::sync::watch::Receiver;
 
 /// number of recent distinct target releases that we always keep, regardless of
 /// configuration
@@ -39,11 +42,16 @@ const NKEEP_RECENT_UPLOADS_ALWAYS: u8 = 1;
 pub struct TufRepoPruner {
     datastore: Arc<DataStore>,
     config: TufRepoPrunerConfig,
+    rx_config: Receiver<ReconfiguratorConfigLoaderState>,
 }
 
 impl TufRepoPruner {
-    pub fn new(datastore: Arc<DataStore>, config: TufRepoPrunerConfig) -> Self {
-        Self { datastore, config }
+    pub fn new(
+        datastore: Arc<DataStore>,
+        config: TufRepoPrunerConfig,
+        rx_config: Receiver<ReconfiguratorConfigLoaderState>,
+    ) -> Self {
+        Self { datastore, config, rx_config }
     }
 }
 
@@ -53,13 +61,20 @@ impl BackgroundTask for TufRepoPruner {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            match tuf_repos_prune(opctx, &self.datastore, &self.config).await {
+            match tuf_repos_prune(
+                opctx,
+                &self.datastore,
+                &self.config,
+                &self.rx_config,
+            )
+            .await
+            {
                 Ok(status) => match serde_json::to_value(status) {
                     Ok(val) => val,
                     Err(err) => json!({
                         "error": format!(
                             "could not serialize task status: {}",
-                             InlineErrorChain::new(&err)
+                            InlineErrorChain::new(&err)
                         ),
                     }),
                 },
@@ -75,7 +90,31 @@ async fn tuf_repos_prune(
     opctx: &OpContext,
     datastore: &DataStore,
     config: &TufRepoPrunerConfig,
+    rx_config: &Receiver<ReconfiguratorConfigLoaderState>,
 ) -> Result<TufRepoPrunerStatus, anyhow::Error> {
+    // Refuse to run if we haven't had a chance to load our config from
+    // the database yet. (There might not be a config, which is fine!
+    // But the loading task needs to have a chance to check.)
+    match &*rx_config.borrow() {
+        ReconfiguratorConfigLoaderState::NotYetLoaded => {
+            info!(
+                opctx.log,
+                "reconfigurator config not yet loaded; doing nothing"
+            );
+            return Ok(TufRepoPrunerStatus::Disabled {
+                reason: "reconfigurator config not yet loaded".to_string(),
+            });
+        }
+        ReconfiguratorConfigLoaderState::Loaded(config) => {
+            if !config.config.tuf_repo_pruner_enabled {
+                info!(&opctx.log, "TUF repo pruner disabled; doing nothing");
+                return Ok(TufRepoPrunerStatus::Disabled {
+                    reason: String::from("explicitly disabled"),
+                });
+            }
+        }
+    };
+
     // Compute configuration.
     let nkeep_recent_releases = NKEEP_RECENT_TARGET_RELEASES_ALWAYS
         .saturating_add(config.nkeep_extra_target_releases);
@@ -148,7 +187,7 @@ async fn tuf_repos_prune(
         }
     }
 
-    Ok(status)
+    Ok(TufRepoPrunerStatus::Enabled(status))
 }
 
 /// Arguments to `decide_prune()`
@@ -165,7 +204,7 @@ struct TufRepoPrune<'a> {
 
 /// Given the complete list of TUF repos and a set of recent releases that we
 /// definitely want to keep, decide what to prune and what to keep.
-fn decide_prune(args: TufRepoPrune) -> TufRepoPrunerStatus {
+fn decide_prune(args: TufRepoPrune) -> TufRepoPrunerDetails {
     let TufRepoPrune {
         nkeep_recent_releases,
         nkeep_recent_uploads,
@@ -221,7 +260,7 @@ fn decide_prune(args: TufRepoPrune) -> TufRepoPrunerStatus {
         }
     }
 
-    TufRepoPrunerStatus {
+    TufRepoPrunerDetails {
         nkeep_recent_releases,
         nkeep_recent_uploads,
         repos_keep_target_release,

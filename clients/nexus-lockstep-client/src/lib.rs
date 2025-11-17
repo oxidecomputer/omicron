@@ -37,8 +37,10 @@ progenitor::generate_api!(
         // as "blueprint" this way, but we have really useful functionality
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
+        BlueprintDatasetConfig = nexus_types::deployment::BlueprintDatasetConfig,
         BlueprintPhysicalDiskConfig = nexus_types::deployment::BlueprintPhysicalDiskConfig,
         BlueprintPhysicalDiskDisposition = nexus_types::deployment::BlueprintPhysicalDiskDisposition,
+        BlueprintZoneConfig = nexus_types::deployment::BlueprintZoneConfig,
         BlueprintZoneImageSource = nexus_types::deployment::BlueprintZoneImageSource,
         Certificate = omicron_common::api::internal::nexus::Certificate,
         ClickhouseMode = nexus_types::deployment::ClickhouseMode,

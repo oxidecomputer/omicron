@@ -158,7 +158,6 @@ use blueprint_display::{
     BpDiffState, BpOmicronZonesTableSchema, BpPhysicalDisksTableSchema,
     BpTable, BpTableData, BpTableRow, KvList, constants::*,
 };
-use id_map::{IdMap, IdMappable};
 use std::str::FromStr;
 
 /// Describes a complete set of software and configuration for the system
@@ -572,11 +571,11 @@ impl BpTableData for BlueprintHostPhase2TableData<'_> {
 /// Wrapper to display a table of a `BlueprintSledConfig`'s disks.
 #[derive(Clone, Debug)]
 struct BlueprintPhysicalDisksTableData<'a> {
-    disks: &'a IdMap<BlueprintPhysicalDiskConfig>,
+    disks: &'a IdOrdMap<BlueprintPhysicalDiskConfig>,
 }
 
 impl<'a> BlueprintPhysicalDisksTableData<'a> {
-    fn new(disks: &'a IdMap<BlueprintPhysicalDiskConfig>) -> Self {
+    fn new(disks: &'a IdOrdMap<BlueprintPhysicalDiskConfig>) -> Self {
         Self { disks }
     }
 }
@@ -603,11 +602,11 @@ impl BpTableData for BlueprintPhysicalDisksTableData<'_> {
 /// Wrapper to display a table of a `BlueprintSledConfig`'s disks.
 #[derive(Clone, Debug)]
 struct BlueprintDatasetsTableData<'a> {
-    datasets: &'a IdMap<BlueprintDatasetConfig>,
+    datasets: &'a IdOrdMap<BlueprintDatasetConfig>,
 }
 
 impl<'a> BlueprintDatasetsTableData<'a> {
-    fn new(datasets: &'a IdMap<BlueprintDatasetConfig>) -> Self {
+    fn new(datasets: &'a IdOrdMap<BlueprintDatasetConfig>) -> Self {
         Self { datasets }
     }
 }
@@ -626,11 +625,11 @@ impl BpTableData for BlueprintDatasetsTableData<'_> {
 /// Wrapper to display a table of a `BlueprintSledConfig`'s zones.
 #[derive(Clone, Debug)]
 struct BlueprintZonesTableData<'a> {
-    zones: &'a IdMap<BlueprintZoneConfig>,
+    zones: &'a IdOrdMap<BlueprintZoneConfig>,
 }
 
 impl<'a> BlueprintZonesTableData<'a> {
-    fn new(zones: &'a IdMap<BlueprintZoneConfig>) -> Self {
+    fn new(zones: &'a IdOrdMap<BlueprintZoneConfig>) -> Self {
         Self { zones }
     }
 }
@@ -939,9 +938,9 @@ pub struct BlueprintSledConfig {
     /// sent an `OmicronSledConfig`.
     pub sled_agent_generation: Generation,
 
-    pub disks: IdMap<BlueprintPhysicalDiskConfig>,
-    pub datasets: IdMap<BlueprintDatasetConfig>,
-    pub zones: IdMap<BlueprintZoneConfig>,
+    pub disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
+    pub datasets: IdOrdMap<BlueprintDatasetConfig>,
+    pub zones: IdOrdMap<BlueprintZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     pub host_phase_2: BlueprintHostPhase2DesiredSlots,
 }
@@ -1075,14 +1074,6 @@ pub struct BlueprintZoneConfig {
     pub filesystem_pool: ZpoolName,
     pub zone_type: BlueprintZoneType,
     pub image_source: BlueprintZoneImageSource,
-}
-
-impl IdMappable for BlueprintZoneConfig {
-    type Id = OmicronZoneUuid;
-
-    fn id(&self) -> Self::Id {
-        self.id
-    }
 }
 
 impl IdOrdItem for BlueprintZoneConfig {
@@ -2143,12 +2134,12 @@ pub struct BlueprintPhysicalDiskConfig {
     pub pool_id: ZpoolUuid,
 }
 
-impl IdMappable for BlueprintPhysicalDiskConfig {
-    type Id = PhysicalDiskUuid;
-
-    fn id(&self) -> Self::Id {
+impl IdOrdItem for BlueprintPhysicalDiskConfig {
+    type Key<'a> = PhysicalDiskUuid;
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+    id_upcast!();
 }
 
 impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
@@ -2161,12 +2152,12 @@ impl From<BlueprintPhysicalDiskConfig> for OmicronPhysicalDiskConfig {
     }
 }
 
-impl IdMappable for BlueprintDatasetConfig {
-    type Id = DatasetUuid;
-
-    fn id(&self) -> Self::Id {
+impl IdOrdItem for BlueprintDatasetConfig {
+    type Key<'a> = DatasetUuid;
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+    id_upcast!();
 }
 
 /// The desired state of an Omicron-managed dataset in a blueprint.
@@ -2412,6 +2403,7 @@ mod test {
     use super::PendingMgsUpdates;
     use crate::inventory::BaseboardId;
     use gateway_types::component::SpType;
+    use sled_hardware_types::GIMLET_SLED_MODEL;
 
     #[test]
     fn test_serialize_pending_mgs_updates() {
@@ -2428,7 +2420,7 @@ mod test {
         let mut pending_mgs_updates = PendingMgsUpdates::new();
         let update = PendingMgsUpdate {
             baseboard_id: Arc::new(BaseboardId {
-                part_number: String::from("913-0000019"),
+                part_number: String::from(GIMLET_SLED_MODEL),
                 serial_number: String::from("BRM27230037"),
             }),
             sp_type: SpType::Sled,

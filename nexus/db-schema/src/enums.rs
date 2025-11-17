@@ -64,6 +64,8 @@ define_enums! {
     IpPoolTypeEnum => "ip_pool_type",
     IpVersionEnum => "ip_version",
     MigrationStateEnum => "migration_state",
+    MulticastGroupStateEnum => "multicast_group_state",
+    MulticastGroupMemberStateEnum => "multicast_group_member_state",
     NetworkInterfaceKindEnum => "network_interface_kind",
     OximeterReadModeEnum => "oximeter_read_mode",
     PhysicalDiskKindEnum => "physical_disk_kind",

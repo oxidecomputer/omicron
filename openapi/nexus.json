@@ -4278,6 +4278,155 @@
         }
       }
     },
+    "/v1/instances/{instance}/multicast-groups": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "List multicast groups for instance",
+        "operationId": "instance_multicast_group_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroupMemberResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/instances/{instance}/multicast-groups/{multicast_group}": {
+      "put": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Join multicast group.",
+        "description": "This is functionally equivalent to adding the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.",
+        "operationId": "instance_multicast_group_join",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroupMember"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Leave multicast group.",
+        "description": "This is functionally equivalent to removing the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.",
+        "operationId": "instance_multicast_group_leave",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/instances/{instance}/reboot": {
       "post": {
         "tags": [
@@ -5876,6 +6025,386 @@
             "end_time",
             "start_time"
           ]
+        }
+      }
+    },
+    "/v1/multicast-groups": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "List all multicast groups.",
+        "operationId": "multicast_group_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroupResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Create a multicast group.",
+        "description": "Multicast groups are fleet-scoped resources that can be joined by instances across projects and silos. A single multicast IP serves all group members regardless of project or silo boundaries.",
+        "operationId": "multicast_group_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MulticastGroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/multicast-groups/{multicast_group}": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Fetch a multicast group.",
+        "operationId": "multicast_group_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Update a multicast group.",
+        "operationId": "multicast_group_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MulticastGroupUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Delete a multicast group.",
+        "operationId": "multicast_group_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/multicast-groups/{multicast_group}/members": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "List members of a multicast group.",
+        "operationId": "multicast_group_member_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroupMemberResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Add instance to a multicast group.",
+        "description": "Functionally equivalent to updating the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger the same reconciliation logic.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
+        "operationId": "multicast_group_member_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MulticastGroupMemberAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroupMember"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/multicast-groups/{multicast_group}/members/{instance}": {
+      "delete": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Remove instance from a multicast group.",
+        "description": "Functionally equivalent to removing the group from the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger reconciliation.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
+        "operationId": "multicast_group_member_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -9090,6 +9619,45 @@
             "end_time",
             "start_time"
           ]
+        }
+      }
+    },
+    "/v1/system/multicast-groups/by-ip/{address}": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Look up multicast group by IP address.",
+        "operationId": "lookup_multicast_group_by_ip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "description": "IP address of the multicast group",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -20552,6 +21120,14 @@
               }
             ]
           },
+          "multicast_groups": {
+            "description": "The multicast groups this instance should join.\n\nThe instance will be automatically added as a member of the specified multicast groups during creation, enabling it to send and receive multicast traffic for those groups.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
@@ -21074,6 +21650,15 @@
                 "$ref": "#/components/schemas/ByteCount"
               }
             ]
+          },
+          "multicast_groups": {
+            "nullable": true,
+            "description": "Multicast groups this instance should join.\n\nWhen specified, this replaces the instance's current multicast group membership with the new set of groups. The instance will leave any groups not listed here and join any new groups that are specified.\n\nIf not provided (None), the instance's multicast group membership will not be changed.",
+            "default": null,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
           },
           "ncpus": {
             "description": "The number of vCPUs to be allocated to the instance",
@@ -22219,7 +22804,7 @@
             "minimum": 0
           },
           "rack_id": {
-            "description": "The containing the switch this loopback address will be configured on.",
+            "description": "The rack containing the switch this loopback address will be configured on.",
             "type": "string",
             "format": "uuid"
           },
@@ -22374,6 +22959,279 @@
         "required": [
           "datum_type"
         ]
+      },
+      "MulticastGroup": {
+        "description": "View of a Multicast Group",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip_pool_id": {
+            "description": "The ID of the IP pool this resource belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "multicast_ip": {
+            "description": "The multicast IP address held by this resource.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. None means no VLAN tagging on egress.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "source_ips": {
+            "description": "Source IP addresses for Source-Specific Multicast (SSM). Empty array means any source is allowed.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "state": {
+            "description": "Current state of the multicast group.",
+            "type": "string"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "ip_pool_id",
+          "multicast_ip",
+          "name",
+          "source_ips",
+          "state",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "MulticastGroupCreate": {
+        "description": "Create-time parameters for a multicast group.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "multicast_ip": {
+            "nullable": true,
+            "description": "The multicast IP address to allocate. If None, one will be allocated from the default pool.",
+            "default": null,
+            "type": "string",
+            "format": "ip"
+          },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. Tags packets leaving the rack to traverse VLAN-segmented upstream networks.\n\nValid range: 2-4094 (VLAN IDs 0-1 are reserved by IEEE 802.1Q standard).",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "pool": {
+            "nullable": true,
+            "description": "Name or ID of the IP pool to allocate from. If None, uses the default multicast pool.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "source_ips": {
+            "nullable": true,
+            "description": "Source IP addresses for Source-Specific Multicast (SSM).\n\nNone uses default behavior (Any-Source Multicast). Empty list explicitly allows any source (Any-Source Multicast). Non-empty list restricts to specific sources (SSM).",
+            "default": null,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "MulticastGroupMember": {
+        "description": "View of a Multicast Group Member (instance belonging to a multicast group)",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "instance_id": {
+            "description": "The ID of the instance that is a member of this group.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "multicast_group_id": {
+            "description": "The ID of the multicast group this member belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "state": {
+            "description": "Current state of the multicast group membership.",
+            "type": "string"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "instance_id",
+          "multicast_group_id",
+          "name",
+          "state",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "MulticastGroupMemberAdd": {
+        "description": "Parameters for adding an instance to a multicast group.",
+        "type": "object",
+        "properties": {
+          "instance": {
+            "description": "Name or ID of the instance to add to the multicast group",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "instance"
+        ]
+      },
+      "MulticastGroupMemberResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MulticastGroupMember"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "MulticastGroupResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MulticastGroup"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "MulticastGroupUpdate": {
+        "description": "Update-time parameters for a multicast group.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. Set to null to clear the MVLAN. Valid range: 2-4094 when provided. Omit the field to leave mvlan unchanged.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "source_ips": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        }
       },
       "Name": {
         "title": "A name unique within the parent collection",
@@ -28207,6 +29065,13 @@
       "description": "Silo-scoped metrics",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/metrics"
+      }
+    },
+    {
+      "name": "multicast-groups",
+      "description": "Multicast groups provide efficient one-to-many network communication.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/multicast-groups"
       }
     },
     {

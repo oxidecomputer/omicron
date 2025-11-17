@@ -127,7 +127,7 @@ impl HostPhase2TestContext {
             .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
-                    sled_agent_api::latest_version(),
+                    sled_agent_api::VERSION_MULTICAST_SUPPORT,
                 ),
             )))
             .start()
@@ -196,7 +196,6 @@ mod api_impl {
     use dropshot::RequestContext;
     use dropshot::StreamingBody;
     use dropshot::TypedBody;
-    use id_map::IdMap;
     use iddqd::IdOrdMap;
     use nexus_sled_agent_shared::inventory::BootImageHeader;
     use nexus_sled_agent_shared::inventory::BootPartitionContents;
@@ -221,12 +220,13 @@ mod api_impl {
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
     };
+    use sled_agent_api::v7::InstanceEnsureBody;
+    use sled_agent_api::v7::InstanceMulticastBody;
     use sled_agent_api::*;
     use sled_agent_types::bootstore::BootstoreStatus;
     use sled_agent_types::disk::DiskEnsureBody;
     use sled_agent_types::early_networking::EarlyNetworkConfig;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
-    use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
     use sled_agent_types::instance::VmmPutStateBody;
     use sled_agent_types::instance::VmmPutStateResponse;
@@ -303,9 +303,9 @@ mod api_impl {
             // with something quasi-reasonable (or empty, if we can).
             let config = OmicronSledConfig {
                 generation: Generation::new(),
-                disks: IdMap::new(),
-                datasets: IdMap::new(),
-                zones: IdMap::new(),
+                disks: IdOrdMap::new(),
+                datasets: IdOrdMap::new(),
+                zones: IdOrdMap::new(),
                 remove_mupdate_override: None,
                 host_phase_2: HostPhase2DesiredSlots {
                     slot_a: HostPhase2DesiredContents::CurrentContents,
@@ -531,7 +531,15 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn vmm_register(
+        async fn vmm_register_v1(
+            _rqctx: RequestContext<Self::Context>,
+            _path_params: Path<VmmPathParam>,
+            _body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
+        ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+            unimplemented!()
+        }
+
+        async fn vmm_register_v7(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
             _body: TypedBody<InstanceEnsureBody>,
@@ -575,6 +583,50 @@ mod api_impl {
             _body: TypedBody<InstanceExternalIpBody>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
+        }
+
+        async fn vmm_join_multicast_group(
+            _rqctx: RequestContext<Self::Context>,
+            _path_params: Path<VmmPathParam>,
+            body: TypedBody<InstanceMulticastBody>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            let body_args = body.into_inner();
+            match body_args {
+                InstanceMulticastBody::Join(_) => {
+                    // MGS test utility - just return success for test compatibility
+                    Ok(HttpResponseUpdatedNoContent())
+                }
+                InstanceMulticastBody::Leave(_) => {
+                    // This endpoint is for joining - reject leave operations
+                    Err(HttpError::for_bad_request(
+                        None,
+                        "Join endpoint cannot process Leave operations"
+                            .to_string(),
+                    ))
+                }
+            }
+        }
+
+        async fn vmm_leave_multicast_group(
+            _rqctx: RequestContext<Self::Context>,
+            _path_params: Path<VmmPathParam>,
+            body: TypedBody<InstanceMulticastBody>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            let body_args = body.into_inner();
+            match body_args {
+                InstanceMulticastBody::Leave(_) => {
+                    // MGS test utility - just return success for test compatibility
+                    Ok(HttpResponseUpdatedNoContent())
+                }
+                InstanceMulticastBody::Join(_) => {
+                    // This endpoint is for leaving - reject join operations
+                    Err(HttpError::for_bad_request(
+                        None,
+                        "Leave endpoint cannot process Join operations"
+                            .to_string(),
+                    ))
+                }
+            }
         }
 
         async fn disk_put(

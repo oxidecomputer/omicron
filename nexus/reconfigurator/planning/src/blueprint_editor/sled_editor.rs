@@ -148,6 +148,7 @@ pub enum SledEditError {
 pub(crate) struct SledEditor(InnerSledEditor);
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum InnerSledEditor {
     // Internally, `SledEditor` has a variant for each variant of `SledState`,
     // as the operations allowed in different states are substantially different
@@ -202,6 +203,17 @@ impl SledEditor {
         match &self.0 {
             InnerSledEditor::Active(_) => SledState::Active,
             InnerSledEditor::Decommissioned(_) => SledState::Decommissioned,
+        }
+    }
+
+    /// Returns the subnet of this sled if it is active, or `None` if it is
+    /// decommissioned.
+    pub fn subnet(&self) -> Option<Ipv6Subnet<SLED_PREFIX>> {
+        match &self.0 {
+            InnerSledEditor::Active(active) => {
+                Some(active.underlay_ip_allocator.subnet())
+            }
+            InnerSledEditor::Decommissioned(_) => None,
         }
     }
 

@@ -77,12 +77,12 @@ use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
 use crate::rack_setup::plan::sled::Plan as SledPlan;
-use anyhow::{Context, bail};
+use anyhow::{Context, anyhow, bail};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use dns_service_client::DnsError;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
@@ -1565,7 +1565,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
 ) -> anyhow::Result<Blueprint> {
     let mut blueprint_sleds = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs_by_id {
-        let mut datasets = IdMap::new();
+        let mut datasets = IdOrdMap::new();
         for d in sled_config.datasets.values() {
             // Only the "Crucible" dataset needs to know the address
             let address = if *d.name.kind() == DatasetKind::Crucible {
@@ -1592,16 +1592,18 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 None
             };
 
-            datasets.insert(BlueprintDatasetConfig {
-                disposition: BlueprintDatasetDisposition::InService,
-                id: d.id,
-                pool: *d.name.pool(),
-                kind: d.name.kind().clone(),
-                address,
-                compression: d.inner.compression,
-                quota: d.inner.quota,
-                reservation: d.inner.reservation,
-            });
+            datasets
+                .insert_unique(BlueprintDatasetConfig {
+                    disposition: BlueprintDatasetDisposition::InService,
+                    id: d.id,
+                    pool: *d.name.pool(),
+                    kind: d.name.kind().clone(),
+                    address,
+                    compression: d.inner.compression,
+                    quota: d.inner.quota,
+                    reservation: d.inner.reservation,
+                })
+                .map_err(|e| anyhow!(InlineErrorChain::new(&e).to_string()))?;
         }
 
         blueprint_sleds.insert(
@@ -1621,7 +1623,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 sled_agent_generation: DeployStepVersion::V5_EVERYTHING,
                 disks: sled_config.disks.clone(),
                 datasets,
-                zones: sled_config.zones.iter().cloned().collect(),
+                zones: sled_config.zones.clone(),
                 host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
                 ),
                 remove_mupdate_override: None,
