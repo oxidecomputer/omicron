@@ -5,6 +5,7 @@
 //! A mechanism for maintaining a full mesh of trust quorum node connections
 
 use crate::established_conn::EstablishedConn;
+use crate::proxy;
 use trust_quorum_protocol::{BaseboardId, Envelope, PeerMsg};
 
 // TODO: Move to this crate
@@ -12,6 +13,7 @@ use trust_quorum_protocol::{BaseboardId, Envelope, PeerMsg};
 use bootstore::schemes::v0::NetworkConfig;
 
 use camino::Utf8PathBuf;
+use derive_more::From;
 use iddqd::{
     BiHashItem, BiHashMap, TriHashItem, TriHashMap, bi_upcast, tri_upcast,
 };
@@ -53,6 +55,19 @@ pub enum MainToConnMsg {
     Msg(WireMsg),
 }
 
+/// The task for this sprockets connection just exited. If
+/// `ConnectionManager::step` returns this value and `peer_id` is `Some` than
+/// it means no new connection for the peer has yet been established. It is
+/// safe to cleanup state for the given `peer_id`, by, for instance, calling
+/// `Node::on_disconnect`.
+///
+/// By always returning the `task_id`, we allow cleanup of proxy requests for
+/// stale connections that will never complete.
+pub struct DisconnectedPeer {
+    pub task_id: task::Id,
+    pub peer_id: Option<BaseboardId>,
+}
+
 /// All possible messages sent over established connections
 ///
 /// This include trust quorum related `PeerMsg`s, but also ancillary network
@@ -60,7 +75,7 @@ pub enum MainToConnMsg {
 ///
 /// All `WireMsg`s sent between nodes is prefixed with a 4 byte size header used
 /// for framing.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, From)]
 pub enum WireMsg {
     /// Used for connection keep alive
     Ping,
@@ -79,6 +94,12 @@ pub enum WireMsg {
     /// of tiny information layered on top of trust quorum. You can still think
     /// of it as a bootstore, although, we no longer use that name.
     NetworkConfig(NetworkConfig),
+
+    /// Requests proxied to other nodes
+    ProxyRequest(proxy::WireRequest),
+
+    /// Responses to proxy requests
+    ProxyResponse(proxy::WireResponse),
 }
 
 /// Messages sent from connection managing tasks to the main peer task
@@ -98,7 +119,8 @@ pub enum ConnToMainMsgInner {
     Connected { addr: SocketAddrV6, peer_id: BaseboardId },
     Received { from: BaseboardId, msg: PeerMsg },
     ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
-    Disconnected { peer_id: BaseboardId },
+    ProxyRequestReceived { from: BaseboardId, req: proxy::WireRequest },
+    ProxyResponseReceived { from: BaseboardId, rsp: proxy::WireResponse },
 }
 
 pub struct TaskHandle {
@@ -120,15 +142,11 @@ impl TaskHandle {
         self.abort_handle.abort()
     }
 
-    pub async fn send(&self, msg: PeerMsg) {
-        let _ = self.tx.send(MainToConnMsg::Msg(WireMsg::Tq(msg))).await;
-    }
-
-    pub async fn send_network_config(&self, config: NetworkConfig) {
-        let _ = self
-            .tx
-            .send(MainToConnMsg::Msg(WireMsg::NetworkConfig(config)))
-            .await;
+    pub async fn send<T>(&self, msg: T)
+    where
+        T: Into<WireMsg>,
+    {
+        let _ = self.tx.send(MainToConnMsg::Msg(msg.into())).await;
     }
 }
 
@@ -148,7 +166,7 @@ impl BiHashItem for TaskHandle {
 }
 
 pub struct EstablishedTaskHandle {
-    baseboard_id: BaseboardId,
+    pub baseboard_id: BaseboardId,
     task_handle: TaskHandle,
 }
 
@@ -172,7 +190,10 @@ impl EstablishedTaskHandle {
         self.task_handle.abort();
     }
 
-    pub async fn send(&self, msg: PeerMsg) {
+    pub async fn send<T>(&self, msg: T)
+    where
+        T: Into<WireMsg>,
+    {
         let _ = self.task_handle.send(msg).await;
     }
 }
@@ -233,6 +254,12 @@ pub struct ConnMgrStatus {
     pub connections: Vec<ConnInfo>,
     pub num_conn_tasks: u64,
     pub total_tasks_spawned: u64,
+}
+
+/// The state of a proxy connection
+pub enum ProxyConnState {
+    Connected(task::Id),
+    Disconnected,
 }
 
 /// A structure to manage all sprockets connections to peer nodes
@@ -399,7 +426,7 @@ impl ConnMgr {
                 "peer_id" => %h.baseboard_id,
                 "generation" => network_config.generation
             );
-            h.task_handle.send_network_config(network_config.clone()).await;
+            h.send(network_config.clone()).await;
         }
     }
 
@@ -415,38 +442,78 @@ impl ConnMgr {
                 "peer_id" => %h.baseboard_id,
                 "generation" => network_config.generation
             );
-            h.task_handle.send_network_config(network_config.clone()).await;
+            h.send(network_config.clone()).await;
+        }
+    }
+
+    /// Forward an API request to another node
+    ///
+    /// Return the state of the connection at this point in time so that the
+    /// [`proxy::Tracker`] can manage the outstanding request on behalf of the
+    /// user.
+    pub async fn proxy_request(
+        &mut self,
+        destination: &BaseboardId,
+        req: proxy::WireRequest,
+    ) -> ProxyConnState {
+        if let Some(h) = self.established.get1(destination) {
+            info!(self.log, "Sending {req:?}"; "peer_id" => %destination);
+            h.send(req).await;
+            ProxyConnState::Connected(h.task_id())
+        } else {
+            ProxyConnState::Disconnected
+        }
+    }
+
+    /// Return a response to a proxied request to another node
+    ///
+    /// There is no need to track whether this succeeds or fails. If the
+    /// connection goes away the client on the other side will notice it and
+    /// retry if needed.
+    pub async fn proxy_response(
+        &mut self,
+        destination: &BaseboardId,
+        rsp: proxy::WireResponse,
+    ) {
+        if let Some(h) = self.established.get1(destination) {
+            info!(self.log, "Sending {rsp:?}"; "peer_id" => %destination);
+            h.send(rsp).await;
         }
     }
 
     /// Perform any polling related operations that the connection
     /// manager must perform concurrently.
+    ///
+    /// Return `Ok(Some(DisconnectedPeer))` if an `EstablishedConnectionTask`
+    /// that was still the exclusive connection task for a specific peer has
+    /// just exited.
     pub async fn step(
         &mut self,
         corpus: Vec<Utf8PathBuf>,
-    ) -> Result<(), AcceptError> {
-        tokio::select! {
+    ) -> Result<Option<DisconnectedPeer>, AcceptError> {
+        let disconnected_peer = tokio::select! {
             acceptor = self.server.accept(corpus.clone()) => {
                 self.accept(acceptor?).await?;
+                None
             }
             Some(res) = self.join_set.join_next_with_id() => {
                 match res {
                     Ok((task_id, _)) => {
-                        self.on_task_exit(task_id).await;
+                        Some(self.on_task_exit(task_id))
                     }
                     Err(err) => {
                         warn!(self.log, "Connection task panic: {err}");
-                        self.on_task_exit(err.id()).await;
+                        Some(self.on_task_exit(err.id()))
                     }
-
                 }
             }
             _ = self.reconnect_interval.tick() => {
                 self.reconnect(corpus.clone()).await;
+                None
             }
-        }
+        };
 
-        Ok(())
+        Ok(disconnected_peer)
     }
 
     pub async fn accept(
@@ -636,22 +703,6 @@ impl ConnMgr {
         }
     }
 
-    /// The established connection task has asynchronously exited.
-    pub async fn on_disconnected(
-        &mut self,
-        task_id: task::Id,
-        peer_id: BaseboardId,
-    ) {
-        if let Some(established_task_handle) = self.established.get1(&peer_id) {
-            if established_task_handle.task_id() != task_id {
-                // This was a stale disconnect
-                return;
-            }
-        }
-        warn!(self.log, "peer disconnected"; "peer_id" => %peer_id);
-        let _ = self.established.remove1(&peer_id);
-    }
-
     /// Initiate connections if a corresponding task doesn't already exist. This
     /// must be called periodically to handle transient disconnections which
     /// cause tasks to exit.
@@ -690,9 +741,9 @@ impl ConnMgr {
         &mut self,
         addrs: BTreeSet<SocketAddrV6>,
         corpus: Vec<Utf8PathBuf>,
-    ) -> BTreeSet<BaseboardId> {
+    ) -> Vec<EstablishedTaskHandle> {
         if self.bootstrap_addrs == addrs {
-            return BTreeSet::new();
+            return vec![];
         }
 
         // We don't try to compare addresses from accepted nodes. If DDMD
@@ -720,10 +771,10 @@ impl ConnMgr {
             self.connect_client(corpus.clone(), addr).await;
         }
 
-        let mut disconnected_peers = BTreeSet::new();
+        let mut disconnected_peers = Vec::new();
         for addr in to_disconnect {
-            if let Some(peer_id) = self.disconnect_client(addr).await {
-                disconnected_peers.insert(peer_id);
+            if let Some(handle) = self.disconnect_client(addr).await {
+                disconnected_peers.push(handle);
             }
         }
         disconnected_peers
@@ -811,7 +862,7 @@ impl ConnMgr {
     async fn disconnect_client(
         &mut self,
         addr: SocketAddrV6,
-    ) -> Option<BaseboardId> {
+    ) -> Option<EstablishedTaskHandle> {
         if let Some(handle) = self.connecting.remove2(&addr) {
             // The connection has not yet completed its handshake
             info!(
@@ -830,7 +881,7 @@ impl ConnMgr {
                     "peer_id" => %handle.baseboard_id
                 );
                 handle.abort();
-                Some(handle.baseboard_id)
+                Some(handle)
             } else {
                 None
             }
@@ -838,7 +889,9 @@ impl ConnMgr {
     }
 
     /// Remove any references to the given task
-    async fn on_task_exit(&mut self, task_id: task::Id) {
+    ///
+    /// Return a `DisconnectedPeer` for the given `task_id`.
+    fn on_task_exit(&mut self, task_id: task::Id) -> DisconnectedPeer {
         // We're most likely to find the task as established so we start with that
         if let Some(handle) = self.established.remove2(&task_id) {
             info!(
@@ -848,6 +901,10 @@ impl ConnMgr {
                 "peer_addr" => %handle.addr(),
                 "peer_id" => %handle.baseboard_id
             );
+            return DisconnectedPeer {
+                task_id,
+                peer_id: Some(handle.baseboard_id),
+            };
         } else if let Some(handle) = self.accepting.remove1(&task_id) {
             info!(
                 self.log,
@@ -869,6 +926,8 @@ impl ConnMgr {
                 "task_id" => ?task_id
             );
         }
+
+        DisconnectedPeer { task_id, peer_id: None }
     }
 }
 
