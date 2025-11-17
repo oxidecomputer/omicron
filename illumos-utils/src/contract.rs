@@ -1,11 +1,16 @@
 #[cfg(target_os = "illumos")]
 use libc::ctid_t;
+use nix::fcntl;
+use nix::sys::stat;
 use slog::{Logger, debug, error};
-use std::ffi::CString;
 use std::ffi::c_char;
 use std::ffi::c_int;
 use std::ffi::c_uint;
 use std::ffi::c_void;
+use std::os::fd::AsRawFd;
+use std::os::fd::OwnedFd;
+use std::os::fd::RawFd;
+use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
@@ -34,30 +39,27 @@ unsafe extern "C" {
 }
 
 // Convert an error message into an ExecutionError::ContractFailure
-fn err(msg: impl ToString) -> crate::ExecutionError {
-    return crate::ExecutionError::ContractFailure {
-        msg: msg.to_string(),
-        err: std::io::Error::last_os_error(),
-    };
-}
-
-// Construct a path to a file in the contract filesystem
-fn path(typ: ContractType, id: Option<c_int>, file: &str) -> CString {
-    let prefix = match typ {
-        ContractType::Process => "/system/contract/process",
-        ContractType::Device => "/system/contract/device",
-    };
-    let id = match id {
-        Some(i) => format!("/{i}"),
-        None => String::new(),
-    };
-    CString::new(format!("{prefix}{id}/{file}")).unwrap()
+use crate::ExecutionError as Error;
+type Result<T> = std::result::Result<T, crate::ExecutionError>;
+fn err<T>(msg: impl ToString) -> Result<T> {
+    let msg = msg.to_string();
+    let err = std::io::Error::last_os_error();
+    Err(Error::ContractFailure { msg, err })
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum ContractType {
     Process,
     Device,
+}
+
+impl ContractType {
+    pub fn path_prefix(self) -> PathBuf {
+        PathBuf::from(match self {
+            Self::Process => "/system/contract/process",
+            Self::Device => "/system/contract/device",
+        })
+    }
 }
 
 // Constants related to process contracts
@@ -95,13 +97,11 @@ impl Drop for ContractEvent {
 }
 
 /// A Watcher is used to wait for events related to contracts
-pub struct Watcher {
-    fd: c_int,
-}
+pub struct Watcher(OwnedFd);
 
-impl Drop for Watcher {
-    fn drop(&mut self) {
-        unsafe { libc::close(self.fd) };
+impl AsRawFd for Watcher {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
     }
 }
 
@@ -110,16 +110,11 @@ impl Watcher {
     /// will return all events of the requested type, and it is the caller's
     /// responsibility to filter for the events relevent to them.
     pub fn new(typ: ContractType) -> Self {
-        let path = path(typ, None, "pbundle");
-        let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDONLY) };
-        if fd < 0 {
-            panic!(
-                "Could not open {:?}: {}",
-                path,
-                std::io::Error::last_os_error()
-            );
-        }
-        Watcher { fd }
+        let path = typ.path_prefix().join("pbundle");
+        let fd =
+            fcntl::open(&path, fcntl::OFlag::O_RDONLY, stat::Mode::empty())
+                .expect("we have a contract, so this file must exist");
+        Watcher(fd)
     }
 
     /// Block until a contract event occurs.
@@ -131,7 +126,7 @@ impl Watcher {
             // ct_event_read_critical(3CONTRACT) will block until a new
             // critical event is available on the channel.
             slog::debug!(log, "entering contract ioctl");
-            match unsafe { ct_event_read_critical(self.fd, evp) } {
+            match unsafe { ct_event_read_critical(self.as_raw_fd(), evp) } {
                 0 => {
                     slog::debug!(log, "back from contract ioctl");
                     let typ = unsafe { ct_event_get_type(event) };
@@ -164,47 +159,39 @@ impl Watcher {
 /// and cancelling a contract.
 pub struct Control {
     ctid: ctid_t,
-    fd: c_int,
+    fd: OwnedFd,
 }
-
-impl Drop for Control {
-    fn drop(&mut self) {
-        unsafe { libc::close(self.fd) };
+impl AsRawFd for Control {
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd.as_raw_fd()
     }
 }
 
 impl Control {
     /// Construct a new Control for the specified contract
-    pub fn new(
-        typ: ContractType,
-        ctid: ctid_t,
-    ) -> Result<Self, crate::ExecutionError> {
-        let path = path(typ, Some(ctid), "ctl");
-        match unsafe { libc::open(path.as_ptr(), libc::O_WRONLY) } {
-            fd if fd >= 0 => Ok(Control { ctid, fd }),
-            _ => Err(err(format!(
-                "opening control path {}",
-                path.into_string().unwrap()
-            ))),
-        }
+    pub fn new(typ: ContractType, ctid: ctid_t) -> Result<Self> {
+        let path = typ.path_prefix().join(ctid.to_string()).join("ctl");
+        fcntl::open(&path, fcntl::OFlag::O_WRONLY, stat::Mode::empty())
+            .map(|fd| Control { ctid, fd })
+            .map_err(|e| crate::ExecutionError::ContractFailure {
+                msg: format!("failed to open control path {}", path.display()),
+                err: e.into(),
+            })
     }
 
     /// Acknowledge an event on the contract
-    pub fn ack(
-        &self,
-        event_id: ct_evid_t,
-    ) -> Result<(), crate::ExecutionError> {
-        match unsafe { ct_ctl_ack(self.fd, event_id) } {
+    pub fn ack(&self, event_id: ct_evid_t) -> Result<()> {
+        match unsafe { ct_ctl_ack(self.as_raw_fd(), event_id) } {
             0 => Ok(()),
-            _ => Err(err(format!("failed to acknowledge event {}", event_id))),
+            _ => err(format!("failed to acknowledge event {}", event_id)),
         }
     }
 
     /// Abandon the contract
-    pub fn abandon(self) -> Result<(), crate::ExecutionError> {
-        match unsafe { ct_ctl_abandon(self.fd) } {
+    pub fn abandon(self) -> Result<()> {
+        match unsafe { ct_ctl_abandon(self.as_raw_fd()) } {
             0 => Ok(()),
-            _ => Err(err(format!("failed to abandon contract {}", self.ctid))),
+            _ => err(format!("failed to abandon contract {}", self.ctid)),
         }
     }
 }
@@ -241,63 +228,48 @@ pub fn process_contract_reaper(log: Logger) {
 
 // A Rust wrapper around the process contract template.
 #[derive(Debug)]
-pub struct Template {
-    fd: c_int,
+pub struct Template(OwnedFd);
+impl AsRawFd for Template {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
+    }
 }
 
 impl Drop for Template {
     fn drop(&mut self) {
         self.clear();
-        // Ignore any error, since printing may interfere with `slog`'s
-        // structured output.
-        unsafe { libc::close(self.fd) };
     }
 }
 
-// This follows the symlink from /dev/tfpkt0 to the full path in the /devices
-// tree.  If found, it returns the path as both a string (for error reporting)
-// and as a vector of bytes (for passing to subsequent system calls).  This
-// redundancy comes from illumos/x86_64 expecting characters to be signed,
-// while Rust expects them to be unsigned.
-fn get_tfpkt_device_path() -> Option<(String, Vec<i8>)> {
-    let dev_path = CString::new("/dev/tfpkt0").unwrap();
-    let mut path_buf = [0i8; 1024];
-    let sz = unsafe {
-        libc::readlink(dev_path.as_ptr(), path_buf.as_mut_ptr(), 1024)
-    };
-    if sz < 0 {
-        None
+fn get_tfpkt_device_path() -> Option<PathBuf> {
+    let link = nix::fcntl::readlink("/dev/tfpkt0").ok()?;
+    let path = PathBuf::from(link);
+    if path.starts_with("../devices/") {
+        // Because the path is relative, the PathBuf strip_prefix()
+        // operation will also return a relative path - stripping off the
+        // leading "/".  To avoid that, we have to cast the PathBuf into a
+        // string to perform the textual prefix stripping we're after.
+        let path = PathBuf::from(
+            path.to_str().unwrap().strip_prefix("../devices").unwrap(),
+        );
+        Some(path)
     } else {
-        let u8path: Vec<u8> = path_buf
-            .iter()
-            .take_while(|c| **c != 0)
-            .map(|c| *c as u8)
-            .collect();
-
-        match str::from_utf8(&u8path) {
-            Ok(p) if p.starts_with("../devices/") => {
-                // readlink returns "../devices/pseudo/..." but the contract
-                // filesystem only wants to know about the "/pseudo/..." part,
-                // so we strip off the first path element before returning it.
-                // We also need to drop any bytes after the terminating NULL.
-                let i8path = path_buf[10..u8path.len() + 1].to_vec();
-                Some((p.to_string(), i8path))
-            }
-            _ => None,
-        }
+        Some(path)
     }
 }
 
 impl Template {
-    pub fn new(typ: ContractType) -> Result<Self, crate::ExecutionError> {
-        let path = path(typ, None, "template");
-        let fd = match unsafe { libc::open(path.as_ptr(), libc::O_RDWR) } {
-            fd if fd >= 0 => Ok(fd),
-            _ => Err(err(format!(
-                "opening template {}",
-                path.into_string().unwrap()
-            ))),
-        }?;
+    pub fn new(typ: ContractType) -> Result<Self> {
+        let path = typ.path_prefix().join("template");
+        let fd = fcntl::open(&path, fcntl::OFlag::O_RDWR, stat::Mode::empty())
+            .map_err(|e| crate::ExecutionError::ContractFailure {
+                msg: format!(
+                    "failed to open contract template {}",
+                    path.display()
+                ),
+                err: e.into(),
+            })?;
+        let rawfd = fd.as_raw_fd();
 
         // The two different contract types are initialized with different
         // settings.  These settings are hardcoded and specific to the manner in
@@ -312,23 +284,23 @@ impl Template {
                 //
                 // See illumos sources in `usr/src/cmd/zlogin/zlogin.c` in the
                 // implementation of `init_template()` for details.
-                if unsafe { ct_tmpl_set_critical(fd, CT_PR_EV_EMPTY) } != 0 {
-                    Err(err("set_critical in process template"))
-                } else if unsafe { ct_tmpl_set_informative(fd, 0) } != 0 {
-                    Err(err("set_informative in process template"))
-                } else if unsafe { ct_pr_tmpl_set_fatal(fd, CT_PR_EV_HWERR) }
+                if unsafe { ct_tmpl_set_critical(rawfd, CT_PR_EV_EMPTY) } != 0 {
+                    err("set_critical in process template")
+                } else if unsafe { ct_tmpl_set_informative(rawfd, 0) } != 0 {
+                    err("set_informative in process template")
+                } else if unsafe { ct_pr_tmpl_set_fatal(rawfd, CT_PR_EV_HWERR) }
                     != 0
                 {
-                    Err(err("set_fatal in process template"))
+                    err("set_fatal in process template")
                 } else if unsafe {
-                    ct_pr_tmpl_set_param(fd, CT_PR_PGRPONLY | CT_PR_REGENT)
+                    ct_pr_tmpl_set_param(rawfd, CT_PR_PGRPONLY | CT_PR_REGENT)
                 } != 0
                 {
-                    Err(err("set_param in process template"))
-                } else if unsafe { ct_tmpl_activate(fd) } != 0 {
-                    Err(err("activating in process template"))
+                    err("set_param in process template")
+                } else if unsafe { ct_tmpl_activate(rawfd) } != 0 {
+                    err("activating in process template")
                 } else {
-                    Ok(Self { fd })
+                    Ok(Self(fd))
                 }
             }
             ContractType::Device => {
@@ -346,42 +318,51 @@ impl Template {
                 // watch here for the removal of "tfpkt", which is a child of
                 // the "tofino", and whose removal is a reliable indicator that
                 // the tofino is gone.
-                let (path, cpath) = match get_tfpkt_device_path() {
-                    Some((p, c)) => Ok((p, c)),
-                    None => {
-                        unsafe { libc::close(fd) };
-                        Err(err("unable to find tfpkt in device tree"))
-                    }
-                }?;
+                let Some(path) = get_tfpkt_device_path() else {
+                    return err("unable to find tfpkt in device tree");
+                };
 
                 // We want to be notified when the device goes offline
-                if unsafe { ct_tmpl_set_critical(fd, CT_DEV_EV_OFFLINE) } != 0 {
-                    Err(err("set_critical in device template"))
-                } else if unsafe { ct_dev_tmpl_set_minor(fd, cpath.as_ptr()) }
+                if unsafe { ct_tmpl_set_critical(rawfd, CT_DEV_EV_OFFLINE) }
                     != 0
                 {
-                    Err(err(format!("set_minor to {path} in device template")))
-                } else if unsafe { ct_tmpl_activate(fd) } != 0 {
-                    Err(err("activating device template"))
+                    err("set_critical in device template")
+                } else if unsafe {
+                    let mut os_path: Vec<i8> = path
+                        .as_os_str()
+                        .as_encoded_bytes()
+                        .iter()
+                        .map(|c| *c as i8)
+                        .collect();
+                    // The conversion from string to bytes above strips off the
+                    // required tailing NULL, which we replace here.
+                    os_path.push(0);
+
+                    ct_dev_tmpl_set_minor(rawfd, os_path.as_ptr())
+                } != 0
+                {
+                    err(format!(
+                        "set_minor to {} in device template",
+                        path.display()
+                    ))
+                } else if unsafe { ct_tmpl_activate(rawfd) } != 0 {
+                    err("activating device template")
                 } else {
-                    Ok(Self { fd })
+                    Ok(Self(fd))
                 }
             }
         }
-        .inspect_err(|_e| {
-            unsafe { libc::close(fd) };
-        })
     }
 
-    pub fn create(&self) -> Result<ctid_t, crate::ExecutionError> {
+    pub fn create(&self) -> Result<ctid_t> {
         let mut ctid = 0;
-        match unsafe { ct_tmpl_create(self.fd, &mut ctid) } {
+        match unsafe { ct_tmpl_create(self.as_raw_fd(), &mut ctid) } {
             0 => Ok(ctid),
-            _ => Err(err("constructing contract")),
+            _ => err("constructing contract"),
         }
     }
 
     pub fn clear(&self) {
-        unsafe { ct_tmpl_clear(self.fd) };
+        unsafe { ct_tmpl_clear(self.as_raw_fd()) };
     }
 }

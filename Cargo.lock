@@ -4976,6 +4976,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "macaddr",
+ "nix 0.30.1",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",

@@ -171,8 +171,7 @@ fn wait_for_signal(log: Arc<Logger>) {
     let mut signals = match Signals::new(&[SIGHUP, SIGINT, SIGQUIT, SIGTERM]) {
         Ok(s) => s,
         Err(e) => {
-            error!(&log, "failed to set up signal handler: {e:?}");
-            return;
+            panic!("failed to set up signal handler: {e:?}");
         }
     };
 
