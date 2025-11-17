@@ -5556,12 +5556,6 @@
         "description": "Dataset and Volume details for a Local Storage dataset ensure request",
         "type": "object",
         "properties": {
-          "block_size": {
-            "description": "Block size for the zvol",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "dataset_size": {
             "description": "Size of the parent dataset",
             "allOf": [
@@ -5580,7 +5574,6 @@
           }
         },
         "required": [
-          "block_size",
           "dataset_size",
           "volume_size"
         ]

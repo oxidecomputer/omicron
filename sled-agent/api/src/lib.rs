@@ -1111,7 +1111,4 @@ pub struct LocalStorageDatasetEnsureRequest {
 
     /// Size of the zvol
     pub volume_size: ByteCount,
-
-    /// Block size for the zvol
-    pub block_size: u32,
 }

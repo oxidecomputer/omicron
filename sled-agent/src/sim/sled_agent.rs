@@ -223,8 +223,8 @@ impl SledAgent {
         };
 
         // Make sure each file backend was ensured before changing any state
-        for (id, disk) in vmm_spec.file_backends() {
-            let FileStorageBackend { block_size, path, .. } = disk;
+        for (_id, disk) in vmm_spec.file_backends() {
+            let FileStorageBackend { path, .. } = disk;
 
             // The FileStorageBackend path will be the full device path, so
             // strip the beginning, including the first part of the external
@@ -237,19 +237,7 @@ impl SledAgent {
             let dataset_id: DatasetUuid = parts[3].parse().unwrap();
 
             // This panics if this dataset was not already created
-            let request = self
-                .storage
-                .lock()
-                .get_local_storage_dataset(zpool_id, dataset_id);
-
-            // Treat a mismatch here as an error
-            if request.block_size != *block_size {
-                return Err(Error::internal_error(&format!(
-                    "request {} block_size {} does not match \
-                    FileStorageBackend block_size {block_size}",
-                    id, request.block_size,
-                )));
-            }
+            self.storage.lock().get_local_storage_dataset(zpool_id, dataset_id);
         }
 
         for (id, _disk) in vmm_spec.crucible_backends() {

@@ -1167,6 +1167,15 @@ impl DelegatedZvol {
             }
         }
     }
+
+    pub fn volblocksize(&self) -> u32 {
+        match &self {
+            DelegatedZvol::LocalStorage { .. } => {
+                // all Local storage zvols use 4096 byte blocks
+                4096
+            }
+        }
+    }
 }
 
 #[cfg(test)]

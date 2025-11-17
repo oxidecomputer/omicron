@@ -1232,7 +1232,6 @@ impl SledAgent {
         let sled_agent_api::LocalStorageDatasetEnsureRequest {
             dataset_size,
             volume_size,
-            block_size,
         } = request;
 
         Zfs::ensure_dataset(DatasetEnsureArgs {
@@ -1262,7 +1261,7 @@ impl SledAgent {
         Zfs::ensure_dataset_volume(
             delegated_zvol.volume_name(),
             volume_size,
-            block_size,
+            delegated_zvol.volblocksize(),
         )
         .await
         .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
