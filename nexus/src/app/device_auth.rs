@@ -134,9 +134,20 @@ impl super::Nexus {
             }
         }
 
-        let time_expires = requested_ttl
+        let mut time_expires = requested_ttl
             .or(silo_max_ttl)
             .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()));
+
+        // If authenticated via a device token, clamp the new token's expiration
+        // to the authenticating token's expiration to prevent indefinite token
+        // extension.
+        if let Some(auth_token_expires) = opctx.authn.token_expiration() {
+            time_expires = match (time_expires, Some(auth_token_expires)) {
+                (Some(new_exp), Some(auth_exp)) => Some(new_exp.min(auth_exp)),
+                (None, Some(auth_exp)) => Some(auth_exp),
+                (new_exp, None) => new_exp,
+            };
+        }
 
         let token = DeviceAccessToken::new(
             db_request.client_id,
@@ -193,11 +204,12 @@ impl super::Nexus {
 
     /// Look up the actor for which a token was granted.
     /// Corresponds to a request *after* completing the flow above.
+    /// Returns the actor and the token's expiration time (if any).
     pub(crate) async fn device_access_token_actor(
         &self,
         opctx: &OpContext,
         token: String,
-    ) -> Result<Actor, Reason> {
+    ) -> Result<(Actor, Option<chrono::DateTime<Utc>>), Reason> {
         let (.., db_access_token) = self
             .db_datastore
             .device_token_lookup_by_token(opctx, token)
@@ -222,7 +234,9 @@ impl super::Nexus {
             })?;
         let silo_id = db_silo_user.silo_id;
 
-        if let Some(time_expires) = db_access_token.time_expires {
+        let expiration = db_access_token.time_expires;
+
+        if let Some(time_expires) = expiration {
             let now = Utc::now();
             if time_expires < now {
                 return Err(Reason::BadCredentials {
@@ -236,7 +250,7 @@ impl super::Nexus {
             }
         }
 
-        Ok(Actor::SiloUser { silo_user_id, silo_id })
+        Ok((Actor::SiloUser { silo_user_id, silo_id }, expiration))
     }
 
     pub(crate) async fn device_access_token(

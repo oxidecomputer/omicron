@@ -8,7 +8,7 @@ use super::super::Details;
 use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
-use crate::authn;
+use crate::authn::{self, AuthMethod};
 use async_trait::async_trait;
 use headers::HeaderMapExt;
 use headers::authorization::{Authorization, Bearer};
@@ -66,7 +66,10 @@ where
             Ok(None) => SchemeResult::NotRequested,
             Ok(Some(token)) => match ctx.scim_token_actor(token).await {
                 Err(error) => SchemeResult::Failed(error),
-                Ok(actor) => SchemeResult::Authenticated(Details { actor }),
+                Ok(actor) => SchemeResult::Authenticated(Details {
+                    actor,
+                    auth_method: AuthMethod::ScimToken,
+                }),
             },
         }
     }

@@ -6,7 +6,7 @@
 
 use super::{HttpAuthnScheme, Reason, SchemeResult};
 use crate::authn;
-use crate::authn::{Actor, Details};
+use crate::authn::{Actor, AuthMethod, Details};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -180,7 +180,10 @@ where
             debug!(log, "failed to extend session")
         }
 
-        SchemeResult::Authenticated(Details { actor })
+        SchemeResult::Authenticated(Details {
+            actor,
+            auth_method: AuthMethod::ConsoleSession,
+        })
     }
 }
 
@@ -395,7 +398,7 @@ mod test {
         let result = authn_with_cookie(&context, Some("session=abc")).await;
         assert!(matches!(
             result,
-            SchemeResult::Authenticated(Details { actor: _ })
+            SchemeResult::Authenticated(Details { actor: _, auth_method: _ })
         ));
 
         // valid cookie should have updated time_last_used
