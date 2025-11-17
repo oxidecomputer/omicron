@@ -639,17 +639,17 @@ async fn test_device_token_cannot_extend_expiration(
 ) {
     let testctx = &cptestctx.external_client;
 
-    // Set silo max TTL to 10 seconds
+    // Set silo max TTL to 15 seconds
     let settings = params::SiloAuthSettingsUpdate {
-        device_token_max_ttl_seconds: NonZeroU32::new(10).into(),
+        device_token_max_ttl_seconds: NonZeroU32::new(15).into(),
     };
     let _: views::SiloAuthSettings =
         object_put(testctx, "/v1/auth-settings", &settings).await;
 
-    // Create an initial token with 5 second TTL
+    // Create an initial token with 8 second TTL
     let client_id = Uuid::new_v4();
     let initial_request =
-        DeviceAuthRequest { client_id, ttl_seconds: NonZeroU32::new(5) };
+        DeviceAuthRequest { client_id, ttl_seconds: NonZeroU32::new(8) };
 
     let auth_response_1 = NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/auth")
@@ -693,21 +693,18 @@ async fn test_device_token_cannot_extend_expiration(
     let initial_token = initial_token_grant.access_token;
     let initial_expiration = initial_token_grant.time_expires.unwrap();
 
-    // Verify initial token expires in roughly 5 seconds
+    // Verify initial token expires in roughly 8 seconds
     let initial_ttl_secs = (initial_expiration - initial_time).num_seconds();
     assert!(
-        initial_ttl_secs >= 4 && initial_ttl_secs <= 6,
-        "initial token should expire in ~5 seconds, got {initial_ttl_secs}"
+        7 <= initial_ttl_secs && initial_ttl_secs <= 9,
+        "initial token should expire in ~8 seconds, got {initial_ttl_secs}"
     );
 
-    // Wait 1 second so the initial token has ~4 seconds left
-    sleep(Duration::from_secs(1)).await;
-
     // Now use the initial token to authenticate and start a NEW device auth flow
-    // Request a token with 8 second TTL (which is less than silo max of 10)
-    // This should ERROR because 8 seconds exceeds the ~4 seconds remaining on the auth token
+    // Request a token with 12 second TTL (which is less than silo max of 15)
+    // This should ERROR because 12 seconds exceeds the ~8 seconds remaining on the auth token
     let second_request =
-        DeviceAuthRequest { client_id, ttl_seconds: NonZeroU32::new(8) };
+        DeviceAuthRequest { client_id, ttl_seconds: NonZeroU32::new(12) };
 
     let auth_response_2 = NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/auth")
@@ -730,11 +727,7 @@ async fn test_device_token_cannot_extend_expiration(
     .execute_and_parse_unwrap::<HttpErrorResponseBody>()
     .await;
 
-    assert!(
-        error.message.contains("Requested token TTL would exceed"),
-        "error message should explain the TTL issue, got: {}",
-        error.message
-    );
+    assert!(error.message.contains("Requested token TTL would exceed"));
 
     // Now start a third flow WITHOUT specifying a TTL
     // This should succeed with clamping to the auth token expiration
@@ -760,8 +753,6 @@ async fn test_device_token_cannot_extend_expiration(
     .execute()
     .await
     .expect("failed to confirm third token");
-
-    let third_time = Utc::now();
 
     // Fetch the third token (no auth needed, just retrieving what was created at confirm time)
     let third_token_grant = NexusRequest::new(
@@ -789,16 +780,6 @@ async fn test_device_token_cannot_extend_expiration(
         "third token expiration should be clamped to initial token expiration. \
          Initial: {initial_expiration}, Third: {third_expiration}, \
          Diff: {time_diff_ms}ms"
-    );
-
-    // Verify the third token doesn't have the full silo max (10 seconds)
-    let third_token_ttl_from_now =
-        (third_expiration - third_time).num_seconds();
-
-    assert!(
-        third_token_ttl_from_now < 5,
-        "third token should not have more than ~3 seconds left \
-         (initial token's remaining time after wait), got {third_token_ttl_from_now}"
     );
 }
 
