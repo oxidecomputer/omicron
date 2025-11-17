@@ -223,7 +223,7 @@ impl SledAgent {
         };
 
         // Make sure each file backend was ensured before changing any state
-        for (_id, disk) in vmm_spec.file_backends() {
+        for (id, disk) in vmm_spec.file_backends() {
             let FileStorageBackend { block_size, path, .. } = disk;
 
             // The FileStorageBackend path will be the full device path, so
@@ -245,9 +245,9 @@ impl SledAgent {
             // Treat a mismatch here as an error
             if request.block_size != *block_size {
                 return Err(Error::internal_error(&format!(
-                    "request block_size {} does not match FileStorageBackend \
-                    block_size {block_size}",
-                    request.block_size,
+                    "request {} block_size {} does not match \
+                    FileStorageBackend block_size {block_size}",
+                    id, request.block_size,
                 )));
             }
         }
