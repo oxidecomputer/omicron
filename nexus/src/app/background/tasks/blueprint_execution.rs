@@ -250,17 +250,18 @@ mod test {
         blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::BlueprintUuid;
-
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use serde_json::json;
     use std::collections::BTreeMap;
+    use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::watch;
@@ -285,6 +286,7 @@ mod test {
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
+                        subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                         sled_agent_generation: Generation::new().next(),
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),
