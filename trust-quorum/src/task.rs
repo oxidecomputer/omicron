@@ -1312,7 +1312,7 @@ mod tests {
 
     /// Commit an initial configuration at all nodes
     #[tokio::test]
-    pub async fn tq_initial_config() {
+    async fn tq_initial_config() {
         let num_nodes = 4;
         let setup =
             TestSetup::spawn_nodes("tq_initial_config", num_nodes).await;
