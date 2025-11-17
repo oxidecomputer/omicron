@@ -948,7 +948,7 @@ pub enum DatasetKind {
     // Other datasets
     Debug,
 
-    /// Used for transient storage, contains volumes delegated to VMMs
+    /// Used for local storage disk types, contains volumes delegated to VMMs
     LocalStorage,
 }
 
