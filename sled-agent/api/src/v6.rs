@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Sled agent types (version 1)
+//! Sled agent types (version 6)
 //!
-//! Version 1 types (before multicast support was added).
+//! Version 6 types (before multicast support was added in version 7).
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -21,12 +21,11 @@ use omicron_common::api::{
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::instance::{InstanceMetadata, VmmSpec};
 use uuid::Uuid;
 
-use crate::instance::{InstanceMetadata, VmmSpec};
-
 /// The body of a request to ensure that a instance and VMM are known to a sled
-/// agent (version 1, before multicast support).
+/// agent (version 6, before multicast support).
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /// The virtual hardware configuration this virtual machine should have when
@@ -56,7 +55,7 @@ pub struct InstanceEnsureBody {
 }
 
 /// Describes sled-local configuration that a sled-agent must establish to make
-/// the instance's virtual hardware fully functional (version 1, before multicast).
+/// the instance's virtual hardware fully functional (version 6, before multicast).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstanceSledLocalConfig {
     pub hostname: Hostname,

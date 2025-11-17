@@ -40,8 +40,8 @@ use sled_agent_types::{
     early_networking::EarlyNetworkConfig,
     firewall_rules::VpcFirewallRulesEnsureBody,
     instance::{
-        InstanceExternalIpBody, InstanceMulticastBody, VmmPutStateBody,
-        VmmPutStateResponse, VmmUnregisterResponse,
+        InstanceExternalIpBody, InstanceMulticastBody, InstanceSledLocalConfig,
+        VmmPutStateBody, VmmPutStateResponse, VmmUnregisterResponse,
     },
     sled::AddSledRequest,
     zone_bundle::{
@@ -55,6 +55,8 @@ use uuid::Uuid;
 
 /// Copies of data types that changed between v3 and v4.
 mod v3;
+/// Copies of data types that changed between v6 and v7.
+mod v6;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -375,11 +377,38 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         versions = ..VERSION_MULTICAST_SUPPORT
     }]
-    async fn v1_vmm_register(
+    async fn v6_vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_types::v1::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
+        body: TypedBody<v6::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        // Convert v6 to v7 by adding empty multicast_groups
+        Self::vmm_register(
+            rqctx,
+            path_params,
+            body.map(|v6_body| {
+                sled_agent_types::instance::InstanceEnsureBody {
+                    vmm_spec: v6_body.vmm_spec,
+                    local_config: InstanceSledLocalConfig {
+                        hostname: v6_body.local_config.hostname,
+                        nics: v6_body.local_config.nics,
+                        source_nat: v6_body.local_config.source_nat,
+                        ephemeral_ip: v6_body.local_config.ephemeral_ip,
+                        floating_ips: v6_body.local_config.floating_ips,
+                        multicast_groups: Vec::new(),
+                        firewall_rules: v6_body.local_config.firewall_rules,
+                        dhcp_config: v6_body.local_config.dhcp_config,
+                    },
+                    vmm_runtime: v6_body.vmm_runtime,
+                    instance_id: v6_body.instance_id,
+                    migration_id: v6_body.migration_id,
+                    propolis_addr: v6_body.propolis_addr,
+                    metadata: v6_body.metadata,
+                }
+            }),
+        )
+        .await
+    }
 
     #[endpoint {
         method = DELETE,

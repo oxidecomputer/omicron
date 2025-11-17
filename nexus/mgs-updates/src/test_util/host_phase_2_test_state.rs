@@ -530,14 +530,6 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn v1_vmm_register(
-            _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<VmmPathParam>,
-            _body: TypedBody<sled_agent_types::v1::InstanceEnsureBody>,
-        ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-            unimplemented!()
-        }
-
         async fn vmm_register(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,

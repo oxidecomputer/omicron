@@ -82,19 +82,6 @@ enum SledAgentSimImpl {}
 impl SledAgentApi for SledAgentSimImpl {
     type Context = Arc<SledAgent>;
 
-    async fn v1_vmm_register(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_types::v1::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        let sa = rqctx.context();
-        let propolis_id = path_params.into_inner().propolis_id;
-        let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.v1_instance_register(propolis_id, body_args).await?,
-        ))
-    }
-
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,

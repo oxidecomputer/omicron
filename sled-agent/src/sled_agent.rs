@@ -61,11 +61,9 @@ use sled_agent_config_reconciler::{
 };
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
-use sled_agent_types::instance::InstanceSledLocalConfig;
-use sled_agent_types::instance::{InstanceEnsureBody, InstanceMulticastBody};
 use sled_agent_types::instance::{
-    InstanceExternalIpBody, VmmPutStateResponse, VmmStateRequested,
-    VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
@@ -853,34 +851,6 @@ impl SledAgent {
             .ensure_registered(propolis_id, instance, self.sled_identifiers())
             .await
             .map_err(|e| Error::Instance(e))
-    }
-
-    /// V1 compatibility shim for instance registration (before multicast support).
-    pub async fn v1_instance_ensure_registered(
-        &self,
-        propolis_id: PropolisUuid,
-        instance: sled_agent_types::v1::InstanceEnsureBody,
-    ) -> Result<SledVmmState, Error> {
-        let upgraded_instance =
-            sled_agent_types::instance::InstanceEnsureBody {
-                vmm_spec: instance.vmm_spec,
-                local_config: InstanceSledLocalConfig {
-                    hostname: instance.local_config.hostname,
-                    nics: instance.local_config.nics,
-                    source_nat: instance.local_config.source_nat,
-                    ephemeral_ip: instance.local_config.ephemeral_ip,
-                    floating_ips: instance.local_config.floating_ips,
-                    multicast_groups: Vec::new(),
-                    firewall_rules: instance.local_config.firewall_rules,
-                    dhcp_config: instance.local_config.dhcp_config,
-                },
-                vmm_runtime: instance.vmm_runtime,
-                instance_id: instance.instance_id,
-                migration_id: instance.migration_id,
-                propolis_addr: instance.propolis_addr,
-                metadata: instance.metadata,
-            };
-        self.instance_ensure_registered(propolis_id, upgraded_instance).await
     }
 
     /// Idempotently ensures that the specified instance is no longer registered

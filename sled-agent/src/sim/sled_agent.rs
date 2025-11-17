@@ -60,11 +60,9 @@ use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
-use sled_agent_types::instance::InstanceMulticastMembership;
-use sled_agent_types::instance::InstanceSledLocalConfig;
 use sled_agent_types::instance::{
-    InstanceExternalIpBody, VmmPutStateResponse, VmmStateRequested,
-    VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 
 use slog::Logger;
@@ -201,43 +199,12 @@ impl SledAgent {
         })
     }
 
-    /// Idempotently ensures that the given API Instance (described by
-    /// `api_instance`) exists on this server in the given runtime state
-    /// (described by `target`). This delegates to the newest version
-    /// of [`sled_agent_types::instance::InstanceEnsureBody`].
-    pub async fn v1_instance_register(
-        self: &Arc<Self>,
-        propolis_id: PropolisUuid,
-        instance: sled_agent_types::v1::InstanceEnsureBody,
-    ) -> Result<SledVmmState, Error> {
-        let upgraded_instance =
-            sled_agent_types::instance::InstanceEnsureBody {
-                vmm_spec: instance.vmm_spec,
-                local_config: InstanceSledLocalConfig {
-                    hostname: instance.local_config.hostname,
-                    nics: instance.local_config.nics,
-                    source_nat: instance.local_config.source_nat,
-                    ephemeral_ip: instance.local_config.ephemeral_ip,
-                    floating_ips: instance.local_config.floating_ips,
-                    multicast_groups: Vec::new(),
-                    firewall_rules: instance.local_config.firewall_rules,
-                    dhcp_config: instance.local_config.dhcp_config,
-                },
-                vmm_runtime: instance.vmm_runtime,
-                instance_id: instance.instance_id,
-                migration_id: instance.migration_id,
-                propolis_addr: instance.propolis_addr,
-                metadata: instance.metadata,
-            };
-        self.instance_register(propolis_id, upgraded_instance).await
-    }
-
     pub async fn instance_register(
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
-        instance: sled_agent_types::instance::InstanceEnsureBody,
+        instance: InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
-        let sled_agent_types::instance::InstanceEnsureBody {
+        let InstanceEnsureBody {
             vmm_spec,
             local_config,
             instance_id,
