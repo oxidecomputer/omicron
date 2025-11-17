@@ -9050,7 +9050,10 @@ external DNS:
 blueprint  008e1541-3d9d-4a50-a877-eed4a3cf86ab
 parent:    05685571-d61f-4754-a2b2-604ea8c45dff
 
-  sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c (active, config generation 18)
+  sled: 2b8f0cb3-0295-4b3c-bc58-4fe88b57112c
+    state:::::::::::::   active
+    config generation:   18
+    subnet::::::::::::   fd00:1122:3344:102::/64
 
     host phase 2 contents:
     ------------------------------
@@ -9127,7 +9130,10 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
 
 
 
-  sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6 (active, config generation 19)
+  sled: 98e6b7c2-2efa-41ca-b20a-0a4d61102fe6
+    state:::::::::::::   active
+    config generation:   19
+    subnet::::::::::::   fd00:1122:3344:101::/64
 
     host phase 2 contents:
     ------------------------------
@@ -9203,7 +9209,10 @@ parent:    05685571-d61f-4754-a2b2-604ea8c45dff
 
 
 
-  sled: d81c6a84-79b8-4958-ae41-ea46c9b19763 (active, config generation 17)
+  sled: d81c6a84-79b8-4958-ae41-ea46c9b19763
+    state:::::::::::::   active
+    config generation:   17
+    subnet::::::::::::   fd00:1122:3344:103::/64
 
     host phase 2 contents:
     ------------------------------
