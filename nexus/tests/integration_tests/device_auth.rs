@@ -634,6 +634,150 @@ async fn test_device_token_request_ttl(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
+async fn test_device_token_cannot_extend_expiration(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let testctx = &cptestctx.external_client;
+
+    // Set silo max TTL to 10 seconds
+    let settings = params::SiloAuthSettingsUpdate {
+        device_token_max_ttl_seconds: NonZeroU32::new(10).into(),
+    };
+    let _: views::SiloAuthSettings =
+        object_put(testctx, "/v1/auth-settings", &settings).await;
+
+    // Create an initial token with 5 second TTL
+    let client_id_1 = Uuid::new_v4();
+    let initial_request = DeviceAuthRequest {
+        client_id: client_id_1,
+        ttl_seconds: NonZeroU32::new(5),
+    };
+
+    let auth_response_1 = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&initial_request))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await;
+
+    let initial_time = Utc::now();
+
+    // Confirm with privileged user to create the token
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response_1.user_code,
+            }))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to confirm initial token");
+
+    // Fetch the initial token
+    let initial_token_grant = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAccessTokenRequest {
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                    .to_string(),
+                device_code: auth_response_1.device_code,
+                client_id: client_id_1,
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
+    .await;
+
+    let initial_token = initial_token_grant.access_token;
+    let initial_expiration = initial_token_grant.time_expires.unwrap();
+
+    // Verify initial token expires in roughly 5 seconds
+    let initial_ttl_secs = (initial_expiration - initial_time).num_seconds();
+    assert!(
+        initial_ttl_secs >= 4 && initial_ttl_secs <= 6,
+        "initial token should expire in ~5 seconds, got {initial_ttl_secs}"
+    );
+
+    // Wait 1 second so the initial token has ~4 seconds left
+    sleep(Duration::from_secs(1)).await;
+
+    // Now use the initial token to authenticate and start a NEW device auth flow
+    // Request a token with 8 second TTL (which is less than silo max of 10)
+    let client_id_2 = Uuid::new_v4();
+    let second_request = DeviceAuthRequest {
+        client_id: client_id_2,
+        ttl_seconds: NonZeroU32::new(8),
+    };
+
+    let auth_response_2 = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&second_request))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await;
+
+    // Confirm using the initial token for authentication (not a web session)
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response_2.user_code,
+            }))
+            .header(header::AUTHORIZATION, format!("Bearer {}", initial_token))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .execute()
+    .await
+    .expect("failed to confirm second token with initial token");
+
+    // Fetch the second token
+    let second_token_grant = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAccessTokenRequest {
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                    .to_string(),
+                device_code: auth_response_2.device_code,
+                client_id: client_id_2,
+            }))
+            .header(header::AUTHORIZATION, format!("Bearer {}", initial_token))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
+    .await;
+
+    let second_expiration = second_token_grant.time_expires.unwrap();
+
+    // The second token should NOT extend beyond the initial token's expiration
+    // It should be clamped to the initial token's expiration time
+    let time_diff_ms =
+        (second_expiration - initial_expiration).num_milliseconds().abs();
+
+    assert!(
+        time_diff_ms <= 1000,
+        "second token expiration should be clamped to initial token expiration. \
+         Initial: {initial_expiration}, Second: {second_expiration}, \
+         Diff: {time_diff_ms}ms"
+    );
+
+    // Additionally, verify the second token doesn't have the full 8 seconds
+    // from when it was created (which would be wrong)
+    let second_creation_time = Utc::now();
+    let second_token_ttl_from_now =
+        (second_expiration - second_creation_time).num_seconds();
+
+    assert!(
+        second_token_ttl_from_now < 6,
+        "second token should not have more than ~4 seconds left \
+         (initial token's remaining time), got {second_token_ttl_from_now}"
+    );
+}
+
+#[nexus_test]
 async fn test_admin_logout_deletes_tokens_and_sessions(
     cptestctx: &ControlPlaneTestContext,
 ) {
