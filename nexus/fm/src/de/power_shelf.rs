@@ -5,6 +5,7 @@
 //! Power shelf diagnosis
 
 use super::DiagnosisEngine;
+use crate::CaseBuilder;
 use crate::SitrepBuilder;
 use crate::alert;
 use crate::ereport_analysis;
@@ -30,6 +31,14 @@ impl PowerShelfDiagnosis {
 impl DiagnosisEngine for PowerShelfDiagnosis {
     fn kind(&self) -> DiagnosisEngineKind {
         DiagnosisEngineKind::PowerShelf
+    }
+
+    fn analyze_open_case(
+        &mut self,
+        sitrep: &mut SitrepBuilder<'_>,
+        case: &mut CaseBuilder,
+    ) -> anyhow::Result<()> {
+        todo!()
     }
 
     fn analyze_ereport(
@@ -117,10 +126,7 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
         Ok(())
     }
 
-    fn process_cases(
-        &mut self,
-        sitrep: &mut SitrepBuilder<'_>,
-    ) -> anyhow::Result<()> {
+    fn finish(&mut self, sitrep: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
         todo!()
     }
 }
