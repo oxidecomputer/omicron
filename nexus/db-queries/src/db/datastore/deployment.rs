@@ -17,6 +17,7 @@ use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
+use ipnetwork::Ipv6Network;
 use core::future::Future;
 use core::pin::Pin;
 use diesel::BoolExpressionMethods;
@@ -262,6 +263,7 @@ impl DataStore {
                     .slot_b
                     .artifact_hash()
                     .map(ArtifactHash),
+                subnet: Ipv6Network::from(sled.subnet).into(),
             })
             .collect::<Vec<_>>();
 
@@ -793,8 +795,14 @@ impl DataStore {
                 paginator = p.found_batch(&batch, &|(s, _, _)| s.sled_id);
 
                 for (s, slot_a_version, slot_b_version) in batch {
+                    let subnet = s.subnet().map_err(|e| {
+                        Error::internal_error(
+                            &InlineErrorChain::new(&*e).to_string(),
+                        )
+                    })?;
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
+                        subnet,
                         sled_agent_generation: *s.sled_agent_generation,
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),

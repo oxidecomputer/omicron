@@ -310,6 +310,14 @@ impl<const N: u8> From<Ipv6Network> for Ipv6Subnet<N> {
     }
 }
 
+impl<const N: u8> From<Ipv6Subnet<N>> for Ipv6Network {
+    fn from(net: Ipv6Subnet<N>) -> Self {
+        // Ipv6Subnet::new() asserts that `N` is a valid IPv6 prefix, so it's
+        // okay to unwrap here.
+        Self::new(net.net.prefix(), N).unwrap()
+    }
+}
+
 // We need a custom Deserialize to ensure that the subnet is what we expect.
 impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
