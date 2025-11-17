@@ -342,10 +342,9 @@ impl DataStore {
     ) -> Result<NetworkInterface, network_interface::InsertError> {
         let query = network_interface::InsertQuery::new(interface.clone())
             .to_insert_query();
-        query
-            .get_result_async(conn)
-            .await
-            .map_err(|e| network_interface::InsertError::from_diesel(e, &interface))
+        query.get_result_async(conn).await.map_err(|e| {
+            network_interface::InsertError::from_diesel(e, &interface)
+        })
     }
 
     /// Delete all network interfaces attached to the given instance.

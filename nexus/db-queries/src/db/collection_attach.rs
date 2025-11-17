@@ -16,8 +16,8 @@ use super::cte_utils::{
     BoxableTable, BoxableUpdateStatement, BoxedQuery, ExprSqlType, FilterBy,
     QueryFromClause, QuerySqlType, TableDefaultWhereClause,
 };
-use async_bb8_diesel::AsyncRunQueryDsl;
 use crate::db::raw_query_builder::TypedSqlQuery;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
@@ -31,7 +31,6 @@ use diesel::sql_types::{BigInt, Nullable, SingleValue};
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::DatastoreAttachTargetConfig;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 
 /// A collection of type aliases particularly relevant to collection-based CTEs.
 pub(crate) mod aliases {
@@ -272,50 +271,46 @@ pub trait DatastoreAttachTarget<ResourceType>:
 impl<T, R> DatastoreAttachTarget<R> for T where T: DatastoreAttachTargetConfig<R>
 {}
 
-/// QueryBuilder-based version of attach_resource (two-phase API).
-///
-/// This provides a two-phase API:
-/// 1. `AttachQueryTemplate::new()` - Creates a template with table/column names
-/// 2. `template.execute()` - Executes with runtime values (UUIDs, max, SET clause)
-///
-/// This separates compile-time schema information from runtime query parameters.
-pub struct AttachQueryTemplate<C: diesel::Table, R: diesel::Table> {
-    collection: Collection<C>,
-    resource: Resource<R>,
-    allow_from_attached: bool,
-}
-
-pub struct Collection<T: diesel::Table> {
+/// A database object which may have one or more [`Resource`]s attached to it.
+pub struct Collection {
     table_name: &'static str,
     id_column: &'static str,
     time_deleted_column: &'static str,
-    _table: PhantomData<T>,
 }
 
-impl<T: diesel::Table> Collection<T> {
+impl Collection {
+    /// Describes a collection, within which a [`Resource`] will be inserted.
+    ///
+    /// - `table_name`: Name of the collection table
+    /// - `id_column`: Name of the primary key column
+    /// - `time_deleted_column`: Name of the column indicating if the collection
+    /// has been soft-deleted.
     pub const fn new(
         table_name: &'static str,
         id_column: &'static str,
         time_deleted_column: &'static str,
     ) -> Self {
-        Self {
-            table_name,
-            id_column,
-            time_deleted_column,
-            _table: PhantomData,
-        }
+        Self { table_name, id_column, time_deleted_column }
     }
 }
 
-pub struct Resource<T: diesel::Table> {
+/// A database object which may belong to one or more [`Collection`]s.
+pub struct Resource {
     table_name: &'static str,
     id_column: &'static str,
     collection_id_column: &'static str,
     time_deleted_column: &'static str,
-    _table: PhantomData<T>,
 }
 
-impl<T: diesel::Table> Resource<T> {
+impl Resource {
+    /// Describes a resource, which may be inserted within a [`Collection`].
+    ///
+    /// - `table_name`: Name of the collection table
+    /// - `id_column`: Name of the primary key column
+    /// - `collection_id_column`: Name of the column referencing the collection
+    /// by primary key.
+    /// - `time_deleted_column`: Name of the column indicating if the collection
+    /// has been soft-deleted.
     pub const fn new(
         table_name: &'static str,
         id_column: &'static str,
@@ -327,27 +322,40 @@ impl<T: diesel::Table> Resource<T> {
             id_column,
             collection_id_column,
             time_deleted_column,
-            _table: PhantomData,
         }
     }
 }
 
-impl<C: diesel::Table, R: diesel::Table> AttachQueryTemplate<C, R> {
+/// Creates a statement for attaching a [`Resource`] object to a [`Collection`].
+///
+/// This query allows callers to atomically check the state of a
+/// collection and a resource while attaching a resource to a collection.
+///
+/// This provides a two-phase API:
+/// - [`AttachQueryTemplate::new`] - Creates a query with table/column names
+/// - [`AttachQueryTemplate::execute`] - Executes with runtime values (UUIDs, max, SET clause)
+pub struct AttachQueryTemplate {
+    collection: Collection,
+    resource: Resource,
+    allow_from_attached: bool,
+}
+
+impl AttachQueryTemplate {
     /// Creates a new attach query template with the schema information.
     ///
     /// This captures all the table and column names that define the structure
-    /// of the attach operation. Call `execute()` with runtime parameters to
+    /// of the attach operation. Call [`Self::execute`] with runtime parameters to
     /// build the actual query.
+    ///
+    /// `allow_from_attached` answers the question: "Can we attach a resource to
+    /// this collection, even if it's currently attached to a different
+    /// collection"?
     pub const fn new(
-        collection: Collection<C>,
-        resource: Resource<R>,
+        collection: Collection,
+        resource: Resource,
         allow_from_attached: bool,
     ) -> Self {
-        Self {
-            collection,
-            resource,
-            allow_from_attached,
-        }
+        Self { collection, resource, allow_from_attached }
     }
 
     /// Builds the attach query with runtime parameters.
@@ -383,9 +391,15 @@ impl<C: diesel::Table, R: diesel::Table> AttachQueryTemplate<C, R> {
         collection_id: uuid::Uuid,
         resource_id: uuid::Uuid,
         max_attached_resources: u32,
-        build_set_clause: impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder),
-        collection_filter: Option<impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder)>,
-        resource_filter: Option<impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder)>,
+        build_set_clause: impl FnOnce(
+            &mut crate::db::raw_query_builder::QueryBuilder,
+        ),
+        collection_filter: Option<
+            impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder),
+        >,
+        resource_filter: Option<
+            impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder),
+        >,
     ) -> AttachQuery<ResourceType, CollectionType>
     where
         ResourceType: Selectable<Pg> + Send + 'static,
@@ -477,8 +491,11 @@ impl<C: diesel::Table, R: diesel::Table> AttachQueryTemplate<C, R> {
         builder.sql(self.collection.id_column);
         builder.sql(" FROM collection_info) AND EXISTS(SELECT ");
         builder.sql(self.resource.id_column);
-        builder.sql(" FROM resource_info) AND (SELECT * FROM resource_count) < ");
-        builder.sql(crate::db::raw_query_builder::TrustedStr::from_u32(max_attached_resources));
+        builder
+            .sql(" FROM resource_info) AND (SELECT * FROM resource_count) < ");
+        builder.sql(crate::db::raw_query_builder::TrustedStr::from_u32(
+            max_attached_resources,
+        ));
         builder.sql(", TRUE, FALSE)), ");
 
         // updated_resource AS (...)
@@ -503,9 +520,7 @@ impl<C: diesel::Table, R: diesel::Table> AttachQueryTemplate<C, R> {
             LEFT JOIN (SELECT * FROM updated_resource) ON TRUE",
         );
 
-        AttachQuery {
-            query: builder.query(),
-        }
+        AttachQuery { query: builder.query() }
     }
 }
 
@@ -513,7 +528,7 @@ pub type RawSqlOutput<ResourceType, CollectionType> = (
     BigInt,
     Nullable<SelectableSqlType<CollectionType>>,
     Nullable<SelectableSqlType<ResourceType>>,
-    Nullable<SelectableSqlType<ResourceType>>
+    Nullable<SelectableSqlType<ResourceType>>,
 );
 
 /// A query built by AttachQueryTemplate that can be executed to attach
@@ -527,10 +542,7 @@ where
     CollectionType: Selectable<Pg> + Send + 'static,
 {
     query: crate::db::raw_query_builder::TypedSqlQuery<
-        RawSqlOutput<
-            ResourceType,
-            CollectionType,
-        >
+        RawSqlOutput<ResourceType, CollectionType>,
     >,
 }
 
@@ -548,22 +560,28 @@ where
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> AsyncAttachToCollectionResult<ResourceType, CollectionType>
     where
-        TypedSqlQuery<
-            RawSqlOutput<
-                ResourceType,
-                CollectionType
-            >
-        >: query_methods::LoadQuery<'static, DbConnection, RawOutput<ResourceType, CollectionType>>,
+        TypedSqlQuery<RawSqlOutput<ResourceType, CollectionType>>:
+            query_methods::LoadQuery<
+                    'static,
+                    DbConnection,
+                    RawOutput<ResourceType, CollectionType>,
+                >,
     {
         use async_bb8_diesel::AsyncRunQueryDsl;
 
         // Execute the query and get the raw tuple result
-        let (attached_count, collection_before_update, resource_before_update, resource_after_update): (
+        let (
+            attached_count,
+            collection_before_update,
+            resource_before_update,
+            resource_after_update,
+        ): (
             i64,
             Option<CollectionType>,
             Option<ResourceType>,
             Option<ResourceType>,
-        ) = self.query
+        ) = self
+            .query
             .get_result_async::<RawOutput<ResourceType, CollectionType>>(conn)
             .await
             .map_err(|e| AttachError::DatabaseError(e))?;
@@ -625,11 +643,10 @@ where
 }
 
 /// Result of [`AttachToCollectionStatement`] when executed asynchronously
-pub type AsyncAttachToCollectionResult<ResourceType, CollectionType> =
-    Result<
-        (CollectionType, ResourceType),
-        AttachError<ResourceType, CollectionType, DieselError>
-    >;
+pub type AsyncAttachToCollectionResult<ResourceType, CollectionType> = Result<
+    (CollectionType, ResourceType),
+    AttachError<ResourceType, CollectionType, DieselError>,
+>;
 
 /// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]

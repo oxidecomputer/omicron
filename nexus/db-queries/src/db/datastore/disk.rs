@@ -11,6 +11,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_attach;
 use crate::db::collection_attach::AttachError;
+use crate::db::collection_attach::AttachQuery;
 use crate::db::collection_attach::AttachQueryTemplate;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
@@ -41,8 +42,6 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::LookupPath;
-use nexus_db_schema::schema::disk;
-use nexus_db_schema::schema::instance;
 use omicron_common::api;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::Error;
@@ -61,22 +60,22 @@ use std::collections::HashSet;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
-/// QueryBuilder-based template for attaching disks to instances.
-#[allow(dead_code)] // TODO: Remove once AttachQuery::attach_and_get_result_async is implemented
-const DISK_ATTACH_QUERY_TEMPLATE: AttachQueryTemplate::<instance::table, disk::table> = AttachQueryTemplate::new(
-    collection_attach::Collection::new(
-        "instance",        // collection table
-        "id",              // collection id column
-        "time_deleted",    // collection time_deleted
-    ),
-    collection_attach::Resource::new(
-        "disk",            // resource table
-        "id",              // resource id column
-        "attach_instance_id", // resource FK column
-        "time_deleted",    // resource time_deleted
-    ),
-    false,             // allow_from_attached
-);
+/// Database query for attaching disks to instances.
+const DISK_ATTACH_QUERY_TEMPLATE: AttachQueryTemplate =
+    AttachQueryTemplate::new(
+        collection_attach::Collection::new(
+            "instance",     // collection table
+            "id",           // collection id column
+            "time_deleted", // collection time_deleted
+        ),
+        collection_attach::Resource::new(
+            "disk",               // resource table
+            "id",                 // resource id column
+            "attach_instance_id", // resource FK column
+            "time_deleted",       // resource time_deleted
+        ),
+        false, // allow_from_attached
+    );
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Disk {
@@ -545,45 +544,53 @@ impl DataStore {
 
         let instance_id = authz_instance.id();
         let disk_id = authz_disk.id();
-        let query = DISK_ATTACH_QUERY_TEMPLATE.build::<model::Disk, model::Instance>(
-            instance_id,
-            disk_id,
-            max_disks,
-            |builder| {
-                use crate::db::queries::disk::build_next_disk_slot_subquery;
-                use diesel::sql_types;
+        let query: AttachQuery<model::Disk, model::Instance> =
+            DISK_ATTACH_QUERY_TEMPLATE.build(
+                instance_id,
+                disk_id,
+                max_disks,
+                |builder| {
+                    use crate::db::queries::disk::build_next_disk_slot_subquery;
+                    use diesel::sql_types;
 
-                // Build SET clause: attach_instance_id, disk_state, slot
-                let attached_label = api::external::DiskState::Attached(instance_id).label();
-                builder.sql("attach_instance_id = ");
-                builder.param().bind::<sql_types::Uuid, _>(instance_id);
-                builder.sql(", disk_state = ");
-                builder.param().bind::<sql_types::Text, _>(attached_label);
-                builder.sql(", slot = (");
-                build_next_disk_slot_subquery(builder, instance_id);
-                builder.sql(")");
-            },
-            Some(|builder: &mut QueryBuilder| {
-                use diesel::sql_types;
-                // Collection (instance) filter: state and active_propolis_id
-                let state_labels: Vec<_> = ok_to_attach_instance_states
-                    .iter()
-                    .map(|s| s.label())
-                    .collect();
-                builder.sql(" AND state = ANY(");
-                builder.param().bind::<sql_types::Array<sql_types::Text>, _>(state_labels);
-                builder.sql(") AND active_propolis_id IS NULL");
-            }),
-            Some(|builder: &mut QueryBuilder| {
-                use diesel::sql_types;
-                // Resource (disk) filter: disk_state
-                builder.sql(" AND disk_state = ANY(");
-                builder.param().bind::<sql_types::Array<sql_types::Text>, _>(
-                    ok_to_attach_disk_state_labels.clone(),
-                );
-                builder.sql(")");
-            }),
-        );
+                    // Build SET clause: attach_instance_id, disk_state, slot
+                    let attached_label =
+                        api::external::DiskState::Attached(instance_id).label();
+                    builder.sql("attach_instance_id = ");
+                    builder.param().bind::<sql_types::Uuid, _>(instance_id);
+                    builder.sql(", disk_state = ");
+                    builder.param().bind::<sql_types::Text, _>(attached_label);
+                    builder.sql(", slot = (");
+                    build_next_disk_slot_subquery(builder, instance_id);
+                    builder.sql(")");
+                },
+                Some(|builder: &mut QueryBuilder| {
+                    use diesel::sql_types;
+                    // Collection (instance) filter: state and active_propolis_id
+                    let state_labels: Vec<_> = ok_to_attach_instance_states
+                        .iter()
+                        .map(|s| s.label())
+                        .collect();
+                    builder.sql(" AND state = ANY(");
+                    builder
+                        .param()
+                        .bind::<sql_types::Array<sql_types::Text>, _>(
+                            state_labels,
+                        );
+                    builder.sql(") AND active_propolis_id IS NULL");
+                }),
+                Some(|builder: &mut QueryBuilder| {
+                    use diesel::sql_types;
+                    // Resource (disk) filter: disk_state
+                    builder.sql(" AND disk_state = ANY(");
+                    builder
+                        .param()
+                        .bind::<sql_types::Array<sql_types::Text>, _>(
+                            ok_to_attach_disk_state_labels.clone(),
+                        );
+                    builder.sql(")");
+                }),
+            );
 
         let conn = self.pool_connection_authorized(opctx).await?;
 

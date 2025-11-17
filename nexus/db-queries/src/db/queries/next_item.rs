@@ -240,7 +240,6 @@ where
         Item: NextItemBinder + Copy,
         Generator: Copy,
     {
-
         // Copy values we need to bind
         let base = *self.shift_generator.base();
         let first_end = *self.shift_generator.shift_indices().first_end();
@@ -278,7 +277,10 @@ where
         if let Some(scope) = &self.scope {
             builder.sql(" ON (").sql(scope.column_name);
             builder.sql(", ").sql(self.item_column_name);
-            builder.sql(", ").sql(TIME_DELETED_COLUMN_IDENT).sql(" IS NULL) = (");
+            builder
+                .sql(", ")
+                .sql(TIME_DELETED_COLUMN_IDENT)
+                .sql(" IS NULL) = (");
             builder.param().bind::<sql_types::Uuid, _>(scope.key);
             builder.sql(", ");
             base.bind_to_query_builder(builder);
@@ -286,7 +288,10 @@ where
             builder.sql(", TRUE)");
         } else {
             builder.sql(" ON (").sql(self.item_column_name);
-            builder.sql(", ").sql(TIME_DELETED_COLUMN_IDENT).sql(" IS NULL) = (");
+            builder
+                .sql(", ")
+                .sql(TIME_DELETED_COLUMN_IDENT)
+                .sql(" IS NULL) = (");
             base.bind_to_query_builder(builder);
             builder.sql(" + ").sql(SHIFT_COLUMN_IDENT);
             builder.sql(", TRUE)");
@@ -309,13 +314,19 @@ const SELF_JOIN_SECOND_TABLE_ALIAS: &str = "self_join_table2";
 // trait-based implementations for different item types. We'll use a helper
 // trait to abstract over the SQL type.
 pub(super) trait NextItemBinder {
-    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()>;
+    fn bind_item<'a>(
+        &'a self,
+        out: &mut AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()>;
     fn bind_to_query_builder(&self, builder: &mut QueryBuilder);
 }
 
 // Implement for common types used in NextItem queries
 impl NextItemBinder for i32 {
-    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+    fn bind_item<'a>(
+        &'a self,
+        out: &mut AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         out.push_bind_param::<sql_types::Int4, i32>(self)
     }
     fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
@@ -324,7 +335,10 @@ impl NextItemBinder for i32 {
 }
 
 impl NextItemBinder for i16 {
-    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+    fn bind_item<'a>(
+        &'a self,
+        out: &mut AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         out.push_bind_param::<sql_types::Int2, i16>(self)
     }
     fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
@@ -334,7 +348,10 @@ impl NextItemBinder for i16 {
 
 // Vni uses Int4 as its SQL type
 impl NextItemBinder for crate::db::model::Vni {
-    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+    fn bind_item<'a>(
+        &'a self,
+        out: &mut AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         out.push_bind_param::<sql_types::Int4, crate::db::model::Vni>(self)
     }
     fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
@@ -344,7 +361,10 @@ impl NextItemBinder for crate::db::model::Vni {
 
 // Ipv4Addr and Ipv6Addr use Inet as their SQL type
 impl NextItemBinder for crate::db::model::Ipv4Addr {
-    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+    fn bind_item<'a>(
+        &'a self,
+        out: &mut AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         out.push_bind_param::<sql_types::Inet, crate::db::model::Ipv4Addr>(self)
     }
     fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
@@ -353,7 +373,10 @@ impl NextItemBinder for crate::db::model::Ipv4Addr {
 }
 
 impl NextItemBinder for crate::db::model::Ipv6Addr {
-    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
+    fn bind_item<'a>(
+        &'a self,
+        out: &mut AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
         out.push_bind_param::<sql_types::Inet, crate::db::model::Ipv6Addr>(self)
     }
     fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
@@ -363,8 +386,13 @@ impl NextItemBinder for crate::db::model::Ipv6Addr {
 
 // MacAddr uses BigInt as its SQL type
 impl NextItemBinder for crate::db::model::MacAddr {
-    fn bind_item<'a>(&'a self, out: &mut AstPass<'_, 'a, Pg>) -> diesel::QueryResult<()> {
-        out.push_bind_param::<sql_types::BigInt, crate::db::model::MacAddr>(self)
+    fn bind_item<'a>(
+        &'a self,
+        out: &mut AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
+        out.push_bind_param::<sql_types::BigInt, crate::db::model::MacAddr>(
+            self,
+        )
     }
     fn bind_to_query_builder(&self, builder: &mut QueryBuilder) {
         builder.param().bind::<sql_types::BigInt, _>(*self);
@@ -398,7 +426,9 @@ where
         out.push_sql(") AS ");
         out.push_identifier(INDEX_COLUMN_IDENT)?;
         out.push_sql(", generate_series(0, ");
-        out.push_bind_param::<sql_types::BigInt, i64>(self.shift_generator.max_shift())?;
+        out.push_bind_param::<sql_types::BigInt, i64>(
+            self.shift_generator.max_shift(),
+        )?;
         out.push_sql(") AS ");
         out.push_identifier(SHIFT_COLUMN_IDENT)?;
         out.push_sql(" UNION ALL SELECT generate_series(");
@@ -412,7 +442,9 @@ where
         out.push_sql(") AS ");
         out.push_identifier(INDEX_COLUMN_IDENT)?;
         out.push_sql(", generate_series(");
-        out.push_bind_param::<sql_types::BigInt, i64>(self.shift_generator.min_shift())?;
+        out.push_bind_param::<sql_types::BigInt, i64>(
+            self.shift_generator.min_shift(),
+        )?;
         out.push_sql(", -1) AS ");
         out.push_identifier(SHIFT_COLUMN_IDENT)?;
         out.push_sql(") LEFT OUTER JOIN ");
@@ -723,13 +755,7 @@ impl<Item> NextItemSelfJoined<Item> {
         item_min: Item,
         item_max: Item,
     ) -> Self {
-        Self {
-            table_name,
-            item_column_name,
-            scope: None,
-            item_min,
-            item_max,
-        }
+        Self { table_name, item_column_name, scope: None, item_min, item_max }
     }
 
     /// Convert this NextItemSelfJoined query into a TypedSqlQuery using QueryBuilder.
@@ -743,7 +769,6 @@ impl<Item> NextItemSelfJoined<Item> {
     where
         Item: NextItemBinder + Copy,
     {
-
         // Copy values we need to bind
         let item_min = self.item_min;
         let item_max = self.item_max;
@@ -774,12 +799,26 @@ impl<Item> NextItemSelfJoined<Item> {
 
         // UNION ALL - gap below
         builder.sql(" UNION ALL (");
-        self.build_gap_query(builder, Direction::Down, item_min, item_max, scope_column, scope_key);
+        self.build_gap_query(
+            builder,
+            Direction::Down,
+            item_min,
+            item_max,
+            scope_column,
+            scope_key,
+        );
         builder.sql(")");
 
         // UNION ALL - gap above
         builder.sql(" UNION ALL (");
-        self.build_gap_query(builder, Direction::Up, item_min, item_max, scope_column, scope_key);
+        self.build_gap_query(
+            builder,
+            Direction::Up,
+            item_min,
+            item_max,
+            scope_column,
+            scope_key,
+        );
         builder.sql(")");
 
         // LIMIT 1) AS <item_column>
@@ -1136,7 +1175,12 @@ mod tests {
     // of the `NextItemSelfJoinedQuery` itself.
     impl NextItemSelfJoinedQuery {
         fn new(min: i32, max: i32) -> Self {
-            let inner = NextItemSelfJoined::new_unscoped("test_schema.item", "value", min, max);
+            let inner = NextItemSelfJoined::new_unscoped(
+                "test_schema.item",
+                "value",
+                min,
+                max,
+            );
             Self { inner }
         }
     }
@@ -1482,8 +1526,12 @@ mod tests {
             "value",
             DefaultShiftGenerator::new(0, N_ITEMS as _, 0).unwrap(),
         );
-        let next_item_join =
-            NextItemSelfJoined::new_unscoped("test_schema.item", "value", 0, N_ITEMS as _);
+        let next_item_join = NextItemSelfJoined::new_unscoped(
+            "test_schema.item",
+            "value",
+            0,
+            N_ITEMS as _,
+        );
         println!(
             "Next-item using `generate_series()`:\n{}\n\
             Next-item using self-join:\n{}\n",

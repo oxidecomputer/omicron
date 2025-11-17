@@ -514,12 +514,10 @@ impl DataStore {
                 // None instead to signal the error.
                 Ok(None)
             }
-            Err(e) => {
-                Err(public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
-                ))
-            }
+            Err(e) => Err(public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(ResourceType::Vpc, name.as_str()),
+            )),
         }
     }
 

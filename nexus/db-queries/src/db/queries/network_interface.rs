@@ -534,7 +534,10 @@ impl NextIpv4Address {
     }
 
     /// Builds the NextIpv4Address query into the provided QueryBuilder.
-    pub fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+    pub fn build_query(
+        &self,
+        builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    ) {
         self.inner.build_query(builder);
     }
 }
@@ -570,7 +573,10 @@ impl NextIpv6Address {
     }
 
     /// Builds the NextIpv6Address query into the provided QueryBuilder.
-    pub fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+    pub fn build_query(
+        &self,
+        builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    ) {
         self.inner.build_query(builder);
     }
 }
@@ -649,7 +655,10 @@ impl NextNicSlot {
     ///
     /// This wraps the inner NextItem query with COALESCE(..., 0) to ensure
     /// a default value of 0 is returned when no slot is found.
-    pub fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+    pub fn build_query(
+        &self,
+        builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    ) {
         builder.sql("SELECT COALESCE((");
         self.inner.build_query(builder);
         builder.sql("), 0)");
@@ -693,7 +702,10 @@ impl NextMacAddress {
     }
 
     /// Builds the NextMacAddress query into the provided QueryBuilder.
-    pub fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+    pub fn build_query(
+        &self,
+        builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    ) {
         self.inner.build_query(builder);
     }
 }
@@ -814,7 +826,9 @@ fn build_ensure_unique_vpc_subnet_expression(
     kind: NetworkInterfaceKind,
     parent_id: Uuid,
 ) {
-    builder.sql("CAST(IF(EXISTS(SELECT subnet_id FROM network_interface WHERE id != ");
+    builder.sql(
+        "CAST(IF(EXISTS(SELECT subnet_id FROM network_interface WHERE id != ",
+    );
     builder.param().bind::<sql_types::Uuid, _>(interface_id);
     builder.sql(" AND parent_id = ");
     builder.param().bind::<sql_types::Uuid, _>(parent_id);
@@ -959,11 +973,7 @@ fn build_interface_validation_cte(
     builder.sql("WITH validated_interface (vpc_id, subnet_id, parent_id, slot, is_primary) AS (SELECT ");
 
     build_ensure_unique_vpc_expression(
-        builder,
-        vpc_id,
-        vpc_id_str,
-        kind,
-        parent_id,
+        builder, vpc_id, vpc_id_str, kind, parent_id,
     );
     builder.sql(" AS vpc_id, ");
 
@@ -1137,7 +1147,8 @@ impl<Q> AutoOrOptionalIp<Q> {
     }
 }
 
-type AllNetworkInterfaceColumns = AllColumnsOf::<nexus_db_schema::schema::network_interface::table>;
+type AllNetworkInterfaceColumns =
+    AllColumnsOf<nexus_db_schema::schema::network_interface::table>;
 
 impl InsertQuery {
     pub fn new(interface: IncompleteNetworkInterface) -> Self {
@@ -1198,7 +1209,11 @@ impl InsertQuery {
     /// Diesel's Insertable trait machinery.
     pub fn to_insert_query(
         self,
-    ) -> crate::db::raw_query_builder::TypedSqlQuery<crate::db::raw_query_builder::SelectableSql<db::model::NetworkInterface>> {
+    ) -> crate::db::raw_query_builder::TypedSqlQuery<
+        crate::db::raw_query_builder::SelectableSql<
+            db::model::NetworkInterface,
+        >,
+    > {
         use crate::db::raw_query_builder::QueryBuilder;
 
         let mut builder = QueryBuilder::new();
@@ -1233,22 +1248,31 @@ impl InsertQuery {
         builder.sql("SELECT ");
         builder.param().bind::<sql_types::Uuid, _>(self.interface.identity.id);
         builder.sql(" AS id, ");
-        builder.param().bind::<sql_types::Text, _>(self.interface.identity.name);
+        builder
+            .param()
+            .bind::<sql_types::Text, _>(self.interface.identity.name);
         builder.sql(" AS name, ");
-        builder.param().bind::<sql_types::Text, _>(self.interface.identity.description);
+        builder
+            .param()
+            .bind::<sql_types::Text, _>(self.interface.identity.description);
         builder.sql(" AS description, ");
         builder.param().bind::<sql_types::Timestamptz, _>(self.now);
         builder.sql(" AS time_created, ");
         builder.param().bind::<sql_types::Timestamptz, _>(self.now);
         builder.sql(" AS time_modified, ");
-        builder.param().bind::<sql_types::Nullable<sql_types::Timestamptz>, _>(None::<DateTime<Utc>>);
+        builder.param().bind::<sql_types::Nullable<sql_types::Timestamptz>, _>(
+            None::<DateTime<Utc>>,
+        );
         builder.sql(" AS time_deleted, ");
-        builder.param().bind::<NetworkInterfaceKindEnum, _>(self.interface.kind);
+        builder
+            .param()
+            .bind::<NetworkInterfaceKindEnum, _>(self.interface.kind);
         builder.sql(" AS kind, ");
         builder.param().bind::<sql_types::Uuid, _>(self.interface.parent_id);
-        builder.sql(" AS parent_id, \
+        builder.sql(
+            " AS parent_id, \
             (SELECT vpc_id FROM validated_interface), \
-            (SELECT subnet_id FROM validated_interface), "
+            (SELECT subnet_id FROM validated_interface), ",
         );
 
         // If the user specified a MAC address, then insert it by value.
@@ -1272,7 +1296,9 @@ impl InsertQuery {
                 builder.sql(")");
             }
             AutoOrOptionalIp::Nullable(maybe_ip) => {
-                builder.param().bind::<sql_types::Nullable<sql_types::Inet>, _>(maybe_ip);
+                builder
+                    .param()
+                    .bind::<sql_types::Nullable<sql_types::Inet>, _>(maybe_ip);
             }
         }
         builder.sql(" AS ip, ");
@@ -1285,7 +1311,9 @@ impl InsertQuery {
                 builder.sql(")");
             }
             AutoOrOptionalIp::Nullable(maybe_ip) => {
-                builder.param().bind::<sql_types::Nullable<sql_types::Inet>, _>(maybe_ip);
+                builder
+                    .param()
+                    .bind::<sql_types::Nullable<sql_types::Inet>, _>(maybe_ip);
             }
         }
         builder.sql(" AS ipv6, ");
@@ -1296,14 +1324,19 @@ impl InsertQuery {
             builder.sql("(SELECT slot FROM validated_interface)");
         }
         builder.sql(" AS slot ");
-        builder.sql(", (SELECT is_primary FROM validated_interface) AS is_primary, ");
+        builder.sql(
+            ", (SELECT is_primary FROM validated_interface) AS is_primary, ",
+        );
 
         // Transit IPs
-        builder.param().bind::<sql_types::Array<sql_types::Inet>, _>(self.transit_ips);
+        builder
+            .param()
+            .bind::<sql_types::Array<sql_types::Inet>, _>(self.transit_ips);
         builder.sql(" AS transit_ips ");
 
         builder.sql(" RETURNING ");
-        builder.sql(AllNetworkInterfaceColumns::with_prefix("network_interface"));
+        builder
+            .sql(AllNetworkInterfaceColumns::with_prefix("network_interface"));
 
         builder.query()
     }
@@ -1323,7 +1356,10 @@ struct IsPrimaryNic {
 
 impl IsPrimaryNic {
     /// Builds the IsPrimaryNic query into the provided QueryBuilder.
-    fn build_query(&self, builder: &mut crate::db::raw_query_builder::QueryBuilder) {
+    fn build_query(
+        &self,
+        builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    ) {
         builder.sql("SELECT NOT EXISTS(SELECT 1 FROM network_interface WHERE parent_id = ");
         builder.param().bind::<sql_types::Uuid, _>(self.parent_id);
         builder.sql(" AND kind = ");
@@ -1453,7 +1489,10 @@ impl DeleteQuery {
     /// Builds the complete DELETE query using QueryBuilder.
     pub fn to_delete_query(
         self,
-    ) -> crate::db::raw_query_builder::TypedSqlQuery<(Nullable<sql_types::Uuid>, Nullable<sql_types::Uuid>)> {
+    ) -> crate::db::raw_query_builder::TypedSqlQuery<(
+        Nullable<sql_types::Uuid>,
+        Nullable<sql_types::Uuid>,
+    )> {
         use crate::db::raw_query_builder::QueryBuilder;
         let mut builder = QueryBuilder::new();
 
@@ -1478,11 +1517,15 @@ impl DeleteQuery {
         builder.sql(" AND time_deleted IS NULL) <= 1, ");
         builder.param().bind::<sql_types::Text, _>(self.parent_id_str);
         builder.sql(", ");
-        builder.param().bind::<sql_types::Text, _>(DeleteError::HAS_SECONDARIES_SENTINEL);
+        builder
+            .param()
+            .bind::<sql_types::Text, _>(DeleteError::HAS_SECONDARIES_SENTINEL);
         builder.sql(") AS UUID)), ");
 
         // found_interface CTE - checks if interface exists
-        builder.sql("found_interface AS (SELECT id FROM network_interface WHERE id = ");
+        builder.sql(
+            "found_interface AS (SELECT id FROM network_interface WHERE id = ",
+        );
         builder.param().bind::<sql_types::Uuid, _>(self.interface_id);
         builder.sql("), ");
 
@@ -1508,8 +1551,9 @@ impl DeleteQuery {
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<bool, DieselError> {
         let query = self.to_delete_query();
-        let (found_id, deleted_id) =
-            query.get_result_async::<(Option<Uuid>, Option<Uuid>)>(conn).await?;
+        let (found_id, deleted_id) = query
+            .get_result_async::<(Option<Uuid>, Option<Uuid>)>(conn)
+            .await?;
         match (found_id, deleted_id) {
             (Some(found), Some(deleted)) => {
                 assert_eq!(

@@ -31,7 +31,7 @@ pub struct InsertVpcQuery {
     vni_subquery: VniSubquery,
 }
 
-type AllVpcColumns = AllColumnsOf::<nexus_db_schema::schema::vpc::table>;
+type AllVpcColumns = AllColumnsOf<nexus_db_schema::schema::vpc::table>;
 
 impl InsertVpcQuery {
     pub fn new(vpc: IncompleteVpc) -> Self {
@@ -75,13 +75,21 @@ impl InsertVpcQuery {
         builder.sql(", ");
         builder.param().bind::<sql_types::Text, _>(self.vpc.identity.name);
         builder.sql(", ");
-        builder.param().bind::<sql_types::Text, _>(self.vpc.identity.description);
+        builder
+            .param()
+            .bind::<sql_types::Text, _>(self.vpc.identity.description);
         builder.sql(", ");
-        builder.param().bind::<sql_types::Timestamptz, _>(self.vpc.identity.time_created);
+        builder
+            .param()
+            .bind::<sql_types::Timestamptz, _>(self.vpc.identity.time_created);
         builder.sql(", ");
-        builder.param().bind::<sql_types::Timestamptz, _>(self.vpc.identity.time_modified);
+        builder
+            .param()
+            .bind::<sql_types::Timestamptz, _>(self.vpc.identity.time_modified);
         builder.sql(", ");
-        builder.param().bind::<sql_types::Nullable<sql_types::Timestamptz>, _>(self.vpc.identity.time_deleted);
+        builder.param().bind::<sql_types::Nullable<sql_types::Timestamptz>, _>(
+            self.vpc.identity.time_deleted,
+        );
         builder.sql(", ");
         builder.param().bind::<sql_types::Uuid, _>(self.vpc.project_id);
         builder.sql(", ");
