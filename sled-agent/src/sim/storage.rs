@@ -1181,7 +1181,7 @@ impl Zpool {
             .get(&id)
             .expect("Failed to get the dataset we just inserted")
         else {
-            panic!("just inserted this variant!");
+            unreachable!("just inserted this variant!");
         };
 
         crucible
