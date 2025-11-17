@@ -638,7 +638,11 @@ async fn test_device_token_cannot_extend_expiration(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let testctx = &cptestctx.external_client;
-    let silo_name = cptestctx.silo_name.as_str();
+
+    // get silo belonging to privileged user to make sure local user for session
+    // testing is created in the same silo
+    let me = object_get::<views::CurrentUser>(testctx, "/v1/me").await;
+    let silo_name = me.silo_name.as_str();
 
     // Set silo max TTL to 15 seconds
     let settings = params::SiloAuthSettingsUpdate {
@@ -667,12 +671,12 @@ async fn test_device_token_cannot_extend_expiration(
     )
     .await;
 
+    // we can use the same client_id for everything because the device codes differentiate
+    let client_id = Uuid::new_v4();
+
     // Test session auth with explicit TTL = silo max (15 seconds)
-    let session_client_id = Uuid::new_v4();
-    let session_request_with_ttl = DeviceAuthRequest {
-        client_id: session_client_id,
-        ttl_seconds: NonZeroU32::new(15),
-    };
+    let session_request_with_ttl =
+        DeviceAuthRequest { client_id, ttl_seconds: NonZeroU32::new(15) };
 
     let session_auth_response = NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/auth")
@@ -699,7 +703,7 @@ async fn test_device_token_cannot_extend_expiration(
     let session_token_grant = fetch_device_token(
         testctx,
         session_auth_response.device_code,
-        session_client_id,
+        client_id,
         AuthnMode::Session(session_token.clone()),
     )
     .await;
@@ -709,14 +713,12 @@ async fn test_device_token_cannot_extend_expiration(
     let session_ttl_secs = (session_expiration - session_time).num_seconds();
     assert!(
         14 <= session_ttl_secs && session_ttl_secs <= 16,
-        "session-authenticated token should get full silo max (~15 seconds), got {session_ttl_secs}"
+        "should be full silo max (~15 seconds), got {session_ttl_secs}"
     );
 
-    // Test session auth with no TTL specified
-    // (When no TTL is requested, tokens get no expiration even with silo max set)
-    let session_client_id2 = Uuid::new_v4();
+    // Test session auth with no TTL specified, gets silo max
     let session_request_no_ttl =
-        DeviceAuthRequest { client_id: session_client_id2, ttl_seconds: None };
+        DeviceAuthRequest { client_id, ttl_seconds: None };
 
     let session_auth_response2 = NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/auth")
@@ -725,6 +727,8 @@ async fn test_device_token_cannot_extend_expiration(
     )
     .execute_and_parse_unwrap::<DeviceAuthResponse>()
     .await;
+
+    let session_time2 = Utc::now();
 
     NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/confirm")
@@ -741,15 +745,17 @@ async fn test_device_token_cannot_extend_expiration(
     let session_token_grant2 = fetch_device_token(
         testctx,
         session_auth_response2.device_code,
-        session_client_id2,
+        client_id,
         AuthnMode::Session(session_token),
     )
     .await;
 
-    // When no TTL is specified, token has no expiration (not clamped)
-    assert_eq!(
-        session_token_grant2.time_expires, None,
-        "session-authenticated token with no TTL should have no expiration"
+    // When no TTL is specified, token still gets silo max expiration
+    let session_expiration2 = session_token_grant2.time_expires.unwrap();
+    let session_ttl_secs2 = (session_expiration2 - session_time2).num_seconds();
+    assert!(
+        14 <= session_ttl_secs2 && session_ttl_secs2 <= 16,
+        "should be silo max (~15 seconds), got {session_ttl_secs2}"
     );
 
     // Now test device token auth with clamping
