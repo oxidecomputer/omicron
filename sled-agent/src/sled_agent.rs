@@ -38,6 +38,7 @@ use illumos_utils::zfs::Mountpoint;
 use illumos_utils::zfs::SizeDetails;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolOrRamdisk;
 use itertools::Itertools as _;
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronSledConfig, SledRole,
@@ -47,6 +48,7 @@ use omicron_common::address::{
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
     ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -55,6 +57,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
+use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     DatasetUuid, ExternalZpoolUuid, GenericUuid, MupdateOverrideUuid,
@@ -65,7 +68,6 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
-use omicron_common::api::internal::shared::DelegatedZvol;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
@@ -1202,6 +1204,28 @@ impl SledAgent {
         dataset_id: DatasetUuid,
         request: sled_agent_api::LocalStorageDatasetEnsureRequest,
     ) -> Result<(), HttpError> {
+        // Ensure that the local storage dataset we want to use is still present
+        let present = self
+            .inner
+            .config_reconciler
+            .available_datasets_rx()
+            .all_mounted_local_storage_datasets()
+            .into_iter()
+            .any(|path_in_pool| match path_in_pool.pool {
+                ZpoolOrRamdisk::Zpool(zpool_name) => {
+                    zpool_name == ZpoolName::External(zpool_id)
+                }
+                ZpoolOrRamdisk::Ramdisk => false,
+            });
+
+        if !present {
+            // We cannot create a child dataset of the local storage dataset if
+            // it's not present! Return a 503.
+            let error =
+                format!("local storage dataset for pool {zpool_id} missing!");
+            return Err(HttpError::for_unavail(Some(error.clone()), error));
+        }
+
         let delegated_zvol =
             DelegatedZvol::LocalStorage { zpool_id, dataset_id };
 
@@ -1251,6 +1275,28 @@ impl SledAgent {
         zpool_id: ExternalZpoolUuid,
         dataset_id: DatasetUuid,
     ) -> Result<(), HttpError> {
+        // Ensure that the local storage dataset we want to use is still present
+        let present = self
+            .inner
+            .config_reconciler
+            .available_datasets_rx()
+            .all_mounted_local_storage_datasets()
+            .into_iter()
+            .any(|path_in_pool| match path_in_pool.pool {
+                ZpoolOrRamdisk::Zpool(zpool_name) => {
+                    zpool_name == ZpoolName::External(zpool_id)
+                }
+                ZpoolOrRamdisk::Ramdisk => false,
+            });
+
+        if !present {
+            // We cannot destroy a child dataset of the local storage dataset if
+            // it's not present! Return a 503.
+            let error =
+                format!("local storage dataset for pool {zpool_id} missing!");
+            return Err(HttpError::for_unavail(Some(error.clone()), error));
+        }
+
         let delegated_zvol =
             DelegatedZvol::LocalStorage { zpool_id, dataset_id };
 

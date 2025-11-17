@@ -128,28 +128,28 @@ impl ReconcilerResult {
             .unwrap_or(TimeSyncStatus::NotYetChecked)
     }
 
-    pub(crate) fn all_mounted_debug_datasets(
+    pub(crate) fn all_mounted_datasets_of_kind(
         &self,
+        kind: DatasetKind,
     ) -> impl Iterator<Item = PathInPool> + '_ {
         let Some(latest_result) = &self.latest_result else {
             return Either::Left(std::iter::empty());
         };
         Either::Right(
-            latest_result
-                .all_mounted_datasets(&self.mount_config, DatasetKind::Debug),
+            latest_result.all_mounted_datasets(&self.mount_config, kind),
         )
+    }
+
+    pub(crate) fn all_mounted_debug_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::Debug)
     }
 
     pub(crate) fn all_mounted_zone_root_datasets(
         &self,
     ) -> impl Iterator<Item = PathInPool> + '_ {
-        let Some(latest_result) = &self.latest_result else {
-            return Either::Left(std::iter::empty());
-        };
-        Either::Right(latest_result.all_mounted_datasets(
-            &self.mount_config,
-            DatasetKind::TransientZoneRoot,
-        ))
+        self.all_mounted_datasets_of_kind(DatasetKind::TransientZoneRoot)
     }
 
     pub(crate) fn to_inventory(
@@ -160,6 +160,12 @@ impl ReconcilerResult {
         let latest_result =
             self.latest_result.as_ref().map(|r| r.to_inventory());
         (status, latest_result)
+    }
+
+    pub(crate) fn all_mounted_local_storage_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::LocalStorage)
     }
 }
 
