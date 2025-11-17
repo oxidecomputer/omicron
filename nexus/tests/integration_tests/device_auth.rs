@@ -647,11 +647,9 @@ async fn test_device_token_cannot_extend_expiration(
         object_put(testctx, "/v1/auth-settings", &settings).await;
 
     // Create an initial token with 5 second TTL
-    let client_id_1 = Uuid::new_v4();
-    let initial_request = DeviceAuthRequest {
-        client_id: client_id_1,
-        ttl_seconds: NonZeroU32::new(5),
-    };
+    let client_id = Uuid::new_v4();
+    let initial_request =
+        DeviceAuthRequest { client_id, ttl_seconds: NonZeroU32::new(5) };
 
     let auth_response_1 = NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/auth")
@@ -684,7 +682,7 @@ async fn test_device_token_cannot_extend_expiration(
                 grant_type: "urn:ietf:params:oauth:grant-type:device_code"
                     .to_string(),
                 device_code: auth_response_1.device_code,
-                client_id: client_id_1,
+                client_id,
             }))
             .expect_status(Some(StatusCode::OK)),
     )
@@ -707,11 +705,8 @@ async fn test_device_token_cannot_extend_expiration(
 
     // Now use the initial token to authenticate and start a NEW device auth flow
     // Request a token with 8 second TTL (which is less than silo max of 10)
-    let client_id_2 = Uuid::new_v4();
-    let second_request = DeviceAuthRequest {
-        client_id: client_id_2,
-        ttl_seconds: NonZeroU32::new(8),
-    };
+    let second_request =
+        DeviceAuthRequest { client_id, ttl_seconds: NonZeroU32::new(8) };
 
     let auth_response_2 = NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/auth")
@@ -742,7 +737,7 @@ async fn test_device_token_cannot_extend_expiration(
                 grant_type: "urn:ietf:params:oauth:grant-type:device_code"
                     .to_string(),
                 device_code: auth_response_2.device_code,
-                client_id: client_id_2,
+                client_id,
             }))
             .header(header::AUTHORIZATION, format!("Bearer {}", initial_token))
             .expect_status(Some(StatusCode::OK)),
