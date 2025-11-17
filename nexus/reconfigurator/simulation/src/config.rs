@@ -202,9 +202,10 @@ impl SimConfigBuilder {
         self.log.push(SimConfigLogEntry::SetNumNexus(num_nexus));
     }
 
-    pub fn set_active_nexus_zone_generation(&mut self, gen: Generation) {
-        self.inner.set_active_nexus_zone_generation(gen);
-        self.log.push(SimConfigLogEntry::SetActiveNexusZoneGeneration(gen));
+    pub fn set_active_nexus_zone_generation(&mut self, generation: Generation) {
+        self.inner.set_active_nexus_zone_generation(generation);
+        self.log
+            .push(SimConfigLogEntry::SetActiveNexusZoneGeneration(generation));
     }
 
     pub fn set_explicit_active_nexus_zones(
@@ -377,8 +378,8 @@ impl SimConfigBuilderInner {
         self.config.num_nexus = Some(num_nexus);
     }
 
-    fn set_active_nexus_zone_generation(&mut self, gen: Generation) {
-        self.config.active_nexus_zone_generation = gen;
+    fn set_active_nexus_zone_generation(&mut self, generation: Generation) {
+        self.config.active_nexus_zone_generation = generation;
     }
 
     fn set_explicit_active_nexus_zones(

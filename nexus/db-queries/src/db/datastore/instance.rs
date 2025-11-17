@@ -359,7 +359,7 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, authz_project).await?;
 
-        let gen = instance.runtime().gen;
+        let generation = instance.runtime().generation;
         let name = instance.name().clone();
         let project_id = instance.project_id;
 
@@ -390,9 +390,9 @@ impl DataStore {
             instance.runtime().nexus_state
         );
         bail_unless!(
-            instance.runtime().gen == gen,
+            instance.runtime().generation == generation,
             "newly-created Instance has unexpected generation: {:?}",
-            instance.runtime().gen
+            instance.runtime().generation
         );
         Ok(instance)
     }
@@ -816,7 +816,7 @@ impl DataStore {
             // - the active Propolis ID will not change, the state generation
             //   increased, and the Propolis generation will not change, or
             // - the Propolis generation increased.
-            .filter(dsl::state_generation.lt(new_runtime.gen))
+            .filter(dsl::state_generation.lt(new_runtime.generation))
             .set(new_runtime.clone())
             .check_if_exists::<Instance>(instance_id.into_untyped_uuid())
             .execute_and_check(&*self.pool_connection_unauthorized().await?)
@@ -2067,7 +2067,7 @@ impl DataStore {
             // - the provided updater generation matches the current updater
             //   generation.
             .filter(dsl::updater_gen.eq(locked_gen))
-            .filter(dsl::state_generation.lt(new_runtime.r#gen))
+            .filter(dsl::state_generation.lt(new_runtime.generation))
             .set((
                 dsl::updater_gen.eq(Generation(locked_gen.0.next())),
                 dsl::updater_id.eq(None::<Uuid>),
@@ -2089,7 +2089,8 @@ impl DataStore {
 
         // The expected state generation number of the instance record *before*
         // applying the update.
-        let prev_state_gen = u64::from(new_runtime.r#gen.0).saturating_sub(1);
+        let prev_state_gen =
+            u64::from(new_runtime.generation.0).saturating_sub(1);
         match result {
             // If we updated the record, the lock has been released! Return
             // `Ok(true)` to indicate that we released the lock successfully.
@@ -2120,7 +2121,8 @@ impl DataStore {
             // another execution of the same saga action has already updated the
             // instance record.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().r#gen.0) != prev_state_gen
+                if u64::from(found.runtime().generation.0)
+                    != prev_state_gen
                     && found.updater_gen != locked_gen =>
             {
                 debug_assert_ne!(found.updater_id, Some(updater_id));
@@ -2130,8 +2132,8 @@ impl DataStore {
                      and lock generation have advanced: the required updates \
                      have probably already been committed.";
                     "instance_id" => %instance_id,
-                    "expected_state_gen" => ?new_runtime.r#gen,
-                    "actual_state_gen" => ?found.runtime().r#gen,
+                    "expected_state_gen" => ?new_runtime.generation,
+                    "actual_state_gen" => ?found.runtime().generation,
                     "updater_id" => %updater_id,
                     "updater_gen" => ?locked_gen,
                     "actual_updater_gen" => ?found.updater_gen,
@@ -2144,7 +2146,8 @@ impl DataStore {
             // longer update the instance, as its state has changed, potentially
             // invalidating the updates. We need to unwind.
             UpdateAndQueryResult { ref found, .. }
-                if u64::from(found.runtime().r#gen.0) != prev_state_gen
+                if u64::from(found.runtime().generation.0)
+                    != prev_state_gen
                     && found.updater_gen == locked_gen
                     && found.updater_id == Some(updater_id) =>
             {
@@ -2153,8 +2156,8 @@ impl DataStore {
                     "cannot commit instance update, as the state generation \
                      has advanced, potentially invalidating the update";
                     "instance_id" => %instance_id,
-                    "expected_state_gen" => ?new_runtime.r#gen,
-                    "actual_state_gen" => ?found.runtime().r#gen,
+                    "expected_state_gen" => ?new_runtime.generation,
+                    "actual_state_gen" => ?found.runtime().generation,
                 );
                 Err(Error::conflict("instance state has changed"))
             }
@@ -2658,7 +2661,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(external::Generation::from_u32(2)),
+                    generation: Generation(external::Generation::from_u32(2)),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2706,7 +2709,7 @@ mod tests {
                 &InstanceUuid::from_untyped_uuid(authz_instance.id()),
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(external::Generation::from_u32(2)),
+                    generation: Generation(external::Generation::from_u32(2)),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -2768,7 +2771,7 @@ mod tests {
         .expect("instance should be locked");
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            r#gen: Generation(external::Generation::from_u32(2)),
+            generation: Generation(external::Generation::from_u32(2)),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: None,
             migration_id: None,
@@ -2808,7 +2811,7 @@ mod tests {
             dbg!(datastore.instance_refetch(&opctx, &authz_instance).await)
                 .expect("instance should exist");
         assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
-        assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
+        assert_eq!(instance.runtime().generation, new_runtime.generation);
 
         // Doing it again at the same generation with a *different* state
         // shouldn't change the instance at all.
@@ -2836,7 +2839,7 @@ mod tests {
         assert_eq!(instance.runtime().propolis_id, new_runtime.propolis_id);
         assert_eq!(instance.runtime().dst_propolis_id, None);
         assert_eq!(instance.runtime().migration_id, None);
-        assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
+        assert_eq!(instance.runtime().generation, new_runtime.generation);
 
         // Clean up.
         db.terminate().await;
@@ -2873,7 +2876,7 @@ mod tests {
         // acquired.
         let new_runtime = &InstanceRuntimeState {
             time_updated: Utc::now(),
-            r#gen: Generation(external::Generation::from_u32(2)),
+            generation: Generation(external::Generation::from_u32(2)),
             propolis_id: Some(Uuid::new_v4()),
             dst_propolis_id: Some(Uuid::new_v4()),
             migration_id: Some(Uuid::new_v4()),
@@ -2902,7 +2905,9 @@ mod tests {
                     &lock,
                     &InstanceRuntimeState {
                         time_updated: Utc::now(),
-                        r#gen: Generation(external::Generation::from_u32(2)),
+                        generation: Generation(external::Generation::from_u32(
+                            2
+                        )),
                         propolis_id: None,
                         dst_propolis_id: None,
                         migration_id: None,
@@ -2987,7 +2992,7 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::Running,
                     },
                 },
@@ -3001,8 +3006,8 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(
-                        snapshot.instance.runtime_state.gen.0.next(),
+                    generation: Generation(
+                        snapshot.instance.runtime_state.generation.0.next(),
                     ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
@@ -3050,7 +3055,7 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::Running,
                     },
                 },
@@ -3074,8 +3079,8 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(
-                        snapshot.instance.runtime_state.gen.0.next(),
+                    generation: Generation(
+                        snapshot.instance.runtime_state.generation.0.next(),
                     ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(active_vmm.id),
@@ -3148,7 +3153,7 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::Stopped,
                     },
                 },
@@ -3166,7 +3171,9 @@ mod tests {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    r#gen: Generation(instance.runtime_state.gen.0.next()),
+                    generation: Generation(
+                        instance.runtime_state.generation.0.next(),
+                    ),
                     nexus_state: InstanceState::Vmm,
                     propolis_id: Some(vmm1.id),
                     ..instance.runtime_state.clone()
@@ -3189,7 +3196,7 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::Running,
                     },
                 },
@@ -3228,7 +3235,9 @@ mod tests {
                     &PropolisUuid::from_untyped_uuid(vmm1.id),
                     &VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation(vmm2.runtime.r#gen.0.next()),
+                        generation: Generation(
+                            vmm2.runtime.generation.0.next()
+                        ),
                         state: VmmState::Running,
                     },
                 )
@@ -3292,7 +3301,7 @@ mod tests {
                     cpu_platform: VmmCpuPlatform::SledDefault,
                     runtime: VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation::new(),
+                        generation: Generation::new(),
                         state: VmmState::Running,
                     },
                 },
@@ -3329,7 +3338,9 @@ mod tests {
                     &PropolisUuid::from_untyped_uuid(vmm2.id),
                     &VmmRuntimeState {
                         time_state_updated: Utc::now(),
-                        r#gen: Generation(vmm2.runtime.r#gen.0.next().next()),
+                        generation: Generation(
+                            vmm2.runtime.generation.0.next().next()
+                        ),
                         state: VmmState::SagaUnwound,
                     },
                 )
@@ -3439,7 +3450,7 @@ mod tests {
                             cpu_platform: VmmCpuPlatform::SledDefault,
                             runtime: VmmRuntimeState {
                                 time_state_updated: Utc::now(),
-                                r#gen: Generation::new(),
+                                generation: Generation::new(),
                                 state: VmmState::Running,
                             },
                         },
@@ -3452,7 +3463,7 @@ mod tests {
                         &InstanceUuid::from_untyped_uuid(instance_id),
                         &InstanceRuntimeState {
                             time_updated: Utc::now(),
-                            gen: Generation(Generation::new().next()),
+                            generation: Generation(Generation::new().next()),
                             nexus_state: InstanceState::Vmm,
                             propolis_id: Some(vmm_id),
                             dst_propolis_id: None,
