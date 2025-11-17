@@ -14,8 +14,8 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::{
-    create_local_user, object_delete_error, object_get, object_put,
-    object_put_error, test_params,
+    create_local_user, create_session_for_user, object_delete_error,
+    object_get, object_put, object_put_error, test_params,
 };
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
@@ -659,32 +659,13 @@ async fn test_device_token_cannot_extend_expiration(
     )
     .await;
 
-    // Login to get session token
-    let login_url = format!("/v1/login/{}/local", silo_name);
-    let login_response = RequestBuilder::new(testctx, Method::POST, &login_url)
-        .body(Some(&test_params::UsernamePasswordCredentials {
-            username: "session-test-user".parse().unwrap(),
-            password: "test-password".to_string(),
-        }))
-        .expect_status(Some(StatusCode::NO_CONTENT))
-        .execute()
-        .await
-        .expect("failed to login");
-
-    let cookie_header = login_response
-        .headers
-        .get(header::SET_COOKIE)
-        .expect("missing session cookie")
-        .to_str()
-        .expect("session cookie not a string");
-    let session_token = cookie_header
-        .split_once("session=")
-        .expect("malformed cookie")
-        .1
-        .split_once(';')
-        .expect("malformed cookie")
-        .0
-        .to_string();
+    let session_token = create_session_for_user(
+        testctx,
+        silo_name,
+        "session-test-user",
+        "test-password",
+    )
+    .await;
 
     // Test session auth with explicit TTL = silo max (15 seconds)
     let session_client_id = Uuid::new_v4();
@@ -715,19 +696,12 @@ async fn test_device_token_cannot_extend_expiration(
     .await
     .expect("failed to confirm with session auth");
 
-    let session_token_grant = NexusRequest::new(
-        RequestBuilder::new(testctx, Method::POST, "/device/token")
-            .allow_non_dropshot_errors()
-            .body_urlencoded(Some(&DeviceAccessTokenRequest {
-                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-                    .to_string(),
-                device_code: session_auth_response.device_code,
-                client_id: session_client_id,
-            }))
-            .expect_status(Some(StatusCode::OK)),
+    let session_token_grant = fetch_device_token(
+        testctx,
+        session_auth_response.device_code,
+        session_client_id,
+        AuthnMode::Session(session_token.clone()),
     )
-    .authn_as(AuthnMode::Session(session_token.clone()))
-    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
     .await;
 
     // Verify session-authenticated token gets full silo max (15 seconds)
@@ -764,19 +738,12 @@ async fn test_device_token_cannot_extend_expiration(
     .await
     .expect("failed to confirm with session auth (no TTL)");
 
-    let session_token_grant2 = NexusRequest::new(
-        RequestBuilder::new(testctx, Method::POST, "/device/token")
-            .allow_non_dropshot_errors()
-            .body_urlencoded(Some(&DeviceAccessTokenRequest {
-                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-                    .to_string(),
-                device_code: session_auth_response2.device_code,
-                client_id: session_client_id2,
-            }))
-            .expect_status(Some(StatusCode::OK)),
+    let session_token_grant2 = fetch_device_token(
+        testctx,
+        session_auth_response2.device_code,
+        session_client_id2,
+        AuthnMode::Session(session_token),
     )
-    .authn_as(AuthnMode::Session(session_token))
-    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
     .await;
 
     // When no TTL is specified, token has no expiration (not clamped)
@@ -815,19 +782,12 @@ async fn test_device_token_cannot_extend_expiration(
     .expect("failed to confirm initial token");
 
     // Fetch the initial token
-    let initial_token_grant = NexusRequest::new(
-        RequestBuilder::new(testctx, Method::POST, "/device/token")
-            .allow_non_dropshot_errors()
-            .body_urlencoded(Some(&DeviceAccessTokenRequest {
-                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
-                    .to_string(),
-                device_code: auth_response_1.device_code,
-                client_id,
-            }))
-            .expect_status(Some(StatusCode::OK)),
+    let initial_token_grant = fetch_device_token(
+        testctx,
+        auth_response_1.device_code,
+        client_id,
+        AuthnMode::PrivilegedUser,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
     .await;
 
     let initial_token = initial_token_grant.access_token;
@@ -1160,24 +1120,26 @@ async fn list_user_sessions(
         .items
 }
 
-async fn create_session_for_user(
+async fn fetch_device_token(
     testctx: &ClientTestContext,
-    silo_name: &str,
-    username: &str,
-    password: &str,
-) {
-    let url = format!("/v1/login/{}/local", silo_name);
-    let credentials = test_params::UsernamePasswordCredentials {
-        username: username.parse().unwrap(),
-        password: password.to_string(),
-    };
-    let _login = RequestBuilder::new(&testctx, Method::POST, &url)
-        .body(Some(&credentials))
-        .expect_status(Some(StatusCode::NO_CONTENT))
-        .execute()
-        .await
-        .expect("failed to log in");
-    // We don't need to extract the token, just creating the session is enough
+    device_code: String,
+    client_id: Uuid,
+    authn_mode: AuthnMode,
+) -> DeviceAccessTokenGrant {
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAccessTokenRequest {
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                    .to_string(),
+                device_code,
+                client_id,
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(authn_mode)
+    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
+    .await
 }
 
 async fn get_tokens_unpriv(
