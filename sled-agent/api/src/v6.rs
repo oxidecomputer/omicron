@@ -26,7 +26,7 @@ use uuid::Uuid;
 use sled_agent_types::instance::{InstanceMetadata, VmmSpec};
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
-/// agent (version 7, with multicast support).
+/// agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /// The virtual hardware configuration this virtual machine should have when
@@ -56,7 +56,7 @@ pub struct InstanceEnsureBody {
 }
 
 /// Describes sled-local configuration that a sled-agent must establish to make
-/// the instance's virtual hardware fully functional (version 7, with multicast).
+/// the instance's virtual hardware fully functional.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstanceSledLocalConfig {
     pub hostname: Hostname,
@@ -66,25 +66,33 @@ pub struct InstanceSledLocalConfig {
     /// provided to an instance to allow inbound connectivity.
     pub ephemeral_ip: Option<IpAddr>,
     pub floating_ips: Vec<IpAddr>,
-    pub multicast_groups: Vec<InstanceMulticastMembership>,
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
 }
 
-/// Represents a multicast group membership for an instance.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct InstanceMulticastMembership {
-    pub group_ip: IpAddr,
-    // For Source-Specific Multicast (SSM)
-    pub sources: Vec<IpAddr>,
-}
-
-/// Request body for multicast group operations.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum InstanceMulticastBody {
-    Join(InstanceMulticastMembership),
-    Leave(InstanceMulticastMembership),
+impl From<InstanceEnsureBody>
+    for sled_agent_types::instance::InstanceEnsureBody
+{
+    fn from(
+        v6: InstanceEnsureBody,
+    ) -> sled_agent_types::instance::InstanceEnsureBody {
+        sled_agent_types::instance::InstanceEnsureBody {
+            vmm_spec: v6.vmm_spec,
+            local_config: sled_agent_types::instance::InstanceSledLocalConfig {
+                hostname: v6.local_config.hostname,
+                nics: v6.local_config.nics,
+                source_nat: v6.local_config.source_nat,
+                ephemeral_ip: v6.local_config.ephemeral_ip,
+                floating_ips: v6.local_config.floating_ips,
+                multicast_groups: Vec::new(),
+                firewall_rules: v6.local_config.firewall_rules,
+                dhcp_config: v6.local_config.dhcp_config,
+            },
+            vmm_runtime: v6.vmm_runtime,
+            instance_id: v6.instance_id,
+            migration_id: v6.migration_id,
+            propolis_addr: v6.propolis_addr,
+            metadata: v6.metadata,
+        }
+    }
 }

@@ -37,9 +37,6 @@ use propolis_client::Client as PropolisClient;
 use propolis_client::instance_spec::{ComponentV0, SpecKey};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
-use sled_agent_api::v7::{
-    InstanceMulticastMembership, InstanceSledLocalConfig,
-};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
@@ -2491,7 +2488,6 @@ mod tests {
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
-    use sled_agent_api::v7::InstanceEnsureBody;
     use sled_agent_config_reconciler::{
         CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
         InternalDisksReceiver,

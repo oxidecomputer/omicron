@@ -20,7 +20,6 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use omicron_uuid_kinds::PropolisUuid;
-use sled_agent_api::v7::{InstanceEnsureBody, InstanceMulticastBody};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_config_reconciler::CurrentlyManagedZpoolsReceiver;
 use sled_agent_types::instance::*;

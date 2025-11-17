@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
-/// agent.
+/// agent (version 7, with multicast support).
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /// The virtual hardware configuration this virtual machine should have when
@@ -58,7 +58,7 @@ pub struct InstanceEnsureBody {
 }
 
 /// Describes sled-local configuration that a sled-agent must establish to make
-/// the instance's virtual hardware fully functional.
+/// the instance's virtual hardware fully functional (version 7, with multicast).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstanceSledLocalConfig {
     pub hostname: Hostname,
@@ -68,8 +68,27 @@ pub struct InstanceSledLocalConfig {
     /// provided to an instance to allow inbound connectivity.
     pub ephemeral_ip: Option<IpAddr>,
     pub floating_ips: Vec<IpAddr>,
+    pub multicast_groups: Vec<InstanceMulticastMembership>,
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
+}
+
+/// Represents a multicast group membership for an instance.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct InstanceMulticastMembership {
+    pub group_ip: IpAddr,
+    // For Source-Specific Multicast (SSM)
+    pub sources: Vec<IpAddr>,
+}
+
+/// Request body for multicast group operations.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceMulticastBody {
+    Join(InstanceMulticastMembership),
+    Leave(InstanceMulticastMembership),
 }
 
 /// Metadata used to track statistics about an instance.
