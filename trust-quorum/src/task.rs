@@ -31,7 +31,7 @@ use trust_quorum_protocol::{
 };
 
 // TODO: Move to this crate
-// https://github.com/oxidecomputer/omicron/issues/9311;
+// https://github.com/oxidecomputer/omicron/issues/9311
 use bootstore::schemes::v0::NetworkConfig;
 
 /// Whether or not a configuration has committed or is still underway.
@@ -146,22 +146,6 @@ pub enum NodeApiRequest {
         rack_id: RackUuid,
         epoch: Epoch,
         tx: oneshot::Sender<Result<CommitStatus, CommitError>>,
-    },
-
-    /// Proxy a [`proxy::WireRequest`] operation to another node
-    ///
-    /// When sled-agent is not running there is no direct way to issue
-    /// operations from Nexus. This occurs when when a node has not yet joined a
-    /// trust quorum configuration, but the mechanism is also useful during RSS.
-    /// In these cases, we need to take an existing node that we have access to
-    /// and proxy requests over sprockets to the `destination` node.
-    Proxy {
-        // Where to send the `wire_request`
-        destination: BaseboardId,
-        /// The actual request proxied across nodes
-        wire_request: proxy::WireRequest,
-        /// A mechanism for responding to the caller
-        tx: oneshot::Sender<Result<proxy::WireValue, proxy::WireError>>,
     },
 
     /// Coordinate a reconfiguration at this node
@@ -686,16 +670,6 @@ impl NodeTask {
             NodeApiRequest::PrepareAndCommit { config, tx } => {
                 let res = self.prepare_and_commit(config).await;
                 let _ = tx.send(res);
-            }
-            NodeApiRequest::ProxyCommit { destination, rack_id, epoch, tx } => {
-                todo!()
-            }
-            NodeApiRequest::ProxyPrepareAndCommit {
-                destination,
-                config,
-                tx,
-            } => {
-                todo!()
             }
             NodeApiRequest::Reconfigure { msg, tx } => {
                 let res =
