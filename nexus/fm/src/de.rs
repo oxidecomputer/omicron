@@ -4,22 +4,32 @@
 
 //! Diagnosis engines
 
+use crate::CaseBuilder;
 use crate::SitrepBuilder;
 use nexus_types::fm;
-pub mod power_shelf;
 use std::sync::Arc;
+
+pub mod power_shelf;
 
 pub trait DiagnosisEngine {
     fn kind(&self) -> fm::DiagnosisEngineKind;
 
+    /// Called for each new ereprot received since the parent sitrep.
     fn analyze_ereport(
         &mut self,
         sitrep: &mut SitrepBuilder<'_>,
         ereport: &Arc<fm::Ereport>,
     ) -> anyhow::Result<()>;
 
-    fn process_cases(
+    /// Called for each case belonging to this diagnosis engine opened in the
+    /// parent sitrep.
+    fn analyze_open_case(
         &mut self,
         sitrep: &mut SitrepBuilder<'_>,
+        ereport: &mut CaseBuilder,
     ) -> anyhow::Result<()>;
+
+    /// Complete this diagnosis engine's analysis, making any necessary changes
+    /// to the sitrep being constructed.
+    fn finish(&mut self, sitrep: &mut SitrepBuilder<'_>) -> anyhow::Result<()>;
 }
