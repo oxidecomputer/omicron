@@ -22,6 +22,7 @@ use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
+use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::OximeterReadPolicy;
@@ -61,6 +62,7 @@ use slog_error_chain::InlineErrorChain;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::IpAddr;
 
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
@@ -70,6 +72,7 @@ pub struct PlanningInputFromDb<'a> {
     pub zpool_rows:
         &'a [(nexus_db_model::Zpool, nexus_db_model::PhysicalDisk)],
     pub ip_pool_range_rows: &'a [nexus_db_model::IpPoolRange],
+    pub external_dns_external_ips: BTreeSet<IpAddr>,
     pub external_ip_rows: &'a [nexus_db_model::ExternalIp],
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
     pub target_boundary_ntp_zone_count: usize,
@@ -122,6 +125,14 @@ impl PlanningInputFromDb<'_> {
             .internal_context("fetching all external zpool rows")?;
         let ip_pool_range_rows =
             fetch_all_service_ip_pool_ranges(opctx, datastore).await?;
+        // TODO-correctness We ought to allow the IPs on which we run external
+        // DNS servers to change, but we don't: instead, we always reuse the IPs
+        // that were specified when the rack was set up.
+        //
+        // https://github.com/oxidecomputer/omicron/issues/8255
+        let external_dns_external_ips = datastore
+            .external_dns_external_ips_specified_by_rack_setup(opctx)
+            .await?;
         let external_ip_rows = datastore
             .external_ip_list_service_all_batched(opctx)
             .await
@@ -230,6 +241,7 @@ impl PlanningInputFromDb<'_> {
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
             ip_pool_range_rows: &ip_pool_range_rows,
+            external_dns_external_ips,
             target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
             target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
@@ -258,20 +270,36 @@ impl PlanningInputFromDb<'_> {
         Ok(planning_input)
     }
 
+    fn build_external_ip_policy(&self) -> Result<ExternalIpPolicy, Error> {
+        let mut builder = ExternalIpPolicy::builder();
+        for range in self.ip_pool_range_rows {
+            let range = IpRange::try_from(range).map_err(|e| {
+                Error::internal_error(&format!(
+                    "invalid IP pool range in database: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+            builder.push_service_pool_range(range).map_err(|e| {
+                Error::internal_error(&format!(
+                    "cannot construct external IP policy: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+        for &ip in &self.external_dns_external_ips {
+            builder.add_external_dns_ip(ip).map_err(|e| {
+                Error::internal_error(&format!(
+                    "cannot construct external IP policy: {}",
+                    InlineErrorChain::new(&e),
+                ))
+            })?;
+        }
+        Ok(builder.build())
+    }
+
     pub fn build(&self) -> Result<PlanningInput, Error> {
-        let service_ip_pool_ranges = self
-            .ip_pool_range_rows
-            .iter()
-            .map(|range| {
-                IpRange::try_from(range).map_err(|e| {
-                    Error::internal_error(&format!(
-                        "invalid IP pool range in database: {e:#}"
-                    ))
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
         let policy = Policy {
-            service_ip_pool_ranges,
+            external_ips: self.build_external_ip_policy()?,
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,

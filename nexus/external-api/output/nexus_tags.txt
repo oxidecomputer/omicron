@@ -49,6 +49,18 @@ affinity_group_member_list               GET      /v1/affinity-groups/{affinity_
 affinity_group_update                    PUT      /v1/affinity-groups/{affinity_group}
 affinity_group_view                      GET      /v1/affinity-groups/{affinity_group}
 instance_affinity_group_list             GET      /v1/instances/{instance}/affinity-groups
+instance_multicast_group_join            PUT      /v1/instances/{instance}/multicast-groups/{multicast_group}
+instance_multicast_group_leave           DELETE   /v1/instances/{instance}/multicast-groups/{multicast_group}
+instance_multicast_group_list            GET      /v1/instances/{instance}/multicast-groups
+lookup_multicast_group_by_ip             GET      /v1/system/multicast-groups/by-ip/{address}
+multicast_group_create                   POST     /v1/multicast-groups
+multicast_group_delete                   DELETE   /v1/multicast-groups/{multicast_group}
+multicast_group_list                     GET      /v1/multicast-groups
+multicast_group_member_add               POST     /v1/multicast-groups/{multicast_group}/members
+multicast_group_member_list              GET      /v1/multicast-groups/{multicast_group}/members
+multicast_group_member_remove            DELETE   /v1/multicast-groups/{multicast_group}/members/{instance}
+multicast_group_update                   PUT      /v1/multicast-groups/{multicast_group}
+multicast_group_view                     GET      /v1/multicast-groups/{multicast_group}
 probe_create                             POST     /experimental/v1/probes
 probe_delete                             DELETE   /experimental/v1/probes/{probe}
 probe_list                               GET      /experimental/v1/probes
@@ -271,7 +283,6 @@ saml_identity_provider_create            POST     /v1/system/identity-providers/
 saml_identity_provider_view              GET      /v1/system/identity-providers/saml/{provider}
 scim_token_create                        POST     /v1/system/scim/tokens
 scim_token_delete                        DELETE   /v1/system/scim/tokens/{token_id}
-scim_token_delete_all                    DELETE   /v1/system/scim/tokens
 scim_token_list                          GET      /v1/system/scim/tokens
 scim_token_view                          GET      /v1/system/scim/tokens/{token_id}
 silo_create                              POST     /v1/system/silos

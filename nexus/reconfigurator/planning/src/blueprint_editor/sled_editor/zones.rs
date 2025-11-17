@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blueprint_builder::EditCounts;
-use id_map::Entry;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -37,14 +37,14 @@ pub enum ZonesEditError {
 #[derive(Debug)]
 pub(super) struct ZonesEditor {
     incoming_sled_agent_generation: Generation,
-    zones: IdMap<BlueprintZoneConfig>,
+    zones: IdOrdMap<BlueprintZoneConfig>,
     counts: EditCounts,
 }
 
 impl ZonesEditor {
     pub fn new(
         incoming_sled_agent_generation: Generation,
-        zones: IdMap<BlueprintZoneConfig>,
+        zones: IdOrdMap<BlueprintZoneConfig>,
     ) -> Self {
         Self {
             incoming_sled_agent_generation,
@@ -56,12 +56,12 @@ impl ZonesEditor {
     pub fn empty() -> Self {
         Self {
             incoming_sled_agent_generation: Generation::new(),
-            zones: IdMap::new(),
+            zones: IdOrdMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
 
-    pub fn finalize(self) -> (IdMap<BlueprintZoneConfig>, EditCounts) {
+    pub fn finalize(self) -> (IdOrdMap<BlueprintZoneConfig>, EditCounts) {
         (self.zones, self.counts)
     }
 

@@ -29,6 +29,7 @@ use derive_more::From;
 use dropshot::HttpError;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
 use illumos_utils::zpool::PathInPool;
@@ -53,6 +54,7 @@ use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
 };
+use sled_agent_api::v7::{InstanceEnsureBody, InstanceMulticastBody};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -61,9 +63,10 @@ use sled_agent_config_reconciler::{
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
-    VmmStateRequested, VmmUnregisterResponse,
+    InstanceExternalIpBody, VmmPutStateResponse, VmmStateRequested,
+    VmmUnregisterResponse,
 };
+use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -78,7 +81,7 @@ use sled_hardware::{HardwareManager, MemoryReservations, underlay};
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
-use slog_error_chain::InlineErrorChain;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -128,9 +131,6 @@ pub enum Error {
     #[error("Error managing instances: {0}")]
     Instance(#[from] crate::instance_manager::Error),
 
-    #[error("Error managing storage: {0}")]
-    Storage(#[from] sled_storage::error::Error),
-
     #[error("Error updating: {0}")]
     Download(#[from] crate::updates::Error),
 
@@ -179,7 +179,6 @@ impl From<Error> for omicron_common::api::external::Error {
         match err {
             // Some errors can convert themselves into the external error
             Error::Services(err) => err.into(),
-            Error::Storage(err) => err.into(),
             _ => omicron_common::api::external::Error::InternalError {
                 internal_message: err.to_string(),
             },
@@ -647,18 +646,16 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
+        let currently_managed_zpools_rx =
+            config_reconciler.currently_managed_zpools_rx().clone();
         let probes = ProbeManager::new(
-            request.body.id.into_untyped_uuid(),
-            nexus_client.clone(),
             etherstub.clone(),
             port_manager.clone(),
             metrics_manager.request_queue(),
             config_reconciler.available_datasets_rx(),
             log.new(o!("component" => "ProbeManager")),
+            currently_managed_zpools_rx,
         );
-
-        let currently_managed_zpools_rx =
-            config_reconciler.currently_managed_zpools_rx().clone();
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -684,8 +681,6 @@ impl SledAgent {
             log: log.clone(),
             sprockets: config.sprockets.clone(),
         };
-
-        sled_agent.inner.probes.run(currently_managed_zpools_rx).await;
 
         // We immediately add a notification to the request queue about our
         // existence. If inspection of the hardware later informs us that we're
@@ -847,7 +842,42 @@ impl SledAgent {
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
-    pub async fn instance_ensure_registered(
+    pub async fn instance_ensure_registered_v1(
+        &self,
+        propolis_id: PropolisUuid,
+        instance: sled_agent_types::instance::InstanceEnsureBody,
+    ) -> Result<SledVmmState, Error> {
+        // Convert v1 to v7
+        let v5_instance = sled_agent_api::v7::InstanceEnsureBody {
+            vmm_spec: instance.vmm_spec,
+            local_config: sled_agent_api::v7::InstanceSledLocalConfig {
+                hostname: instance.local_config.hostname,
+                nics: instance.local_config.nics,
+                source_nat: instance.local_config.source_nat,
+                ephemeral_ip: instance.local_config.ephemeral_ip,
+                floating_ips: instance.local_config.floating_ips,
+                multicast_groups: Vec::new(), // v1 doesn't support multicast
+                firewall_rules: instance.local_config.firewall_rules,
+                dhcp_config: instance.local_config.dhcp_config,
+            },
+            vmm_runtime: instance.vmm_runtime,
+            instance_id: instance.instance_id,
+            migration_id: instance.migration_id,
+            propolis_addr: instance.propolis_addr,
+            metadata: instance.metadata,
+        };
+        self.instance_ensure_registered_v7(propolis_id, v5_instance).await
+    }
+
+    pub async fn instance_ensure_registered_v7(
+        &self,
+        propolis_id: PropolisUuid,
+        instance: InstanceEnsureBody,
+    ) -> Result<SledVmmState, Error> {
+        self.instance_ensure_registered(propolis_id, instance).await
+    }
+
+    async fn instance_ensure_registered(
         &self,
         propolis_id: PropolisUuid,
         instance: InstanceEnsureBody,
@@ -916,6 +946,30 @@ impl SledAgent {
         self.inner
             .instances
             .delete_external_ip(propolis_id, external_ip)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_join_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .join_multicast_group(propolis_id, multicast_body)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_leave_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .leave_multicast_group(propolis_id, multicast_body)
             .await
             .map_err(|e| Error::Instance(e))
     }
@@ -1189,9 +1243,14 @@ impl SledAgent {
     ) -> Vec<Result<SledDiagnosticsCmdOutput, SledDiagnosticsCmdError>> {
         sled_diagnostics::health_check().await
     }
+
+    /// Completely replace the set of probes managed by this sled.
+    pub(crate) fn set_probes(&self, probes: IdHashMap<ProbeCreate>) {
+        self.inner.probes.set_probes(probes);
+    }
 }
 
-#[derive(From, thiserror::Error, Debug)]
+#[derive(From, thiserror::Error, Debug, SlogInlineError)]
 pub enum AddSledError {
     #[error("Failed to learn bootstrap ip for {sled_id}")]
     BootstrapAgentClient {
@@ -1206,6 +1265,7 @@ pub enum AddSledError {
     #[error("Failed to initialize {sled_id}: {err}")]
     BootstrapTcpClient {
         sled_id: Baseboard,
+        #[source]
         err: crate::bootstrap::client::Error,
     },
 }

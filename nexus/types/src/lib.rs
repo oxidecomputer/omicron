@@ -32,6 +32,7 @@
 pub mod authn;
 pub mod deployment;
 pub mod external_api;
+pub mod fm;
 pub mod identity;
 pub mod internal_api;
 pub mod inventory;

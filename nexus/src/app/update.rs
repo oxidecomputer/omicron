@@ -14,21 +14,22 @@ use nexus_db_model::TufRepoUpload;
 use nexus_db_model::TufTrustRoot;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::{datastore::SQL_BATCH_SIZE, pagination::Paginator};
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::{
     Blueprint, BlueprintTarget, TargetReleaseDescription,
 };
 use nexus_types::external_api::shared::TufSignedRootRole;
 use nexus_types::external_api::views;
-use nexus_types::external_api::views::TufRepoUploadStatus;
+use nexus_types::identity::Asset;
 use nexus_types::internal_api::views as internal_views;
-use nexus_types::inventory::RotSlot;
+use nexus_types::inventory::BaseboardId;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::Nullable;
 use omicron_common::api::external::{DataPageParams, Error};
-use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::{GenericUuid, TufTrustRootUuid};
 use semver::Version;
 use std::collections::BTreeMap;
+use std::iter;
 use std::sync::Arc;
 use tokio::sync::watch;
 use update_common::artifacts::{
@@ -93,29 +94,30 @@ impl super::Nexus {
             .await
             .map_err(HttpError::from)?;
 
-        // If we inserted a new repository, move the `ArtifactsWithPlan` (which
-        // carries with it the `Utf8TempDir`s storing the artifacts) into the
-        // artifact replication background task, then immediately activate the
-        // task.
-        if response.status == TufRepoUploadStatus::Inserted {
-            self.tuf_artifact_replication_tx
-                .send(artifacts_with_plan)
-                .await
-                .map_err(|err| {
-                    // In theory this should never happen; `Sender::send`
-                    // returns an error only if the receiver has hung up, and
-                    // the receiver should live for as long as Nexus does (it
-                    // belongs to the background task driver).
-                    //
-                    // If this _does_ happen, the impact is that the database
-                    // has recorded a repository for which we no longer have
-                    // the artifacts.
-                    Error::internal_error(&format!(
-                        "failed to send artifacts for replication: {err}"
-                    ))
-                })?;
-            self.background_tasks.task_tuf_artifact_replication.activate();
-        }
+        // Move the `ArtifactsWithPlan` (which carries with it the
+        // `Utf8TempDir`s storing the artifacts) into the artifact replication
+        // background task, then immediately activate the task. (If this repo
+        // was already uploaded, the artifacts should immediately be dropped by
+        // the task.)
+        self.tuf_artifact_replication_tx
+            .send(artifacts_with_plan)
+            .await
+            .map_err(|err| {
+                // This error can only happen while Nexus's Tokio runtime is
+                // shutting down; Sender::send returns an error only if the
+                // receiver has hung up, and the receiver should live for
+                // as long as Nexus does (it belongs to the background task
+                // driver.)
+                //
+                // In the unlikely event that it does happen within this narrow
+                // window, the impact is that the database has recorded a
+                // repository for which we no longer have the artifacts. The fix
+                // would be to reupload the repository.
+                Error::internal_error(&format!(
+                    "failed to send artifacts for replication: {err}"
+                ))
+            })?;
+        self.background_tasks.task_tuf_artifact_replication.activate();
 
         Ok(response)
     }
@@ -224,7 +226,10 @@ impl super::Nexus {
             .borrow()
             .clone() // drop read lock held by outstanding borrow
             .ok_or_else(|| {
-                Error::internal_error("Tried to get update status before target blueprint is loaded")
+                Error::internal_error(
+                    "Tried to get update status before \
+                     target blueprint is loaded",
+                )
             })?;
 
         let (blueprint_target, blueprint) = &*bp_arc;
@@ -244,7 +249,8 @@ impl super::Nexus {
         })
     }
 
-    /// Build a map of version strings to the number of components on that version
+    /// Build a map of version strings to the number of components on that
+    /// version
     async fn component_version_counts(
         &self,
         opctx: &OpContext,
@@ -302,6 +308,29 @@ impl super::Nexus {
             None => TargetReleaseDescription::Initial,
         };
 
+        // Get the list of sleds that should be reported as a part of the update
+        // status. (In particular, this allows us to filter out sleds that are
+        // physically present but not part of the cluster, as well as add
+        // "unknown" counts for sleds that ought to be present but aren't.)
+        let expected_sleds = self
+            .datastore()
+            .sled_list_all_batched(
+                opctx,
+                SledFilter::SpsUpdatedByReconfigurator,
+            )
+            .await?
+            .iter()
+            .map(|sled| {
+                (
+                    BaseboardId {
+                        part_number: sled.part_number().to_string(),
+                        serial_number: sled.serial_number().to_string(),
+                    },
+                    sled.id(),
+                )
+            })
+            .collect();
+
         // It's weird to use the internal view this way. It would feel more
         // correct to extract shared logic and call it in both places. On the
         // other hand, that sharing would be boilerplatey and not add much yet.
@@ -310,6 +339,7 @@ impl super::Nexus {
         let status = internal_views::UpdateStatus::new(
             &prev_target_desc,
             &curr_target_desc,
+            &expected_sleds,
             &inventory,
         );
 
@@ -317,13 +347,9 @@ impl super::Nexus {
             let zone_versions = sled.zones.into_iter().map(|zone| zone.version);
 
             // boot_disk tells you which slot is relevant
-            let host_version =
-                sled.host_phase_2.boot_disk.ok().map(|slot| match slot {
-                    M2Slot::A => sled.host_phase_2.slot_a_version.clone(),
-                    M2Slot::B => sled.host_phase_2.slot_b_version.clone(),
-                });
+            let host_version = sled.host_phase_2.boot_disk_version();
 
-            zone_versions.chain(host_version)
+            zone_versions.chain(iter::once(host_version))
         });
 
         let mgs_driven_versions =
@@ -335,34 +361,34 @@ impl super::Nexus {
                 let bootloader_version =
                     status.rot_bootloader.stage0_version.clone();
 
-                let rot_version =
-                    status.rot.active_slot.map(|slot| match slot {
-                        RotSlot::A => status.rot.slot_a_version.clone(),
-                        RotSlot::B => status.rot.slot_b_version.clone(),
-                    });
+                // for the RoT, get the version of the active slot.
+                let rot_version = status.rot.active_slot_version();
 
-                let host_version = match &status.host_os_phase_1 {
-                    internal_views::HostPhase1Status::Sled {
-                        slot_a_version,
-                        slot_b_version,
-                        active_slot,
-                        ..
-                    } => active_slot.map(|slot| match slot {
-                        M2Slot::A => slot_a_version.clone(),
-                        M2Slot::B => slot_b_version.clone(),
-                    }),
-                    internal_views::HostPhase1Status::NotASled => None,
-                };
+                // This is an SP; it will only have a host OS phase 1 if it's a
+                // sled (and not a switch / PSC). If it does, we have to check
+                // the version of the active slot.
+                let host_version = status.host_os_phase_1.active_slot_version();
 
-                std::iter::once(sp_version)
-                    .chain(rot_version)
-                    .chain(std::iter::once(bootloader_version))
+                iter::once(sp_version)
+                    .chain(iter::once(rot_version))
+                    .chain(iter::once(bootloader_version))
                     .chain(host_version)
             });
 
         let mut counts = BTreeMap::new();
         for version in sled_versions.chain(mgs_driven_versions) {
-            *counts.entry(version.to_string()).or_insert(0) += 1;
+            // Don't use `version.to_string()` here because that will report
+            // specific errors; instead, flatten all errors to just "error".
+            // It's fine to use `.to_string()` for the non-error variants.
+            let version = match version {
+                internal_views::TufRepoVersion::Unknown
+                | internal_views::TufRepoVersion::InstallDataset
+                | internal_views::TufRepoVersion::Version(_) => {
+                    version.to_string()
+                }
+                internal_views::TufRepoVersion::Error(_) => "error".to_string(),
+            };
+            *counts.entry(version).or_insert(0) += 1;
         }
         Ok(counts)
     }

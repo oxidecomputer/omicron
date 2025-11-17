@@ -148,6 +148,7 @@ pub enum SledEditError {
 pub(crate) struct SledEditor(InnerSledEditor);
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum InnerSledEditor {
     // Internally, `SledEditor` has a variant for each variant of `SledState`,
     // as the operations allowed in different states are substantially different
@@ -202,6 +203,17 @@ impl SledEditor {
         match &self.0 {
             InnerSledEditor::Active(_) => SledState::Active,
             InnerSledEditor::Decommissioned(_) => SledState::Decommissioned,
+        }
+    }
+
+    /// Returns the subnet of this sled if it is active, or `None` if it is
+    /// decommissioned.
+    pub fn subnet(&self) -> Option<Ipv6Subnet<SLED_PREFIX>> {
+        match &self.0 {
+            InnerSledEditor::Active(active) => {
+                Some(active.underlay_ip_allocator.subnet())
+            }
+            InnerSledEditor::Decommissioned(_) => None,
         }
     }
 
@@ -661,13 +673,19 @@ impl ActiveSledEditor {
 
         self.disks.ensure(disk)?;
 
-        // Every disk also gets a Debug and Transient Zone Root dataset; ensure
-        // both of those exist as well.
-        let debug = PartialDatasetConfig::for_debug(zpool);
-        let zone_root = PartialDatasetConfig::for_transient_zone_root(zpool);
+        // Every disk also gets:
+        let dataset_configs = [
+            // a Debug dataset
+            PartialDatasetConfig::for_debug(zpool),
+            // Transient Zone Root dataset
+            PartialDatasetConfig::for_transient_zone_root(zpool),
+            // a LocalStorage dataset
+            PartialDatasetConfig::for_local_storage_root(zpool),
+        ];
 
-        self.datasets.ensure_in_service(debug, rng);
-        self.datasets.ensure_in_service(zone_root, rng);
+        for dataset_config in dataset_configs {
+            self.datasets.ensure_in_service(dataset_config, rng);
+        }
 
         Ok(())
     }

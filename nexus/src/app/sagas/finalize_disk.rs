@@ -15,10 +15,11 @@ use crate::app::sagas::snapshot_create;
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_model::Generation;
-use nexus_db_queries::{authn, authz};
+use nexus_db_queries::{authn, authz, db::datastore};
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use serde::Deserialize;
 use serde::Serialize;
 use slog_error_chain::InlineErrorChain;
@@ -32,7 +33,7 @@ pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
     pub project_id: Uuid,
-    pub disk_id: Uuid,
+    pub disk: datastore::CrucibleDisk,
     pub snapshot_name: Option<Name>,
 }
 
@@ -79,7 +80,7 @@ impl NexusSaga for SagaFinalizeDisk {
                 serialized_authn: params.serialized_authn.clone(),
                 silo_id: params.silo_id,
                 project_id: params.project_id,
-                disk_id: params.disk_id,
+                disk: params.disk.clone(),
                 attach_instance_id: None,
                 use_the_pantry: true,
                 create_params: params::SnapshotCreate {
@@ -87,10 +88,10 @@ impl NexusSaga for SagaFinalizeDisk {
                         name: snapshot_name.clone(),
                         description: format!(
                             "snapshot of finalized disk {}",
-                            params.disk_id
+                            params.disk.id()
                         ),
                     },
-                    disk: params.disk_id.into(),
+                    disk: params.disk.id().into(),
                 },
             };
 
@@ -145,7 +146,7 @@ async fn sfd_set_finalizing_state(
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, osagactx.datastore())
-            .disk_id(params.disk_id)
+            .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
             .map_err(ActionError::action_failed)?;
@@ -168,7 +169,7 @@ async fn sfd_set_finalizing_state(
             // will be important later to *only* transition this disk out of finalizing
             // if the generation number matches what *this* saga is doing.
             let (.., db_disk) = LookupPath::new(&opctx, osagactx.datastore())
-                .disk_id(params.disk_id)
+                .disk_id(params.disk.id())
                 .fetch_for(authz::Action::Read)
                 .await
                 .map_err(ActionError::action_failed)?;
@@ -196,7 +197,7 @@ async fn sfd_set_finalizing_state_undo(
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, osagactx.datastore())
-            .disk_id(params.disk_id)
+            .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
             .map_err(ActionError::action_failed)?;
@@ -214,7 +215,7 @@ async fn sfd_set_finalizing_state_undo(
                 info!(
                     log,
                     "undo: setting disk {} state from finalizing to import_ready",
-                    params.disk_id
+                    params.disk.id()
                 );
 
                 osagactx
@@ -230,7 +231,7 @@ async fn sfd_set_finalizing_state_undo(
                 info!(
                     log,
                     "disk {} has generation number {:?}, which doesn't match the expected {:?}: skip setting to import_ready",
-                    params.disk_id,
+                    params.disk.id(),
                     db_disk.runtime().gen,
                     expected_disk_generation_number,
                 );
@@ -238,7 +239,7 @@ async fn sfd_set_finalizing_state_undo(
         }
 
         external::DiskState::ImportReady => {
-            info!(log, "disk {} already import_ready", params.disk_id);
+            info!(log, "disk {} already import_ready", params.disk.id());
         }
 
         _ => {
@@ -260,18 +261,29 @@ async fn sfd_get_pantry_address(
         &params.serialized_authn,
     );
 
+    // Re-fetch the disk, and use the lookup first to check for modify
+    // permission.
     let (.., db_disk) = LookupPath::new(&opctx, osagactx.datastore())
-        .disk_id(params.disk_id)
+        .disk_id(params.disk.id())
         .fetch_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
+
+    let disk = match osagactx
+        .datastore()
+        .disk_get(&opctx, params.disk.id())
+        .await
+        .map_err(ActionError::action_failed)?
+    {
+        datastore::Disk::Crucible(disk) => disk,
+    };
 
     // At any stage of executing this saga, if the disk moves from state
     // importing to detached, it will be detached from the corresponding Pantry.
     // Any subsequent saga nodes will fail because the pantry address is stored
     // as part of the saga state, and requests sent to that Pantry with the
     // disk's id will fail.
-    let pantry_address = db_disk.pantry_address().ok_or_else(|| {
+    let pantry_address = disk.pantry_address().ok_or_else(|| {
         ActionError::action_failed(String::from("disk not attached to pantry!"))
     })?;
 
@@ -287,19 +299,27 @@ async fn sfd_call_pantry_detach_for_disk(
     let params = sagactx.saga_params::<Params>()?;
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
-    call_pantry_detach(
+    match call_pantry_detach(
         sagactx.user_data().nexus(),
         &log,
-        params.disk_id,
+        params.disk.id(),
         pantry_address,
     )
     .await
-    .map_err(|e| {
-        ActionError::action_failed(format!(
+    {
+        // If the detach succeeds, then proceed with finalization. If the detach
+        // fails because the associated pantry is gone, then we have to be able
+        // to proceed with finalization in order to be able to eventually delete
+        // the disk. The associated pantry may have been expunged at any time
+        // during the import and this part of the code doesn't know the state of
+        // the disk, but we can't fail and leave the disk un-deleteable.
+        Ok(()) | Err(ProgenitorOperationRetryError::Gone) => Ok(()),
+
+        Err(e) => Err(ActionError::action_failed(format!(
             "pantry detach failed: {}",
             InlineErrorChain::new(&e)
-        ))
-    })
+        ))),
+    }
 }
 
 async fn sfd_clear_pantry_address(
@@ -314,10 +334,10 @@ async fn sfd_clear_pantry_address(
         &params.serialized_authn,
     );
 
-    info!(log, "setting disk {} pantry to None", params.disk_id);
+    info!(log, "setting disk {} pantry to None", params.disk.id());
 
     let (.., authz_disk) = LookupPath::new(&opctx, datastore)
-        .disk_id(params.disk_id)
+        .disk_id(params.disk.id())
         .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
@@ -343,7 +363,7 @@ async fn sfd_set_detached_state(
 
     let (.., authz_disk, db_disk) =
         LookupPath::new(&opctx, osagactx.datastore())
-            .disk_id(params.disk_id)
+            .disk_id(params.disk.id())
             .fetch_for(authz::Action::Modify)
             .await
             .map_err(ActionError::action_failed)?;
@@ -357,7 +377,7 @@ async fn sfd_set_detached_state(
                 info!(
                     log,
                     "setting disk {} state from finalizing to detached",
-                    params.disk_id
+                    params.disk.id()
                 );
 
                 osagactx
@@ -373,7 +393,7 @@ async fn sfd_set_detached_state(
                 info!(
                     log,
                     "disk {} has generation number {:?}, which doesn't match the expected {:?}: skip setting to detached",
-                    params.disk_id,
+                    params.disk.id(),
                     db_disk.runtime().gen,
                     expected_disk_generation_number,
                 );
@@ -381,7 +401,7 @@ async fn sfd_set_detached_state(
         }
 
         external::DiskState::Detached => {
-            info!(log, "disk {} already detached", params.disk_id);
+            info!(log, "disk {} already detached", params.disk.id());
         }
 
         _ => {

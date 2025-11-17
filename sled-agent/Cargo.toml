@@ -44,7 +44,7 @@ http-body-util.workspace = true
 http-range.workspace = true
 hyper.workspace = true
 hyper-staticfile.workspace = true
-id-map.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true
 internal-dns-resolver.workspace = true
@@ -93,6 +93,7 @@ sled-diagnostics.workspace = true
 sled-hardware.workspace = true
 sled-hardware-types.workspace = true
 sled-storage.workspace = true
+sp-sim.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
@@ -130,8 +131,10 @@ http.workspace = true
 hyper.workspace = true
 nexus-reconfigurator-blippy.workspace = true
 omicron-test-utils.workspace = true
+progenitor.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
+regress.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 subprocess.workspace = true
 slog-async.workspace = true
@@ -139,6 +142,7 @@ slog-term.workspace = true
 tempfile.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
+zfs-test-harness.workspace = true
 
 illumos-utils = { workspace = true, features = ["testing"] }
 sled-agent-config-reconciler = { workspace = true, features = ["testing"] }

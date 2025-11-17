@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Implementation of queries for operating on external multicast groups from IP
-//! Pools.
+//! Queries for allocating external, customer-facing  multicast groups from IP
+//! pools.
 //!
-//! Much of this is based on the external IP allocation code, with
-//! modifications for multicast group semantics.
+//! Based on [`super::external_ip`] allocation code, adapted for multicast
+//! group semantics.
 
 use chrono::{DateTime, Utc};
 use diesel::pg::Pg;
@@ -27,7 +27,7 @@ use crate::db::true_or_cast_error::matches_sentinel;
 const REALLOCATION_WITH_DIFFERENT_MULTICAST_GROUP_SENTINEL: &'static str =
     "Reallocation of multicast group with different configuration";
 
-/// Translates a generic multicast group allocation error to an external error.
+/// Converts multicast group allocation errors to external errors.
 pub fn from_diesel(
     e: diesel::result::Error,
 ) -> omicron_common::api::external::Error {
@@ -50,13 +50,10 @@ pub fn from_diesel(
     )
 }
 
-/// Query to allocate the next available external multicast group address from
-/// IP pools.
+/// Query to allocate next available external multicast group address from IP pools.
 ///
-/// This query follows a similar pattern as [`super::external_ip::NextExternalIp`] but for multicast
-/// addresses.
-///
-/// It handles pool-based allocation, explicit address requests, and
+/// Similar pattern to [`super::external_ip::NextExternalIp`] but for multicast
+/// addresses. Handles pool-based allocation, explicit address requests, and
 /// idempotency.
 pub struct NextExternalMulticastGroup {
     group: IncompleteExternalMulticastGroup,
@@ -77,11 +74,8 @@ impl NextExternalMulticastGroup {
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.group.id)?;
         out.push_sql(" AS id, ");
 
-        // Use provided name (now required via identity pattern)
         out.push_bind_param::<sql_types::Text, Name>(&self.group.name)?;
         out.push_sql(" AS name, ");
-
-        // Use provided description (now required via identity pattern)
         out.push_bind_param::<sql_types::Text, String>(
             &self.group.description,
         )?;
@@ -98,9 +92,6 @@ impl NextExternalMulticastGroup {
 
         out.push_bind_param::<sql_types::Nullable<sql_types::Timestamptz>, Option<DateTime<Utc>>>(&None)?;
         out.push_sql(" AS time_deleted, ");
-
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.group.project_id)?;
-        out.push_sql(" AS project_id, ");
 
         // Pool ID from the candidates subquery (like external IP)
         out.push_sql("ip_pool_id, ");
@@ -127,11 +118,12 @@ impl NextExternalMulticastGroup {
         }
         out.push_sql("]::inet[] AS source_ips, ");
 
+        // MVLAN for external uplink forwarding
+        out.push_bind_param::<sql_types::Nullable<sql_types::Int2>, Option<i16>>(&self.group.mvlan)?;
+        out.push_sql(" AS mvlan, ");
+
         out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(&None)?;
         out.push_sql(" AS underlay_group_id, ");
-
-        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.group.rack_id)?;
-        out.push_sql(" AS rack_id, ");
 
         out.push_bind_param::<sql_types::Nullable<sql_types::Text>, Option<String>>(&self.group.tag)?;
         out.push_sql(" AS tag, ");
@@ -203,7 +195,6 @@ impl NextExternalMulticastGroup {
         out.push_sql(" AND ");
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(" IS NULL");
-
         // Filter for multicast address ranges (224.0.0.0/4 for IPv4,
         // ff00::/8 for IPv6)
         out.push_sql(" AND (");
@@ -250,18 +241,18 @@ impl QueryFragment<Pg> for NextExternalMulticastGroup {
         out.push_sql("INSERT INTO ");
         schema::multicast_group::table.walk_ast(out.reborrow())?;
         out.push_sql(
-            " (id, name, description, time_created, time_modified, time_deleted, project_id, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, underlay_group_id, rack_id, tag, state, version_added, version_removed)
-             SELECT id, name, description, time_created, time_modified, time_deleted, project_id, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, underlay_group_id, rack_id, tag, state, version_added, version_removed FROM next_external_multicast_group
+            " (id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed)
+             SELECT id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed FROM next_external_multicast_group
                 WHERE NOT EXISTS (SELECT 1 FROM previously_allocated_group)
-                RETURNING id, name, description, time_created, time_modified, time_deleted, project_id, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, underlay_group_id, rack_id, tag, state, version_added, version_removed",
+                RETURNING id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed",
         );
         out.push_sql(") ");
 
         // Return either the newly inserted or previously allocated group
         out.push_sql(
-            "SELECT id, name, description, time_created, time_modified, time_deleted, project_id, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, underlay_group_id, rack_id, tag, state, version_added, version_removed FROM previously_allocated_group
+            "SELECT id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed FROM previously_allocated_group
             UNION ALL
-            SELECT id, name, description, time_created, time_modified, time_deleted, project_id, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, underlay_group_id, rack_id, tag, state, version_added, version_removed FROM multicast_group",
+            SELECT id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed FROM multicast_group",
         );
 
         Ok(())

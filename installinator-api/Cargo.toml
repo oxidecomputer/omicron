@@ -10,8 +10,8 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 dropshot.workspace = true
+dropshot-api-manager-types.workspace = true
 hyper.workspace = true
-installinator-common.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -19,4 +19,5 @@ schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
 tufaceous-artifact.workspace = true
+update-engine.workspace = true
 uuid.workspace = true

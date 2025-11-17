@@ -53,7 +53,7 @@ pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbVmmState; 4] = [
     DbVmmState::Migrating,
 ];
 
-/// The maximum number of disks that can be attached to an instance.
+/// The maximum number of external IPs that can be attached to an instance.
 pub const MAX_EXTERNAL_IPS_PER_INSTANCE: u32 = 32;
 
 type FromClause<T> =
@@ -89,217 +89,114 @@ pub fn from_diesel(e: DieselError) -> external::Error {
     )
 }
 
-const MAX_PORT: u16 = u16::MAX;
+const MAX_PORT: i32 = u16::MAX as _;
 
-/// Select the next available IP address and port range for an instance's
-/// external connectivity.
+/// Select the next available IP address and port range for external
+/// connectivity.
 ///
-/// All guest instances by default are able to make outbound network
-/// connections, for example to `ping 8.8.8.8`. That requires an external IP
-/// address, selected from an IP Pool maintained by rack operators. This query
-/// can be used to select a portion of the full port-range of one IP address,
-/// reserving them for use by an instance.
+/// # Overview
 ///
-/// In general, the query:
+/// This query is used to allocate an IP address from a given IP Pool, both for
+/// guest instances and Oxide services that need external connectivity. It
+/// accepts the ID of a pool, plus arguments describing the kind of address,
+/// the intended parent, whether it's an explicitly-requested address or
+/// automatically-allocated, and so on.
 ///
-/// - Selects the next available IP address and port range from the specified IP pool
-/// - Inserts that record into the `external_ip` table
-/// - Updates the rcgen and time modified of the parent `ip_pool_range` table
+/// The query is designed to be idempotent. Provided the same arguments, it'll
+/// return the exact same record if called more than once. That's so we can use
+/// it in sagas or other similar contexts.
 ///
-/// In detail, the query is:
+/// This query is really complicated. See the expectorate test output files, in
+/// `tests/output/` to see the full, formatted query. But in general, it:
 ///
-/// ```sql
-/// WITH next_external_ip AS (
-///     -- Create a new IP address record
-///     SELECT
-///         <ip_id> AS id,
-///         <name> AS name,
-///         <description> AS description,
-///         <now> AS time_created,
-///         <now> AS time_modified,
-///         NULL AS time_deleted,
-///         ip_pool_id,
-///         ip_pool_range_id,
-///         <is_service> AS is_service,
-///         <parent_id> AS parent_id,
-///         <kind> AS kind,
-///         candidate_ip AS ip,
-///         CAST(candidate_first_port AS INT4) AS first_port,
-///         CAST(candidate_last_port AS INT4) AS last_port,
-///         <project_id> AS project_id,
-///         <is_probe> AS is_probe,
-///         <state> AS state
-///     FROM
-///         SELECT * FROM (
-///             -- Select all IP addresses by pool and range.
-///             SELECT
-///                 ip_pool_id,
-///                 id AS ip_pool_range_id,
-///                 <Candidate IP Query> AS candidate_ip
-///             FROM
-///                 ip_pool_range
-///             WHERE
-///                 <pool restriction clause> AND
-///                 time_deleted IS NULL
-///         ) AS candidates
-///         WHERE candidates.candidate_ip IS NOT NULL
-///     CROSS JOIN
-///         (
-///             -- Cartesian product with all first/last port values
-///             SELECT
-///                 candidate_first_port,
-///                 candidate_first_port +
-///                     <NUM_SOURCE_NAT_PORTS - 1>
-///                     AS candidate_last_port
-///             FROM
-///                 generate_series(0, <MAX_PORT>, <NUM_SOURCE_NAT_PORTS>)
-///                     AS candidate_first_port
-///         )
-///     LEFT OUTER JOIN
-///         -- Join with existing IPs, selecting the first row from the
-///         -- address and port sequence subqueries that has no match. I.e.,
-///         -- is not yet reserved.
-///         external_ip
-///     ON
-///         -- The JOIN conditions depend on the IP kind:
+/// - Selects any previously-allocated record, for idempotency
+/// - Selects a bunch of caller-provided constants, things like an instance ID
+/// - Selects the next free external IP, or chunk of one, in the case of an SNAT
+///   address.
+/// - Inserts either the new address, or the original, provided the
+///   caller-supplied data is the same as that record. (E.g., if the IP has
+///   changed, this query will fail.)
+/// - Updates the `ip_pool_range` table's `rcgen` column, to reflect the fact
+///   that we've allocated a new child object.
 ///
-///         -- For Floating and Ephemeral IPs, we need to reserve the entire
-///         -- port range which makes the condition pretty simple: We don't
-///         -- care what the port is, any record with that IP is considered
-///         -- a match.
-///         (ip, time_deleted IS NULL) = (candidate_ip, TRUE)
+/// The actual record inserted is returned to the caller.
 ///
-///         -- SNAT IPs are a little more complicated; we need to prevent
-///         -- SNAT IPs from "carving out" any part of the port range of an
-///         -- IP if there is an Ephemeral or Floating IP with the same
-///         -- address. However, we want to _allow_ taking the next available
-///         -- chunk of ports when there is an existing SNAT IP with the same
-///         -- address. We do this by preventing _overlapping_ port ranges
-///         -- within the same IP.
-///         (
-///             ip,
-///             candidate_first_port >= first_port AND
-///                 candidate_last_port <= last_port AND
-///                 time_deleted IS NULL
-///         ) = (candidate_ip, TRUE)
-///     WHERE
-///         (ip IS NULL) OR (id = <ip_id>)
-///     ORDER BY
-///         candidate_ip, candidate_first_port
-///     LIMIT 1
-/// ),
-/// -- Identify if the IP address has already been allocated, to validate
-/// -- that the request looks the same (for idempotency).
-/// previously_allocated_ip AS (
-///     SELECT
-///         id as old_id,
-///         ip as old_ip,
-///         first_port as old_first_port,
-///         last_port as old_last_port
-///     FROM external_ip
-///     WHERE
-///         id = <id> AND time_deleted IS NULL
-/// ),
-/// -- Compare `next_external_ip` with `previously_allocated_ip`, and throw
-/// -- an error if the request is not idempotent.
-/// validate_prior_allocation AS MATERIALIZED (
-///     CAST(
-///         -- If this expression evaluates to false, we throw an error.
-///         IF(
-///             -- Either the previously_allocated_ip does not exist, or...
-///             NOT EXISTS(SELECT 1 FROM previously_allocated_ip) OR
-///             -- ... If it does exist, the IP address must be the same for
-///             -- both the old and new request.
-///             (
-///                 SELECT
-///                    ip = old_ip AND
-///                    first_port = old_first_port AND
-///                    last_port = old_last_port
-///                 FROM
-///                     (
-///                         SELECT
-///                             ip, first_port, last_port,
-///                             old_ip, old_first_port, old_last_port
-///                         FROM next_external_ip
-///                         INNER JOIN
-///                         previously_allocated_ip ON old_id = id
-///                     )
-///             ),
-///             TRUE,
-///             <Error Message> AS BOOL
-///         )
-///     )
-/// ),
-/// external_ip AS (
-///     -- Insert the record into the actual table.
-///     -- When a conflict is detected, we'll update the timestamps but leave
-///     -- everything else as it exists in the record. This should only be
-///     -- possible on replay of a saga node.
-///     INSERT INTO
-///         external_ip
-///     (SELECT * FROM next_external_ip)
-///     ON CONFLICT (id)
-///     DO UPDATE SET
-///         time_created = excluded.time_created,
-///         time_modified = excluded.time_modified,
-///         time_deleted = excluded.time_deleted
-///     RETURNING *
-/// ),
-/// updated_pool AS (
-///     UPDATE SET
-///         ip_pool_range
-///     SET
-///         time_modified = NOW(),
-///         rcgen = rcgen + 1
-///     WHERE
-///         id = (SELECT ip_pool_id FROM next_external_ip) AND
-///         time_deleted IS NULL
-///     RETURNING id
-/// )
-/// SELECT * FROM external_ip;
-/// ```
+/// # Query details
 ///
-/// Performance notes
-/// -----------------
+/// Note that the query looks pretty different based on the arguments. The main
+/// distinction comes from the kind of address (SNAT or Ephemeral / Floating),
+/// and whether we're doing an automatic address allocation or requesting a
+/// specific IP address.
 ///
-/// This query currently searches _all_ available IP Pools and _all_ contained
-/// ranges. It is similar to the common "next item" queries, in that its
-/// worst-case peformance is proportional to the total number of IP addresses in
-/// all pools. Specifically, its runtime is proportional to the lowest
-/// unallocated address in any IP pool. However, it's important to note that
-/// Cockroach currently completely runs all subqueries and caches their results
-/// in memory, meaning this query will need to be redesigned to limit the
-/// number of results it checks. As an example, suppose there were a large
-/// number of IP pools each containing an IPv6 /64 subnet. That's 2**64 items
-/// _per_ pool.
+/// The general strategy for finding an IP address is:
 ///
-/// A good way to start limiting this is cap the address-search subquery. It's
-/// not clear what that limit should be though.
+/// - Use the previously-allocated address, if it exists.
+/// - Use an exact, caller-provided IP address and port-range, if provided.
+/// - Check if the smallest address in an IP Pool Range is available, and use it
+///   if so.
+/// - Search for the next IP or chunk of one, by joining the `external_ip.ip`
+///   column with `external_ip.ip + 1`, i.e., the "next address". This is
+///   similar to how the "next-item" queries work, though unfortunately we can't
+///   use that in this context.
 ///
-/// Casting
-/// -------
+/// ## SNAT vs Ephemeral / Floating
 ///
-/// There are a couple of explicit `CAST` expressions above, which are required.
-/// The `generate_series` call creating the port ranges defaults to generating
-/// 64-bit integer values, since the call isn't tied to any particular table
-/// (even though we send the start/stop to the database as `i32`s). We need to
-/// cast it on the way out of the database, so that Diesel can correctly
-/// deserialize it into an `i32`.
+/// SNAT addresses present a big challenge. They use a portion of the port
+/// range, 16k as of this writing. That means multiple SNAT addresses can share
+/// the same underlying IP address. An example of this kind of query can be
+/// found in `nexus/db-queries/tests/output/next_instance_snat_ip.sql`. It needs
+/// to join both IP addresses and also the possible port chunks. The query is
+/// technically parametrized by the size of those chunks, though changing it
+/// should be done with extreme care.
 ///
-/// Pool restriction
-/// ----------------
+/// In contrast, Ephemeral / Floating IPs take the whole port range. This makes
+/// the query quite a bit simpler. This only needs to look for "whole
+/// addresses". See
+/// `nexus/db-queries/tests/output/next_automatic_floating_ip.sql` for details,
+/// noting that the Ephemeral IP version of the query works the same way.
 ///
-/// Clients must supply the UUID of an IP pool from which they are allocating.
+/// ## Explicit vs automatic
+///
+/// The second main distinction is between explicit addresses, where we're
+/// asking for an exact IP address (and port range), or searching for one to
+/// allocate automatically.
+///
+/// In the former case, we select the requested address as constants in the SQL
+/// query, subject to some validation. The address has to be within an IP Pool
+/// Range in the pool itself; and, if this is a reallocation of a previous
+/// address, it has to be exactly the same as that previous one. That is, you
+/// can't request a new, different address the second time. An example of the
+/// explicit-request SQL query can be found in
+/// `nexus/db-queries/tests/output/next_explicit_floating_ip.sql`.
+///
+/// If the allocation is automatic, it gets...complicated. In that case, we do a
+/// bunch of joins to find the smallest address that's not yet allocated. It's
+/// best to look at the expectorate files with "automatic" in their name.
+///
+/// # Performance notes
+///
+/// This query has been written with performance in mind, particuarly memory
+/// consumption. The previous versions of the query used `generate_series()` to
+/// find the list of _all_ IP addresses in an IP Range, and then join that with
+/// the allocated IPs to find the first free one. That works, but since
+/// CockroachDB eagerly-evaluates all subqueries, is expensive for larger
+/// subnets, and completely infeasible for realistic IPv6 ranges.
+///
+/// Note that the current version of the query does have some performance
+/// issues. Memory consumption and time are dependent on the number of existing,
+/// allocated addresses in the provided IP Pool. (Assuming we're doing an
+/// automatic allocation. Explicit allocations are constant-time w.r.t. the
+/// number of addresses.) This is still better than the previous version, but we
+/// may need to reevaluate the runtime as we deploy it. Depending on the
+/// statistics of the table, we may need to emply a completely different
+/// strategy, such as attempting to pick a random address, or doing a
+/// fixed-sized linear search.
 #[derive(Debug, Clone)]
 pub struct NextExternalIp {
     ip: IncompleteExternalIp,
     // Number of ports reserved per IP address. Only applicable if the IP kind
     // is snat.
     n_ports_per_chunk: i32,
-    // The offset from the first port to the last, inclusive. This is required
-    // because the ranges must not overlap and `generate_series` is inclusive of
-    // its endpoints.
-    last_port_offset: i32,
     now: DateTime<Utc>,
 }
 
@@ -307,25 +204,20 @@ impl NextExternalIp {
     pub fn new(ip: IncompleteExternalIp) -> Self {
         let now = Utc::now();
         let n_ports_per_chunk = i32::from(NUM_SOURCE_NAT_PORTS);
-        Self {
-            ip,
-            n_ports_per_chunk,
-            last_port_offset: n_ports_per_chunk - 1,
-            now,
-        }
+        Self { ip, n_ports_per_chunk, now }
     }
 
-    fn push_next_ip_and_port_range_subquery<'a>(
+    // Push the top-level SELECT clauses used in the `next_external_ip` CTE.
+    //
+    // NOTE: These columns must be selected in the order in which they
+    // appear in the table, to avoid needing to push the explicit column
+    // names in the RETURNING clause and final SELECT from the CTE.
+    fn push_next_external_ip_cte_select_clauses<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> QueryResult<()> {
         use schema::external_ip::dsl;
         out.push_sql("SELECT ");
-
-        // NOTE: These columns must be selected in the order in which they
-        // appear in the table, to avoid needing to push the explicit column
-        // names in the RETURNING clause and final SELECT from the CTE.
-
         // Id
         out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.id())?;
         out.push_sql(" AS ");
@@ -366,7 +258,9 @@ impl NextExternalIp {
         out.push_identifier(dsl::time_deleted::NAME)?;
         out.push_sql(", ");
 
-        // Pool ID
+        // Pool ID.
+        out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+        out.push_sql(" AS ");
         out.push_identifier(dsl::ip_pool_id::NAME)?;
         out.push_sql(", ");
 
@@ -392,14 +286,14 @@ impl NextExternalIp {
         out.push_identifier(dsl::kind::NAME)?;
         out.push_sql(", ");
 
-        // Candidate IP from the subquery
+        // Next available IP from the following subquery
         out.push_sql("candidate_ip AS ");
         out.push_identifier(dsl::ip::NAME)?;
 
-        // Candidate first / last port from the subquery
-        out.push_sql(", CAST(candidate_first_port AS INT4) AS ");
+        // Select the first / last ports.
+        out.push_sql(", candidate_first_port AS ");
         out.push_identifier(dsl::first_port::NAME)?;
-        out.push_sql(", CAST(candidate_last_port AS INT4) AS ");
+        out.push_sql(", candidate_last_port AS ");
         out.push_identifier(dsl::last_port::NAME)?;
         out.push_sql(", ");
 
@@ -422,99 +316,241 @@ impl NextExternalIp {
         out.push_sql(" AS ");
         out.push_identifier(dsl::is_probe::NAME)?;
 
-        out.push_sql(" FROM (");
-        self.push_address_sequence_subquery(out.reborrow())?;
-        out.push_sql(") CROSS JOIN (");
-        self.push_port_sequence_subquery(out.reborrow())?;
-        out.push_sql(") LEFT OUTER JOIN ");
-        EXTERNAL_IP_FROM_CLAUSE.walk_ast(out.reborrow())?;
-
-        // The JOIN conditions depend on the IP type. For automatic SNAT IP
-        // addresses, we need to consider existing records with their port
-        // ranges. That's because we want to allow providing two different
-        // chunks of ports from the same IP to two different guests or services.
-        //
-        // However, for Floating and Ephemeral IPs, we need to reserve the
-        // entire port range. An Instance or Service may start listening on
-        // any port, and we need to allow inbound connections to that port.
-        // (It can't be rewritten on the way in.)
-        //
-        // The second case is much simpler, so let's start with that.
-        //
-        // ```sql
-        // ON (ip, time_deleted IS NULL) = (candidate_ip, TRUE)
-        // ```
-        //
-        // Here, we don't care what the port is. Any record in the table that
-        // has that IP should be considered a match. This prevents creating
-        // Ephemeral or Floating IPs when there is any other record with the
-        // same address, even an SNAT IP only consuming a portion of the port
-        // range.
-        //
-        // Now for the first case, SNAT. Here, we need to prevent SNAT IPs from
-        // "carving out" any part of the port range of an IP if there is an
-        // Ephemeral or Floating IP with the same address. However, we want to
-        // _allow_ taking the next available chunk of ports when there is an
-        // existing SNAT IP with the same address.
-        //
-        // This is done by preventing _overlapping_ port ranges within the same
-        // IP. There's a clause in the JOIN condition:
-        //
-        // ```
-        // candidate_first_port >= first_port
-        // AND
-        // candidate_last_port <= last_port
-        // ```
-        //
-        // which, if `TRUE`, results in a match in the left outer join. That is,
-        // if there is any existing address whose port range contains the
-        // candidate port range, we return that as a match. That means we cannot
-        // double-allocate matching port ranges for an SNAT address, nor can we
-        // double-allocate a port range that's already been claimed by an
-        // Ephemeral or Floating address.
-        //
-        // In either case, we follow this with a filter `WHERE ip IS NULL`,
-        // meaning we select the candidate address and first port that does not
-        // have a matching record in the table already.
-        out.push_sql(" ON (");
-        out.push_identifier(dsl::ip::NAME)?;
-        out.push_sql(",");
-        if matches!(self.ip.kind(), &IpKind::SNat) {
-            out.push_sql(" candidate_first_port >= ");
-            out.push_identifier(dsl::first_port::NAME)?;
-            out.push_sql(" AND candidate_last_port <= ");
-            out.push_identifier(dsl::last_port::NAME)?;
-            out.push_sql(" AND ");
-        }
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL) = (candidate_ip, TRUE) ");
-
-        // In all cases, we're selecting rows from the join that don't have a
-        // match in the existing table.
-        //
-        // This is a bit subtle. The join condition considers rows a match if
-        // the `time_deleted` is null. That means that if the record has been
-        // soft-deleted, it won't be considered a match, and thus both the IP
-        // and first port (in the join result) will be null. Note that there
-        // _is_ a record in the `external_ip` table that has that IP
-        // and possibly first port, but since it's been soft-deleted, it's not a
-        // match. In that case, we can get away with _only_ filtering the join
-        // results on the IP from the `external_ip` table being NULL.
-        out.push_sql(" WHERE (");
-        out.push_identifier(dsl::ip::NAME)?;
-        out.push_sql(" IS NULL) OR (");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.id())?;
-        out.push_sql(
-            ") \
-            ORDER BY candidate_ip, candidate_first_port \
-            LIMIT 1",
-        );
-
         Ok(())
     }
 
+    // Push the subquery that selects an explicit IP address and port.
+    //
+    // This selects the caller's provided address and port range, as long as it
+    // is within the first / last address of some range in the provided IP Pool.
+    // It returns NULL if there is no such address.
+    fn push_explicit_ip_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+        addr: &'a ipnetwork::IpNetwork,
+        first_port: &'a i32,
+        last_port: &'a i32,
+    ) -> QueryResult<()> {
+        out.push_sql("SELECT r.id AS ip_pool_range_id, CASE ");
+        out.push_bind_param::<sql_types::Inet, _>(addr)?;
+        out.push_sql(
+            " BETWEEN r.first_address AND r.last_address WHEN TRUE THEN ",
+        );
+        out.push_bind_param::<sql_types::Inet, _>(addr)?;
+        out.push_sql(" ELSE NULL END AS candidate_ip, ");
+        out.push_bind_param::<sql_types::Int4, _>(first_port)?;
+        out.push_sql(" AS candidate_first_port, ");
+        out.push_bind_param::<sql_types::Int4, _>(last_port)?;
+        out.push_sql(
+            " AS candidate_last_port \
+            FROM ip_pool_range AS r \
+            WHERE ip_pool_id = ",
+        );
+        out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+        out.push_sql(" AND time_deleted IS NULL");
+        Ok(())
+    }
+
+    // Push the subquery selecting the next SNAT IP address and port range.
+    //
+    // This query is the most complicated of the bunch. We need to join all the
+    // available IP addresses in a pool with all the available port ranges, and
+    // then find the smallest that doesn't overlap any existing entry. We also
+    // fall back to picking the next fully-available IP address, i.e., the exact
+    // same subquery as we use in the Floating / Ephemeral case. These are all
+    // UNIONed together.
+    fn push_automatic_snat_ip_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        out.push_sql(
+            "\
+            SELECT \
+                ip_pool_range_id, \
+                candidate_ip, \
+                candidate_first_port, \
+                candidate_last_port \
+            FROM (\
+                SELECT \
+                    old_ip_pool_range_id AS ip_pool_range_id, \
+                    old_ip AS candidate_ip, \
+                    old_first_port AS candidate_first_port, \
+                    old_last_port AS candidate_last_port \
+                FROM \
+                    previously_allocated_ip\
+            ) UNION ALL (\
+                SELECT DISTINCT ON (iws.ip) \
+                    iws.ip_pool_range_id, \
+                    iws.ip AS candidate_ip, \
+                    pb.candidate_first_port, \
+                    pb.candidate_last_port \
+                FROM (\
+                    SELECT DISTINCT e.ip_pool_range_id, e.ip \
+                    FROM external_ip AS e \
+                    WHERE e.ip_pool_id = ",
+        );
+        out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+        out.push_sql(" AND e.kind = ");
+        out.push_bind_param::<IpKindEnum, _>(self.ip.kind())?;
+        out.push_sql(
+            " AND e.time_deleted IS NULL \
+                ) AS iws \
+                CROSS JOIN (\
+                    SELECT \
+                        block_start AS candidate_first_port, \
+                        block_start + ",
+        );
+        out.push_bind_param::<sql_types::Int4, _>(&self.n_ports_per_chunk)?;
+        out.push_sql(" - 1 AS candidate_last_port FROM generate_series(0, ");
+        out.push_bind_param::<sql_types::Int4, _>(&MAX_PORT)?;
+        out.push_sql(", ");
+        out.push_bind_param::<sql_types::Int4, _>(&self.n_ports_per_chunk)?;
+        out.push_sql(
+            ") AS block_start\
+                ) AS pb \
+                WHERE NOT EXISTS (\
+                    SELECT 1 \
+                    FROM external_ip AS e \
+                    WHERE e.ip = iws.ip \
+                    AND e.first_port <= pb.candidate_last_port \
+                    AND e.last_port >= pb.candidate_first_port \
+                    AND e.time_deleted IS NULL \
+                ) \
+                ORDER BY iws.ip, pb.candidate_first_port \
+                LIMIT 1\
+                ) \
+                UNION ALL \
+                SELECT \
+                    ip_pool_range_id, \
+                    candidate_ip, \
+                    0 AS candidate_first_port, ",
+        );
+        out.push_bind_param::<sql_types::Int4, _>(&self.n_ports_per_chunk)?;
+        out.push_sql(" - 1 AS candidate_last_port FROM (");
+        self.push_automatic_full_ip_subquery_body(out.reborrow())?;
+        out.push_sql(
+            "\
+                ) AS free_ips \
+                WHERE candidate_ip IS NOT NULL \
+                ) AS all_candidates \
+                ORDER BY candidate_ip, candidate_first_port \
+                LIMIT 1",
+        );
+        Ok(())
+    }
+
+    // Push the subquery that automatically selects the next available IP
+    // address that has no other entry sharing any of its ports.
+    fn push_automatic_full_ip_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        out.push_sql(
+            "(\
+                SELECT \
+                    old_ip_pool_range_id AS ip_pool_range_id, \
+                    old_ip AS candidate_ip, \
+                    old_first_port AS candidate_first_port, \
+                    old_last_port AS candidate_last_port \
+                FROM \
+                    previously_allocated_ip\
+                ) \
+                UNION ALL ",
+        );
+        self.push_automatic_full_ip_subquery_body(out.reborrow())?;
+        out.push_sql(
+            ") AS all_candidates \
+            WHERE candidate_ip IS NOT NULL \
+            ORDER BY candidate_ip \
+            LIMIT 1 ",
+        );
+        Ok(())
+    }
+
+    fn push_automatic_full_ip_subquery_body<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        out.push_sql("SELECT r.id AS ip_pool_range_id, ");
+
+        // Now, if the caller wants an explicit IP, we can push the simpler,
+        // direct form of the query that selects the address, if it's within the
+        // range itself.
+        //
+        // Otherwise, push the full address-search query.
+        if let Some(addr) = self.ip.explicit_ip() {
+            out.push_sql("CASE ");
+            out.push_bind_param::<sql_types::Inet, _>(addr)?;
+            out.push_sql(
+                " BETWEEN r.first_address AND r.last_address WHEN TRUE THEN ",
+            );
+            out.push_bind_param::<sql_types::Inet, _>(addr)?;
+            out.push_sql(" ELSE NULL END ");
+        } else {
+            out.push_sql(
+                "\
+                COALESCE(\
+                    CASE \
+                        WHEN NOT EXISTS (\
+                            SELECT 1 \
+                            FROM external_ip AS e \
+                            WHERE e.ip_pool_id = ",
+            );
+            out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+            out.push_sql(
+                " \
+                            AND e.ip_pool_range_id = r.id \
+                            AND e.ip = r.first_address \
+                            AND e.time_deleted IS NULL\
+                        ) \
+                        THEN r.first_address \
+                    END, \
+                    (\
+                        SELECT e.ip + 1 \
+                        FROM external_ip AS e \
+                        WHERE e.ip_pool_id = ",
+            );
+            out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+            out.push_sql(
+                " \
+                        AND e.ip_pool_range_id = r.id \
+                        AND e.ip < r.last_address \
+                        AND e.time_deleted IS NULL \
+                        AND NOT EXISTS (\
+                            SELECT 1 \
+                            FROM external_ip AS e2 \
+                            WHERE e2.ip_pool_id = ",
+            );
+            out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+            out.push_sql(
+                " \
+                            AND e2.ip_pool_range_id = r.id \
+                            AND e2.ip = e.ip + 1 \
+                            AND e2.time_deleted IS NULL\
+                        ) \
+                        ORDER BY e.ip \
+                        LIMIT 1\
+                    )\
+                )",
+            );
+        }
+
+        // Continue by pushing the bits selecting the first / last ports.
+        out.push_sql(" AS candidate_ip, 0 AS candidate_first_port, ");
+        out.push_bind_param::<sql_types::Int4, _>(&MAX_PORT)?;
+        out.push_sql(
+            " \
+                AS candidate_last_port \
+            FROM \
+                ip_pool_range AS r \
+                WHERE r.ip_pool_id = ",
+        );
+        out.push_bind_param::<sql_types::Uuid, _>(self.ip.pool_id())?;
+        out.push_sql(" AND r.time_deleted IS NULL ");
+        Ok(())
+    }
+
+    // Push subquery that selects a previously-allocated external IP by its ID.
     fn push_prior_allocation_subquery<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -524,6 +560,8 @@ impl NextExternalIp {
         out.push_sql("SELECT ");
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" AS old_id, ");
+        out.push_identifier(dsl::ip_pool_range_id::NAME)?;
+        out.push_sql(" AS old_ip_pool_range_id, ");
         out.push_identifier(dsl::ip::NAME)?;
         out.push_sql(" AS old_ip, ");
         out.push_identifier(dsl::first_port::NAME)?;
@@ -542,6 +580,12 @@ impl NextExternalIp {
         Ok(())
     }
 
+    // Push the subquery that validates that the previously-selected external IP
+    // address either:
+    //
+    // - does not exist, i.e., this is a new entry
+    // - is exactly the same as the one we're adding now, i.e., we're
+    //   idempotently inserting the same record again, such as in a saga.
     fn push_validate_prior_allocation_subquery<'a>(
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
@@ -564,7 +608,7 @@ impl NextExternalIp {
                 out.unsafe_to_cache_prepared();
                 // Either the allocation to this UUID needs to be new...
                 out.push_sql(
-                    "NOT EXISTS(SELECT 1 FROM previously_allocated_ip) OR",
+                    "NOT EXISTS(SELECT 1 FROM previously_allocated_ip) OR ",
                 );
                 // ... Or we are allocating the same IP address...
                 out.push_sql("(SELECT ");
@@ -574,16 +618,11 @@ impl NextExternalIp {
                 out.push_identifier(dsl::first_port::NAME)?;
                 out.push_sql(" = old_first_port AND ");
                 out.push_identifier(dsl::last_port::NAME)?;
-                out.push_sql(" = old_last_port FROM (SELECT ");
-                out.push_identifier(dsl::ip::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::first_port::NAME)?;
-                out.push_sql(", ");
-                out.push_identifier(dsl::last_port::NAME)?;
                 out.push_sql(
-                    ", old_ip, old_first_port, old_last_port \
-                    FROM next_external_ip INNER JOIN previously_allocated_ip \
-                    ON old_id = id))",
+                    " = old_last_port \
+                    FROM next_external_ip \
+                    INNER JOIN previously_allocated_ip \
+                    ON previously_allocated_ip.old_id = next_external_ip.id)",
                 );
                 Ok(())
             }
@@ -597,165 +636,6 @@ impl NextExternalIp {
                 REALLOCATION_WITH_DIFFERENT_IP_SENTINEL,
             );
         QUERY.walk_ast(out.reborrow())?;
-        Ok(())
-    }
-
-    // Push a subquery which selects either:
-    // - A sequence of candidate IP addresses from the IP pool range, if no
-    // explicit IP address has been supplied, or
-    // - A single IP address within the range, if an explicit IP address has
-    // been supplied.
-    //
-    // ```sql
-    // SELECT * FROM (
-    //   SELECT
-    //       ip_pool_id,
-    //       id AS ip_pool_range_id,
-    //       -- Candidates with no explicit IP:
-    //       first_address + generate_series(0, last_address - first_address)
-    //       -- Candidates with explicit IP:
-    //       CASE
-    //          first_address <= <explicit_ip> AND
-    //          <explicit_ip> <= last_address
-    //       WHEN TRUE THEN <explicit_ip> ELSE NULL END
-    //       -- Either way:
-    //           AS candidate_ip
-    //   FROM
-    //       ip_pool_range
-    //   WHERE
-    //       <pool_restriction> AND
-    //       time_deleted IS NULL
-    // ) AS candidates
-    // WHERE candidates.candidate_ip IS NOT NULL
-    // ```
-    fn push_address_sequence_subquery<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> QueryResult<()> {
-        use schema::ip_pool_range::dsl;
-        out.push_sql("SELECT * FROM (");
-
-        out.push_sql("SELECT ");
-        out.push_identifier(dsl::ip_pool_id::NAME)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::id::NAME)?;
-        out.push_sql(" AS ip_pool_range_id, ");
-
-        if let Some(explicit_ip) = self.ip.explicit_ip() {
-            out.push_sql("CASE ");
-            out.push_identifier(dsl::first_address::NAME)?;
-            out.push_sql(" <= ");
-            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
-                explicit_ip,
-            )?;
-            out.push_sql(" AND ");
-            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
-                explicit_ip,
-            )?;
-            out.push_sql(" <= ");
-            out.push_identifier(dsl::last_address::NAME)?;
-            out.push_sql(" WHEN TRUE THEN ");
-            out.push_bind_param::<sql_types::Inet, ipnetwork::IpNetwork>(
-                explicit_ip,
-            )?;
-            out.push_sql(" ELSE NULL END");
-        } else {
-            out.push_identifier(dsl::first_address::NAME)?;
-            out.push_sql(" + generate_series(0, ");
-            out.push_identifier(dsl::last_address::NAME)?;
-            out.push_sql(" - ");
-            out.push_identifier(dsl::first_address::NAME)?;
-            out.push_sql(") ");
-        }
-
-        out.push_sql(" AS candidate_ip FROM ");
-        IP_POOL_RANGE_FROM_CLAUSE.walk_ast(out.reborrow())?;
-        out.push_sql(" WHERE ");
-        out.push_identifier(dsl::ip_pool_id::NAME)?;
-        out.push_sql(" = ");
-        out.push_bind_param::<sql_types::Uuid, Uuid>(self.ip.pool_id())?;
-        out.push_sql(" AND ");
-        out.push_identifier(dsl::time_deleted::NAME)?;
-        out.push_sql(" IS NULL");
-        out.push_sql(") AS candidates ");
-        out.push_sql("WHERE candidates.candidate_ip IS NOT NULL");
-        Ok(())
-    }
-
-    // Push a subquery that selects the possible values for a first port, based on
-    // the defined spacing. Note that there are two forms, depending on whether
-    // the IP type we're allocating for is Floating/Ephemeral, or an SNAT IP
-    // address.
-    //
-    // For SNAT addresses, we want to provide port ranges. Those ranges must not
-    // overlap between different records, but there will be more than one record
-    // with the same IP. This subquery then generates the port-range chunks
-    // sequentially.
-    //
-    // ```sql
-    // SELECT
-    //     candidate_first_port,
-    //     candidate_first_port +
-    //         <NUM_SOURCE_NAT_PORTS - 1>
-    //         AS candidate_last_port
-    // FROM
-    //     generate_series(0, <MAX_PORT>, <NUM_SOURCE_NAT_PORTS>)
-    //         AS candidate_first_port
-    // ```
-    //
-    // If an explicit port range is requested, we generate a simple
-    // SELECT clause:
-    //
-    // ```sql
-    // SELECT
-    //     <explicit_first_port> AS candidate_first_port,
-    //     <explicit_last_port> AS candidate_last_port
-    // ```
-    //
-    // For Floating or Ephemeral IP addresses, we reserve the entire port range
-    // for the guest/service. In this case, we generate the static values 0 and 65535:
-    //
-    // ```sql
-    // SELECT
-    //     0 AS candidate_first_port,
-    //     65535 AS candidate_last_port
-    // ```
-    fn push_port_sequence_subquery<'a>(
-        &'a self,
-        mut out: AstPass<'_, 'a, Pg>,
-    ) -> QueryResult<()> {
-        const MAX_PORT: i32 = self::MAX_PORT as i32;
-        if let IpKind::SNat = self.ip.kind() {
-            if let Some((first_port, last_port)) =
-                &self.ip.explicit_port_range()
-            {
-                out.push_sql("SELECT ");
-                out.push_bind_param::<sql_types::Int4, i32>(first_port)?;
-                out.push_sql(" AS candidate_first_port, ");
-                out.push_bind_param::<sql_types::Int4, i32>(last_port)?;
-                out.push_sql(" AS candidate_last_port");
-            } else {
-                out.push_sql(
-                    "SELECT candidate_first_port, candidate_first_port + ",
-                );
-                out.push_bind_param::<sql_types::Int4, i32>(
-                    &self.last_port_offset,
-                )?;
-                out.push_sql(
-                    " AS candidate_last_port FROM generate_series(0, ",
-                );
-                out.push_bind_param::<sql_types::Int4, i32>(&MAX_PORT)?;
-                out.push_sql(", ");
-                out.push_bind_param::<sql_types::Int4, i32>(
-                    &self.n_ports_per_chunk,
-                )?;
-                out.push_sql(") AS candidate_first_port");
-            }
-        } else {
-            out.push_sql("SELECT 0 AS candidate_first_port, ");
-            out.push_bind_param::<sql_types::Int4, i32>(&MAX_PORT)?;
-            out.push_sql(" AS candidate_last_port");
-        }
         Ok(())
     }
 
@@ -803,9 +683,9 @@ impl NextExternalIp {
             " (SELECT * FROM next_external_ip) \
             ON CONFLICT (id) \
             DO UPDATE SET \
-                time_created = excluded.time_created,
-                time_modified = excluded.time_modified,
-                time_deleted = excluded.time_deleted
+                time_created = excluded.time_created, \
+                time_modified = excluded.time_modified, \
+                time_deleted = excluded.time_deleted \
             RETURNING *",
         );
         Ok(())
@@ -824,19 +704,73 @@ impl QueryFragment<Pg> for NextExternalIp {
     ) -> diesel::QueryResult<()> {
         out.unsafe_to_cache_prepared();
 
-        // Push the first CTE, creating the candidate record by selecting the
-        // next available IP address and port range, across all IP Pools and
-        // their IP address ranges.
-        out.push_sql("WITH next_external_ip AS (");
-        self.push_next_ip_and_port_range_subquery(out.reborrow())?;
-        out.push_sql("), ");
-
-        out.push_sql("previously_allocated_ip AS (");
+        // We're always going to select any previously-allocated record with the
+        // same ID. The way in which that is used depends on the kind of
+        // allocation we're doing (automatic or explicit), but we always need
+        // it. Push that CTE first.
+        out.push_sql("WITH previously_allocated_ip AS (");
         self.push_prior_allocation_subquery(out.reborrow())?;
         out.push_sql("), ");
-        out.push_sql("validate_previously_allocated_ip AS MATERIALIZED(");
-        self.push_validate_prior_allocation_subquery(out.reborrow())?;
-        out.push_sql("), ");
+
+        // The main difference between the various queries is whether we're
+        // trying to allocate an explicit IP, or find the next one
+        // automatically.
+        //
+        // For the explicit IP case, we _also_ know the explicit port range in
+        // all cases. For Floating or Ephemeral IPs, that's (0, 65535). The only
+        // time we explicitly request an SNAT address is when we're constructing
+        // an Omicron zone, in which case we _also_ know the explicit port
+        // range.
+        //
+        // Note that we could enforce these invariants in the type system, but
+        // the QueryFragment trait requires borrowed values, which makes that a
+        // bit awkward.
+        out.push_sql("next_external_ip AS (");
+        self.push_next_external_ip_cte_select_clauses(out.reborrow())?;
+        out.push_sql(" FROM (");
+        match (
+            self.ip.kind(),
+            self.ip.explicit_ip(),
+            self.ip.explicit_port_range(),
+        ) {
+            (IpKind::SNat, None, None) => {
+                self.push_automatic_snat_ip_subquery(out.reborrow())?;
+                out.push_sql("), ");
+            }
+
+            (IpKind::Ephemeral, None, None)
+            | (IpKind::Floating, None, None) => {
+                self.push_automatic_full_ip_subquery(out.reborrow())?;
+                out.push_sql("), ");
+            }
+
+            (IpKind::SNat, Some(ip), Some((first_port, last_port)))
+            | (IpKind::Ephemeral, Some(ip), Some((first_port, last_port)))
+            | (IpKind::Floating, Some(ip), Some((first_port, last_port))) => {
+                self.push_explicit_ip_subquery(
+                    out.reborrow(),
+                    ip,
+                    first_port,
+                    last_port,
+                )?;
+                out.push_sql(
+                    ") WHERE candidate_ip IS NOT NULL), \
+                    validate_previously_allocated_ip AS MATERIALIZED(",
+                );
+                self.push_validate_prior_allocation_subquery(out.reborrow())?;
+                out.push_sql("), ");
+            }
+
+            (IpKind::SNat, None, Some(_))
+            | (IpKind::SNat, Some(_), None)
+            | (IpKind::Ephemeral, None, Some(_))
+            | (IpKind::Ephemeral, Some(_), None)
+            | (IpKind::Floating, None, Some(_))
+            | (IpKind::Floating, Some(_), None) => unreachable!(
+                "IP and port ranges should always be either both \
+                Some(_) or both None"
+            ),
+        }
 
         // Push the subquery that potentially inserts this record, or ignores
         // primary key conflicts (for idempotency).
@@ -867,22 +801,28 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 mod tests {
     use crate::authz;
     use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
+    use crate::db::explain::ExplainableAsync as _;
     use crate::db::identity::Resource;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
     use crate::db::model::IpPoolRange;
     use crate::db::pub_test_utils::TestDatabase;
+    use crate::db::queries::external_ip::NextExternalIp;
+    use crate::db::raw_query_builder::expectorate_query_contents;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::ByteCount;
+    use nexus_db_model::ExternalIp;
+    use nexus_db_model::IncompleteExternalIp;
     use nexus_db_model::Instance;
     use nexus_db_model::InstanceCpuCount;
     use nexus_db_model::IpPoolReservationType;
     use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::IpVersion;
+    use nexus_db_model::Name;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
@@ -900,6 +840,7 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
     use uuid::Uuid;
 
     struct TestContext {
@@ -921,7 +862,7 @@ mod tests {
             name: &str,
             range: IpRange,
             is_default: bool,
-        ) -> authz::IpPool {
+        ) -> (authz::IpPool, IpPool) {
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: name.parse().unwrap(),
@@ -931,7 +872,8 @@ mod tests {
                 IpPoolReservationType::ExternalSilos,
             );
 
-            self.db
+            let db_pool = self
+                .db
                 .datastore()
                 .ip_pool_create(self.db.opctx(), pool.clone())
                 .await
@@ -952,12 +894,14 @@ mod tests {
 
             self.initialize_ip_pool(name, range).await;
 
-            LookupPath::new(self.db.opctx(), self.db.datastore())
-                .ip_pool_id(pool.id())
-                .lookup_for(authz::Action::Read)
-                .await
-                .unwrap()
-                .0
+            let authz_pool =
+                LookupPath::new(self.db.opctx(), self.db.datastore())
+                    .ip_pool_id(pool.id())
+                    .lookup_for(authz::Action::Read)
+                    .await
+                    .unwrap()
+                    .0;
+            (authz_pool, db_pool)
         }
 
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
@@ -999,7 +943,10 @@ mod tests {
             let instance_id = InstanceUuid::new_v4();
             let project_id = Uuid::new_v4();
             let instance = Instance::new(instance_id, project_id, &InstanceCreate {
-                identity: IdentityMetadataCreateParams { name: String::from(name).parse().unwrap(), description: format!("instance {}", name) },
+                identity: IdentityMetadataCreateParams {
+                    name: String::from(name).parse().unwrap(),
+                    description: format!("instance {}", name)
+                },
                 ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
                 memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
                 hostname: "test".parse().unwrap(),
@@ -1013,6 +960,7 @@ mod tests {
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             });
 
             let conn = self
@@ -1059,9 +1007,7 @@ mod tests {
         ))
         .unwrap();
         context.create_ip_pool("default", range, true).await;
-        for first_port in
-            (0..super::MAX_PORT).step_by(NUM_SOURCE_NAT_PORTS.into())
-        {
+        for first_port in (0..u16::MAX).step_by(NUM_SOURCE_NAT_PORTS.into()) {
             let id = Uuid::new_v4();
             let instance_id = InstanceUuid::new_v4();
             let ip = context
@@ -1135,7 +1081,7 @@ mod tests {
             .0;
         assert_eq!(ephemeral_ip.ip.ip(), range.last_address());
         assert_eq!(ephemeral_ip.first_port.0, 0);
-        assert_eq!(ephemeral_ip.last_port.0, super::MAX_PORT);
+        assert_eq!(ephemeral_ip.last_port.0, u16::MAX);
 
         // At this point, we should be able to allocate neither a new Ephemeral
         // nor any SNAT IPs.
@@ -1212,7 +1158,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 2),
             Ipv4Addr::new(10, 0, 0, 3),
         ];
-        let ports = (0..super::MAX_PORT).step_by(NUM_SOURCE_NAT_PORTS.into());
+        let ports = (0..u16::MAX).step_by(NUM_SOURCE_NAT_PORTS.into());
         let mut external_ips = itertools::iproduct!(addresses, ports);
 
         // Allocate two addresses
@@ -1628,6 +1574,12 @@ mod tests {
             .expect("Failed to allocate instance SNAT IP address");
 
         // Check identity, not equality. The timestamps will be updated.
+        assert_external_ips_equivalent(&ip, &new_ip);
+
+        context.success().await;
+    }
+
+    fn assert_external_ips_equivalent(ip: &ExternalIp, new_ip: &ExternalIp) {
         assert_eq!(ip.id, new_ip.id);
         assert_eq!(ip.name, new_ip.name);
         assert_eq!(ip.description, new_ip.description);
@@ -1640,8 +1592,6 @@ mod tests {
         assert_eq!(ip.ip, new_ip.ip);
         assert_eq!(ip.first_port, new_ip.first_port);
         assert_eq!(ip.last_port, new_ip.last_port);
-
-        context.success().await;
     }
 
     #[tokio::test]
@@ -1662,7 +1612,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        let p1 = context.create_ip_pool("p1", second_range, false).await;
+        let (p1, ..) = context.create_ip_pool("p1", second_range, false).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
@@ -1707,7 +1657,7 @@ mod tests {
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        let p1 = context.create_ip_pool("p1", second_range, false).await;
+        let (p1, ..) = context.create_ip_pool("p1", second_range, false).await;
 
         // Allocate all available addresses in the second pool.
         let first_octet = first_address.octets()[3];
@@ -1750,6 +1700,531 @@ mod tests {
             )
             .await
             .expect_err("Should not use IP addresses from a different pool");
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn can_explain_next_external_ip_query() {
+        let logctx = dev::test_setup_log("can_explain_next_external_ip_query");
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let conn = db.pool().claim().await.unwrap();
+        let params = [
+            IncompleteExternalIp::for_ephemeral(Uuid::new_v4(), Uuid::new_v4()),
+            IncompleteExternalIp::for_instance_source_nat(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+            ),
+        ];
+        for prs in &params {
+            let query = NextExternalIp::new(prs.clone());
+            let _ = query.explain_async(&conn).await.unwrap_or_else(|e| {
+                panic!(
+                    "Failed to explain query, is it valid \
+                    SQL?\nparams: {prs:#?}\nerror: {e:#?}"
+                )
+            });
+        }
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn expectorate_next_automatic_floating_ip_query() {
+        let params = IncompleteExternalIp::for_floating(
+            uuid::uuid!("45633e04-3087-47eb-9d1e-8436fb090108"),
+            &Name("fip".parse().unwrap()),
+            "",
+            uuid::uuid!("789fdb15-9790-4df1-9d06-c1ecd72c94ae"),
+            uuid::uuid!("37bdd6f6-0adb-46ad-8e5b-083b928ace56"),
+        );
+        let query = NextExternalIp::new(params);
+        expectorate_query_contents(
+            query,
+            "tests/output/next_automatic_floating_ip.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_next_explicit_floating_ip_query() {
+        let params = IncompleteExternalIp::for_floating_explicit(
+            uuid::uuid!("45633e04-3087-47eb-9d1e-8436fb090108"),
+            &Name("fip".parse().unwrap()),
+            "",
+            uuid::uuid!("789fdb15-9790-4df1-9d06-c1ecd72c94ae"),
+            "10.0.0.1".parse().unwrap(),
+            uuid::uuid!("37bdd6f6-0adb-46ad-8e5b-083b928ace56"),
+        );
+        let query = NextExternalIp::new(params);
+        expectorate_query_contents(
+            query,
+            "tests/output/next_explicit_floating_ip.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_next_instance_snat_ip_query() {
+        let params = IncompleteExternalIp::for_instance_source_nat(
+            uuid::uuid!("45633e04-3087-47eb-9d1e-8436fb090108"),
+            uuid::uuid!("789fdb15-9790-4df1-9d06-c1ecd72c94ae"),
+            uuid::uuid!("9fcfee03-173e-4aff-92a3-2fc9da49c008"),
+        );
+        let query = NextExternalIp::new(params);
+        expectorate_query_contents(
+            query,
+            "tests/output/next_instance_snat_ip.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_next_omicron_zone_snat_ip_query() {
+        let ip = OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+            id: ExternalIpUuid::from_untyped_uuid(uuid::uuid!(
+                "cd7bf0bc-72f6-497d-89b9-787039da448a"
+            )),
+            snat_cfg: SourceNatConfig::new(
+                "10.0.0.1".parse().unwrap(),
+                0,
+                (1 << 14) - 1,
+            )
+            .unwrap(),
+        });
+        let params = IncompleteExternalIp::for_omicron_zone(
+            uuid::uuid!("45633e04-3087-47eb-9d1e-8436fb090108"),
+            ip,
+            OmicronZoneUuid::from_untyped_uuid(uuid::uuid!(
+                "9fcfee03-173e-4aff-92a3-2fc9da49c008"
+            )),
+            ZoneKind::BoundaryNtp,
+        );
+        let query = NextExternalIp::new(params);
+        expectorate_query_contents(
+            query,
+            "tests/output/next_omicron_zone_snat_ip.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn can_reallocate_automatic_ephemeral_with_full_range() {
+        let context = TestContext::new(
+            "can_reallocate_automatic_ephemeral_with_full_range",
+        )
+        .await;
+
+        let first_address = Ipv4Addr::new(10, 0, 0, 1);
+        let last_address = Ipv4Addr::new(10, 0, 0, 3);
+        let range = IpRange::try_from((first_address, last_address)).unwrap();
+        let (p1, ..) = context.create_ip_pool("default", range, true).await;
+
+        let mut ips = Vec::with_capacity(range.len() as _);
+        let mut instance_id = None;
+
+        // Allocate all available addresses in the pool.
+        let first_octet = first_address.octets()[3];
+        let last_octet = last_address.octets()[3];
+        for octet in first_octet..=last_octet {
+            let iid = context.create_instance(&format!("o{octet}")).await;
+            let _ = instance_id.get_or_insert(iid);
+            let ip = context
+                .db
+                .datastore()
+                .allocate_instance_ephemeral_ip(
+                    context.db.opctx(),
+                    Uuid::new_v4(),
+                    iid,
+                    Some(p1.clone()),
+                    true,
+                )
+                .await
+                .expect("Failed to allocate instance ephemeral IP address")
+                .0;
+            if let IpAddr::V4(addr) = ip.ip.ip() {
+                assert_eq!(addr.octets()[3], octet);
+            } else {
+                panic!("Expected an IPv4 address");
+            }
+            ips.push(ip);
+        }
+
+        // Now, if we attempt to reallocate the first address, we do not fail,
+        // but instead get back the same first address.
+        let (new_ip, _) = context
+            .db
+            .datastore()
+            .allocate_instance_ephemeral_ip(
+                context.db.opctx(),
+                ips[0].id,
+                instance_id.unwrap(),
+                Some(p1),
+                true,
+            )
+            .await
+            .expect("able to reallocate existing IP with full IP Range");
+        assert_external_ips_equivalent(&ips[0], &new_ip);
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn can_reallocate_automatic_snat_with_full_range() {
+        let context =
+            TestContext::new("can_reallocate_automatic_snat_with_full_range")
+                .await;
+
+        let first_address = Ipv4Addr::new(10, 0, 0, 1);
+        let last_address = Ipv4Addr::new(10, 0, 0, 3);
+        let range = IpRange::try_from((first_address, last_address)).unwrap();
+        let (p1, ..) = context.create_ip_pool("default", range, true).await;
+
+        let mut ips = Vec::with_capacity(range.len() as usize * 4);
+        let mut instance_id = None;
+
+        // Allocate all available addresses in the pool.
+        for octet in 0.. {
+            let iid = context.create_instance(&format!("o{octet}")).await;
+            let _ = instance_id.get_or_insert(iid);
+            let res = context
+                .db
+                .datastore()
+                .allocate_instance_snat_ip(
+                    context.db.opctx(),
+                    Uuid::new_v4(),
+                    iid,
+                    p1.id(),
+                )
+                .await;
+            let ip = match res {
+                Ok(ip) => ip,
+                Err(Error::InsufficientCapacity { .. }) => break,
+                e => e.expect("Failed to allocate instance SNAT IP address"),
+            };
+            assert!(ip.ip.ip().is_ipv4());
+            ips.push(ip);
+        }
+
+        // Now, if we attempt to reallocate the first address, we do not fail,
+        // but instead get back the same first address.
+        let new_ip = context
+            .db
+            .datastore()
+            .allocate_instance_snat_ip(
+                context.db.opctx(),
+                ips[0].id,
+                instance_id.unwrap(),
+                p1.id(),
+            )
+            .await
+            .expect("able to reallocate existing IP with full IP Range");
+        assert_external_ips_equivalent(&ips[0], &new_ip);
+
+        context.success().await;
+    }
+
+    /// Sanity check that we can actually run this query for IPv6 pools and
+    /// ranges, without hitting pathological performance issues. This test is
+    /// skipped by default, since it can take a while and failures don't provide
+    /// much useful information.
+    ///
+    /// What we can use this for is looking at the asymptotic performance of the
+    /// query. As expected, it slows down as more addresses are allocated, but
+    /// beyond that we'll need more monitoring to know if the performance is
+    /// acceptable. We may need to make the query smarter, with constant runtime
+    /// and memory consumption as a function of the number of allocated
+    /// addresses. We could do that with something like a randomly-selected
+    /// address or searching in limited-size chunks.
+    #[tokio::test]
+    #[ignore]
+    async fn can_allocate_large_ipv6_range() {
+        let context = TestContext::new("can_allocate_large_ipv6_range").await;
+        let range = IpRange::try_from((
+            "fd00::1".parse::<Ipv6Addr>().unwrap(),
+            "fd00::ffff".parse::<Ipv6Addr>().unwrap(),
+        ))
+        .unwrap();
+        let (pool, ..) = context.create_ip_pool("default", range, true).await;
+
+        let start = std::time::Instant::now();
+        for (i, expected_addr) in range.iter().enumerate() {
+            let id = Uuid::new_v4();
+            let iid = context.create_instance(&format!("inst-{i}")).await;
+            let (ip, _) = context
+                .db
+                .datastore()
+                .allocate_instance_ephemeral_ip(
+                    context.db.opctx(),
+                    id,
+                    iid,
+                    Some(pool.clone()),
+                    true,
+                )
+                .await
+                .expect("Failed to allocate instance external IP address");
+            assert_eq!(ip.id, id);
+            assert_eq!(ip.ip.ip(), expected_addr);
+            assert_eq!(ip.first_port.0, 0u16);
+            assert_eq!(ip.last_port.0, u16::MAX);
+            assert_eq!(ip.kind, IpKind::Ephemeral);
+            assert_eq!(ip.parent_id, Some(iid.into_untyped_uuid()));
+            if i > 0 && i % 100 == 0 {
+                let time = start.elapsed();
+                let ps = i as f64 / time.as_secs_f64();
+                println!(
+                    ">> allocated {} addresses in {:.02?} ({:.02} / sec)",
+                    i, time, ps,
+                );
+            }
+        }
+
+        // The next allocation should fail, due to IP exhaustion
+        let instance_id = InstanceUuid::new_v4();
+        let err = context
+            .db
+            .datastore()
+            .allocate_instance_ephemeral_ip(
+                context.db.opctx(),
+                Uuid::new_v4(),
+                instance_id,
+                Some(pool),
+                true,
+            )
+            .await
+            .expect_err(
+                "An error should be received when an IPv6 pool is exhausted",
+            );
+        assert_eq!(
+            err,
+            Error::insufficient_capacity(
+                "No external IP addresses available",
+                "NextExternalIp::new returned NotFound",
+            ),
+        );
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn can_insert_explicit_address_with_two_ranges_in_pool() {
+        let context = TestContext::new(
+            "can_insert_explicit_address_with_two_ranges_in_pool",
+        )
+        .await;
+
+        // Add a new range to the IPv6 service pool.
+        //
+        // This checks that the subquery for selecting the range this IP
+        // overlaps with returns at most one row, even though there are multiple
+        // ranges in the pool.
+        let range1 = IpRange::try_from((
+            "fd00::1".parse::<Ipv6Addr>().unwrap(),
+            "fd00::ffff".parse::<Ipv6Addr>().unwrap(),
+        ))
+        .unwrap();
+        let range2 = IpRange::try_from((
+            "fd01::1".parse::<Ipv6Addr>().unwrap(),
+            "fd01::ffff".parse::<Ipv6Addr>().unwrap(),
+        ))
+        .unwrap();
+        let (authz_pool, db_pool) = context
+            .db
+            .datastore()
+            .ip_pools_service_lookup(
+                context.db.opctx(),
+                nexus_db_model::IpVersion::V6,
+            )
+            .await
+            .expect("should be able to lookup service IP Pool");
+        for range in [range1, range2] {
+            let _ = context
+                .db
+                .datastore()
+                .ip_pool_add_range(
+                    context.db.opctx(),
+                    &authz_pool,
+                    &db_pool,
+                    &range,
+                )
+                .await
+                .expect("Should be able to add range");
+        }
+
+        let expected_addr = "fd00::10".parse().unwrap();
+        let first_port = 32768;
+        let last_port = 49151;
+        let id = ExternalIpUuid::new_v4();
+        let snat = OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
+            id,
+            snat_cfg: SourceNatConfig::new(
+                expected_addr,
+                first_port,
+                last_port,
+            )
+            .unwrap(),
+        });
+        let snat_service_id = OmicronZoneUuid::new_v4();
+        let ip = context
+            .db
+            .datastore()
+            .external_ip_allocate_omicron_zone(
+                context.db.opctx(),
+                snat_service_id,
+                ZoneKind::BoundaryNtp,
+                snat,
+            )
+            .await
+            .expect("Failed to allocate service IP address");
+        assert_eq!(ip.id, id.into_untyped_uuid());
+        assert_eq!(ip.ip.ip(), expected_addr);
+        assert_eq!(ip.first_port.0, first_port);
+        assert_eq!(ip.last_port.0, last_port);
+        assert_eq!(ip.kind, IpKind::SNat);
+        assert_eq!(ip.parent_id, Some(snat_service_id.into_untyped_uuid()));
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn can_allocate_ephemeral_ips_from_all_ranges_in_a_pool() {
+        let context = TestContext::new(
+            "can_allocate_ephemeral_ips_from_all_ranges_in_a_pool",
+        )
+        .await;
+
+        // Create two ranges in the same pool. Each range will have one address
+        // for simplicity.
+        let addrs = [Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 2)];
+        let range1 = IpRange::try_from((addrs[0], addrs[0])).unwrap();
+        let range2 = IpRange::try_from((addrs[1], addrs[1])).unwrap();
+        let (authz_pool, db_pool) =
+            context.create_ip_pool("default", range1, true).await;
+        let _ = context
+            .db
+            .datastore()
+            .ip_pool_add_range(
+                context.db.opctx(),
+                &authz_pool,
+                &db_pool,
+                &range2,
+            )
+            .await
+            .expect("able to add a second range to the pool");
+
+        // Allocate an instance and address, which should take the first address
+        // (which is the whole range).
+        let iid = context.create_instance("inst1").await;
+        let ip = context
+            .db
+            .datastore()
+            .allocate_instance_ephemeral_ip(
+                context.db.opctx(),
+                Uuid::new_v4(),
+                iid,
+                Some(authz_pool.clone()),
+                true,
+            )
+            .await
+            .expect("Failed to allocate instance ephemeral IP address")
+            .0;
+        if let IpAddr::V4(addr) = ip.ip.ip() {
+            assert_eq!(addr, addrs[0]);
+        } else {
+            panic!("Expected an IPv4 address");
+        }
+
+        // Allocate another one, which should take the second address, which is
+        // "all" of the second range.
+        let iid = context.create_instance("inst2").await;
+        let ip = context
+            .db
+            .datastore()
+            .allocate_instance_ephemeral_ip(
+                context.db.opctx(),
+                Uuid::new_v4(),
+                iid,
+                Some(authz_pool.clone()),
+                true,
+            )
+            .await
+            .expect("Failed to allocate instance ephemeral IP address")
+            .0;
+        if let IpAddr::V4(addr) = ip.ip.ip() {
+            assert_eq!(addr, addrs[1]);
+        } else {
+            panic!("Expected an IPv4 address");
+        }
+
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn can_allocate_snat_ips_from_all_ranges_in_a_pool() {
+        let context =
+            TestContext::new("can_allocate_snat_ips_from_all_ranges_in_a_pool")
+                .await;
+
+        // Create two ranges in the same pool. Each range will have one address
+        // for simplicity.
+        let addrs = [Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::new(10, 0, 0, 2)];
+        let range1 = IpRange::try_from((addrs[0], addrs[0])).unwrap();
+        let range2 = IpRange::try_from((addrs[1], addrs[1])).unwrap();
+        let (authz_pool, db_pool) =
+            context.create_ip_pool("default", range1, true).await;
+        let _ = context
+            .db
+            .datastore()
+            .ip_pool_add_range(
+                context.db.opctx(),
+                &authz_pool,
+                &db_pool,
+                &range2,
+            )
+            .await
+            .expect("able to add a second range to the pool");
+
+        // Allocate 4 instances, to take the whole address that constitutes the
+        // first range.
+        for i in 0..4 {
+            let iid = context.create_instance(&format!("inst{i}")).await;
+            let ip = context
+                .db
+                .datastore()
+                .allocate_instance_snat_ip(
+                    context.db.opctx(),
+                    Uuid::new_v4(),
+                    iid,
+                    db_pool.id(),
+                )
+                .await
+                .expect("Failed to allocate instance SNAT IP address");
+            if let IpAddr::V4(addr) = ip.ip.ip() {
+                assert_eq!(addr, addrs[0]);
+            } else {
+                panic!("Expected an IPv4 address");
+            }
+        }
+
+        // Allocate another one, which should take the second address, the first
+        // port block in the second range.
+        let iid = context.create_instance("last").await;
+        let ip = context
+            .db
+            .datastore()
+            .allocate_instance_snat_ip(
+                context.db.opctx(),
+                Uuid::new_v4(),
+                iid,
+                db_pool.id(),
+            )
+            .await
+            .expect("Failed to allocate instance SNAT IP address");
+        if let IpAddr::V4(addr) = ip.ip.ip() {
+            assert_eq!(addr, addrs[1]);
+        } else {
+            panic!("Expected an IPv4 address");
+        }
 
         context.success().await;
     }

@@ -292,7 +292,9 @@ pub struct OmicronZoneExternalSnatIp {
 ///
 /// This is a slimmer `nexus_db_model::ServiceNetworkInterface` that only stores
 /// the fields necessary for blueprint planning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct OmicronZoneNic {
     pub id: VnicUuid,
     pub mac: MacAddr,
@@ -337,7 +339,9 @@ impl TriHashItem for OmicronZoneExternalIpEntry {
 /// A pair of an Omicron zone ID and a network interface.
 ///
 /// Part of [`OmicronZoneNetworkResources`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
+)]
 pub struct OmicronZoneNicEntry {
     pub zone_id: OmicronZoneUuid,
     pub nic: OmicronZoneNic,

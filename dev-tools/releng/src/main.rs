@@ -46,7 +46,7 @@ use crate::job::Jobs;
 /// to as "v8", "version 8", or "release 8" to customers). The use of semantic
 /// versioning is mostly to hedge for perhaps wanting something more granular in
 /// the future.
-const BASE_VERSION: Version = Version::new(17, 0, 0);
+const BASE_VERSION: Version = Version::new(18, 0, 0);
 
 const RETRY_ATTEMPTS: usize = 3;
 
@@ -68,7 +68,7 @@ const HOST_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 8] = [
     (&PackageName::new_const("oxlog"), InstallMethod::Install),
     (&PackageName::new_const("propolis-server"), InstallMethod::Bundle),
     (&PackageName::new_const("pumpkind-gz"), InstallMethod::Install),
-    (&PackageName::new_const("crucible-dtrace"), InstallMethod::Install),
+    (&PackageName::new_const("crucible-utils"), InstallMethod::Install),
     (&PackageName::new_const("switch-asic"), InstallMethod::Bundle),
 ];
 /// Packages to install or bundle in the recovery (trampoline) OS image.

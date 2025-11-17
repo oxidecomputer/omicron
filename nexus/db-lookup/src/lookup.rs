@@ -262,9 +262,11 @@ impl<'a> LookupPath<'a> {
                 SiloUser::PrimaryKey(Root { lookup_root: self }, *silo_user_id),
             ),
 
-            authn::Actor::UserBuiltin { .. } => Err(
-                Error::non_resourcetype_not_found("could not find silo user"),
-            ),
+            authn::Actor::UserBuiltin { .. } | authn::Actor::Scim { .. } => {
+                Err(Error::non_resourcetype_not_found(
+                    "could not find silo user",
+                ))
+            }
         }
     }
 
@@ -345,6 +347,23 @@ impl<'a> LookupPath<'a> {
 
     pub fn address_lot_name_owned(self, name: Name) -> AddressLot<'a> {
         AddressLot::OwnedName(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type MulticastGroup, identified by its name
+    pub fn multicast_group_name<'b, 'c>(
+        self,
+        name: &'b Name,
+    ) -> MulticastGroup<'c>
+    where
+        'a: 'c,
+        'b: 'c,
+    {
+        MulticastGroup::Name(Root { lookup_root: self }, name)
+    }
+
+    /// Select a resource of type MulticastGroup, identified by its id
+    pub fn multicast_group_id(self, id: Uuid) -> MulticastGroup<'a> {
+        MulticastGroup::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     pub fn loopback_address(
@@ -510,6 +529,18 @@ impl<'a> LookupPath<'a> {
         'a: 'b,
     {
         Alert::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type [`ScimClientBearerToken`], identified by its
+    /// UUID.
+    pub fn scim_client_bearer_token_id<'b>(
+        self,
+        id: Uuid,
+    ) -> ScimClientBearerToken<'b>
+    where
+        'a: 'b,
+    {
+        ScimClientBearerToken::PrimaryKey(Root { lookup_root: self }, id)
     }
 }
 
@@ -736,6 +767,14 @@ lookup_resource! {
 // Miscellaneous resources nested directly below "Fleet"
 
 lookup_resource! {
+    name = "MulticastGroup",
+    ancestors = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "ConsoleSession",
     ancestors = [],
     lookup_by_name = false,
@@ -907,6 +946,15 @@ lookup_resource! {
     primary_key_columns = [
         { column_name = "id", uuid_kind = AlertKind }
     ]
+}
+
+lookup_resource! {
+    name = "ScimClientBearerToken",
+    ancestors = ["Silo"],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
+    visible_outside_silo = true
 }
 
 // Helpers for unifying the interfaces around images

@@ -65,6 +65,7 @@ use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SiloGroupUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -138,6 +139,24 @@ where
     OutputType: serde::de::DeserializeOwned,
 {
     NexusRequest::objects_post(client, path, input)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"POST\" request to {path}: {e}")
+        })
+        .parsed_body()
+        .unwrap()
+}
+
+pub async fn object_create_no_body<OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+) -> OutputType
+where
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::objects_post_no_body(client, path)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
@@ -280,6 +299,44 @@ pub async fn create_ip_pool(
     (pool, range)
 }
 
+/// Create a multicast IP pool with a multicast range for testing.
+///
+/// The multicast IP range may be specified if it's important for testing specific
+/// multicast addresses, or a default multicast range (224.1.0.0 - 224.1.255.255)
+/// will be provided if the `ip_range` argument is `None`.
+pub async fn create_multicast_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_range: Option<IpRange>,
+) -> (IpPool, IpPoolRange) {
+    let pool = object_create(
+        client,
+        "/v1/system/ip-pools",
+        &params::IpPoolCreate::new_multicast(
+            IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::from("a multicast ip pool"),
+            },
+            ip_range
+                .map(|r| r.version())
+                .unwrap_or_else(|| views::IpVersion::V4),
+        ),
+    )
+    .await;
+
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(224, 1, 0, 0),
+            Ipv4Addr::new(224, 1, 255, 255),
+        ))
+        .unwrap()
+    });
+    let url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
+    let range = object_create(client, &url, &ip_range).await;
+    (pool, range)
+}
+
 pub async fn link_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
@@ -382,6 +439,23 @@ pub async fn create_silo(
     discoverable: bool,
     identity_mode: shared::SiloIdentityMode,
 ) -> Silo {
+    create_silo_with_admin_group_name(
+        client,
+        silo_name,
+        discoverable,
+        identity_mode,
+        None,
+    )
+    .await
+}
+
+pub async fn create_silo_with_admin_group_name(
+    client: &ClientTestContext,
+    silo_name: &str,
+    discoverable: bool,
+    identity_mode: shared::SiloIdentityMode,
+    admin_group_name: Option<String>,
+) -> Silo {
     object_create(
         client,
         "/v1/system/silos",
@@ -393,7 +467,7 @@ pub async fn create_silo(
             quotas: params::SiloQuotasCreate::arbitrarily_high_default(),
             discoverable,
             identity_mode,
-            admin_group_name: None,
+            admin_group_name,
             tls_certificates: vec![],
             mapped_fleet_roles: Default::default(),
         },
@@ -631,6 +705,8 @@ pub async fn create_instance(
         true,
         Default::default(),
         None,
+        // Multicast groups=
+        Vec::<NameOrId>::new(),
     )
     .await
 }
@@ -648,6 +724,7 @@ pub async fn create_instance_with(
     start: bool,
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
     cpu_platform: Option<InstanceCpuPlatform>,
+    multicast_groups: Vec<NameOrId>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 
@@ -674,6 +751,7 @@ pub async fn create_instance_with(
             start,
             auto_restart_policy,
             anti_affinity_groups: Vec::new(),
+            multicast_groups,
         },
     )
     .await
@@ -1117,6 +1195,48 @@ pub async fn grant_iam<T>(
             .expect("failed to parse policy");
     let new_role_assignment =
         shared::RoleAssignment::for_silo_user(grant_user, grant_role);
+    let new_role_assignments = existing_policy
+        .role_assignments
+        .into_iter()
+        .chain(std::iter::once(new_role_assignment))
+        .collect();
+
+    let new_policy = shared::Policy { role_assignments: new_role_assignments };
+
+    // TODO-correctness use etag when we have it
+    NexusRequest::object_put(client, &policy_url, Some(&new_policy))
+        .authn_as(run_as)
+        .execute()
+        .await
+        .expect("failed to update policy");
+}
+
+/// Grant a role on a resource to a group
+///
+/// * `grant_resource_url`: URL of the resource we're granting the role on
+/// * `grant_role`: the role we're granting
+/// * `grant_group`: the uuid of the group we're granting the role to
+/// * `run_as`: the user _doing_ the granting
+pub async fn grant_iam_for_group<T>(
+    client: &ClientTestContext,
+    grant_resource_url: &str,
+    grant_role: T,
+    grant_group: SiloGroupUuid,
+    run_as: AuthnMode,
+) where
+    T: serde::Serialize + serde::de::DeserializeOwned,
+{
+    let policy_url = format!("{}/policy", grant_resource_url);
+    let existing_policy: shared::Policy<T> =
+        NexusRequest::object_get(client, &policy_url)
+            .authn_as(run_as.clone())
+            .execute()
+            .await
+            .expect("failed to fetch policy")
+            .parsed_body()
+            .expect("failed to parse policy");
+    let new_role_assignment =
+        shared::RoleAssignment::for_silo_group(grant_group, grant_role);
     let new_role_assignments = existing_policy
         .role_assignments
         .into_iter()

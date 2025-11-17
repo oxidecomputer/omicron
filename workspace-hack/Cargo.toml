@@ -35,6 +35,7 @@ chrono = { version = "0.4.42", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.48", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.48", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
@@ -42,12 +43,13 @@ crypto-common = { version = "0.1.6", default-features = false, features = ["getr
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
 daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 data-encoding = { version = "2.9.0" }
+der = { version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
-ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"] }
+ed25519-dalek = { version = "2.1.1", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
-env_logger = { version = "0.11.5", default-features = false, features = ["auto-color"] }
+env_logger = { version = "0.11.8", default-features = false, features = ["auto-color"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.2", features = ["zlib-rs"] }
 form_urlencoded = { version = "1.2.2" }
@@ -58,17 +60,17 @@ futures-io = { version = "0.3.31" }
 futures-sink = { version = "0.3.31" }
 futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6bd2660d651332f38949cdfd3d23d751ca54b120", default-features = false, features = ["debug-impls", "serde"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6bd2660d651332f38949cdfd3d23d751ca54b120", features = ["std"] }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", default-features = false, features = ["debug-impls", "serde"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.16.0", default-features = false, features = ["allocator-api2", "inline-more"] }
-heck = { version = "0.4.1" }
+heck = { version = "0.4.1", features = ["unicode"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
-iddqd = { version = "0.3.13", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.3.16", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.0.3" }
 indexmap = { version = "2.11.4", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
@@ -108,8 +110,8 @@ rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", def
 regex = { version = "1.11.3" }
 regex-automata = { version = "0.4.11", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.5" }
-reqwest = { version = "0.12.22", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
-rsa = { version = "0.9.6", features = ["serde", "sha2"] }
+reqwest = { version = "0.12.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.19", features = ["ring"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
@@ -118,9 +120,11 @@ scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.27", features = ["serde"] }
 serde = { version = "1.0.226", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.226", features = ["alloc", "rc"] }
-serde_json = { version = "1.0.145", features = ["raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.145", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_with = { version = "3.14.0" }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
+sha3 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
@@ -150,7 +154,7 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.27", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
-zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }
+zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "jiff-02", "zstd"] }
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
@@ -172,6 +176,7 @@ chrono = { version = "0.4.42", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.48", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.48", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+const-oid = { version = "0.9.6", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.21" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
@@ -179,12 +184,13 @@ crypto-common = { version = "0.1.6", default-features = false, features = ["getr
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
 daft = { version = "0.1.4", features = ["derive", "newtype-uuid1", "oxnet01", "uuid1"] }
 data-encoding = { version = "2.9.0" }
+der = { version = "0.7.10", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
-ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"] }
+ed25519-dalek = { version = "2.1.1", features = ["digest", "pem", "rand_core"] }
 either = { version = "1.15.0", features = ["use_std"] }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
-env_logger = { version = "0.11.5", default-features = false, features = ["auto-color"] }
+env_logger = { version = "0.11.8", default-features = false, features = ["auto-color"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.1.2", features = ["zlib-rs"] }
 form_urlencoded = { version = "1.2.2" }
@@ -195,17 +201,17 @@ futures-io = { version = "0.3.31" }
 futures-sink = { version = "0.3.31" }
 futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6bd2660d651332f38949cdfd3d23d751ca54b120", default-features = false, features = ["debug-impls", "serde"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6bd2660d651332f38949cdfd3d23d751ca54b120", features = ["std"] }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", default-features = false, features = ["debug-impls", "serde"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
 hashbrown = { version = "0.16.0", default-features = false, features = ["allocator-api2", "inline-more"] }
-heck = { version = "0.4.1" }
+heck = { version = "0.4.1", features = ["unicode"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
-iddqd = { version = "0.3.13", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.3.16", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.0.3" }
 indexmap = { version = "2.11.4", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
@@ -245,8 +251,8 @@ rand_chacha-468e82937335b1c9 = { package = "rand_chacha", version = "0.3.1", def
 regex = { version = "1.11.3" }
 regex-automata = { version = "0.4.11", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "std", "unicode"] }
 regex-syntax = { version = "0.8.5" }
-reqwest = { version = "0.12.22", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
-rsa = { version = "0.9.6", features = ["serde", "sha2"] }
+reqwest = { version = "0.12.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+rsa = { version = "0.9.8", features = ["serde", "sha2"] }
 rustc-hash = { version = "2.1.1" }
 rustls = { version = "0.23.19", features = ["ring"] }
 rustls-webpki = { version = "0.102.8", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
@@ -255,9 +261,11 @@ scopeguard = { version = "1.2.0" }
 semver = { version = "1.0.27", features = ["serde"] }
 serde = { version = "1.0.226", features = ["alloc", "derive", "rc"] }
 serde_core = { version = "1.0.226", features = ["alloc", "rc"] }
-serde_json = { version = "1.0.145", features = ["raw_value", "unbounded_depth"] }
+serde_json = { version = "1.0.145", features = ["alloc", "raw_value", "unbounded_depth"] }
+serde_with = { version = "3.14.0" }
 sha1 = { version = "0.10.6", features = ["oid"] }
 sha2 = { version = "0.10.9", features = ["oid"] }
+sha3 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.7.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.15.1", default-features = false, features = ["const_new"] }
@@ -291,7 +299,7 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.27", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
-zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }
+zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "jiff-02", "zstd"] }
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
@@ -299,10 +307,11 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
+miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -312,10 +321,11 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
+miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -323,9 +333,10 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.x86_64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
+miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -333,9 +344,10 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
+miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -343,9 +355,10 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.aarch64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
+miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -353,9 +366,10 @@ rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-features = false, features = ["std"] }
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
+miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustix-dff4ba8e3ae991db = { package = "rustix", version = "1.0.7", features = ["fs", "stdio", "termios"] }
@@ -365,11 +379,12 @@ bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.9.4", default-f
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
+miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nom = { version = "7.1.3" }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
@@ -383,11 +398,12 @@ clang-sys = { version = "1.8.1", default-features = false, features = ["clang_11
 cookie = { version = "0.18.1", default-features = false, features = ["percent-encode"] }
 dof-468e82937335b1c9 = { package = "dof", version = "0.3.0", default-features = false, features = ["des"] }
 dof-9fbad63c4bcf4a8f = { package = "dof", version = "0.4.0", default-features = false, features = ["des"] }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.1", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 hyper-rustls = { version = "0.27.7", features = ["http2", "ring", "webpki-tokio"] }
 hyper-util = { version = "0.1.17", features = ["full"] }
 itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
+miniz_oxide = { version = "0.8.5", default-features = false, features = ["with-alloc"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nom = { version = "7.1.3" }
 rustix-d585fab2519d2d1 = { package = "rustix", version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }

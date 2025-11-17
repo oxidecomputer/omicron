@@ -18,7 +18,7 @@ use crate::rack_setup::{
 use crate::sim::SimulatedUpstairs;
 use anyhow::{Context as _, anyhow};
 use crucible_agent_client::types::State as RegionState;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
@@ -158,12 +158,17 @@ impl Server {
                             repo_depot_port,
                             role: NexusTypes::SledRole::Scrimlet,
                             baseboard: NexusTypes::Baseboard {
-                                serial: format!(
-                                    "sim-{}",
-                                    &config.id.to_string()[0..8]
-                                ),
-                                part: String::from("Unknown"),
-                                revision: 0,
+                                serial: config
+                                    .hardware
+                                    .baseboard
+                                    .identifier()
+                                    .to_string(),
+                                part: config
+                                    .hardware
+                                    .baseboard
+                                    .model()
+                                    .to_string(),
+                                revision: config.hardware.baseboard.revision(),
                             },
                             usable_hardware_threads: config
                                 .hardware
@@ -403,26 +408,30 @@ pub async fn run_standalone_server(
         SocketAddr::V6(a) => a,
     };
     let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-    let mut zones = IdMap::new();
-    zones.insert(BlueprintZoneConfig {
-        disposition: BlueprintZoneDisposition::InService,
-        id: OmicronZoneUuid::new_v4(),
-        zone_type: BlueprintZoneType::InternalDns(
-            blueprint_zone_type::InternalDns {
-                dataset: OmicronZoneDataset { pool_name },
-                http_address: http_bound,
-                dns_address: match dns.dns_server.local_address() {
-                    SocketAddr::V4(_) => panic!("did not expect v4 address"),
-                    SocketAddr::V6(a) => a,
+    let mut zones = IdOrdMap::new();
+    zones
+        .insert_unique(BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: OmicronZoneUuid::new_v4(),
+            zone_type: BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    dataset: OmicronZoneDataset { pool_name },
+                    http_address: http_bound,
+                    dns_address: match dns.dns_server.local_address() {
+                        SocketAddr::V4(_) => {
+                            panic!("did not expect v4 address")
+                        }
+                        SocketAddr::V6(a) => a,
+                    },
+                    gz_address: Ipv6Addr::LOCALHOST,
+                    gz_address_index: 0,
                 },
-                gz_address: Ipv6Addr::LOCALHOST,
-                gz_address_index: 0,
-            },
-        ),
-        // Co-locate the filesystem pool with the dataset
-        filesystem_pool: pool_name,
-        image_source: BlueprintZoneImageSource::InstallDataset,
-    });
+            ),
+            // Co-locate the filesystem pool with the dataset
+            filesystem_pool: pool_name,
+            image_source: BlueprintZoneImageSource::InstallDataset,
+        })
+        .expect("freshly generated zone IDs are unique");
 
     let mut internal_services_ip_pool_ranges = vec![];
     let mut macs = MacAddr::iter_system();
@@ -430,40 +439,46 @@ pub async fn run_standalone_server(
         let ip = nexus_external_addr.ip();
         let id = OmicronZoneUuid::new_v4();
 
-        zones.insert(BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::InService,
-            id,
-            zone_type: BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                internal_address: match config.nexus_address {
-                    SocketAddr::V4(_) => panic!("did not expect v4 address"),
-                    SocketAddr::V6(a) => a,
-                },
-                lockstep_port: nexus_lockstep_port,
-                external_ip: from_ipaddr_to_external_floating_ip(ip),
-                nic: nexus_types::inventory::NetworkInterface {
-                    id: Uuid::new_v4(),
-                    kind: NetworkInterfaceKind::Service {
-                        id: id.into_untyped_uuid(),
+        zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id,
+                zone_type: BlueprintZoneType::Nexus(
+                    blueprint_zone_type::Nexus {
+                        internal_address: match config.nexus_address {
+                            SocketAddr::V4(_) => {
+                                panic!("did not expect v4 address")
+                            }
+                            SocketAddr::V6(a) => a,
+                        },
+                        lockstep_port: nexus_lockstep_port,
+                        external_ip: from_ipaddr_to_external_floating_ip(ip),
+                        nic: nexus_types::inventory::NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: id.into_untyped_uuid(),
+                            },
+                            name: "nexus".parse().unwrap(),
+                            ip: NEXUS_OPTE_IPV4_SUBNET
+                                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+                                .unwrap()
+                                .into(),
+                            mac: macs.next().unwrap(),
+                            subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                            transit_ips: vec![],
+                        },
+                        external_tls: false,
+                        external_dns_servers: vec![],
+                        nexus_generation: Generation::new(),
                     },
-                    name: "nexus".parse().unwrap(),
-                    ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
-                        .unwrap()
-                        .into(),
-                    mac: macs.next().unwrap(),
-                    subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
-                    vni: Vni::SERVICES_VNI,
-                    primary: true,
-                    slot: 0,
-                    transit_ips: vec![],
-                },
-                external_tls: false,
-                external_dns_servers: vec![],
-                nexus_generation: Generation::new(),
-            }),
-            filesystem_pool: get_random_zpool(),
-            image_source: BlueprintZoneImageSource::InstallDataset,
-        });
+                ),
+                filesystem_pool: get_random_zpool(),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .expect("freshly generated zone IDs are unique");
 
         internal_services_ip_pool_ranges.push(match ip {
             IpAddr::V4(addr) => {
@@ -481,39 +496,41 @@ pub async fn run_standalone_server(
         let ip = *external_dns_internal_addr.ip();
         let id = OmicronZoneUuid::new_v4();
         let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
-        zones.insert(BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::InService,
-            id,
-            zone_type: BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns {
-                    dataset: OmicronZoneDataset { pool_name },
-                    http_address: external_dns_internal_addr,
-                    dns_address: from_sockaddr_to_external_floating_addr(
-                        SocketAddr::V6(external_dns_internal_addr),
-                    ),
-                    nic: nexus_types::inventory::NetworkInterface {
-                        id: Uuid::new_v4(),
-                        kind: NetworkInterfaceKind::Service {
-                            id: id.into_untyped_uuid(),
+        zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id,
+                zone_type: BlueprintZoneType::ExternalDns(
+                    blueprint_zone_type::ExternalDns {
+                        dataset: OmicronZoneDataset { pool_name },
+                        http_address: external_dns_internal_addr,
+                        dns_address: from_sockaddr_to_external_floating_addr(
+                            SocketAddr::V6(external_dns_internal_addr),
+                        ),
+                        nic: nexus_types::inventory::NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service {
+                                id: id.into_untyped_uuid(),
+                            },
+                            name: "external-dns".parse().unwrap(),
+                            ip: DNS_OPTE_IPV4_SUBNET
+                                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+                                .unwrap()
+                                .into(),
+                            mac: macs.next().unwrap(),
+                            subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                            transit_ips: vec![],
                         },
-                        name: "external-dns".parse().unwrap(),
-                        ip: DNS_OPTE_IPV4_SUBNET
-                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
-                            .unwrap()
-                            .into(),
-                        mac: macs.next().unwrap(),
-                        subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
-                        vni: Vni::SERVICES_VNI,
-                        primary: true,
-                        slot: 0,
-                        transit_ips: vec![],
                     },
-                },
-            ),
-            // Co-locate the filesystem pool with the dataset
-            filesystem_pool: pool_name,
-            image_source: BlueprintZoneImageSource::InstallDataset,
-        });
+                ),
+                // Co-locate the filesystem pool with the dataset
+                filesystem_pool: pool_name,
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .expect("freshly generated zone IDs are unique");
 
         internal_services_ip_pool_ranges
             .push(IpRange::V6(Ipv6Range { first: ip, last: ip }));

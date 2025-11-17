@@ -11,11 +11,9 @@ use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::{
-    CreateResult, DataPageParams, DeleteResult, ListResultVec, LookupResult,
-    NameOrId, http_pagination::PaginatedBy,
+    CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
+    http_pagination::PaginatedBy,
 };
-use omicron_uuid_kinds::SledUuid;
-use uuid::Uuid;
 
 impl super::Nexus {
     /// List the probes in the given project.
@@ -30,17 +28,6 @@ impl super::Nexus {
         self.db_datastore.probe_list(opctx, &authz_project, pagparams).await
     }
 
-    /// List the probes for the given sled. This is used by sled agents to
-    /// determine what probes they should be running.
-    pub(crate) async fn probe_list_for_sled(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-        sled: SledUuid,
-    ) -> ListResultVec<ProbeInfo> {
-        self.db_datastore.probe_list_for_sled(sled, opctx, pagparams).await
-    }
-
     /// Get info about a particular probe.
     pub(crate) async fn probe_get(
         &self,
@@ -53,9 +40,10 @@ impl super::Nexus {
         self.db_datastore.probe_get(opctx, &authz_project, &name_or_id).await
     }
 
-    /// Create a probe. This adds the probe to the data store and sets up the
-    /// NAT state on the switch. Actual launching of the probe is done by the
-    /// target sled agent asynchronously.
+    /// Create a probe.
+    ///
+    /// This adds the probe to the data store, sets up the NAT state on the
+    /// swtich, and notifies the sled-agent about the new probe.
     pub(crate) async fn probe_create(
         &self,
         opctx: &OpContext,
@@ -111,12 +99,15 @@ impl super::Nexus {
             )
             .await?;
         }
+        self.background_tasks.task_probe_distributor.activate();
 
         Ok(probe)
     }
 
-    /// Delete a probe. This deletes the probe from the data store and tears
-    /// down the associated NAT state.
+    /// Delete a probe.
+    ///
+    /// This deletes the probe from the data store, tears down the associated
+    /// NAT state, and tells the sled-agent to delete the probe zone.
     pub(crate) async fn probe_delete(
         &self,
         opctx: &OpContext,
@@ -124,17 +115,13 @@ impl super::Nexus {
         name_or_id: NameOrId,
     ) -> DeleteResult {
         let probe = self.probe_get(opctx, project_lookup, &name_or_id).await?;
-
         self.probe_delete_dpd_config(opctx, probe.id).await?;
-
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
-        self.db_datastore.probe_delete(opctx, &authz_project, &name_or_id).await
-    }
-
-    /// Activate the VPC route manager background task by request of a sled
-    /// agent's probe manager.
-    pub(crate) fn refresh_vpc_routes(&self) {
-        self.background_tasks.task_vpc_route_manager.activate();
+        self.db_datastore
+            .probe_delete(opctx, &authz_project, &name_or_id)
+            .await?;
+        self.background_tasks.task_probe_distributor.activate();
+        Ok(())
     }
 }

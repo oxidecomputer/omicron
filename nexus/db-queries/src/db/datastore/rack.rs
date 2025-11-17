@@ -41,6 +41,7 @@ use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::IpPool;
 use nexus_db_model::IpPoolReservationType;
+use nexus_db_model::IpConfig;
 use nexus_db_model::IpVersion;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
@@ -59,6 +60,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
+use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -75,6 +77,8 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
@@ -567,12 +571,27 @@ impl DataStore {
         // explicit IP allocation and create a service NIC as well.
         let zone_type = &zone_config.zone_type;
         let zone_report_str = zone_type.kind().report_str();
+
+        // Extract an IPv4 address from the `shared::NetworkInterface` object.
+        //
+        // TODO-completeness: Handle IPv6 interface addresses. See
+        // https://github.com/oxidecomputer/omicron/issues/9246.
+        let extract_ipv4 = |nic: &NetworkInterface| -> Result<Ipv4Addr, Error> {
+            let IpAddr::V4(ipv4) = nic.ip else {
+                return Err(Error::invalid_request(
+                    "IPv6 addresses are not yet supported",
+                ));
+            };
+            Ok(ipv4)
+        };
+
         let service_ip_nic = match zone_type {
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { nic, dns_address, .. },
             ) => {
                 let external_ip =
                     OmicronZoneExternalIp::Floating(dns_address.into_ip());
+                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -584,7 +603,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    nic.ip,
+                    IpConfig::from_ipv4(ip),
                     nic.mac,
                     nic.slot,
                 )
@@ -597,6 +616,7 @@ impl DataStore {
                 ..
             }) => {
                 let external_ip = OmicronZoneExternalIp::Floating(*external_ip);
+                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -608,7 +628,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    nic.ip,
+                    IpConfig::from_ipv4(ip),
                     nic.mac,
                     nic.slot,
                 )
@@ -619,6 +639,7 @@ impl DataStore {
                 blueprint_zone_type::BoundaryNtp { external_ip, nic, .. },
             ) => {
                 let external_ip = OmicronZoneExternalIp::Snat(*external_ip);
+                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -630,7 +651,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    nic.ip,
+                    IpConfig::from_ipv4(ip),
                     nic.mac,
                     nic.slot,
                 )
@@ -982,7 +1003,7 @@ impl DataStore {
                     for dataset in datasets {
                         use nexus_db_schema::schema::crucible_dataset::dsl;
                         let zpool_id = dataset.pool_id();
-                        Zpool::insert_resource(
+                        let _: CrucibleDataset = Zpool::insert_resource(
                             zpool_id.into(),
                             diesel::insert_into(dsl::crucible_dataset)
                                 .values(dataset.clone())
@@ -1145,7 +1166,7 @@ mod test {
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use async_bb8_diesel::AsyncSimpleConnection;
     use dropshot::PaginationOrder;
-    use id_map::IdMap;
+    use iddqd::IdOrdMap;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::IpPoolReservationType;
@@ -1159,6 +1180,7 @@ mod test {
     use nexus_types::deployment::BlueprintSledConfig;
     use nexus_types::deployment::BlueprintSource;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
+    use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
     use nexus_types::deployment::{
         BlueprintZoneConfig, OmicronZoneExternalFloatingAddr,
@@ -1462,7 +1484,7 @@ mod test {
     }
 
     fn make_sled_config_only_zones(
-        blueprint_zones: BTreeMap<SledUuid, IdMap<BlueprintZoneConfig>>,
+        blueprint_zones: BTreeMap<SledUuid, IdOrdMap<BlueprintZoneConfig>>,
     ) -> BTreeMap<SledUuid, BlueprintSledConfig> {
         blueprint_zones
             .into_iter()
@@ -1472,8 +1494,8 @@ mod test {
                     BlueprintSledConfig {
                         state: SledState::Active,
                         sled_agent_generation: Generation::new().next(),
-                        disks: IdMap::new(),
-                        datasets: IdMap::new(),
+                        disks: IdOrdMap::new(),
+                        datasets: IdOrdMap::new(),
                         zones,
                         remove_mupdate_override: None,
                         host_phase_2:
@@ -1495,17 +1517,17 @@ mod test {
         let sled2 = create_test_sled(&datastore, SledUuid::new_v4()).await;
         let sled3 = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
-        let service_ip_pool_ranges = vec![
-            IpRange::try_from((
-                Ipv4Addr::new(1, 2, 3, 4),
-                Ipv4Addr::new(1, 2, 3, 6),
-            ))
-            .unwrap(),
-        ];
+        let service_ip_pool = IpRange::try_from((
+            Ipv4Addr::new(1, 2, 3, 4),
+            Ipv4Addr::new(1, 2, 3, 6),
+        ))
+        .unwrap();
+        let external_ip_policy =
+            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
 
         let mut system = SystemDescription::new();
         system
-            .service_ip_pool_ranges(service_ip_pool_ranges.clone())
+            .set_external_ip_policy(external_ip_policy)
             .sled(SledBuilder::new().id(sled1.id()))
             .expect("failed to add sled1")
             .sled(SledBuilder::new().id(sled2.id()))
@@ -1608,7 +1630,7 @@ mod test {
                 },
             ]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
         blueprint_zones.insert(
             sled2.id(),
@@ -1729,7 +1751,7 @@ mod test {
                 &opctx,
                 RackInit {
                     blueprint: blueprint.clone(),
-                    service_ip_pool_ranges,
+                    service_ip_pool_ranges: vec![service_ip_pool],
                     ..Default::default()
                 },
             )
@@ -1865,14 +1887,14 @@ mod test {
         // Ask for two Nexus services, with different external IPs.
         let nexus_ip_start = Ipv4Addr::new(1, 2, 3, 4);
         let nexus_ip_end = Ipv4Addr::new(1, 2, 3, 5);
-        let service_ip_pool_ranges = vec![
-            IpRange::try_from((nexus_ip_start, nexus_ip_end))
-                .expect("Cannot create IP Range"),
-        ];
+        let service_ip_pool = IpRange::try_from((nexus_ip_start, nexus_ip_end))
+            .expect("Cannot create IP Range");
+        let external_ip_policy =
+            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
 
         let mut system = SystemDescription::new();
         system
-            .service_ip_pool_ranges(service_ip_pool_ranges.clone())
+            .set_external_ip_policy(external_ip_policy)
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
@@ -1962,7 +1984,7 @@ mod test {
                 },
             ]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
 
         let datasets = vec![];
@@ -2017,7 +2039,7 @@ mod test {
                 RackInit {
                     blueprint: blueprint.clone(),
                     datasets: datasets.clone(),
-                    service_ip_pool_ranges,
+                    service_ip_pool_ranges: vec![service_ip_pool],
                     internal_dns,
                     external_dns,
                     ..Default::default()
@@ -2175,14 +2197,14 @@ mod test {
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 1);
         let nexus_ip_end =
             Ipv6Addr::new(0xfd00, 0x1122, 0x3344, 0, 0, 0, 0, 10);
-        let service_ip_pool_ranges = vec![
-            IpRange::try_from((nexus_ip_start, nexus_ip_end))
-                .expect("Cannot create IP Range"),
-        ];
+        let service_ip_pool = IpRange::try_from((nexus_ip_start, nexus_ip_end))
+            .expect("Cannot create IP Range");
+        let external_ip_policy =
+            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
 
         let mut system = SystemDescription::new();
         system
-            .service_ip_pool_ranges(service_ip_pool_ranges.clone())
+            .set_external_ip_policy(external_ip_policy)
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
@@ -2230,7 +2252,7 @@ mod test {
                 image_source: BlueprintZoneImageSource::InstallDataset,
             }]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
 
         let datasets = vec![];
@@ -2285,14 +2307,33 @@ mod test {
                 RackInit {
                     blueprint: blueprint.clone(),
                     datasets: datasets.clone(),
-                    service_ip_pool_ranges,
+                    service_ip_pool_ranges: vec![service_ip_pool],
                     internal_dns,
                     external_dns,
                     ..Default::default()
                 },
             )
-            .await
-            .expect("Failed to initialize rack");
+            .await;
+
+        // IPv6 addresses aren't fully supported right now. See
+        // https://github.com/oxidecomputer/omicron/issues/1716. When that is
+        // fully-addressed, this will start to fail and we can remove this
+        // block to restore the previous test coverage.
+        let Err(Error::InvalidRequest { message }) = &rack else {
+            panic!(
+                "Expected an error initializing a rack with an IPv6 address, \
+                until they are fully-supported. Found {rack:#?}"
+            );
+        };
+        assert_eq!(
+            message.external_message(),
+            "IPv6 addresses are not yet supported"
+        );
+        let Ok(rack) = rack else {
+            db.terminate().await;
+            logctx.cleanup_successful();
+            return;
+        };
 
         assert_eq!(rack.id(), rack_id());
         assert!(rack.initialized);
@@ -2473,7 +2514,7 @@ mod test {
                 image_source: BlueprintZoneImageSource::InstallDataset,
             }]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
         let blueprint_id = BlueprintUuid::new_v4();
         let blueprint = Blueprint {
@@ -2526,11 +2567,13 @@ mod test {
         let sled = create_test_sled(&datastore, SledUuid::new_v4()).await;
 
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
-        let service_ip_pool_ranges = vec![IpRange::from(ip)];
+        let service_ip_pool = IpRange::from(ip);
+        let external_ip_policy =
+            ExternalIpPolicy::single_pool_no_external_dns(service_ip_pool);
 
         let mut system = SystemDescription::new();
         system
-            .service_ip_pool_ranges(service_ip_pool_ranges.clone())
+            .set_external_ip_policy(external_ip_policy)
             .sled(SledBuilder::new().id(sled.id()))
             .expect("failed to add sled");
 
@@ -2616,7 +2659,7 @@ mod test {
                 },
             ]
             .into_iter()
-            .collect::<IdMap<_>>(),
+            .collect::<IdOrdMap<_>>(),
         );
 
         let blueprint_id = BlueprintUuid::new_v4();
@@ -2647,7 +2690,7 @@ mod test {
                 RackInit {
                     rack_id: rack_id(),
                     blueprint: blueprint.clone(),
-                    service_ip_pool_ranges,
+                    service_ip_pool_ranges: vec![service_ip_pool],
                     ..Default::default()
                 },
             )

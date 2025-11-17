@@ -21,19 +21,19 @@ use diesel::query_builder::QueryId;
 use diesel::query_builder::{AstPass, Query};
 use diesel::result::Error as DieselError;
 use diesel::sql_types::{self, Nullable};
-use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
+use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel, retryable};
 use nexus_db_lookup::DbConnection;
-use nexus_db_model::SqlU8;
+use nexus_db_model::{Ip, IpAssignment, Ipv4Addr, SqlU8};
 use nexus_db_model::{MAX_NICS_PER_INSTANCE, NetworkInterfaceKind};
 use nexus_db_schema::enums::NetworkInterfaceKindEnum;
 use nexus_db_schema::schema::network_interface::dsl;
-use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::{self, Error};
 use slog_error_chain::SlogInlineError;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::Ipv6Addr;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
@@ -259,15 +259,19 @@ fn decode_database_error(
         r#"incorrect UUID length: multiple-vpcs"#,
     );
 
-    // Error message generated when we attempt to insert NULL in the `ip`
-    // column, which only happens when we run out of IPs in the subnet.
-    const IP_EXHAUSTION_ERROR_MESSAGE: &str =
-        r#"null value in column "ip" violates not-null constraint"#;
+    // The name of the constraint violated when we attempt to insert NULL for
+    // one of the IP address columns, either `ipv4` or `ipv6`. This only happens
+    // when we run out of addresses in the subnet.
+    const IP_EXHAUSTION_CONSTRAINT: &str = r#"at_least_one_ip_address"#;
 
     // The name of the index whose uniqueness is violated if we try to assign an
-    // IP that is already allocated to another interface in the same subnet.
-    const IP_NOT_AVAILABLE_CONSTRAINT: &str =
-        "network_interface_subnet_id_ip_key";
+    // IPv4 that is already allocated to another interface in the same subnet.
+    const IPV4_NOT_AVAILABLE_CONSTRAINT: &str =
+        "network_interface_subnet_id_ipv4_key";
+
+    // TODO-completeness: Add a similar constraint name and check below when we
+    // support inserting VPC-private IPv6 addresses. See
+    // https://github.com/oxidecomputer/omicron/issues/9245.
 
     // The name of the index whose uniqueness is violated if we try to assign a
     // MAC that is already allocated to another interface in the same VPC.
@@ -321,12 +325,11 @@ fn decode_database_error(
 
     match err {
         // If the address allocation subquery fails, we'll attempt to insert
-        // NULL for the `ip` column. This checks that the non-NULL constraint on
-        // that colum has been violated.
-        DieselError::DatabaseError(
-            DatabaseErrorKind::NotNullViolation,
-            info,
-        ) if info.message() == IP_EXHAUSTION_ERROR_MESSAGE => {
+        // NULL for one of the IP columns. This checks if the CHECK constraint
+        // on the table has been violated.
+        DieselError::DatabaseError(DatabaseErrorKind::CheckViolation, info)
+            if info.constraint_name() == Some(IP_EXHAUSTION_CONSTRAINT) =>
+        {
             InsertError::NoAvailableIpAddresses {
                 name: interface.subnet.identity.name.to_string(),
                 id: interface.subnet.identity.id,
@@ -397,11 +400,19 @@ fn decode_database_error(
         ) => match info.constraint_name() {
             // Constraint violated if a user-requested IP address has
             // already been assigned within the same VPC Subnet.
-            Some(constraint) if constraint == IP_NOT_AVAILABLE_CONSTRAINT => {
-                let ip = interface
-                    .ip
-                    .unwrap_or_else(|| std::net::Ipv4Addr::UNSPECIFIED.into());
-                InsertError::IpAddressNotAvailable(ip)
+            Some(constraint) if constraint == IPV4_NOT_AVAILABLE_CONSTRAINT => {
+                let Some(ipv4) = interface.ip_config.ipv4_addr() else {
+                    let err = Error::internal_error(&format!(
+                        "Violated constraint that ensures unique \
+                        IPv4 addresses when inserting an explicitly-\
+                        requested IPv4 address, but there doesn't \
+                        appear to be any such address. Instead, \
+                        found {:?}",
+                        interface.ip_config,
+                    ));
+                    return InsertError::External(err);
+                };
+                InsertError::IpAddressNotAvailable((*ipv4).into())
             }
             // Constraint violated if a user-requested MAC address has
             // already been assigned within the same VPC.
@@ -466,57 +477,46 @@ fn decode_database_error(
 
 // Return the first available address in a subnet. This is not the network
 // address, since Oxide reserves the first few addresses.
-fn first_available_address(subnet: &IpNetwork) -> IpAddr {
-    match subnet {
-        IpNetwork::V4(network) => network
-            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _)
-            .unwrap_or_else(|| {
-                panic!("Unexpectedly small IPv4 subnetwork: '{}'", network)
-            })
-            .into(),
-        IpNetwork::V6(network) => {
-            // NOTE: This call to `nth()` will loop and call the `next()`
-            // implementation. That's inefficient, but the number of reserved
-            // addresses is very small, so it should not matter.
-            network
-                .iter()
-                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _)
-                .unwrap_or_else(|| {
-                    panic!("Unexpectedly small IPv6 subnetwork: '{}'", network)
-                })
-                .into()
-        }
-    }
+fn first_available_ipv4_address(network: &Ipv4Network) -> std::net::Ipv4Addr {
+    network.nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _).unwrap_or_else(|| {
+        panic!("Unexpectedly small IPv4 subnetwork: '{}'", network)
+    })
+}
+
+fn first_available_ipv6_address(network: &Ipv6Network) -> std::net::Ipv6Addr {
+    // NOTE: This call to `nth()` will loop and call the `next()`
+    // implementation. That's inefficient, but the number of reserved
+    // addresses is very small, so it should not matter.
+    network.iter().nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as _).unwrap_or_else(
+        || panic!("Unexpectedly small IPv6 subnetwork: '{}'", network),
+    )
 }
 
 // Return the last available address in a subnet. This is not the broadcast
 // address, since that is reserved.
-fn last_available_address(subnet: &IpNetwork) -> IpAddr {
-    // NOTE: In both cases below, we subtract 2 from the network size. That's
-    // because we first subtract 1 to go from a size to an index, and then
-    // another 1 because the broadcast address isn't valid for an interface.
-    match subnet {
-        IpNetwork::V4(network) => network
-            .size()
-            .checked_sub(2)
-            .and_then(|n| network.nth(n))
-            .map(IpAddr::V4)
-            .unwrap_or_else(|| {
-                panic!("Unexpectedly small IPv4 subnetwork: '{}'", network);
-            }),
-        IpNetwork::V6(network) => {
-            // NOTE: The iterator implementation for `Ipv6Network` only
-            // implements the required `Iterator::next()` method. That means we
-            // get the default implementation of the `nth()` method, which will
-            // loop and call `next()`. That is ridiculously inefficient, so we
-            // manually compute the nth address through addition instead.
-            let base = u128::from(network.network());
-            let n = network.size().checked_sub(2).unwrap_or_else(|| {
-                panic!("Unexpectedly small IPv6 subnetwork: '{}'", network);
-            });
-            IpAddr::V6(Ipv6Addr::from(base + n))
-        }
-    }
+//
+// NOTE: In both functions below, we subtract 2 from the network size. That's
+// because we first subtract 1 to go from a size to an index, and then
+// another 1 because the broadcast address isn't valid for an interface.
+fn last_available_ipv4_address(network: &Ipv4Network) -> std::net::Ipv4Addr {
+    network.size().checked_sub(2).and_then(|n| network.nth(n)).unwrap_or_else(
+        || {
+            panic!("Unexpectedly small IPv4 subnetwork: '{}'", network);
+        },
+    )
+}
+
+fn last_available_ipv6_address(network: &Ipv6Network) -> std::net::Ipv6Addr {
+    // NOTE: The iterator implementation for `Ipv6Network` only
+    // implements the required `Iterator::next()` method. That means we
+    // get the default implementation of the `nth()` method, which will
+    // loop and call `next()`. That is ridiculously inefficient, so we
+    // manually compute the nth address through addition instead.
+    let base = u128::from(network.network());
+    let n = network.size().checked_sub(2).unwrap_or_else(|| {
+        panic!("Unexpectedly small IPv6 subnetwork: '{}'", network);
+    });
+    Ipv6Addr::from(base + n)
 }
 
 /// The `NextIpv4Address` query is a `NextItem` query for choosing the next
@@ -525,7 +525,7 @@ fn last_available_address(subnet: &IpNetwork) -> IpAddr {
 pub struct NextIpv4Address {
     inner: NextItemSelfJoined<
         nexus_db_schema::schema::network_interface::table,
-        IpNetwork,
+        Ipv4Addr,
         nexus_db_schema::schema::network_interface::dsl::ip,
         Uuid,
         nexus_db_schema::schema::network_interface::dsl::subnet_id,
@@ -534,14 +534,48 @@ pub struct NextIpv4Address {
 
 impl NextIpv4Address {
     pub fn new(subnet: Ipv4Network, subnet_id: Uuid) -> Self {
-        let subnet = IpNetwork::from(subnet);
-        let min = IpNetwork::from(first_available_address(&subnet));
-        let max = IpNetwork::from(last_available_address(&subnet));
-        Self { inner: NextItemSelfJoined::new_scoped(subnet_id, min, max) }
+        let min = first_available_ipv4_address(&subnet);
+        let max = last_available_ipv4_address(&subnet);
+        Self {
+            inner: NextItemSelfJoined::new_scoped(
+                subnet_id,
+                min.into(),
+                max.into(),
+            ),
+        }
     }
 }
 
 delegate_query_fragment_impl!(NextIpv4Address);
+
+/// The `NextIpv6Address` query is a `NextItem` query for choosing the next
+/// available IPv6 address for an interface.
+#[derive(Debug, Clone, Copy)]
+pub struct NextIpv6Address {
+    inner: NextItemSelfJoined<
+        nexus_db_schema::schema::network_interface::table,
+        db::model::Ipv6Addr,
+        nexus_db_schema::schema::network_interface::dsl::ipv6,
+        Uuid,
+        nexus_db_schema::schema::network_interface::dsl::subnet_id,
+    >,
+}
+
+impl NextIpv6Address {
+    pub fn new(subnet: Ipv6Network, subnet_id: Uuid) -> Self {
+        let min = first_available_ipv6_address(&subnet);
+        let max = last_available_ipv6_address(&subnet);
+        Self {
+            inner: NextItemSelfJoined::new_scoped(
+                subnet_id,
+                min.into(),
+                max.into(),
+            ),
+        }
+    }
+}
+
+delegate_query_fragment_impl!(NextIpv6Address);
 
 /// A `NextItem` subquery that selects the next empty slot for an interface.
 ///
@@ -997,7 +1031,7 @@ pub struct InsertQuery {
     interface: IncompleteNetworkInterface,
     now: DateTime<Utc>,
 
-    // The following fields are derived from the previous fields. This begs the
+    // The following fields are derived from the previous fields. This raises the
     // question: "Why bother storing them at all?"
     //
     // Diesel's [`diesel::query_builder::ast_pass::AstPass:push_bind_param`] method
@@ -1007,13 +1041,44 @@ pub struct InsertQuery {
     vpc_id_str: String,
     subnet_id_str: String,
     parent_id_str: String,
-    ip_sql: Option<IpNetwork>,
+    ipv4_sql: AutoOrOptionalIp<NextIpv4Address>,
+    ipv6_sql: AutoOrOptionalIp<NextIpv6Address>,
+    transit_ips: Vec<IpNetwork>,
     mac_sql: Option<db::model::MacAddr>,
     slot_sql: Option<SqlU8>,
     next_mac_subquery: NextMacAddress,
-    next_ipv4_address_subquery: NextIpv4Address,
     next_slot_subquery: NextNicSlot,
     is_primary_subquery: IsPrimaryNic,
+}
+
+/// Helper type to insert an interface's IP address.
+///
+/// This inserts either a constant IP address, NULL, or the result of the
+/// next-item subquery that selects the next available IP address.
+#[derive(Debug, Clone)]
+enum AutoOrOptionalIp<Q> {
+    /// Insert the result of the subquery that automatically selects an address.
+    Auto(Q),
+    /// Insert an IP address or NULL if one isn't requested for the interface.
+    Nullable(Option<IpNetwork>),
+}
+
+impl<Q> AutoOrOptionalIp<Q>
+where
+    Q: QueryFragment<Pg>,
+{
+    fn new<T>(assignment: Option<&IpAssignment<T>>, auto: Q) -> Self
+    where
+        T: Ip,
+    {
+        match assignment {
+            None => AutoOrOptionalIp::Nullable(None),
+            Some(IpAssignment::Auto) => AutoOrOptionalIp::Auto(auto),
+            Some(IpAssignment::Explicit(ip)) => {
+                AutoOrOptionalIp::Nullable(Some(ip.into_ipnet()))
+            }
+        }
+    }
 }
 
 impl InsertQuery {
@@ -1022,29 +1087,48 @@ impl InsertQuery {
         let subnet_id_str = interface.subnet.identity.id.to_string();
         let kind = interface.kind;
         let parent_id_str = interface.parent_id.to_string();
-        let ip_sql = interface.ip.map(|ip| ip.into());
         let mac_sql = interface.mac.map(|mac| mac.into());
         let slot_sql = interface.slot.map(|slot| slot.into());
         let next_mac_subquery =
             NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
+        let next_slot_subquery = NextNicSlot::new(interface.parent_id);
+        let is_primary_subquery =
+            IsPrimaryNic { kind, parent_id: interface.parent_id };
         let next_ipv4_address_subquery = NextIpv4Address::new(
             interface.subnet.ipv4_block.0.into(),
             interface.subnet.identity.id,
         );
-        let next_slot_subquery = NextNicSlot::new(interface.parent_id);
-        let is_primary_subquery =
-            IsPrimaryNic { kind, parent_id: interface.parent_id };
+        let ipv4_sql = AutoOrOptionalIp::new(
+            interface.ip_config.ipv4_assignment(),
+            next_ipv4_address_subquery,
+        );
+        let next_ipv6_address_subquery = NextIpv6Address::new(
+            interface.subnet.ipv6_block.0.into(),
+            interface.subnet.identity.id,
+        );
+        let ipv6_sql = AutoOrOptionalIp::new(
+            interface.ip_config.ipv6_assignment(),
+            next_ipv6_address_subquery,
+        );
+        let transit_ips = interface
+            .ip_config
+            .transit_ips()
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
         Self {
             interface,
             now: Utc::now(),
             vpc_id_str,
             subnet_id_str,
             parent_id_str,
-            ip_sql,
+            ipv4_sql,
+            ipv6_sql,
+            transit_ips,
             mac_sql,
             slot_sql,
             next_mac_subquery,
-            next_ipv4_address_subquery,
             next_slot_subquery,
             is_primary_subquery,
         }
@@ -1188,15 +1272,35 @@ impl QueryFragment<Pg> for InsertQuery {
         // If the user specified an IP address, then insert it by value. If they
         // did not, meaning we're allocating the next available one on their
         // behalf, then insert that subquery here.
-        if let Some(ref ip) = &self.ip_sql {
-            out.push_bind_param::<sql_types::Inet, IpNetwork>(ip)?;
-        } else {
-            out.push_sql("(");
-            self.next_ipv4_address_subquery.walk_ast(out.reborrow())?;
-            out.push_sql(")");
+        match &self.ipv4_sql {
+            AutoOrOptionalIp::Auto(subquery) => {
+                out.push_sql("(");
+                subquery.walk_ast(out.reborrow())?;
+                out.push_sql(")");
+            }
+            AutoOrOptionalIp::Nullable(maybe_ip) => out
+                .push_bind_param::<sql_types::Nullable<sql_types::Inet>, _>(
+                    maybe_ip,
+                )?,
         }
         out.push_sql(" AS ");
         out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(", ");
+
+        // Same for IPv6 addresses.
+        match &self.ipv6_sql {
+            AutoOrOptionalIp::Auto(subquery) => {
+                out.push_sql("(");
+                subquery.walk_ast(out.reborrow())?;
+                out.push_sql(")");
+            }
+            AutoOrOptionalIp::Nullable(maybe_ip) => out
+                .push_bind_param::<sql_types::Nullable<sql_types::Inet>, _>(
+                    maybe_ip,
+                )?,
+        }
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::ipv6::NAME)?;
         out.push_sql(", ");
 
         if let Some(slot) = &self.slot_sql {
@@ -1214,7 +1318,7 @@ impl QueryFragment<Pg> for InsertQuery {
         out.push_sql(", ");
 
         out.push_bind_param::<sql_types::Array<sql_types::Inet>, Vec<IpNetwork>>(
-            &self.interface.transit_ips,
+            &self.transit_ips,
         )?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::transit_ips::NAME)?;
@@ -1268,6 +1372,8 @@ impl QueryFragment<Pg> for InsertQueryValues {
         out.push_identifier(dsl::mac::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::ip::NAME)?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::ipv6::NAME)?;
         out.push_sql(", ");
         out.push_identifier(dsl::slot::NAME)?;
         out.push_sql(", ");
@@ -1843,7 +1949,6 @@ mod tests {
     use super::InsertError;
     use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-    use super::first_available_address;
     use crate::authz;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
@@ -1856,11 +1961,18 @@ mod tests {
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
     use crate::db::pub_test_utils::TestDatabase;
-    use crate::db::queries::network_interface::last_available_address;
+    use crate::db::queries::network_interface::first_available_ipv4_address;
+    use crate::db::queries::network_interface::first_available_ipv6_address;
+    use crate::db::queries::network_interface::last_available_ipv4_address;
+    use crate::db::queries::network_interface::last_available_ipv6_address;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use model::NetworkInterfaceKind;
     use nexus_db_lookup::LookupPath;
+    use nexus_db_model::IpConfig;
+    use nexus_db_model::IpVersion;
+    use nexus_db_model::Ipv4Assignment;
+    use nexus_db_model::Ipv4Config;
     use nexus_types::external_api::params;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::params::InstanceNetworkInterfaceAttachment;
@@ -1911,6 +2023,7 @@ mod tests {
             start: true,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         };
 
         let instance = Instance::new(instance_id, project_id, &params);
@@ -1949,7 +2062,7 @@ mod tests {
         let new_runtime = model::InstanceRuntimeState {
             nexus_state: state,
             propolis_id,
-            gen: instance.runtime_state.gen.next().into(),
+            r#gen: instance.runtime_state.gen.next().into(),
             ..instance.runtime_state.clone()
         };
         let res = db_datastore
@@ -2133,7 +2246,7 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            ip.into(),
+            IpConfig::from_ipv4(ip),
             MacAddr::random_system(),
             0,
         )
@@ -2205,8 +2318,7 @@ mod tests {
                 name: "interface-a".parse().unwrap(),
                 description: String::from("description"),
             },
-            Some(requested_ip),
-            vec![],
+            IpConfig::from_ipv4(requested_ip),
         )
         .unwrap();
         let err = context.datastore()
@@ -2222,11 +2334,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_insert_request_exact_ip() {
-        let context = TestContext::new("test_insert_request_exact_ip", 2).await;
+    async fn can_request_exact_ipv4() {
+        let context = TestContext::new("can_request_exact_ipv4", 2).await;
+        can_request_exact_ip_impl(context, IpVersion::V4).await
+    }
+
+    #[tokio::test]
+    async fn can_request_exact_ipv6() {
+        let context = TestContext::new("can_request_exact_ipv6", 2).await;
+        can_request_exact_ip_impl(context, IpVersion::V6).await
+    }
+
+    async fn can_request_exact_ip_impl(
+        context: TestContext,
+        ip_version: IpVersion,
+    ) {
         let instance = context.create_stopped_instance().await;
         let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
-        let requested_ip = "172.30.0.5".parse().unwrap();
+        let (requested_ip, ip_config) = match ip_version {
+            IpVersion::V4 => {
+                let addr = context.net1.subnets[0].ipv4_block.nth(5).unwrap();
+                (IpAddr::V4(addr), IpConfig::from_ipv4(addr))
+            }
+            IpVersion::V6 => {
+                let addr = context.net1.subnets[0].ipv6_block.nth(5).unwrap();
+                (IpAddr::V6(addr), IpConfig::from_ipv6(addr))
+            }
+        };
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance_id,
@@ -2235,8 +2369,7 @@ mod tests {
                 name: "interface-a".parse().unwrap(),
                 description: String::from("description"),
             },
-            Some(requested_ip),
-            vec![],
+            ip_config,
         )
         .unwrap();
         let inserted_interface = context
@@ -2248,11 +2381,28 @@ mod tests {
             .await
             .expect("Failed to insert interface with known-good IP address");
         assert_interfaces_eq(&interface, &inserted_interface.clone().into());
+        let actual_addr: IpAddr = match ip_version {
+            IpVersion::V4 => {
+                inserted_interface.ipv4.expect("an IPv4 address").into()
+            }
+            IpVersion::V6 => {
+                inserted_interface.ipv6.expect("an IPv6 address").into()
+            }
+        };
         assert_eq!(
-            inserted_interface.ip.ip(),
-            requested_ip,
+            actual_addr, requested_ip,
             "The requested IP address should be available when no interfaces exist in the table"
         );
+        match ip_version {
+            IpVersion::V4 => assert!(
+                inserted_interface.ipv6.is_none(),
+                "Should not have an IPv6 address"
+            ),
+            IpVersion::V6 => assert!(
+                inserted_interface.ipv4.is_none(),
+                "Should not have an IPv4 address"
+            ),
+        }
         context.success().await;
     }
 
@@ -2268,8 +2418,7 @@ mod tests {
                 name: "interface-b".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let err = context.datastore()
@@ -2307,8 +2456,7 @@ mod tests {
                     name: format!("interface-{}", i).parse().unwrap(),
                     description: String::from("description"),
                 },
-                None,
-                vec![],
+                IpConfig::auto_ipv4(),
             )
             .unwrap();
             let inserted_interface = context
@@ -2323,10 +2471,16 @@ mod tests {
                 &interface,
                 &inserted_interface.clone().into(),
             );
-            let actual_address = inserted_interface.ip.ip();
+            let actual_address = Ipv4Addr::from(
+                inserted_interface.ipv4.expect("an IPv4 address"),
+            );
             assert_eq!(
                 actual_address, expected_address,
                 "Failed to auto-assign correct sequential address to interface"
+            );
+            assert!(
+                inserted_interface.ipv6.is_none(),
+                "Should not have an IPv6 address"
             );
         }
         context.success().await;
@@ -2352,8 +2506,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let inserted_interface = context
@@ -2364,6 +2517,7 @@ mod tests {
 
         // Inserting an interface with the same IP should fail, even if all
         // other parameters are valid.
+        let ip = inserted_interface.ipv4.expect("an IPv4 address");
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             new_instance_id,
@@ -2372,18 +2526,19 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            Some(inserted_interface.ip.ip()),
-            vec![],
+            IpConfig::from_ipv4(ip.into()),
         )
         .unwrap();
         let result = context
             .datastore()
             .instance_create_network_interface_raw(context.opctx(), interface)
             .await;
-        assert!(
-            matches!(result, Err(InsertError::IpAddressNotAvailable(_))),
-            "Requesting an interface with an existing IP should fail"
-        );
+        let Err(InsertError::IpAddressNotAvailable(_)) = result else {
+            panic!(
+                "Requesting an interface with an existing IP should fail, found {:?}",
+                result,
+            );
+        };
         context.success().await;
     }
 
@@ -2408,7 +2563,7 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            ip.into(),
+            IpConfig::from_ipv4(ip),
             mac,
             0,
         )
@@ -2448,7 +2603,7 @@ mod tests {
                     name: "service-nic".parse().unwrap(),
                     description: String::from("service nic"),
                 },
-                ip.into(),
+                IpConfig::from_ipv4(ip),
                 mac,
                 slot,
             )
@@ -2488,7 +2643,7 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            ips.next().expect("exhausted test subnet").into(),
+            IpConfig::from_ipv4(ips.next().expect("exhausted test subnet")),
             mac,
             0,
         )
@@ -2511,7 +2666,7 @@ mod tests {
                 name: "new-service-nic".parse().unwrap(),
                 description: String::from("new-service nic"),
             },
-            ips.next().expect("exhausted test subnet").into(),
+            IpConfig::from_ipv4(ips.next().expect("exhausted test subnet")),
             mac,
             0,
         )
@@ -2567,7 +2722,7 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            ip0.into(),
+            IpConfig::from_ipv4(ip0),
             next_mac(),
             0,
         )
@@ -2588,7 +2743,7 @@ mod tests {
                 name: "new-service-nic".parse().unwrap(),
                 description: String::from("new-service nic"),
             },
-            ip1.into(),
+            IpConfig::from_ipv4(ip1),
             next_mac(),
             0,
         )
@@ -2621,8 +2776,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let _ = context
@@ -2641,8 +2795,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let result = context
@@ -2673,8 +2826,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let _ = context
@@ -2690,8 +2842,7 @@ mod tests {
                 name: "interface-d".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let result = context
@@ -2719,8 +2870,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let _ = context
@@ -2762,8 +2912,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let _ = context
@@ -2772,7 +2921,9 @@ mod tests {
             .await
             .expect("Failed to insert interface");
         let expected_address = "172.30.0.5".parse().unwrap();
-        for addr in [Some(expected_address), None] {
+        for ip_config in
+            [IpConfig::from_ipv4(expected_address), IpConfig::auto_ipv4()]
+        {
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
                 instance_id,
@@ -2781,8 +2932,7 @@ mod tests {
                     name: "interface-a".parse().unwrap(),
                     description: String::from("description"),
                 },
-                addr,
-                vec![],
+                ip_config,
             )
             .unwrap();
             let result = context
@@ -2821,8 +2971,7 @@ mod tests {
                     name: "interface-c".parse().unwrap(),
                     description: String::from("description"),
                 },
-                None,
-                vec![],
+                IpConfig::auto_ipv4(),
             )
             .unwrap();
             let _ = context
@@ -2851,8 +3000,7 @@ mod tests {
                 name: "interface-d".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let result = context
@@ -2885,8 +3033,7 @@ mod tests {
                     name: format!("if{}", i).parse().unwrap(),
                     description: String::from("description"),
                 },
-                None,
-                vec![],
+                IpConfig::auto_ipv4(),
             )
             .unwrap();
             let result = context
@@ -2931,7 +3078,15 @@ mod tests {
             "The random MAC address {:?} is not a valid {} address",
             inserted.mac, kind,
         );
-        assert_eq!(inserted.transit_ips, incomplete.transit_ips);
+        assert_eq!(
+            inserted.transit_ips,
+            incomplete
+                .ip_config
+                .transit_ips()
+                .into_iter()
+                .map(ipnetwork::IpNetwork::from)
+                .collect::<Vec<_>>()
+        );
     }
 
     // Test that we fail to insert an interface if there are no available slots
@@ -2955,8 +3110,7 @@ mod tests {
                     name: format!("interface-{}", slot).parse().unwrap(),
                     description: String::from("description"),
                 },
-                None,
-                vec![],
+                IpConfig::auto_ipv4(),
             )
             .unwrap();
             let inserted_interface = context
@@ -2991,8 +3145,7 @@ mod tests {
                 name: "interface-8".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
         let result = context
@@ -3010,16 +3163,44 @@ mod tests {
 
     // Regression for https://github.com/oxidecomputer/omicron/issues/8208
     #[tokio::test]
-    async fn allocation_and_deallocation_takes_next_smallest_address() {
+    async fn allocation_and_deallocation_takes_next_smallest_ipv4_address() {
         let context = TestContext::new(
-            "allocation_and_deallocation_takes_next_smallest_address",
+            "allocation_and_deallocation_takes_next_smallest_ipv4_address",
             1,
         )
         .await;
+        allocation_and_deallocation_takes_next_smallest_address_impl(
+            context,
+            IpVersion::V4,
+        )
+        .await
+    }
 
+    #[tokio::test]
+    async fn allocation_and_deallocation_takes_next_smallest_ipv6_address() {
+        let context = TestContext::new(
+            "allocation_and_deallocation_takes_next_smallest_ipv6_address",
+            1,
+        )
+        .await;
+        allocation_and_deallocation_takes_next_smallest_address_impl(
+            context,
+            IpVersion::V6,
+        )
+        .await
+    }
+
+    async fn allocation_and_deallocation_takes_next_smallest_address_impl(
+        context: TestContext,
+        ip_version: IpVersion,
+    ) {
         // Create three instances, each with an interface.
         const N_INSTANCES: usize = 3;
         let mut instances = Vec::with_capacity(N_INSTANCES);
+        let ip_config = match ip_version {
+            IpVersion::V4 => IpConfig::auto_ipv4(),
+            IpVersion::V6 => IpConfig::auto_ipv6(),
+        };
         for _ in 0..N_INSTANCES {
             let instance = context.create_stopped_instance().await;
             let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
@@ -3031,8 +3212,7 @@ mod tests {
                     name: "interface-c".parse().unwrap(),
                     description: String::from("description"),
                 },
-                None,
-                vec![],
+                ip_config.clone(),
             )
             .unwrap();
             let intf = context
@@ -3047,7 +3227,14 @@ mod tests {
         }
 
         // Delete the NIC on the first instance.
-        let original_ip = instances[0].1.ip.ip();
+        let original_ip = match ip_version {
+            IpVersion::V4 => {
+                IpAddr::V4(instances[0].1.ipv4.expect("an IPv4 address").into())
+            }
+            IpVersion::V6 => {
+                IpAddr::V6(instances[0].1.ipv6.expect("an IPv6 address").into())
+            }
+        };
         context.delete_instance_nics(instances[0].0.id()).await;
 
         // And recreate it, ensuring we get the same IP address again.
@@ -3059,8 +3246,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            ip_config.clone(),
         )
         .unwrap();
         let intf = context
@@ -3069,9 +3255,16 @@ mod tests {
             .await
             .expect("Failed to insert interface");
         instances[0].1 = intf;
+        let new_ip = match ip_version {
+            IpVersion::V4 => {
+                IpAddr::V4(instances[0].1.ipv4.expect("an IPv4 address").into())
+            }
+            IpVersion::V6 => {
+                IpAddr::V6(instances[0].1.ipv6.expect("an IPv6 address").into())
+            }
+        };
         assert_eq!(
-            instances[0].1.ip.ip(),
-            original_ip,
+            new_ip, original_ip,
             "Should have recreated the first available IP address again"
         );
 
@@ -3091,8 +3284,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            ip_config.clone(),
         )
         .unwrap();
         let intf = context
@@ -3100,9 +3292,22 @@ mod tests {
             .instance_create_network_interface_raw(context.opctx(), interface)
             .await
             .expect("Failed to insert interface");
+        let (actual_addr, expected_addr) = match ip_version {
+            IpVersion::V4 => (
+                IpAddr::V4(intf.ipv4.expect("an IPv4 address").into()),
+                IpAddr::V4(
+                    instances[1].1.ipv4.expect("an IPv4 address").into(),
+                ),
+            ),
+            IpVersion::V6 => (
+                IpAddr::V6(intf.ipv6.expect("an IPv6 address").into()),
+                IpAddr::V6(
+                    instances[1].1.ipv6.expect("an IPv6 address").into(),
+                ),
+            ),
+        };
         assert_eq!(
-            intf.ip.ip(),
-            instances[1].1.ip.ip(),
+            actual_addr, expected_addr,
             "Should have used the second address",
         );
 
@@ -3135,8 +3340,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            Some(IpAddr::V4(addr)),
-            vec![],
+            IpConfig::from_ipv4(addr),
         )
         .unwrap();
         let _ = context
@@ -3156,8 +3360,7 @@ mod tests {
                 name: "interface-c".parse().unwrap(),
                 description: String::from("description"),
             },
-            None,
-            vec![],
+            IpConfig::auto_ipv4(),
         )
         .unwrap();
 
@@ -3178,9 +3381,10 @@ mod tests {
                         panic!("Should have been able to get the {NTH}-1-th address")
                     })
             ),
-            interface2.ip.ip(),
+            IpAddr::from(interface2.ipv4.expect("an IPv4 address")),
             "Should have allocated 1 less than the smallest existing address"
         );
+        assert!(interface2.ipv6.is_none(), "Should not have an IPv6 address");
 
         context.success().await;
     }
@@ -3189,13 +3393,13 @@ mod tests {
     fn test_first_available_address() {
         let subnet = "172.30.0.0/28".parse().unwrap();
         assert_eq!(
-            first_available_address(&subnet),
-            "172.30.0.5".parse::<IpAddr>().unwrap(),
+            first_available_ipv4_address(&subnet),
+            "172.30.0.5".parse::<Ipv4Addr>().unwrap(),
         );
         let subnet = "fd00::/64".parse().unwrap();
         assert_eq!(
-            first_available_address(&subnet),
-            "fd00::5".parse::<IpAddr>().unwrap(),
+            first_available_ipv6_address(&subnet),
+            "fd00::5".parse::<Ipv6Addr>().unwrap(),
         );
     }
 
@@ -3203,13 +3407,13 @@ mod tests {
     fn test_last_available_address() {
         let subnet = "172.30.0.0/28".parse().unwrap();
         assert_eq!(
-            last_available_address(&subnet),
-            "172.30.0.14".parse::<IpAddr>().unwrap(),
+            last_available_ipv4_address(&subnet),
+            "172.30.0.14".parse::<Ipv4Addr>().unwrap(),
         );
         let subnet = "fd00::/64".parse().unwrap();
         assert_eq!(
-            last_available_address(&subnet),
-            "fd00::ffff:ffff:ffff:fffe".parse::<IpAddr>().unwrap(),
+            last_available_ipv6_address(&subnet),
+            "fd00::ffff:ffff:ffff:fffe".parse::<Ipv6Addr>().unwrap(),
         );
     }
 
@@ -3226,6 +3430,10 @@ mod tests {
             "172.16.0.0/16".parse().unwrap(),
         ];
 
+        let ip_config = IpConfig::V4(Ipv4Config {
+            ip: Ipv4Assignment::Auto,
+            transit_ips: transit_ips.clone(),
+        });
         let interface = IncompleteNetworkInterface::new_instance(
             Uuid::new_v4(),
             instance_id,
@@ -3234,8 +3442,7 @@ mod tests {
                 name: "interface-with-transit".parse().unwrap(),
                 description: String::from("Test interface with transit IPs"),
             },
-            None, // Auto-assign IP
-            transit_ips.clone(),
+            ip_config,
         )
         .unwrap();
 
@@ -3251,6 +3458,53 @@ mod tests {
         // Verify the basic interface properties
         assert_interfaces_eq(&interface, &inserted_interface.clone().into());
 
+        context.success().await;
+    }
+
+    // We'll create a bunch of instances, in the same subnet, each with many
+    // interfaces assigned automatic IPv6 addresses. This test is pretty
+    // silly, in that it can't really _fail_, just that we don't hit any
+    // pathological behavior when trying to allocate more than a small
+    // number of IPv6 addresses.
+    #[tokio::test]
+    #[ignore]
+    async fn can_allocate_many_ipv6_interfaces() {
+        let context =
+            TestContext::new("can_allocate_many_ipv6_interfaces", 1).await;
+        const N_INSTANCES: usize = 256;
+        let mut interfaces =
+            Vec::with_capacity(N_INSTANCES * MAX_NICS_PER_INSTANCE);
+        for _ in 0..N_INSTANCES {
+            let instance = context.create_stopped_instance().await;
+            let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+            let interface = IncompleteNetworkInterface::new_instance(
+                Uuid::new_v4(),
+                instance_id,
+                context.net1.subnets[0].clone(),
+                IdentityMetadataCreateParams {
+                    name: "net0".parse().unwrap(),
+                    description: String::from("description"),
+                },
+                IpConfig::auto_ipv6(),
+            )
+            .unwrap();
+            let intf = context
+                .datastore()
+                .instance_create_network_interface_raw(
+                    context.opctx(),
+                    interface,
+                )
+                .await
+                .expect("Failed to insert interface");
+            interfaces.push(intf);
+        }
+        let start = context.net1.subnets[0].ipv6_block;
+        for (i, intf) in interfaces.iter().enumerate() {
+            assert!(intf.ipv4.is_none());
+            let addr = intf.ipv6.expect("an IPv6 address");
+            let expected_addr = start.nth((i + 5) as _).unwrap();
+            assert_eq!(expected_addr, std::net::Ipv6Addr::from(addr));
+        }
         context.success().await;
     }
 }

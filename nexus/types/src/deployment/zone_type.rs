@@ -577,6 +577,17 @@ pub mod blueprint_zone_type {
         pub nexus_generation: Generation,
     }
 
+    impl Nexus {
+        pub fn lockstep_address(&self) -> SocketAddrV6 {
+            SocketAddrV6::new(
+                *self.internal_address.ip(),
+                self.lockstep_port,
+                0,
+                0,
+            )
+        }
+    }
+
     #[derive(
         Debug,
         Clone,

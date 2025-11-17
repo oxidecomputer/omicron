@@ -11,10 +11,13 @@ use crate::InternalDisks;
 use crate::ResolverStatusExt;
 use crate::SledAgentFacilities;
 use crate::TimeSyncConfig;
+use crate::dump_setup_task::FormerZoneRootArchiver;
+use camino::Utf8PathBuf;
 use futures::FutureExt as _;
 use futures::future;
-use id_map::IdMap;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use illumos_utils::addrobj::AddrObject;
 use illumos_utils::running_zone::RunCommandError;
 use illumos_utils::running_zone::RunningZone;
@@ -84,7 +87,7 @@ pub enum TimeSyncError {
 
 #[derive(Debug)]
 pub(super) struct OmicronZones {
-    zones: IdMap<OmicronZone>,
+    zones: IdOrdMap<OmicronZone>,
     mount_config: Arc<MountConfig>,
     timesync_config: TimeSyncConfig,
 }
@@ -94,7 +97,7 @@ impl OmicronZones {
         mount_config: Arc<MountConfig>,
         timesync_config: TimeSyncConfig,
     ) -> Self {
-        Self { zones: IdMap::default(), mount_config, timesync_config }
+        Self { zones: IdOrdMap::default(), mount_config, timesync_config }
     }
 
     pub(crate) fn has_retryable_error(&self) -> bool {
@@ -139,16 +142,17 @@ impl OmicronZones {
     /// On failure, returns the number of zones that failed to shut down.
     pub(super) async fn shut_down_zones_if_needed<T: SledAgentFacilities>(
         &mut self,
-        desired_zones: &IdMap<OmicronZoneConfig>,
+        desired_zones: &IdOrdMap<OmicronZoneConfig>,
         resolver_status: &ResolverStatus,
         internal_disks: &InternalDisks,
         sled_agent_facilities: &T,
+        archiver: FormerZoneRootArchiver,
         log: &Logger,
     ) -> Result<(), NonZeroUsize> {
         self.shut_down_zones_if_needed_impl(
             desired_zones,
             sled_agent_facilities,
-            &RealZoneFacilities { resolver_status, internal_disks },
+            &RealZoneFacilities { resolver_status, internal_disks, archiver },
             log,
         )
         .await
@@ -159,7 +163,7 @@ impl OmicronZones {
         U: ZoneFacilities,
     >(
         &mut self,
-        desired_zones: &IdMap<OmicronZoneConfig>,
+        desired_zones: &IdOrdMap<OmicronZoneConfig>,
         sled_agent_facilities: &T,
         zone_facilities: &U,
         log: &Logger,
@@ -254,7 +258,7 @@ impl OmicronZones {
             };
 
             if should_shut_down {
-                zones_to_shut_down.push(z.id());
+                zones_to_shut_down.push(z.key());
             }
         }
 
@@ -298,18 +302,19 @@ impl OmicronZones {
     #[expect(clippy::too_many_arguments)]
     pub(super) async fn start_zones_if_needed<T: SledAgentFacilities>(
         &mut self,
-        desired_zones: &IdMap<OmicronZoneConfig>,
+        desired_zones: &IdOrdMap<OmicronZoneConfig>,
         resolver_status: &ResolverStatus,
         internal_disks: &InternalDisks,
         sled_agent_facilities: &T,
         is_time_synchronized: bool,
         datasets: &OmicronDatasets,
+        archiver: FormerZoneRootArchiver,
         log: &Logger,
     ) {
         self.start_zones_if_needed_impl(
             desired_zones,
             sled_agent_facilities,
-            &RealZoneFacilities { resolver_status, internal_disks },
+            &RealZoneFacilities { resolver_status, internal_disks, archiver },
             is_time_synchronized,
             datasets,
             log,
@@ -322,7 +327,7 @@ impl OmicronZones {
         U: ZoneFacilities,
     >(
         &mut self,
-        desired_zones: &IdMap<OmicronZoneConfig>,
+        desired_zones: &IdOrdMap<OmicronZoneConfig>,
         sled_agent_facilities: &T,
         zone_facilities: &U,
         is_time_synchronized: bool,
@@ -401,7 +406,7 @@ impl OmicronZones {
                 Ok(state) => state,
                 Err(err) => ZoneState::FailedToStart(err),
             };
-            self.zones.insert(OmicronZone { config, state });
+            self.zones.insert_overwrite(OmicronZone { config, state });
         }
     }
 
@@ -586,12 +591,14 @@ struct OmicronZone {
     state: ZoneState,
 }
 
-impl IdMappable for OmicronZone {
-    type Id = OmicronZoneUuid;
+impl IdOrdItem for OmicronZone {
+    type Key<'a> = OmicronZoneUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.config.id
     }
+
+    id_upcast!();
 }
 
 impl OmicronZone {
@@ -704,6 +711,16 @@ impl OmicronZone {
                 )),
                 err,
             ));
+        }
+
+        // Make a best effort to archive the zone's log files.
+        if let Some(zone_dataset_root) = running_zone.root().parent() {
+            zone_facilities
+                .archive_zone_root(zone_dataset_root.to_owned())
+                .await;
+        } else {
+            // This should be impossible.
+            warn!(log, "Failed to archive zone root: non-existent parent");
         }
 
         resume_shutdown_from_stop(
@@ -948,11 +965,14 @@ trait ZoneFacilities {
         &self,
         addrobj: AddrObject,
     ) -> Result<(), ZoneShutdownError>;
+
+    async fn archive_zone_root(&self, path: Utf8PathBuf);
 }
 
 struct RealZoneFacilities<'a> {
     resolver_status: &'a ResolverStatus,
     internal_disks: &'a InternalDisks,
+    archiver: FormerZoneRootArchiver,
 }
 
 impl ZoneFacilities for RealZoneFacilities<'_> {
@@ -1005,6 +1025,10 @@ impl ZoneFacilities for RealZoneFacilities<'_> {
         Zones::delete_address(None, &addrobj)
             .await
             .map_err(ZoneShutdownError::DeleteGzAddrObj)
+    }
+
+    async fn archive_zone_root(&self, path: Utf8PathBuf) {
+        self.archiver.archive_former_zone_root(path).await
     }
 }
 
@@ -1456,6 +1480,8 @@ mod tests {
             self.inner.lock().unwrap().removed_gz_addresses.insert(addrobj);
             Ok(())
         }
+
+        async fn archive_zone_root(&self, _path: Utf8PathBuf) {}
     }
 
     const BOOT_DISK_PATH: &str = "/test/boot/disk";
@@ -1675,7 +1701,7 @@ mod tests {
         let (fake_zone, location) = fake_zone_builder
             .make_running_zone_with_location("test", logctx.log.clone())
             .await;
-        zones.zones.insert(OmicronZone {
+        zones.zones.insert_overwrite(OmicronZone {
             config: make_zone_config(fake_zone_id),
             state: ZoneState::Running {
                 running_zone: Arc::new(fake_zone),
@@ -1685,7 +1711,7 @@ mod tests {
 
         let sled_agent_facilities = FakeSledAgentFacilities::default();
         let zone_facilities = FakeZoneFacilities::default();
-        let desired_zones = IdMap::default();
+        let desired_zones = IdOrdMap::default();
 
         // Cause zone halting to fail; this error variant isn't quite right, but
         // that doesn't affect the test. We'll just look for this string in the
@@ -1753,7 +1779,7 @@ mod tests {
 
         // Construct a zone we want to start.
         let fake_zone_id = OmicronZoneUuid::new_v4();
-        let desired_zones: IdMap<_> =
+        let desired_zones: IdOrdMap<_> =
             [make_zone_config(fake_zone_id)].into_iter().collect();
         let datasets = make_datasets(desired_zones.iter());
 
@@ -1839,7 +1865,8 @@ mod tests {
 
         // Construct a zone we want to start.
         let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
-        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let desired_zones: IdOrdMap<_> =
+            [fake_zone.clone()].into_iter().collect();
         let datasets = make_datasets(desired_zones.iter());
 
         // Configure our fake zone facilities to report a zone with this name as
@@ -1906,7 +1933,8 @@ mod tests {
         // sync'd.
         let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
         assert!(fake_zone.zone_type.requires_timesync());
-        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let desired_zones: IdOrdMap<_> =
+            [fake_zone.clone()].into_iter().collect();
         let datasets = make_datasets(desired_zones.iter());
 
         let zone_facilities = FakeZoneFacilities::default();
@@ -1958,7 +1986,8 @@ mod tests {
 
         // Construct a zone we want to start.
         let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
-        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let desired_zones: IdOrdMap<_> =
+            [fake_zone.clone()].into_iter().collect();
         let datasets = make_datasets(desired_zones.iter());
 
         // Configure our fake zone facilities to report a zone with this name as
@@ -2020,7 +2049,8 @@ mod tests {
 
         // Construct a zone we want to start.
         let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
-        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let desired_zones: IdOrdMap<_> =
+            [fake_zone.clone()].into_iter().collect();
         let datasets = make_datasets(desired_zones.iter());
 
         // Configure zone facilities to return a mupdate override error.
@@ -2099,7 +2129,7 @@ mod tests {
 
         let mut zones =
             OmicronZones::new(nonexistent_mount_config(), TimeSyncConfig::Skip);
-        zones.zones.insert(OmicronZone {
+        zones.zones.insert_overwrite(OmicronZone {
             config: zone_config,
             state: ZoneState::Running {
                 running_zone: Arc::new(fake_zone),
@@ -2114,7 +2144,7 @@ mod tests {
         let zone_facilities = FakeZoneFacilities::default();
         zones
             .shut_down_zones_if_needed_impl(
-                &IdMap::default(),
+                &IdOrdMap::default(),
                 &sled_agent_facilities,
                 &zone_facilities,
                 &logctx.log,
@@ -2146,7 +2176,8 @@ mod tests {
 
         // Construct a zone we want to start.
         let fake_zone = make_zone_config(OmicronZoneUuid::new_v4());
-        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let desired_zones: IdOrdMap<_> =
+            [fake_zone.clone()].into_iter().collect();
 
         // datasets0: missing root dataset entirely
         let datasets0 = {
@@ -2236,7 +2267,8 @@ mod tests {
             },
             image_source: OmicronZoneImageSource::InstallDataset,
         };
-        let desired_zones: IdMap<_> = [fake_zone.clone()].into_iter().collect();
+        let desired_zones: IdOrdMap<_> =
+            [fake_zone.clone()].into_iter().collect();
 
         // datasets0: missing durable dataset entirely
         let datasets0 = {
@@ -2333,7 +2365,7 @@ mod tests {
 
         let sled_agent_facilities = FakeSledAgentFacilities::default();
 
-        let desired_zones: IdMap<_> =
+        let desired_zones: IdOrdMap<_> =
             [install_dataset_zone.clone(), artifact_zone.clone()]
                 .into_iter()
                 .collect();
@@ -2401,7 +2433,7 @@ mod tests {
                 hash: Ok(artifact_zone_hash),
             },
         );
-        let desired_zones: IdMap<_> =
+        let desired_zones: IdOrdMap<_> =
             [install_dataset_zone.clone(), artifact_zone.clone()]
                 .into_iter()
                 .collect();
@@ -2439,7 +2471,7 @@ mod tests {
             },
         );
 
-        let desired_zones: IdMap<_> =
+        let desired_zones: IdOrdMap<_> =
             [install_dataset_zone.clone(), artifact_zone.clone()]
                 .into_iter()
                 .collect();
@@ -2477,7 +2509,7 @@ mod tests {
 
         install_dataset_zone.filesystem_pool =
             Some(ZpoolName::new_external(ZpoolUuid::new_v4()));
-        let desired_zones: IdMap<_> =
+        let desired_zones: IdOrdMap<_> =
             [install_dataset_zone.clone()].into_iter().collect();
         zones
             .shut_down_zones_if_needed_impl(

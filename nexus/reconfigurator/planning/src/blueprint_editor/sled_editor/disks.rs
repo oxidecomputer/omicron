@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::blueprint_builder::EditCounts;
-use id_map::Entry;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
+use iddqd::id_ord_map::Entry;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use omicron_common::api::external::Generation;
@@ -26,14 +26,14 @@ pub enum DisksEditError {
 #[derive(Debug)]
 pub(super) struct DisksEditor {
     incoming_sled_agent_generation: Generation,
-    disks: IdMap<BlueprintPhysicalDiskConfig>,
+    disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
     counts: EditCounts,
 }
 
 impl DisksEditor {
     pub fn new(
         incoming_sled_agent_generation: Generation,
-        disks: IdMap<BlueprintPhysicalDiskConfig>,
+        disks: IdOrdMap<BlueprintPhysicalDiskConfig>,
     ) -> Self {
         Self {
             incoming_sled_agent_generation,
@@ -45,12 +45,14 @@ impl DisksEditor {
     pub fn empty() -> Self {
         Self {
             incoming_sled_agent_generation: Generation::new(),
-            disks: IdMap::new(),
+            disks: IdOrdMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
 
-    pub fn finalize(self) -> (IdMap<BlueprintPhysicalDiskConfig>, EditCounts) {
+    pub fn finalize(
+        self,
+    ) -> (IdOrdMap<BlueprintPhysicalDiskConfig>, EditCounts) {
         (self.disks, self.counts)
     }
 

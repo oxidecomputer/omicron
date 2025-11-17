@@ -970,7 +970,7 @@ impl InvConfigReconcilerStatus {
                 let config = get_config(&config_id.into())
                     .context("missing sled config we should have fetched")?;
                 ConfigReconcilerInventoryStatus::Running {
-                    config,
+                    config: Box::new(config),
                     started_at: self.reconciler_status_timestamp.context(
                         "missing reconciler status timestamp \
                          for kind 'running'",

@@ -31,6 +31,8 @@ use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_model::Ipv4Addr;
+use nexus_db_model::Ipv6Addr;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
@@ -47,31 +49,62 @@ use uuid::Uuid;
 
 /// OPTE requires information that's currently split across the network
 /// interface and VPC subnet tables.
-#[derive(Debug, diesel::Queryable)]
+#[derive(Debug, diesel::Queryable, diesel::Selectable)]
 struct NicInfo {
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::id)]
     id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::parent_id)]
     parent_id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::kind)]
     kind: NetworkInterfaceKind,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::name)]
     name: db::model::Name,
-    ip: ipnetwork::IpNetwork,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::ip)]
+    ipv4: Option<Ipv4Addr>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::ipv6)]
+    _ipv6: Option<Ipv6Addr>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::mac)]
     mac: db::model::MacAddr,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc_subnet::ipv4_block)]
     ipv4_block: db::model::Ipv4Net,
-    ipv6_block: db::model::Ipv6Net,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc_subnet::ipv6_block)]
+    _ipv6_block: db::model::Ipv6Net,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc::vni)]
     vni: db::model::Vni,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::is_primary)]
     primary: bool,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::slot)]
     slot: i16,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::transit_ips)]
     transit_ips: Vec<ipnetwork::IpNetwork>,
 }
 
-impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
-    fn from(
+impl TryFrom<NicInfo>
+    for omicron_common::api::internal::shared::NetworkInterface
+{
+    type Error = Error;
+
+    fn try_from(
         nic: NicInfo,
-    ) -> omicron_common::api::internal::shared::NetworkInterface {
-        let ip_subnet = if nic.ip.is_ipv4() {
-            oxnet::IpNet::V4(nic.ipv4_block.0)
-        } else {
-            oxnet::IpNet::V6(nic.ipv6_block.0)
+    ) -> Result<
+        omicron_common::api::internal::shared::NetworkInterface,
+        Self::Error,
+    > {
+        // TODO-completeness: Support IPv6 and dual-stack NICs in the Nexus <->
+        // sled-agent API. That includes the IPs themselves and the VPC Subnets.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/9246.
+        //
+        // This whole method can become the infallible `From` again when that's
+        // resolved.
+        let Some(ipv4) = nic.ipv4 else {
+            return Err(Error::internal_error(&format!(
+                "Found internal NIC without an IPv4 address: \
+                nic_id=\"{}\", parent_id=\"{}\"",
+                nic.id, nic.parent_id,
+            )));
         };
+        let ip_subnet = oxnet::IpNet::V4(nic.ipv4_block.0);
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
                 omicron_common::api::internal::shared::NetworkInterfaceKind::Instance{ id: nic.parent_id }
@@ -83,18 +116,18 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
                 omicron_common::api::internal::shared::NetworkInterfaceKind::Probe{ id: nic.parent_id }
             }
         };
-        omicron_common::api::internal::shared::NetworkInterface {
+        Ok(omicron_common::api::internal::shared::NetworkInterface {
             id: nic.id,
             kind,
             name: nic.name.into(),
-            ip: nic.ip.ip(),
+            ip: ipv4.into(),
             mac: nic.mac.0,
             subnet: ip_subnet,
             vni: nic.vni.0,
             primary: nic.primary,
             slot: u8::try_from(nic.slot).unwrap(),
             transit_ips: nic.transit_ips.iter().map(|v| (*v).into()).collect(),
-        }
+        })
     }
 }
 
@@ -111,8 +144,13 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
             .map_err(network_interface::InsertError::External)?;
+        // Creating a NIC doesn't create a child resource of the subnet itself;
+        // it creates a child of the Instance. We only need Read permission on
+        // the subnet to reference it. This allows limited-collaborators to
+        // create instances while still blocking them from modifying networking
+        // infrastructure.
         opctx
-            .authorize(authz::Action::CreateChild, authz_subnet)
+            .authorize(authz::Action::Read, authz_subnet)
             .await
             .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await
@@ -500,32 +538,14 @@ impl DataStore {
             )
             .inner_join(vpc::table.on(vpc_subnet::vpc_id.eq(vpc::id)))
             .order_by(network_interface::slot)
-            // TODO-cleanup: Having to specify each column again is less than
-            // ideal, but we can't derive `Selectable` since this is the result
-            // of a JOIN and not from a single table. DRY this out if possible.
-            .select((
-                network_interface::id,
-                network_interface::parent_id,
-                network_interface::kind,
-                network_interface::name,
-                network_interface::ip,
-                network_interface::mac,
-                vpc_subnet::ipv4_block,
-                vpc_subnet::ipv6_block,
-                vpc::vni,
-                network_interface::is_primary,
-                network_interface::slot,
-                network_interface::transit_ips,
-            ))
-            .get_results_async::<NicInfo>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .select(NicInfo::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(rows
+        rows
             .into_iter()
-            .map(omicron_common::api::internal::shared::NetworkInterface::from)
-            .collect())
+            .map(omicron_common::api::internal::shared::NetworkInterface::try_from)
+            .collect::<Result<_, _>>()
     }
 
     /// Return the information about an instance's network interfaces required
@@ -925,6 +945,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+    use nexus_db_model::IpConfig;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
     use std::collections::BTreeSet;
@@ -976,7 +997,7 @@ mod tests {
                     name: name.parse().unwrap(),
                     description: name,
                 },
-                ip.into(),
+                IpConfig::from_ipv4(ip),
                 macs.next().unwrap(),
                 0,
             )
