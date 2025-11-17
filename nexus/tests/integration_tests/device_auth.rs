@@ -705,6 +705,7 @@ async fn test_device_token_cannot_extend_expiration(
 
     // Now use the initial token to authenticate and start a NEW device auth flow
     // Request a token with 8 second TTL (which is less than silo max of 10)
+    // This should ERROR because 8 seconds exceeds the ~4 seconds remaining on the auth token
     let second_request =
         DeviceAuthRequest { client_id, ttl_seconds: NonZeroU32::new(8) };
 
@@ -716,59 +717,88 @@ async fn test_device_token_cannot_extend_expiration(
     .execute_and_parse_unwrap::<DeviceAuthResponse>()
     .await;
 
-    // Confirm using the initial token for authentication (not a web session)
-    NexusRequest::new(
+    // Attempting to confirm with the initial token should FAIL because the requested
+    // TTL exceeds the auth token's expiration
+    let error = NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/confirm")
             .body(Some(&DeviceAuthVerify {
                 user_code: auth_response_2.user_code,
+            }))
+            .header(header::AUTHORIZATION, format!("Bearer {}", initial_token))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
+    .await;
+
+    assert!(
+        error.message.contains("Requested token TTL would exceed"),
+        "error message should explain the TTL issue, got: {}",
+        error.message
+    );
+
+    // Now start a third flow WITHOUT specifying a TTL
+    // This should succeed with clamping to the auth token expiration
+    let third_request = DeviceAuthRequest { client_id, ttl_seconds: None };
+
+    let auth_response_3 = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&third_request))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await;
+
+    // Confirm using the initial token
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: auth_response_3.user_code,
             }))
             .header(header::AUTHORIZATION, format!("Bearer {}", initial_token))
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .execute()
     .await
-    .expect("failed to confirm second token with initial token");
+    .expect("failed to confirm third token");
 
-    // Fetch the second token
-    let second_token_grant = NexusRequest::new(
+    let third_time = Utc::now();
+
+    // Fetch the third token (no auth needed, just retrieving what was created at confirm time)
+    let third_token_grant = NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/token")
             .allow_non_dropshot_errors()
             .body_urlencoded(Some(&DeviceAccessTokenRequest {
                 grant_type: "urn:ietf:params:oauth:grant-type:device_code"
                     .to_string(),
-                device_code: auth_response_2.device_code,
+                device_code: auth_response_3.device_code,
                 client_id,
             }))
-            .header(header::AUTHORIZATION, format!("Bearer {}", initial_token))
             .expect_status(Some(StatusCode::OK)),
     )
     .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
     .await;
 
-    let second_expiration = second_token_grant.time_expires.unwrap();
+    let third_expiration = third_token_grant.time_expires.unwrap();
 
-    // The second token should NOT extend beyond the initial token's expiration
-    // It should be clamped to the initial token's expiration time
+    // The third token should be clamped to the initial token's expiration
     let time_diff_ms =
-        (second_expiration - initial_expiration).num_milliseconds().abs();
+        (third_expiration - initial_expiration).num_milliseconds().abs();
 
     assert!(
         time_diff_ms <= 1000,
-        "second token expiration should be clamped to initial token expiration. \
-         Initial: {initial_expiration}, Second: {second_expiration}, \
+        "third token expiration should be clamped to initial token expiration. \
+         Initial: {initial_expiration}, Third: {third_expiration}, \
          Diff: {time_diff_ms}ms"
     );
 
-    // Additionally, verify the second token doesn't have the full 8 seconds
-    // from when it was created (which would be wrong)
-    let second_creation_time = Utc::now();
-    let second_token_ttl_from_now =
-        (second_expiration - second_creation_time).num_seconds();
+    // Verify the third token doesn't have the full silo max (10 seconds)
+    let third_token_ttl_from_now =
+        (third_expiration - third_time).num_seconds();
 
     assert!(
-        second_token_ttl_from_now < 6,
-        "second token should not have more than ~4 seconds left \
-         (initial token's remaining time), got {second_token_ttl_from_now}"
+        third_token_ttl_from_now < 5,
+        "third token should not have more than ~3 seconds left \
+         (initial token's remaining time after wait), got {third_token_ttl_from_now}"
     );
 }
 

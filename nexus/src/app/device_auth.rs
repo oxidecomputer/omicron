@@ -123,31 +123,68 @@ impl super::Nexus {
         let silo_max_ttl = silo_auth_settings.device_token_max_ttl_seconds;
         let requested_ttl = db_request.token_ttl_seconds;
 
-        // Validate the requested TTL against the silo's max TTL
-        if let (Some(requested), Some(max)) = (requested_ttl, silo_max_ttl) {
-            if requested > max.0.into() {
-                return Err(Error::invalid_request(&format!(
-                    "Requested TTL {} seconds exceeds maximum \
-                     allowed TTL for this silo of {} seconds",
-                    requested, max
-                )));
-            }
-        }
+        // This logic is a bit gnarly, but we landed on it as the least bad
+        // option. Error out if the user requests a token TTL that is longer
+        // than allowed, i.e., either
+        //
+        //   a) it is longer than the silo max TTL, or
+        //   b) this request was authenticated with a device token and the TTL
+        //      would produce an expiration later than the current token's.
+        //
+        // If the user does not request a specific TTL, we do not error out.
+        // We calculate the token TTL as min(silo max TTL, current token TTL
+        // if present). Token confirm requests authenticated with a console
+        // session can get device tokens with TTLs up to the silo max.
 
-        let time_expires = requested_ttl
-            .or(silo_max_ttl)
-            .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()))
-            // If authenticated via a device token, clamp the new token's expiration
-            // to the authenticating token's expiration to prevent indefinite token
-            // extension.
-            .map(|new_exp| match opctx.authn.token_expiration() {
-                Some(auth_exp) => new_exp.min(auth_exp),
-                None => new_exp,
-            })
-            // even if there is no requested TTL or silo max TTL, still clamp to
-            // the expiration time of the device token being used right now (only
-            // present if this request is authed with a token)
-            .or_else(|| opctx.authn.token_expiration());
+        let time_expires = if let Some(requested_ttl) = requested_ttl {
+            // If the user requested a TTL, validate it against the silo max
+            // TTL as well as the expiration time of the token being used (if a
+            // token is being used)
+
+            // Validate the requested TTL against the silo's max TTL
+            if let Some(max) = silo_max_ttl {
+                if requested_ttl > max.0.into() {
+                    return Err(Error::invalid_request(&format!(
+                        "Requested TTL {} seconds exceeds maximum allowed \
+                     TTL for this silo of {} seconds",
+                        requested_ttl, max
+                    )));
+                }
+            };
+
+            let requested_exp =
+                Utc::now() + Duration::seconds(requested_ttl.0.into());
+
+            // If currently authenticated via token, error if requested exceeds it
+            if let Some(auth_exp) = opctx.authn.device_token_expiration() {
+                if requested_exp > auth_exp {
+                    return Err(Error::invalid_request(
+                        "Requested token TTL would exceed the expiration time \
+                         of the token being used to authenticate the confirm \
+                         request. To get the full requested TTL, confirm \
+                         this token using a web console session. Alternatively, \
+                         omit requested TTL to get a token with the longest \
+                         allowed lifetime, determined by the lesser of the silo \
+                         max and the current token's expiration time.",
+                    ));
+                }
+            }
+
+            Some(requested_exp)
+        } else {
+            // No explicit TTL requested. Rather than erroring out if silo max
+            // exceeds expiration time of current token, just clamp.
+            let silo_max_exp = silo_max_ttl
+                .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()));
+            match (silo_max_exp, opctx.authn.device_token_expiration()) {
+                (Some(silo_exp), Some(token_exp)) => {
+                    Some(silo_exp.min(token_exp))
+                }
+                (Some(silo_exp), None) => Some(silo_exp),
+                (None, Some(token_exp)) => Some(token_exp),
+                (None, None) => None,
+            }
+        };
 
         let token = DeviceAccessToken::new(
             db_request.client_id,
