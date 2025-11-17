@@ -383,7 +383,7 @@ mod tests {
         // This is the first "user" task that will issue proxy operations
         let count = requests_completed.clone();
         let dest = destination.clone();
-        let _ = spawn(async move {
+        spawn(async move {
             let s = proxy.commit(dest, rack_id, Epoch(1)).await.unwrap();
 
             // The first attempt should succeed
@@ -411,7 +411,7 @@ mod tests {
         // to the same node.
         let proxy = Proxy::new(tx);
         let count = requests_completed.clone();
-        let _ = spawn(async move {
+        spawn(async move {
             let s = proxy.status(destination.clone()).await.unwrap();
             assert_matches!(s, NodeStatus { .. });
             let _ = count.fetch_add(1, Ordering::Relaxed);
@@ -426,8 +426,7 @@ mod tests {
         let request_id_2 = tracker
             .ops
             .iter()
-            .filter(|&r| r.request_id != request_id_1)
-            .next()
+            .find(|&r| r.request_id != request_id_1)
             .unwrap()
             .request_id;
 
@@ -487,7 +486,7 @@ mod tests {
         // This is the first "user" task that will issue proxy operations
         let count = requests_completed.clone();
         let dest = destination.clone();
-        let _ = spawn(async move {
+        spawn(async move {
             let s = proxy.commit(dest, rack_id, Epoch(1)).await.unwrap_err();
             assert_matches!(s, ProxyError::InvalidResponse(_));
             let _ = count.fetch_add(1, Ordering::Relaxed);
@@ -561,7 +560,7 @@ mod tests {
         // This is the first "user" task that will issue proxy operations
         let count = requests_completed.clone();
         let dest = destination.clone();
-        let _ = spawn(async move {
+        spawn(async move {
             let s = proxy.commit(dest, rack_id, Epoch(1)).await.unwrap_err();
             assert_eq!(s, ProxyError::Disconnected);
             let _ = count.fetch_add(1, Ordering::Relaxed);
@@ -584,7 +583,7 @@ mod tests {
         let proxy = Proxy::new(tx);
         let count = requests_completed.clone();
         let dest = destination.clone();
-        let _ = spawn(async move {
+        spawn(async move {
             let s = proxy.status(dest.clone()).await.unwrap_err();
             assert_eq!(s, ProxyError::Disconnected);
             let _ = count.fetch_add(1, Ordering::Relaxed);
