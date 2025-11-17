@@ -1552,7 +1552,10 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>...........
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   ::/64
 
     host phase 2 contents:
     ------------------------
@@ -1591,7 +1594,10 @@ parent:    <none>
 
 
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>...........
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   ::/64
 
     host phase 2 contents:
     ------------------------
@@ -1676,7 +1682,10 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>...........
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   ::/64
 
     host phase 2 contents:
     ------------------------
@@ -1715,7 +1724,10 @@ parent:    <none>
 
 
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>...........
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   ::/64
 
     host phase 2 contents:
     ------------------------
