@@ -146,7 +146,7 @@ impl super::Nexus {
                 if requested_ttl > max.0.into() {
                     return Err(Error::invalid_request(&format!(
                         "Requested TTL {} seconds exceeds maximum allowed \
-                     TTL for this silo of {} seconds",
+                         TTL for this silo of {} seconds",
                         requested_ttl, max
                     )));
                 }
@@ -173,16 +173,15 @@ impl super::Nexus {
             Some(requested_exp)
         } else {
             // No explicit TTL requested. Rather than erroring out if silo max
-            // exceeds expiration time of current token, just clamp.
+            // exceeds TTL exceeds expiration time of current token, just clamp.
             let silo_max_exp = silo_max_ttl
                 .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()));
+            // a.min(b) doesn't do it because None is always less than Some(_)
             match (silo_max_exp, opctx.authn.device_token_expiration()) {
                 (Some(silo_exp), Some(token_exp)) => {
                     Some(silo_exp.min(token_exp))
                 }
-                (Some(silo_exp), None) => Some(silo_exp),
-                (None, Some(token_exp)) => Some(token_exp),
-                (None, None) => None,
+                (a, b) => a.or(b),
             }
         };
 

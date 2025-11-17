@@ -653,7 +653,7 @@ async fn test_device_token_cannot_extend_expiration(
 
     // First, test that session auth does NOT clamp token TTL
     // Create a local user and get a session token
-    let silo_url = format!("/v1/system/silos/{}", silo_name);
+    let silo_url = format!("/v1/system/silos/{silo_name}");
     let test_silo: views::Silo = object_get(testctx, &silo_url).await;
     let _test_user = create_local_user(
         testctx,
@@ -827,7 +827,7 @@ async fn test_device_token_cannot_extend_expiration(
             .body(Some(&DeviceAuthVerify {
                 user_code: auth_response_2.user_code,
             }))
-            .header(header::AUTHORIZATION, format!("Bearer {}", initial_token))
+            .header(header::AUTHORIZATION, format!("Bearer {initial_token}"))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .execute_and_parse_unwrap::<HttpErrorResponseBody>()
@@ -853,7 +853,7 @@ async fn test_device_token_cannot_extend_expiration(
             .body(Some(&DeviceAuthVerify {
                 user_code: auth_response_3.user_code,
             }))
-            .header(header::AUTHORIZATION, format!("Bearer {}", initial_token))
+            .header(header::AUTHORIZATION, format!("Bearer {initial_token}"))
             .expect_status(Some(StatusCode::NO_CONTENT)),
     )
     .execute()

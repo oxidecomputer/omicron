@@ -1287,7 +1287,7 @@ pub async fn create_session_for_user(
     username: &str,
     password: &str,
 ) -> String {
-    let url = format!("/v1/login/{}/local", silo_name);
+    let url = format!("/v1/login/{silo_name}/local");
     let credentials = test_params::UsernamePasswordCredentials {
         username: username.parse().unwrap(),
         password: password.to_string(),
