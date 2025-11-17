@@ -32,8 +32,8 @@ use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
-    InstanceExternalIpBody, VmmPutStateBody, VmmPutStateResponse,
-    VmmUnregisterResponse,
+    InstanceExternalIpBody, InstanceMulticastBody, VmmPutStateBody,
+    VmmPutStateResponse, VmmUnregisterResponse,
 };
 use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
@@ -489,7 +489,20 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseOk(sa.get_role()))
     }
 
-    async fn vmm_register_v1(
+    async fn v1_vmm_register(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<sled_agent_types::v1::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+        Ok(HttpResponseOk(
+            sa.v1_instance_ensure_registered(propolis_id, body_args).await?,
+        ))
+    }
+
+    async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
         body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
@@ -498,20 +511,7 @@ impl SledAgentApi for SledAgentImpl {
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         Ok(HttpResponseOk(
-            sa.instance_ensure_registered_v1(propolis_id, body_args).await?,
-        ))
-    }
-
-    async fn vmm_register_v7(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_api::v7::InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        let sa = rqctx.context();
-        let propolis_id = path_params.into_inner().propolis_id;
-        let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.instance_ensure_registered_v7(propolis_id, body_args).await?,
+            sa.instance_ensure_registered(propolis_id, body_args).await?,
         ))
     }
 
@@ -571,7 +571,7 @@ impl SledAgentApi for SledAgentImpl {
     async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_api::v7::InstanceMulticastBody>,
+        body: TypedBody<InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;
@@ -583,7 +583,7 @@ impl SledAgentApi for SledAgentImpl {
     async fn vmm_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_api::v7::InstanceMulticastBody>,
+        body: TypedBody<InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
         let id = path_params.into_inner().propolis_id;

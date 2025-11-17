@@ -4,20 +4,22 @@
 
 //! Cross-version compatibility tests for sled-agent multicast APIs.
 //!
-//! This test verifies that v4 and v5 instance configurations work correctly
-//! together, specifically around multicast group support. It follows the same
-//! pattern as the DNS cross-version tests.
+//! This test verifies that v6 and v7 instance configurations work correctly
+//! together, specifically around multicast support. It follows
+//! the same pattern as the DNS cross-version tests.
 
 use anyhow::Result;
 use std::net::IpAddr;
 
 use omicron_common::api::internal::shared::DhcpConfig;
-use sled_agent_api::v7;
+use sled_agent_types::instance::{
+    InstanceMulticastMembership, InstanceSledLocalConfig,
+};
 
-// Generate v5 client from v5 OpenAPI spec (with enhanced multicast support)
-mod v5_client {
+// Generate v6 client from v6 OpenAPI spec (before multicast support)
+mod v6_client {
     progenitor::generate_api!(
-        spec = "../openapi/sled-agent/sled-agent-5.0.0-253577.json",
+        spec = "../openapi/sled-agent/sled-agent-6.0.0-d37dd7.json",
         interface = Positional,
         inner_type = slog::Logger,
         derives = [schemars::JsonSchema, Clone, Eq, PartialEq],
@@ -34,8 +36,8 @@ mod v5_client {
     );
 }
 
-// A v5 server can productively handle requests from a v4 client, and a v4
-// client can provide instance configurations to a v5 server (backwards compatible).
+// A v7 server can productively handle requests from a v6 client, and a v6
+// client can provide instance configurations to a v7 server (backwards compatible).
 // This follows the same pattern as DNS cross-version compatibility.
 #[tokio::test]
 pub async fn multicast_cross_version_works() -> Result<(), anyhow::Error> {
@@ -47,9 +49,9 @@ pub async fn multicast_cross_version_works() -> Result<(), anyhow::Error> {
 
     // Focus on the local_config field since that's where multicast_groups lives
 
-    // Create v4 local config JSON (won't have multicast_groups field)
-    let v4_local_config_json = serde_json::json!({
-        "hostname": "test-v4",
+    // Create v6 local config JSON (won't have multicast_groups field)
+    let v6_local_config_json = serde_json::json!({
+        "hostname": "test-v6",
         "nics": [],
         "source_nat": {
             "ip": "10.1.1.1",
@@ -66,9 +68,9 @@ pub async fn multicast_cross_version_works() -> Result<(), anyhow::Error> {
         }
     });
 
-    // Create v5 local config with multicast_groups
-    let v5_local_config = v7::InstanceSledLocalConfig {
-        hostname: omicron_common::api::external::Hostname::try_from("test-v5")
+    // Create v7 local config with multicast_groups
+    let v7_local_config = InstanceSledLocalConfig {
+        hostname: omicron_common::api::external::Hostname::try_from("test-v7")
             .unwrap(),
         nics: vec![],
         source_nat: nexus_types::deployment::SourceNatConfig::new(
@@ -79,7 +81,7 @@ pub async fn multicast_cross_version_works() -> Result<(), anyhow::Error> {
         .unwrap(),
         ephemeral_ip: None,
         floating_ips: vec![],
-        multicast_groups: vec![v7::InstanceMulticastMembership {
+        multicast_groups: vec![InstanceMulticastMembership {
             group_ip: multicast_addr,
             sources: vec![source_addr],
         }],
@@ -91,26 +93,26 @@ pub async fn multicast_cross_version_works() -> Result<(), anyhow::Error> {
         },
     };
 
-    // Test that v4 can be parsed by v5 (with empty multicast_groups)
-    let v4_as_v5_json = serde_json::to_string(&v4_local_config_json)?;
-    let v5_json = serde_json::to_string(&v5_local_config)?;
+    // Test that v6 can be parsed by v7 (with empty multicast_groups)
+    let v6_as_v7_json = serde_json::to_string(&v6_local_config_json)?;
+    let v7_json = serde_json::to_string(&v7_local_config)?;
 
-    // v4 should NOT have multicast_groups in the JSON
+    // v6 should NOT have multicast_groups in the JSON
     assert!(
-        !v4_as_v5_json.contains("multicast_groups"),
-        "v4 InstanceSledLocalConfig should not contain multicast_groups field"
+        !v6_as_v7_json.contains("multicast_groups"),
+        "v6 InstanceSledLocalConfig should not contain multicast_groups field"
     );
 
-    // v5 should HAVE multicast_groups in the JSON
+    // v7 should HAVE multicast_groups in the JSON
     assert!(
-        v5_json.contains("multicast_groups"),
-        "v5 InstanceSledLocalConfig should contain multicast_groups field"
+        v7_json.contains("multicast_groups"),
+        "v7 InstanceSledLocalConfig should contain multicast_groups field"
     );
 
-    // Verify v5 has the multicast group we added
+    // Verify v7 has the multicast group we added
     assert!(
-        v5_json.contains(&format!("\"group_ip\":\"{multicast_addr}\"")),
-        "v5 should contain the multicast group IP"
+        v7_json.contains(&format!("\"group_ip\":\"{multicast_addr}\"")),
+        "v7 should contain the multicast group IP"
     );
 
     logctx.cleanup_successful();

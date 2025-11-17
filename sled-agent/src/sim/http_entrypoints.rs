@@ -36,13 +36,13 @@ use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
 use range_requests::PotentialRange;
-use sled_agent_api::v7::InstanceMulticastBody;
 use sled_agent_api::*;
 use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::InstanceExternalIpBody;
+use sled_agent_types::instance::InstanceMulticastBody;
 use sled_agent_types::instance::VmmPutStateBody;
 use sled_agent_types::instance::VmmPutStateResponse;
 use sled_agent_types::instance::VmmUnregisterResponse;
@@ -82,23 +82,23 @@ enum SledAgentSimImpl {}
 impl SledAgentApi for SledAgentSimImpl {
     type Context = Arc<SledAgent>;
 
-    async fn vmm_register_v1(
+    async fn v1_vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
+        body: TypedBody<sled_agent_types::v1::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         Ok(HttpResponseOk(
-            sa.instance_register_v1(propolis_id, body_args).await?,
+            sa.v1_instance_register(propolis_id, body_args).await?,
         ))
     }
 
-    async fn vmm_register_v7(
+    async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_api::v7::InstanceEnsureBody>,
+        body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
