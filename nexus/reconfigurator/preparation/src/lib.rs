@@ -404,7 +404,7 @@ async fn fetch_all_service_ip_pool_ranges(
     let service_pools = datastore
         .ip_pools_list_batched(
             opctx,
-            IpPoolReservationType::OxideInternal,
+            IpPoolReservationType::SystemInternal,
             None,
         )
         .await

@@ -76,7 +76,7 @@ impl DataStore {
                 Some(p) => p,
                 None => {
                     let (_, new) = self
-                        .fetch_first_oxide_internal_ip_pool(
+                        .fetch_first_system_internal_ip_pool(
                             opctx,
                             nexus_auth::authz::Action::CreateChild,
                             Some(version.into()),
@@ -627,7 +627,7 @@ mod tests {
             datastore: &DataStore,
         ) {
             let (ip_pool, db_pool) = datastore
-                .fetch_first_oxide_internal_ip_pool(
+                .fetch_first_system_internal_ip_pool(
                     &opctx,
                     nexus_auth::authz::Action::CreateChild,
                     Some(IpVersion::V4.into()),

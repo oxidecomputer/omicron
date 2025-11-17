@@ -951,7 +951,7 @@ pub static DEMO_IP_POOL_RESERVE_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/reserve", *DEMO_IP_POOL_URL));
 pub static DEMO_IP_POOL_RESERVE: LazyLock<params::IpPoolReservationUpdate> =
     LazyLock::new(|| params::IpPoolReservationUpdate {
-        reservation_type: shared::IpPoolReservationType::OxideInternal,
+        reservation_type: shared::IpPoolReservationType::SystemInternal,
     });
 pub static DEMO_IP_POOL_UTILIZATION_URL: LazyLock<String> =
     LazyLock::new(|| format!("{}/utilization", *DEMO_IP_POOL_URL));

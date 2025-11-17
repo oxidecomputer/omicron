@@ -1404,7 +1404,7 @@ mod test {
         let service_pools = datastore
             .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
             )
             .await

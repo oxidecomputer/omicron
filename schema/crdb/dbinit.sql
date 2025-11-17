@@ -2165,7 +2165,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
 /* Indicates what an IP Pool is reserved for. */
 CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
     'external_silos',
-    'oxide_internal'
+    'system_internal'
 );
 
 /*
@@ -6792,7 +6792,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '199.0.0', NULL)
+    (TRUE, NOW(), NOW(), '200.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

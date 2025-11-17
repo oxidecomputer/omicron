@@ -306,7 +306,7 @@ impl DataStore {
         //
         // See: https://github.com/oxidecomputer/omicron/issues/8949.
         let (.., pool) = self
-            .fetch_first_oxide_internal_ip_pool(
+            .fetch_first_system_internal_ip_pool(
                 opctx,
                 authz::Action::CreateChild,
                 Some(version),
@@ -353,7 +353,7 @@ impl DataStore {
         // query below, which filters on is_service to get external IPs from
         // any pool.
         let _ = self
-            .fetch_first_oxide_internal_ip_pool(
+            .fetch_first_system_internal_ip_pool(
                 opctx,
                 authz::Action::ListChildren,
                 None,
@@ -1184,7 +1184,7 @@ mod tests {
         ))
         .unwrap();
         let (service_ip_pool, db_pool) = datastore
-            .fetch_first_oxide_internal_ip_pool(
+            .fetch_first_system_internal_ip_pool(
                 opctx,
                 authz::Action::CreateChild,
                 Some(IpVersion::V4),

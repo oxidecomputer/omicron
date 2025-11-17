@@ -328,8 +328,8 @@ impl DataStore {
             })
     }
 
-    /// Fetch the first IP Pool reserved for Oxide internal use.
-    pub(crate) async fn fetch_first_oxide_internal_ip_pool(
+    /// Fetch the first IP Pool reserved for Oxide internal system use.
+    pub(crate) async fn fetch_first_system_internal_ip_pool(
         &self,
         opctx: &OpContext,
         action: authz::Action,
@@ -338,7 +338,7 @@ impl DataStore {
         let pools = self
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 version,
                 None,
                 &PaginatedBy::Id(DataPageParams {
@@ -816,7 +816,7 @@ impl DataStore {
         if ip_pool_resource.resource_id == INTERNAL_SILO_ID {
             return Err(Error::invalid_request(
                 "IP Pools should not be linked to the internal Oxide silo. \
-                    Reserve the Pool for `oxide_internal` use instead.",
+                    Reserve the Pool for `system_internal` use instead.",
             ));
         }
         opctx
@@ -1833,7 +1833,7 @@ fn reserve_ip_pool_query(
         IpPoolReservationType::ExternalSilos => {
             reserve_external_ip_pool_query(pool, reservation_type)
         }
-        IpPoolReservationType::OxideInternal => {
+        IpPoolReservationType::SystemInternal => {
             reserve_internal_ip_pool_query(pool, reservation_type)
         }
     }
@@ -2785,7 +2785,7 @@ mod test {
                     IpPool::new(
                         &identity,
                         IpVersion::V4,
-                        IpPoolReservationType::OxideInternal,
+                        IpPoolReservationType::SystemInternal,
                     ),
                 )
                 .await
@@ -2817,7 +2817,7 @@ mod test {
         let oxide_reserved_found = datastore
             .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
             )
             .await
@@ -2882,9 +2882,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_link_oxide_internal_pool_to_external_silo() {
+    async fn cannot_link_system_internal_pool_to_external_silo() {
         let logctx = dev::test_setup_log(
-            "cannot_link_oxide_internal_pool_to_external_silo",
+            "cannot_link_system_internal_pool_to_external_silo",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -2900,7 +2900,7 @@ mod test {
                 IpPool::new(
                     &identity,
                     IpVersion::V4,
-                    IpPoolReservationType::OxideInternal,
+                    IpPoolReservationType::SystemInternal,
                 ),
             )
             .await
@@ -2974,7 +2974,7 @@ mod test {
                 opctx,
                 &authz_pool,
                 &db_pool,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
             )
             .await;
         let Err(Error::InvalidRequest { message }) = &res else {
@@ -3131,7 +3131,7 @@ mod test {
         let pools = datastore
             .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
             )
             .await
@@ -3160,7 +3160,7 @@ mod test {
         let l = datastore
             .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
             )
             .await
@@ -3189,7 +3189,7 @@ mod test {
         let l = datastore
             .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
             )
             .await
@@ -3212,7 +3212,7 @@ mod test {
         let pools = datastore
             .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
             )
             .await
@@ -3244,7 +3244,7 @@ mod test {
         let l = datastore
             .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
             )
             .await
@@ -3279,7 +3279,7 @@ mod test {
         let l = datastore
             .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
             )
             .await
@@ -3302,7 +3302,7 @@ mod test {
         let pool = datastore
             .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 Some(IpVersion::V4),
             )
             .await
@@ -3405,7 +3405,7 @@ mod test {
         };
         let query = reserve_ip_pool_query(
             &ip_pool,
-            IpPoolReservationType::OxideInternal,
+            IpPoolReservationType::SystemInternal,
         );
         let _ = query
             .explain_async(&conn)
@@ -3433,7 +3433,7 @@ mod test {
         };
         let query = reserve_ip_pool_query(
             &ip_pool,
-            IpPoolReservationType::OxideInternal,
+            IpPoolReservationType::SystemInternal,
         );
         expectorate_query_contents(
             &query,
@@ -3461,7 +3461,7 @@ mod test {
             ip_version: IpVersion::V4,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
-            reservation_type: IpPoolReservationType::OxideInternal,
+            reservation_type: IpPoolReservationType::SystemInternal,
         };
         let query = reserve_ip_pool_query(
             &ip_pool,
@@ -3489,7 +3489,7 @@ mod test {
             ip_version: IpVersion::V4,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
-            reservation_type: IpPoolReservationType::OxideInternal,
+            reservation_type: IpPoolReservationType::SystemInternal,
         };
         let query = reserve_ip_pool_query(
             &ip_pool,

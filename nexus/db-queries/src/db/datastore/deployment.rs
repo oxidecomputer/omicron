@@ -4310,7 +4310,7 @@ mod tests {
         ))
         .unwrap();
         let (service_authz_ip_pool, service_ip_pool) = datastore
-            .fetch_first_oxide_internal_ip_pool(
+            .fetch_first_system_internal_ip_pool(
                 &opctx,
                 authz::Action::CreateChild,
                 Some(IpVersion::V4),
@@ -4453,7 +4453,7 @@ mod tests {
             })
             .expect("found external IP");
         let (service_authz_ip_pool, service_ip_pool) = datastore
-            .fetch_first_oxide_internal_ip_pool(
+            .fetch_first_system_internal_ip_pool(
                 &opctx,
                 authz::Action::CreateChild,
                 Some(IpVersion::V4),

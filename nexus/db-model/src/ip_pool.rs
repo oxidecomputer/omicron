@@ -67,14 +67,14 @@ impl_enum_type!(
     pub enum IpPoolReservationType;
 
     ExternalSilos => b"external_silos"
-    OxideInternal => b"oxide_internal"
+    SystemInternal => b"system_internal"
 );
 
 impl ::std::fmt::Display for IpPoolReservationType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             IpPoolReservationType::ExternalSilos => "external_silos",
-            IpPoolReservationType::OxideInternal => "oxide_internal",
+            IpPoolReservationType::SystemInternal => "system_internal",
         };
         f.write_str(s)
     }
@@ -84,7 +84,7 @@ impl From<shared::IpPoolReservationType> for IpPoolReservationType {
     fn from(value: shared::IpPoolReservationType) -> Self {
         match value {
             shared::IpPoolReservationType::ExternalSilos => Self::ExternalSilos,
-            shared::IpPoolReservationType::OxideInternal => Self::OxideInternal,
+            shared::IpPoolReservationType::SystemInternal => Self::SystemInternal,
         }
     }
 }
@@ -93,7 +93,7 @@ impl From<IpPoolReservationType> for shared::IpPoolReservationType {
     fn from(value: IpPoolReservationType) -> Self {
         match value {
             IpPoolReservationType::ExternalSilos => Self::ExternalSilos,
-            IpPoolReservationType::OxideInternal => Self::OxideInternal,
+            IpPoolReservationType::SystemInternal => Self::SystemInternal,
         }
     }
 }

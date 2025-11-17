@@ -712,7 +712,8 @@ impl DataStore {
         Ok(())
     }
 
-    // List Oxide reserved IP Pools and corresponding authz objects.
+    // List Oxide reserved IP Pools and corresponding authz objects which cover
+    // the provided IP Ranges.
     async fn list_all_service_ip_pools(
         &self,
         opctx: &OpContext,
@@ -726,7 +727,7 @@ impl DataStore {
         let service_ip_pools = self
             .ip_pools_list_batched(
                 &opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
             )
             .await?;
@@ -1120,7 +1121,7 @@ impl DataStore {
                     ),
                 },
                 version,
-                nexus_db_model::IpPoolReservationType::OxideInternal,
+                nexus_db_model::IpPoolReservationType::SystemInternal,
             );
             match self.ip_pool_create(opctx, internal_pool).await {
                 Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => {}
@@ -1797,7 +1798,7 @@ mod test {
         let svc_pools = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 Some(IpVersion::V4),
                 None,
                 &PaginatedBy::Id(pagparams),
@@ -2106,7 +2107,7 @@ mod test {
         let svc_pools = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 Some(IpVersion::V4),
                 None,
                 &PaginatedBy::Id(pagparams),
@@ -2358,7 +2359,7 @@ mod test {
         let svc_pools = datastore
             .ip_pools_list_paginated(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 Some(IpVersion::V6),
                 None,
                 &PaginatedBy::Id(pagparams),

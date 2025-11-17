@@ -185,7 +185,7 @@ impl DataStore {
     ) -> ListResultVec<ServiceNetworkInterface> {
         use nexus_db_schema::schema::service_network_interface::dsl;
         let _ = self
-            .fetch_first_oxide_internal_ip_pool(
+            .fetch_first_system_internal_ip_pool(
                 opctx,
                 authz::Action::ListChildren,
                 None,
@@ -252,7 +252,7 @@ impl DataStore {
         // Note that the IP version here doesn't matter, both IPv4 and IPv6
         // service pools have the same permissions.
         let _ = self
-            .fetch_first_oxide_internal_ip_pool(
+            .fetch_first_system_internal_ip_pool(
                 opctx,
                 authz::Action::CreateChild,
                 None,
@@ -436,7 +436,7 @@ impl DataStore {
         // Note that the IP version here doesn't matter, both pools have the
         // same permissions.
         let _ = self
-            .fetch_first_oxide_internal_ip_pool(
+            .fetch_first_system_internal_ip_pool(
                 opctx,
                 authz::Action::Delete,
                 None,
@@ -903,7 +903,7 @@ impl DataStore {
         // But assuming this check is correct, all service pools have the same
         // permissions, so the actual IP version here doesn't matter.
         let _ = self
-            .fetch_first_oxide_internal_ip_pool(
+            .fetch_first_system_internal_ip_pool(
                 opctx,
                 authz::Action::ListChildren,
                 None,

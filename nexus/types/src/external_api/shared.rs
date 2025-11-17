@@ -749,8 +749,8 @@ impl RelayState {
 pub enum IpPoolReservationType {
     /// The pool is reserved for use by external customer Silos.
     ExternalSilos,
-    /// The pool is reserved for Oxide internal use.
-    OxideInternal,
+    /// The pool is reserved for internal system use.
+    SystemInternal,
 }
 
 impl IpPoolReservationType {
