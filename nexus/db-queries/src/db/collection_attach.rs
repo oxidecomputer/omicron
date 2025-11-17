@@ -332,74 +332,127 @@ impl Resource {
 /// collection and a resource while attaching a resource to a collection.
 ///
 /// This provides a two-phase API:
-/// - [`AttachQueryTemplate::new`] - Creates a query with table/column names
-/// - [`AttachQueryTemplate::execute`] - Executes with runtime values (UUIDs, max, SET clause)
+/// - [`AttachQueryTemplate::new`] - Constructs the query structure with all SQL logic
+/// - [`AttachQueryTemplate::build`] - Supplies runtime bind parameter values (UUIDs, max count)
 pub struct AttachQueryTemplate {
     collection: Collection,
     resource: Resource,
     allow_from_attached: bool,
+    build_set_clause: Box<
+        dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder, uuid::Uuid)
+            + Send,
+    >,
+    collection_filter: Option<
+        Box<dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder) + Send>,
+    >,
+    resource_filter: Option<
+        Box<dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder) + Send>,
+    >,
 }
 
 impl AttachQueryTemplate {
-    /// Creates a new attach query template with the schema information.
+    /// Creates a new attach query template with the full query structure.
     ///
-    /// This captures all the table and column names that define the structure
-    /// of the attach operation. Call [`Self::execute`] with runtime parameters to
-    /// build the actual query.
+    /// This captures all the SQL logic for the attach operation:
+    /// - Table and column names
+    /// - SET clause structure for the UPDATE
+    /// - Optional additional filters for collection and resource validation
     ///
     /// `allow_from_attached` answers the question: "Can we attach a resource to
     /// this collection, even if it's currently attached to a different
     /// collection"?
-    pub const fn new(
-        collection: Collection,
-        resource: Resource,
-        allow_from_attached: bool,
-    ) -> Self {
-        Self { collection, resource, allow_from_attached }
-    }
-
-    /// Builds the attach query with runtime parameters.
     ///
-    /// Takes the UUIDs, capacity limit, and a closure to build the SET clause.
-    /// The closure receives a mutable reference to a QueryBuilder and should
-    /// construct the SET clause for the UPDATE statement (without the "SET" keyword).
-    ///
-    /// Optional filter closures can be provided to add additional WHERE conditions
-    /// for collection and resource validation beyond just the ID and time_deleted checks.
+    /// The closures receive a QueryBuilder and should construct the SQL structure,
+    /// calling `.param()` for bind parameters and `.bind()` for values. Later,
+    /// the `.bind()` calls will be separated out.
     ///
     /// Example:
     /// ```ignore
-    /// template.build(
-    ///     collection_id,
-    ///     resource_id,
-    ///     max_resources,
+    /// AttachQueryTemplate::new(
+    ///     collection,
+    ///     resource,
+    ///     false,
     ///     |builder| {
-    ///         builder.sql("column1 = ");
-    ///         builder.param().bind::<sql_types::Uuid, _>(value1);
-    ///         builder.sql(", column2 = ");
-    ///         builder.param().bind::<sql_types::Text, _>(value2);
+    ///         builder.sql("attach_instance_id = ");
+    ///         builder.param().bind::<sql_types::Uuid, _>(instance_id);
+    ///         builder.sql(", disk_state = ");
+    ///         builder.param().bind::<sql_types::Text, _>(attached_label);
     ///     },
     ///     Some(|builder| {
-    ///         builder.sql(" AND state = ");
-    ///         builder.param().bind::<sql_types::Text, _>("active");
+    ///         builder.sql(" AND state = ANY(");
+    ///         builder.param().bind::<sql_types::Array<Text>, _>(states);
+    ///         builder.sql(")");
     ///     }),
     ///     None,
     /// )
     /// ```
+    pub fn new(
+        collection: Collection,
+        resource: Resource,
+        allow_from_attached: bool,
+        build_set_clause: impl FnOnce(
+            &mut crate::db::raw_query_builder::QueryBuilder,
+            uuid::Uuid,
+        ) + Send
+        + 'static,
+        collection_filter: Option<
+            impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder)
+            + Send
+            + 'static,
+        >,
+        resource_filter: Option<
+            impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder)
+            + Send
+            + 'static,
+        >,
+    ) -> Self {
+        Self {
+            collection,
+            resource,
+            allow_from_attached,
+            build_set_clause: Box::new(build_set_clause),
+            collection_filter: collection_filter.map(|f| {
+                Box::new(f)
+                    as Box<
+                        dyn FnOnce(
+                                &mut crate::db::raw_query_builder::QueryBuilder,
+                            ) + Send,
+                    >
+            }),
+            resource_filter: resource_filter.map(|f| {
+                Box::new(f)
+                    as Box<
+                        dyn FnOnce(
+                                &mut crate::db::raw_query_builder::QueryBuilder,
+                            ) + Send,
+                    >
+            }),
+        }
+    }
+
+    /// Builds the attach query with runtime bind parameter values.
+    ///
+    /// Takes only the runtime values needed for execution:
+    /// - `collection_id`: UUID of the collection to attach to
+    /// - `resource_id`: UUID of the resource being attached
+    /// - `max_attached_resources`: Maximum number of resources allowed in the collection
+    ///
+    /// The SQL structure and bind parameter positions were defined when creating
+    /// the template via `new()`.
+    ///
+    /// Example:
+    /// ```ignore
+    /// let query = template.build::<Disk, Instance>(
+    ///     instance_id,
+    ///     disk_id,
+    ///     MAX_DISKS_PER_INSTANCE,
+    /// );
+    /// ```
     pub fn build<ResourceType, CollectionType>(
-        &self,
+        self,
         collection_id: uuid::Uuid,
         resource_id: uuid::Uuid,
         max_attached_resources: u32,
-        build_set_clause: impl FnOnce(
-            &mut crate::db::raw_query_builder::QueryBuilder,
-        ),
-        collection_filter: Option<
-            impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder),
-        >,
-        resource_filter: Option<
-            impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder),
-        >,
     ) -> AttachQuery<ResourceType, CollectionType>
     where
         ResourceType: Selectable<Pg> + Send + 'static,
@@ -423,7 +476,7 @@ impl AttachQueryTemplate {
         builder.sql(" AND ");
         builder.sql(self.collection.time_deleted_column);
         builder.sql(" IS NULL");
-        if let Some(filter) = collection_filter {
+        if let Some(filter) = self.collection_filter {
             filter(&mut builder);
         }
         builder.sql(" FOR UPDATE), ");
@@ -439,7 +492,7 @@ impl AttachQueryTemplate {
         builder.sql(" AND ");
         builder.sql(self.resource.time_deleted_column);
         builder.sql(" IS NULL");
-        if let Some(filter) = resource_filter {
+        if let Some(filter) = self.resource_filter {
             filter(&mut builder);
         }
         builder.sql(" FOR UPDATE), ");
@@ -503,8 +556,8 @@ impl AttachQueryTemplate {
         builder.sql(self.resource.table_name);
         builder.sql(" SET ");
 
-        // Let the caller build the SET clause
-        build_set_clause(&mut builder);
+        // Call the SET clause builder (consumes it since it's FnOnce)
+        (self.build_set_clause)(&mut builder, collection_id);
 
         builder.sql(" WHERE ");
         builder.sql(self.resource.id_column);
