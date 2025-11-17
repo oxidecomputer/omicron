@@ -24,24 +24,6 @@ pfexec mkdir -p /out
 pfexec mkdir -p /out/logs
 pfexec chown -R "$UID" /out
 
-INPUT=/input
-# === TEMPORARY: - see: https://github.com/oxidecomputer/buildomat/issues/72
-# just doing this to try out the rest of the script
-# POOL=/pool/int/"$(ls /pool/int | head -n1)" # aaaaaaaaaaaaaaaaaaaaaaaaaa
-# INPUT=$POOL/input
-# pfexec mkdir -p $INPUT/a4x2
-# pfexec chown "$UID" "$INPUT/a4x2"
-
-# (
-#     cd $INPUT/a4x2
-#     curl -LO https://buildomat.eng.oxide.computer/wg/0/artefact/01K7GGHDNM61M4RHXEAXSXHK1Q/OUbkXdqkWSzGqNrgcb7U5X5PahvEYNgNRGhZmIPCzTH1TbI5/01K7GGHT6NHC3NT8HDCC3QS26E/01K7GMQA3V38ZDD82QQWCM8ZSJ/a4x2-package.tar.gz
-#     curl -LO https://buildomat.eng.oxide.computer/wg/0/artefact/01K7GGHDNM61M4RHXEAXSXHK1Q/OUbkXdqkWSzGqNrgcb7U5X5PahvEYNgNRGhZmIPCzTH1TbI5/01K7GGHT6NHC3NT8HDCC3QS26E/01K7GMRGN7TSZWWQF510C0MZQE/xtask
-#     pwd
-#     ls
-# )
-# ===
-
-
 #
 # Make space for CI work
 #
@@ -65,7 +47,7 @@ export FALCON_DATASET=cpool/falcon
 #
 # xtask binary has tools for working with a4x2
 # 
-cp $INPUT/a4x2/xtask .
+cp /input/a4x2/out/xtask .
 chmod +x xtask
 
 #
@@ -134,7 +116,7 @@ pfexec ./dhcp-server $first $last $gw $server &> /out/dhcp-server.log &
 # Run the topology
 # XXX set env var to pull from http://catacomb.eng.oxide.computer:12346/falcon/
 #
-pfexec ./xtask a4x2 deploy start --package $INPUT/a4x2/a4x2-package.tar.gz
+pfexec ./xtask a4x2 deploy start --package /input/a4x2/out/a4x2-package.tar.gz
 
 pfexec dladm
 pfexec ipadm
