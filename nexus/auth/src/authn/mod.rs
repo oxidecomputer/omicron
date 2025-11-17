@@ -101,12 +101,10 @@ impl Context {
     /// token used to authenticate.
     pub fn device_token_expiration(&self) -> Option<DateTime<Utc>> {
         match &self.kind {
-            Kind::Authenticated(Details { auth_method, .. }, ..) => {
-                match auth_method {
-                    AuthMethod::DeviceToken { expiration } => *expiration,
-                    _ => None,
-                }
-            }
+            Kind::Authenticated(
+                Details { device_token_expiration, .. },
+                ..,
+            ) => *device_token_expiration,
             Kind::Unauthenticated => None,
         }
     }
@@ -236,7 +234,7 @@ impl Context {
             kind: Kind::Authenticated(
                 Details {
                     actor: Actor::UserBuiltin { user_builtin_id },
-                    auth_method: AuthMethod::InternalService,
+                    device_token_expiration: None,
                 },
                 None,
             ),
@@ -255,7 +253,7 @@ impl Context {
                         silo_user_id: USER_TEST_PRIVILEGED.id(),
                         silo_id: USER_TEST_PRIVILEGED.silo_id,
                     },
-                    auth_method: AuthMethod::ConsoleSession,
+                    device_token_expiration: None,
                 },
                 Some(SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap()),
             ),
@@ -285,7 +283,7 @@ impl Context {
             kind: Kind::Authenticated(
                 Details {
                     actor: Actor::SiloUser { silo_user_id, silo_id },
-                    auth_method: AuthMethod::ConsoleSession,
+                    device_token_expiration: None,
                 },
                 Some(silo_authn_policy),
             ),
@@ -300,7 +298,7 @@ impl Context {
             kind: Kind::Authenticated(
                 Details {
                     actor: Actor::Scim { silo_id },
-                    auth_method: AuthMethod::ScimToken,
+                    device_token_expiration: None,
                 },
                 // This should never be non-empty, we don't want the SCIM user
                 // to ever have associated roles.
@@ -411,22 +409,6 @@ enum Kind {
     Authenticated(Details, Option<SiloAuthnPolicy>),
 }
 
-/// Describes the method used to authenticate
-#[derive(Clone, Debug, Deserialize, Serialize)]
-enum AuthMethod {
-    /// Authenticated via a console session (web login)
-    ConsoleSession,
-    /// Authenticated via a device access token
-    DeviceToken {
-        /// When this token expires, if at all
-        expiration: Option<DateTime<Utc>>,
-    },
-    /// Authenticated via a SCIM bearer token
-    ScimToken,
-    /// Internal service authentication (built-in users)
-    InternalService,
-}
-
 /// Describes the actor that was authenticated
 ///
 /// This could eventually include other information used during authorization,
@@ -435,8 +417,11 @@ enum AuthMethod {
 pub struct Details {
     /// the actor performing the request
     actor: Actor,
-    /// the method used to authenticate
-    auth_method: AuthMethod,
+    /// When the device token expires. Present only when authenticating via
+    /// a device token. This is a slightly awkward fit but is included here
+    /// because we need to use this to clamp the expiration time when device
+    /// tokens are confirmed using an existing device token.
+    device_token_expiration: Option<DateTime<Utc>>,
 }
 
 /// Who is performing an operation

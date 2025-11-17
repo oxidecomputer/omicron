@@ -8,7 +8,7 @@ use super::super::Details;
 use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
-use crate::authn::{self, AuthMethod};
+use crate::authn;
 use async_trait::async_trait;
 use headers::HeaderMapExt;
 use headers::authorization::{Authorization, Bearer};
@@ -68,7 +68,7 @@ where
                 Err(error) => SchemeResult::Failed(error),
                 Ok(actor) => SchemeResult::Authenticated(Details {
                     actor,
-                    auth_method: AuthMethod::ScimToken,
+                    device_token_expiration: None,
                 }),
             },
         }

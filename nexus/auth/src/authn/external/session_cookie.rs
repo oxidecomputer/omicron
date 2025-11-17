@@ -6,7 +6,7 @@
 
 use super::{HttpAuthnScheme, Reason, SchemeResult};
 use crate::authn;
-use crate::authn::{Actor, AuthMethod, Details};
+use crate::authn::{Actor, Details};
 use anyhow::anyhow;
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
@@ -182,7 +182,7 @@ where
 
         SchemeResult::Authenticated(Details {
             actor,
-            auth_method: AuthMethod::ConsoleSession,
+            device_token_expiration: None,
         })
     }
 }
@@ -398,7 +398,10 @@ mod test {
         let result = authn_with_cookie(&context, Some("session=abc")).await;
         assert!(matches!(
             result,
-            SchemeResult::Authenticated(Details { actor: _, auth_method: _ })
+            SchemeResult::Authenticated(Details {
+                actor: _,
+                device_token_expiration: _
+            })
         ));
 
         // valid cookie should have updated time_last_used

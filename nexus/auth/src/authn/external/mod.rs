@@ -236,7 +236,7 @@ mod test {
                 SKIP => SchemeResult::NotRequested,
                 OK => SchemeResult::Authenticated(authn::Details {
                     actor: self.actor,
-                    auth_method: authn::AuthMethod::ConsoleSession,
+                    device_token_expiration: None,
                 }),
                 FAIL => SchemeResult::Failed(Reason::BadCredentials {
                     actor: self.actor,

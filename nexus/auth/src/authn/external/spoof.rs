@@ -11,8 +11,8 @@ use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
 use super::SiloUserSilo;
+use crate::authn;
 use crate::authn::Actor;
-use crate::authn::{self, AuthMethod};
 use anyhow::Context;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -111,7 +111,7 @@ where
                         let actor = Actor::SiloUser { silo_id, silo_user_id };
                         SchemeResult::Authenticated(Details {
                             actor,
-                            auth_method: AuthMethod::ConsoleSession,
+                            device_token_expiration: None,
                         })
                     }
                 }

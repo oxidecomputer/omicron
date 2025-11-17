@@ -9,7 +9,7 @@ use super::HttpAuthnScheme;
 use super::Reason;
 use super::SchemeResult;
 use super::SiloUserSilo;
-use crate::authn::{self, AuthMethod};
+use crate::authn;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use headers::HeaderMapExt;
@@ -66,10 +66,10 @@ where
             Ok(None) => SchemeResult::NotRequested,
             Ok(Some(token)) => match ctx.token_actor(token).await {
                 Err(error) => SchemeResult::Failed(error),
-                Ok((actor, expiration)) => {
+                Ok((actor, device_token_expiration)) => {
                     SchemeResult::Authenticated(Details {
                         actor,
-                        auth_method: AuthMethod::DeviceToken { expiration },
+                        device_token_expiration,
                     })
                 }
             },

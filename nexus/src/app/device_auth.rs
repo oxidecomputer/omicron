@@ -134,20 +134,20 @@ impl super::Nexus {
             }
         }
 
-        let mut time_expires = requested_ttl
+        let time_expires = requested_ttl
             .or(silo_max_ttl)
-            .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()));
-
-        // If authenticated via a device token, clamp the new token's expiration
-        // to the authenticating token's expiration to prevent indefinite token
-        // extension.
-        if let Some(auth_token_expires) = opctx.authn.token_expiration() {
-            time_expires = match (time_expires, Some(auth_token_expires)) {
-                (Some(new_exp), Some(auth_exp)) => Some(new_exp.min(auth_exp)),
-                (None, Some(auth_exp)) => Some(auth_exp),
-                (new_exp, None) => new_exp,
-            };
-        }
+            .map(|ttl| Utc::now() + Duration::seconds(ttl.0.into()))
+            // If authenticated via a device token, clamp the new token's expiration
+            // to the authenticating token's expiration to prevent indefinite token
+            // extension.
+            .map(|new_exp| match opctx.authn.token_expiration() {
+                Some(auth_exp) => new_exp.min(auth_exp),
+                None => new_exp,
+            })
+            // even if there is no requested TTL or silo max TTL, still clamp to
+            // the expiration time of the device token being used right now (only
+            // present if this request is authed with a token)
+            .or_else(|| opctx.authn.token_expiration());
 
         let token = DeviceAccessToken::new(
             db_request.client_id,
