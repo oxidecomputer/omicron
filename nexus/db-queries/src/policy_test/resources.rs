@@ -76,6 +76,7 @@ pub async fn make_resources(
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
     builder.new_resource(authz::INVENTORY);
     builder.new_resource(authz::IP_POOL_LIST);
+    builder.new_resource(authz::MULTICAST_GROUP_LIST);
     builder.new_resource(authz::QUIESCE_STATE);
     builder.new_resource(authz::UPDATE_TRUST_ROOT_LIST);
     builder.new_resource(authz::TARGET_RELEASE_CONFIG);
@@ -368,6 +369,14 @@ async fn make_project(
         Uuid::new_v4(),
         LookupType::ByName(disk_name.clone()),
     ));
+
+    let multicast_group_name = format!("{project_name}-multicast-group1");
+    builder.new_resource(authz::MulticastGroup::new(
+        authz::FLEET,
+        Uuid::new_v4(),
+        LookupType::ByName(multicast_group_name),
+    ));
+
     builder.new_resource(affinity_group.clone());
     builder.new_resource(anti_affinity_group.clone());
     builder.new_resource(instance.clone());

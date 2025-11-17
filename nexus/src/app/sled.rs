@@ -92,6 +92,14 @@ impl super::Nexus {
         // the control plane.
         if was_modified {
             self.activate_inventory_collection();
+
+            // Signal multicast cache invalidation since sled topology changed.
+            // The reconciler will be activated via its inventory watchers.
+            if let Some(flag) =
+                &self.background_tasks_internal.multicast_invalidate_cache
+            {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
         }
 
         Ok(())
@@ -122,6 +130,15 @@ impl super::Nexus {
         // ahead and activate it now so that those instances don't need to wait
         // for the next periodic activation before they can be cleaned up.
         self.background_tasks.task_instance_watcher.activate();
+
+        // Signal multicast cache invalidation since sled topology changed.
+        // Inventory collection will be triggered automatically, which will
+        // activate the reconciler via its inventory watchers.
+        if let Some(flag) =
+            &self.background_tasks_internal.multicast_invalidate_cache
+        {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
 
         Ok(prev_policy)
     }

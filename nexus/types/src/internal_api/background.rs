@@ -144,6 +144,39 @@ impl InstanceUpdaterStatus {
     }
 }
 
+/// The status of a `multicast_reconciler` background task activation.
+#[derive(Default, Serialize, Deserialize, Debug)]
+pub struct MulticastGroupReconcilerStatus {
+    /// Whether the multicast reconciler is disabled due to the feature not
+    /// being enabled.
+    ///
+    /// We use disabled here to match other background task status structs.
+    pub disabled: bool,
+    /// Number of multicast groups transitioned from "Creating" to "Active" state.
+    pub groups_created: usize,
+    /// Number of multicast groups cleaned up (fully removed after "Deleting").
+    pub groups_deleted: usize,
+    /// Number of active multicast groups verified on dataplane switches.
+    pub groups_verified: usize,
+    /// Number of members processed ("Joining"→"Joined", "Left" with
+    /// time_deleted→hard-deleted cleanup).
+    pub members_processed: usize,
+    /// Number of members deleted (Left + time_deleted).
+    pub members_deleted: usize,
+    /// Errors that occurred during reconciliation operations.
+    pub errors: Vec<String>,
+}
+
+impl MulticastGroupReconcilerStatus {
+    pub fn total_groups_processed(&self) -> usize {
+        self.groups_created + self.groups_deleted + self.groups_verified
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+}
+
 /// The status of an `instance_reincarnation` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {
@@ -159,7 +192,7 @@ pub struct InstanceReincarnationStatus {
     /// UUIDs of instances which changed state before they could be
     /// reincarnated.
     pub changed_state: Vec<ReincarnatableInstance>,
-    /// Any errors that occured while finding instances in need of reincarnation.
+    /// Any errors that occurred while finding instances in need of reincarnation.
     pub errors: Vec<String>,
     /// Errors that occurred while restarting individual instances.
     pub restart_errors: Vec<(ReincarnatableInstance, String)>,

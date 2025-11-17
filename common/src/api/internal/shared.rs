@@ -1001,15 +1001,20 @@ impl DatasetKind {
     }
 
     /// Returns true if this dataset is delegated to a non-global zone.
+    ///
+    /// Note: the `zoned` property of a dataset controls whether or not a
+    /// dataset is managed from a non-global zone. This function's intent is
+    /// different in the sense that it's asking whether or not a dataset will be
+    /// delegated to a non-global zone, not managed by a non-global zone.
     pub fn zoned(&self) -> bool {
         use DatasetKind::*;
         match self {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
 
-            TransientZoneRoot | TransientZone { .. } | Debug => false,
-
-            LocalStorage => true,
+            TransientZoneRoot | TransientZone { .. } | Debug | LocalStorage => {
+                false
+            }
         }
     }
 

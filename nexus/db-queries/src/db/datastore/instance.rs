@@ -67,6 +67,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Returns the operator-visible [external API
@@ -736,6 +737,62 @@ impl DataStore {
                 })?;
 
         Ok(InstanceGestalt { instance, migration, active_vmm, target_vmm })
+    }
+
+    /// Batch-fetch instance and VMM records for multiple instances to avoid N+1 queries.
+    ///
+    /// This method efficiently retrieves multiple instances and their active VMMs
+    /// in a single database round-trip using a LEFT JOIN. It is used by the
+    /// multicast reconciler to check the state of many instances simultaneously.
+    ///
+    /// # Returns
+    ///
+    /// A HashMap mapping instance_id -> `(Instance, Option<Vmm>)` where:
+    /// - The VMM is `None` for stopped instances (no `active_propolis_id`)
+    /// - Deleted instances are excluded from the result
+    /// - Non-existent instance IDs are silently omitted from the map
+    pub async fn instance_and_vmm_batch_fetch(
+        &self,
+        opctx: &OpContext,
+        instance_ids: &[omicron_uuid_kinds::InstanceUuid],
+    ) -> Result<HashMap<Uuid, (Instance, Option<Vmm>)>, Error> {
+        use nexus_db_schema::schema::instance::dsl as instance_dsl;
+        use nexus_db_schema::schema::vmm::dsl as vmm_dsl;
+
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        if instance_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let results: Vec<(Instance, Option<Vmm>)> = instance_dsl::instance
+            .filter(
+                instance_dsl::id.eq_any(
+                    instance_ids
+                        .iter()
+                        .map(|id| id.into_untyped_uuid())
+                        .collect::<Vec<_>>(),
+                ),
+            )
+            .filter(instance_dsl::time_deleted.is_null())
+            .left_join(
+                vmm_dsl::vmm.on(vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id)
+                    .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .select((Instance::as_select(), Option::<Vmm>::as_select()))
+            .load_async::<(Instance, Option<Vmm>)>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let map = results
+            .into_iter()
+            .map(|(instance, vmm)| (instance.id(), (instance, vmm)))
+            .collect();
+
+        Ok(map)
     }
 
     // TODO-design It's tempting to return the updated state of the Instance
@@ -2183,6 +2240,64 @@ impl DataStore {
             ))
         }
     }
+
+    /// Get the runtime state of an instance by ID.
+    ///
+    /// Returns the instance's current runtime state, or None if the instance
+    /// doesn't exist or has been deleted.
+    pub async fn instance_get_state(
+        &self,
+        opctx: &OpContext,
+        instance_id: &InstanceUuid,
+    ) -> Result<Option<InstanceRuntimeState>, external::Error> {
+        use nexus_db_schema::schema::instance::dsl;
+        let id = instance_id.into_untyped_uuid();
+
+        let instance = dsl::instance
+            .filter(dsl::id.eq(id))
+            .filter(dsl::time_deleted.is_null())
+            .select(Instance::as_select())
+            .first_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(instance.map(|i| i.runtime_state))
+    }
+
+    /// Look up the sled hosting an instance via its active VMM.
+    ///
+    /// Returns None if the instance exists but has no active VMM (stopped
+    /// instance).
+    pub async fn instance_get_sled_id(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> Result<Option<Uuid>, external::Error> {
+        use nexus_db_schema::schema::{instance, vmm};
+        let maybe_row: Option<Option<Uuid>> = instance::table
+            .left_join(
+                vmm::table
+                    .on(instance::active_propolis_id.eq(vmm::id.nullable())),
+            )
+            .filter(instance::id.eq(instance_id))
+            .filter(instance::time_deleted.is_null())
+            .select(vmm::sled_id.nullable())
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        match maybe_row {
+            None => Err(external::Error::not_found_by_id(
+                ResourceType::Instance,
+                &instance_id,
+            )),
+            Some(sled) => Ok(sled),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2263,6 +2378,7 @@ mod tests {
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ),
             )
