@@ -40,8 +40,8 @@ use sled_agent_types::{
     early_networking::EarlyNetworkConfig,
     firewall_rules::VpcFirewallRulesEnsureBody,
     instance::{
-        InstanceExternalIpBody, InstanceMulticastBody, InstanceSledLocalConfig,
-        VmmPutStateBody, VmmPutStateResponse, VmmUnregisterResponse,
+        InstanceExternalIpBody, InstanceMulticastBody, VmmPutStateBody,
+        VmmPutStateResponse, VmmUnregisterResponse,
     },
     sled::AddSledRequest,
     zone_bundle::{
@@ -382,52 +382,7 @@ pub trait SledAgentApi {
         path_params: Path<VmmPathParam>,
         body: TypedBody<v6::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        // Convert v6 to v7 by adding empty multicast_groups
-        Self::vmm_register(
-            rqctx,
-            path_params,
-            body.map(|v6_body| {
-                let v6::InstanceEnsureBody {
-                    vmm_spec,
-                    local_config,
-                    vmm_runtime,
-                    instance_id,
-                    migration_id,
-                    propolis_addr,
-                    metadata,
-                } = v6_body;
-
-                let v6::InstanceSledLocalConfig {
-                    hostname,
-                    nics,
-                    source_nat,
-                    ephemeral_ip,
-                    floating_ips,
-                    firewall_rules,
-                    dhcp_config,
-                } = local_config;
-
-                sled_agent_types::instance::InstanceEnsureBody {
-                    vmm_spec,
-                    local_config: InstanceSledLocalConfig {
-                        hostname,
-                        nics,
-                        source_nat,
-                        ephemeral_ip,
-                        floating_ips,
-                        multicast_groups: Vec::new(),
-                        firewall_rules,
-                        dhcp_config,
-                    },
-                    vmm_runtime,
-                    instance_id,
-                    migration_id,
-                    propolis_addr,
-                    metadata,
-                }
-            }),
-        )
-        .await
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {

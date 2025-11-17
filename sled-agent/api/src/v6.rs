@@ -68,3 +68,56 @@ pub struct InstanceSledLocalConfig {
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
 }
+
+impl From<InstanceSledLocalConfig>
+    for sled_agent_types::instance::InstanceSledLocalConfig
+{
+    fn from(v6: InstanceSledLocalConfig) -> Self {
+        let InstanceSledLocalConfig {
+            hostname,
+            nics,
+            source_nat,
+            ephemeral_ip,
+            floating_ips,
+            firewall_rules,
+            dhcp_config,
+        } = v6;
+
+        Self {
+            hostname,
+            nics,
+            source_nat,
+            ephemeral_ip,
+            floating_ips,
+            multicast_groups: Vec::new(),
+            firewall_rules,
+            dhcp_config,
+        }
+    }
+}
+
+impl From<InstanceEnsureBody>
+    for sled_agent_types::instance::InstanceEnsureBody
+{
+    fn from(v6: InstanceEnsureBody) -> Self {
+        let InstanceEnsureBody {
+            vmm_spec,
+            local_config,
+            vmm_runtime,
+            instance_id,
+            migration_id,
+            propolis_addr,
+            metadata,
+        } = v6;
+
+        Self {
+            vmm_spec,
+            local_config: local_config.into(),
+            vmm_runtime,
+            instance_id,
+            migration_id,
+            propolis_addr,
+            metadata,
+        }
+    }
+}
