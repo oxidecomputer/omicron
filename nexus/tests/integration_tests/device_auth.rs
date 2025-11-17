@@ -638,6 +638,7 @@ async fn test_device_token_cannot_extend_expiration(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let testctx = &cptestctx.external_client;
+    let silo_name = cptestctx.silo_name.as_str();
 
     // Set silo max TTL to 15 seconds
     let settings = params::SiloAuthSettingsUpdate {
@@ -646,6 +647,145 @@ async fn test_device_token_cannot_extend_expiration(
     let _: views::SiloAuthSettings =
         object_put(testctx, "/v1/auth-settings", &settings).await;
 
+    // First, test that session auth does NOT clamp token TTL
+    // Create a local user and get a session token
+    let silo_url = format!("/v1/system/silos/{}", silo_name);
+    let test_silo: views::Silo = object_get(testctx, &silo_url).await;
+    let _test_user = create_local_user(
+        testctx,
+        &test_silo,
+        &"session-test-user".parse().unwrap(),
+        test_params::UserPassword::Password("test-password".to_string()),
+    )
+    .await;
+
+    // Login to get session token
+    let login_url = format!("/v1/login/{}/local", silo_name);
+    let login_response = RequestBuilder::new(testctx, Method::POST, &login_url)
+        .body(Some(&test_params::UsernamePasswordCredentials {
+            username: "session-test-user".parse().unwrap(),
+            password: "test-password".to_string(),
+        }))
+        .expect_status(Some(StatusCode::NO_CONTENT))
+        .execute()
+        .await
+        .expect("failed to login");
+
+    let cookie_header = login_response
+        .headers
+        .get(header::SET_COOKIE)
+        .expect("missing session cookie")
+        .to_str()
+        .expect("session cookie not a string");
+    let session_token = cookie_header
+        .split_once("session=")
+        .expect("malformed cookie")
+        .1
+        .split_once(';')
+        .expect("malformed cookie")
+        .0
+        .to_string();
+
+    // Test session auth with explicit TTL = silo max (15 seconds)
+    let session_client_id = Uuid::new_v4();
+    let session_request_with_ttl = DeviceAuthRequest {
+        client_id: session_client_id,
+        ttl_seconds: NonZeroU32::new(15),
+    };
+
+    let session_auth_response = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&session_request_with_ttl))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await;
+
+    let session_time = Utc::now();
+
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: session_auth_response.user_code,
+            }))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::Session(session_token.clone()))
+    .execute()
+    .await
+    .expect("failed to confirm with session auth");
+
+    let session_token_grant = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAccessTokenRequest {
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                    .to_string(),
+                device_code: session_auth_response.device_code,
+                client_id: session_client_id,
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::Session(session_token.clone()))
+    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
+    .await;
+
+    // Verify session-authenticated token gets full silo max (15 seconds)
+    let session_expiration = session_token_grant.time_expires.unwrap();
+    let session_ttl_secs = (session_expiration - session_time).num_seconds();
+    assert!(
+        14 <= session_ttl_secs && session_ttl_secs <= 16,
+        "session-authenticated token should get full silo max (~15 seconds), got {session_ttl_secs}"
+    );
+
+    // Test session auth with no TTL specified
+    // (When no TTL is requested, tokens get no expiration even with silo max set)
+    let session_client_id2 = Uuid::new_v4();
+    let session_request_no_ttl =
+        DeviceAuthRequest { client_id: session_client_id2, ttl_seconds: None };
+
+    let session_auth_response2 = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/auth")
+            .body_urlencoded(Some(&session_request_no_ttl))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .execute_and_parse_unwrap::<DeviceAuthResponse>()
+    .await;
+
+    NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/confirm")
+            .body(Some(&DeviceAuthVerify {
+                user_code: session_auth_response2.user_code,
+            }))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::Session(session_token.clone()))
+    .execute()
+    .await
+    .expect("failed to confirm with session auth (no TTL)");
+
+    let session_token_grant2 = NexusRequest::new(
+        RequestBuilder::new(testctx, Method::POST, "/device/token")
+            .allow_non_dropshot_errors()
+            .body_urlencoded(Some(&DeviceAccessTokenRequest {
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                    .to_string(),
+                device_code: session_auth_response2.device_code,
+                client_id: session_client_id2,
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::Session(session_token))
+    .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
+    .await;
+
+    // When no TTL is specified, token has no expiration (not clamped)
+    assert_eq!(
+        session_token_grant2.time_expires, None,
+        "session-authenticated token with no TTL should have no expiration"
+    );
+
+    // Now test device token auth with clamping
     // Create an initial token with 8 second TTL
     let client_id = Uuid::new_v4();
     let initial_request =
