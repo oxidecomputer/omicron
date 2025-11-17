@@ -387,23 +387,43 @@ pub trait SledAgentApi {
             rqctx,
             path_params,
             body.map(|v6_body| {
+                let v6::InstanceEnsureBody {
+                    vmm_spec,
+                    local_config,
+                    vmm_runtime,
+                    instance_id,
+                    migration_id,
+                    propolis_addr,
+                    metadata,
+                } = v6_body;
+
+                let v6::InstanceSledLocalConfig {
+                    hostname,
+                    nics,
+                    source_nat,
+                    ephemeral_ip,
+                    floating_ips,
+                    firewall_rules,
+                    dhcp_config,
+                } = local_config;
+
                 sled_agent_types::instance::InstanceEnsureBody {
-                    vmm_spec: v6_body.vmm_spec,
+                    vmm_spec,
                     local_config: InstanceSledLocalConfig {
-                        hostname: v6_body.local_config.hostname,
-                        nics: v6_body.local_config.nics,
-                        source_nat: v6_body.local_config.source_nat,
-                        ephemeral_ip: v6_body.local_config.ephemeral_ip,
-                        floating_ips: v6_body.local_config.floating_ips,
+                        hostname,
+                        nics,
+                        source_nat,
+                        ephemeral_ip,
+                        floating_ips,
                         multicast_groups: Vec::new(),
-                        firewall_rules: v6_body.local_config.firewall_rules,
-                        dhcp_config: v6_body.local_config.dhcp_config,
+                        firewall_rules,
+                        dhcp_config,
                     },
-                    vmm_runtime: v6_body.vmm_runtime,
-                    instance_id: v6_body.instance_id,
-                    migration_id: v6_body.migration_id,
-                    propolis_addr: v6_body.propolis_addr,
-                    metadata: v6_body.metadata,
+                    vmm_runtime,
+                    instance_id,
+                    migration_id,
+                    propolis_addr,
+                    metadata,
                 }
             }),
         )

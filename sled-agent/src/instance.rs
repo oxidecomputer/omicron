@@ -39,9 +39,6 @@ use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_types::instance::*;
-use sled_agent_types::instance::{
-    InstanceMulticastMembership, InstanceSledLocalConfig,
-};
 use sled_agent_types::zone_bundle::ZoneBundleCause;
 use sled_agent_zone_images::ramdisk_file_source;
 use slog::Logger;
