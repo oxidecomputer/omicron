@@ -1166,20 +1166,16 @@ impl Zpool {
         start_port: u16,
         end_port: u16,
     ) -> &CrucibleServer {
-        self.datasets.insert(
-            id,
-            DatasetContents::Crucible(CrucibleServer::new(
+        let DatasetContents::Crucible(crucible) = self
+            .datasets
+            .entry(id)
+            .insert_entry(DatasetContents::Crucible(CrucibleServer::new(
                 log,
                 crucible_ip,
                 start_port,
                 end_port,
-            )),
-        );
-
-        let DatasetContents::Crucible(crucible) = self
-            .datasets
-            .get(&id)
-            .expect("Failed to get the dataset we just inserted")
+            )))
+            .into_mut()
         else {
             unreachable!("just inserted this variant!");
         };
