@@ -32,7 +32,9 @@ use crate::{
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
+use serde::{Deserialize, Serialize};
 use slog::{Logger, error, info, o, warn};
+use slog_error_chain::SlogInlineError;
 
 /// An entity capable of participating in trust quorum
 ///
@@ -1063,7 +1065,16 @@ impl Node {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    SlogInlineError,
+    Serialize,
+    Deserialize,
+)]
 pub enum CommitError {
     #[error("invalid rack id")]
     InvalidRackId(
@@ -1077,7 +1088,16 @@ pub enum CommitError {
     Expunged { epoch: Epoch, from: BaseboardId },
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    SlogInlineError,
+    Serialize,
+    Deserialize,
+)]
 pub enum PrepareAndCommitError {
     #[error("invalid rack id")]
     InvalidRackId(

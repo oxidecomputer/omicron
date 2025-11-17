@@ -5,6 +5,7 @@
 //! A mechanism for maintaining a full mesh of trust quorum node connections
 
 use crate::established_conn::EstablishedConn;
+use crate::proxy;
 use trust_quorum_protocol::{BaseboardId, Envelope, PeerMsg};
 
 // TODO: Move to this crate
@@ -12,6 +13,7 @@ use trust_quorum_protocol::{BaseboardId, Envelope, PeerMsg};
 use bootstore::schemes::v0::NetworkConfig;
 
 use camino::Utf8PathBuf;
+use derive_more::From;
 use iddqd::{
     BiHashItem, BiHashMap, TriHashItem, TriHashMap, bi_upcast, tri_upcast,
 };
@@ -60,7 +62,7 @@ pub enum MainToConnMsg {
 ///
 /// All `WireMsg`s sent between nodes is prefixed with a 4 byte size header used
 /// for framing.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, From)]
 pub enum WireMsg {
     /// Used for connection keep alive
     Ping,
@@ -79,6 +81,12 @@ pub enum WireMsg {
     /// of tiny information layered on top of trust quorum. You can still think
     /// of it as a bootstore, although, we no longer use that name.
     NetworkConfig(NetworkConfig),
+
+    /// Requests proxied to other nodes
+    ProxyRequest(proxy::WireRequest),
+
+    /// Responses to proxy requests
+    ProxyResponse(proxy::WireResponse),
 }
 
 /// Messages sent from connection managing tasks to the main peer task
@@ -99,6 +107,8 @@ pub enum ConnToMainMsgInner {
     Received { from: BaseboardId, msg: PeerMsg },
     ReceivedNetworkConfig { from: BaseboardId, config: NetworkConfig },
     Disconnected { peer_id: BaseboardId },
+    ProxyRequestReceived { from: BaseboardId, req: proxy::WireRequest },
+    ProxyResponseReceived { from: BaseboardId, rsp: proxy::WireResponse },
 }
 
 pub struct TaskHandle {
@@ -120,15 +130,11 @@ impl TaskHandle {
         self.abort_handle.abort()
     }
 
-    pub async fn send(&self, msg: PeerMsg) {
-        let _ = self.tx.send(MainToConnMsg::Msg(WireMsg::Tq(msg))).await;
-    }
-
-    pub async fn send_network_config(&self, config: NetworkConfig) {
-        let _ = self
-            .tx
-            .send(MainToConnMsg::Msg(WireMsg::NetworkConfig(config)))
-            .await;
+    pub async fn send<T>(&self, msg: T)
+    where
+        T: Into<WireMsg>,
+    {
+        let _ = self.tx.send(MainToConnMsg::Msg(msg.into())).await;
     }
 }
 
@@ -172,7 +178,10 @@ impl EstablishedTaskHandle {
         self.task_handle.abort();
     }
 
-    pub async fn send(&self, msg: PeerMsg) {
+    pub async fn send<T>(&self, msg: T)
+    where
+        T: Into<WireMsg>,
+    {
         let _ = self.task_handle.send(msg).await;
     }
 }
@@ -233,6 +242,12 @@ pub struct ConnMgrStatus {
     pub connections: Vec<ConnInfo>,
     pub num_conn_tasks: u64,
     pub total_tasks_spawned: u64,
+}
+
+/// The state of a proxy connection
+pub enum ProxyConnState {
+    Connected,
+    Disconnected,
 }
 
 /// A structure to manage all sprockets connections to peer nodes
@@ -399,7 +414,7 @@ impl ConnMgr {
                 "peer_id" => %h.baseboard_id,
                 "generation" => network_config.generation
             );
-            h.task_handle.send_network_config(network_config.clone()).await;
+            h.send(network_config.clone()).await;
         }
     }
 
@@ -415,7 +430,42 @@ impl ConnMgr {
                 "peer_id" => %h.baseboard_id,
                 "generation" => network_config.generation
             );
-            h.task_handle.send_network_config(network_config.clone()).await;
+            h.send(network_config.clone()).await;
+        }
+    }
+
+    /// Forward an API request to another node
+    ///
+    /// Return the state of the connection at this point in time so that the
+    /// [`proxy::Tracker`] can manage the outstanding request on behalf of the
+    /// user.
+    pub async fn proxy_request(
+        &mut self,
+        destination: &BaseboardId,
+        req: proxy::WireRequest,
+    ) -> ProxyConnState {
+        if let Some(h) = self.established.get1(destination) {
+            info!(self.log, "Sending {req:?}"; "peer_id" => %destination);
+            h.send(req).await;
+            ProxyConnState::Connected
+        } else {
+            ProxyConnState::Disconnected
+        }
+    }
+
+    /// Return a response to a proxied request to another node
+    ///
+    /// There is no need to track whether this succeeds or fails. If the
+    /// connection goes away the client on the other side will notice it and
+    /// retry if needed.
+    pub async fn proxy_response(
+        &mut self,
+        destination: &BaseboardId,
+        rsp: proxy::WireResponse,
+    ) {
+        if let Some(h) = self.established.get1(destination) {
+            info!(self.log, "Sending {rsp:?}"; "peer_id" => %destination);
+            h.send(rsp).await;
         }
     }
 
