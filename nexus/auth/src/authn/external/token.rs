@@ -64,7 +64,7 @@ where
         match parse_token(headers.typed_get().as_ref()) {
             Err(error) => SchemeResult::Failed(error),
             Ok(None) => SchemeResult::NotRequested,
-            Ok(Some(token)) => match ctx.token_actor(token).await {
+            Ok(Some(token)) => match ctx.authenticate_token(token).await {
                 Err(error) => SchemeResult::Failed(error),
                 Ok((actor, device_token_expiration)) => {
                     SchemeResult::Authenticated(Details {
@@ -97,8 +97,9 @@ fn parse_token(
 /// A context that can look up a Silo user and client ID from a token.
 #[async_trait]
 pub trait TokenContext {
-    /// Returns the actor authenticated by the token and the token's expiration time (if any).
-    async fn token_actor(
+    /// Returns the actor authenticated by the token and the token's expiration
+    /// time (if any).
+    async fn authenticate_token(
         &self,
         token: String,
     ) -> Result<(authn::Actor, Option<DateTime<Utc>>), Reason>;

@@ -242,7 +242,7 @@ impl super::Nexus {
     /// Look up the actor for which a token was granted.
     /// Corresponds to a request *after* completing the flow above.
     /// Returns the actor and the token's expiration time (if any).
-    pub(crate) async fn device_access_token_actor(
+    pub(crate) async fn authenticate_token(
         &self,
         opctx: &OpContext,
         token: String,
