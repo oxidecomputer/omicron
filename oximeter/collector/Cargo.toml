@@ -1,7 +1,7 @@
 [package]
 name = "oximeter-collector"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 description = "The oximeter metric collection server"
 license = "MPL-2.0"
 

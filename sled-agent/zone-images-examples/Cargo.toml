@@ -2,7 +2,7 @@
 name = "sled-agent-zone-images-examples"
 description = "Example values for sled-agent-zone-images types"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 
 [lints]
 workspace = true

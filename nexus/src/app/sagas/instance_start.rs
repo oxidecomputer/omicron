@@ -404,7 +404,7 @@ async fn sis_move_to_starting(
         db::model::InstanceRuntimeState {
             nexus_state: db::model::InstanceState::Vmm,
             propolis_id: Some(propolis_id.into_untyped_uuid()),
-            r#gen: db_instance.runtime().r#gen.next().into(),
+            generation: db_instance.runtime().generation.next().into(),
             time_last_auto_restarted,
             ..db_instance.runtime_state
         }
@@ -446,7 +446,7 @@ async fn sis_move_to_starting_undo(
     let new_runtime = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
         propolis_id: None,
-        gen: db_instance.runtime_state.gen.next().into(),
+        generation: db_instance.runtime_state.generation.next().into(),
         ..db_instance.runtime_state
     };
 
