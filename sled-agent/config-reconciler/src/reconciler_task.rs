@@ -24,6 +24,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::LOCAL_STORAGE_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
@@ -247,8 +248,17 @@ impl LatestReconciliationResult {
         // handle the specific `DatasetKind`s used by our callers.
         let mountpoint = match &kind {
             DatasetKind::Debug => U2_DEBUG_DATASET,
+            DatasetKind::LocalStorage => LOCAL_STORAGE_DATASET,
             DatasetKind::TransientZoneRoot => ZONE_DATASET,
-            _ => unreachable!(
+
+            DatasetKind::Clickhouse |
+            DatasetKind::ClickhouseKeeper |
+            DatasetKind::ClickhouseServer |
+            DatasetKind::Cockroach |
+            DatasetKind::Crucible |
+            DatasetKind::ExternalDns |
+            DatasetKind::InternalDns |
+            DatasetKind::TransientZone { .. } => unreachable!(
                 "private function called with unexpected kind {kind:?}"
             ),
         };
