@@ -36,7 +36,9 @@ const LEGACY_ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 /// This panics if the conversion fails. That might happen if we somehow
 /// serialized a NIC with an IPv4 address, but on an IPv6 subnet. That should
 /// not be possible, but we have no way of recovering into the current format if
-/// we do encounter that.
+/// we do encounter that. Returning `None` is not correct, since that would
+/// incorrectly indicate that we have no config at all. We _must_ panic and rely
+/// on support correcting this (believed-to-be-impossible) situation.
 pub(super) async fn try_convert_v6_sled_config(
     log: &Logger,
     datasets: Vec<Utf8PathBuf>,

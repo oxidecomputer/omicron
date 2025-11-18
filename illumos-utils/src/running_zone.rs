@@ -552,6 +552,9 @@ impl RunningZone {
         Ok(network)
     }
 
+    // TODO-completeness: Handle dual-stack OPTE ports here. This works for
+    // either IPv4 or IPv6 addresses, but not both.
+    // See https://github.com/oxidecomputer/omicron/issues/9247.
     pub async fn ensure_address_for_port(
         &self,
         name: &str,

@@ -174,8 +174,8 @@ impl ReconfiguratorSim {
                 };
                 let ip = maybe_ip.with_context(|| {
                     format!(
-                        "Omicron zone has an external and private IP \
-                        configurations of different IP versions. \
+                        "Omicron zone has external and private IP \
+                        configurations with different IP versions. \
                         zone_id={} zone_kind={} \
                         external_ip={} private_ip_config={:?}",
                         zone.id,

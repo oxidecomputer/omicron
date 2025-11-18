@@ -701,7 +701,7 @@ pub struct ProbeInfo {
     // NOTE: This type currently appears in both the external and internal APIs.
     // It's not used in the internal API anymore, and we've not yet expanded the
     // external API to support dual-stack NICs. When we do, this whole type
-    // needs a new version the external API, and the internal API needs to
+    // needs a new version in the external API, and the internal API needs to
     // continue to refer to this original version.
     pub interface: NetworkInterfaceV1,
 }

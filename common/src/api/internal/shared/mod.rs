@@ -26,7 +26,7 @@ pub mod network_interface;
 
 // Re-export latest version of all NIC-related types.
 pub use network_interface::NetworkInterfaceKind;
-pub use network_interface::v2::*;
+pub use network_interface::*;
 
 /// An IP address and port range used for source NAT, i.e., making
 /// outbound network connections from guests or services.

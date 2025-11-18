@@ -7382,33 +7382,51 @@
             "description": "The interface has only an IPv4 configuration.",
             "type": "object",
             "properties": {
-              "v4": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "v4"
+                ]
+              },
+              "value": {
                 "$ref": "#/components/schemas/PrivateIpv4Config"
               }
             },
             "required": [
-              "v4"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "description": "The interface has only an IPv6 configuration.",
             "type": "object",
             "properties": {
-              "v6": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "v6"
+                ]
+              },
+              "value": {
                 "$ref": "#/components/schemas/PrivateIpv6Config"
               }
             },
             "required": [
-              "v6"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           },
           {
             "description": "The interface is dual-stack.",
             "type": "object",
             "properties": {
-              "dual_stack": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "dual_stack"
+                ]
+              },
+              "value": {
                 "type": "object",
                 "properties": {
                   "v4": {
@@ -7435,9 +7453,9 @@
               }
             },
             "required": [
-              "dual_stack"
-            ],
-            "additionalProperties": false
+              "type",
+              "value"
+            ]
           }
         ]
       },

@@ -285,19 +285,20 @@ impl DataStore {
         //
         // TODO-completeness: Ensure this works for dual-stack Omicron service
         // zone NICs. See https://github.com/oxidecomputer/omicron/issues/9313.
-        if cfg!(any(test, feature = "testing"))
-            && nic
-                .ip_config
-                .ipv4_addr()
-                .map(|ip| ip.is_loopback())
-                .unwrap_or(false)
-            && nic
-                .ip_config
-                .ipv6_addr()
-                .map(|ip| ip.is_loopback())
-                .unwrap_or(false)
-        {
-            return Ok(true);
+        if cfg!(any(test, feature = "testing")) {
+            match (
+                nic.ip_config.ipv4_addr().map(|ip| ip.is_loopback()),
+                nic.ip_config.ipv6_addr().map(|ip| ip.is_loopback()),
+            ) {
+                (None, Some(true))
+                | (Some(true), None)
+                | (Some(true), Some(true)) => {
+                    // If we have no addresses other than loopbacks, consider
+                    // this already allocated and bail out for testing.
+                    return Ok(true);
+                }
+                (_, _) => {} // fallthrough to real impl.
+            }
         }
 
         let allocated_nics = self

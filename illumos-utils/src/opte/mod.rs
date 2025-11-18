@@ -34,6 +34,7 @@ pub use port::Port;
 pub use port_manager::PortCreateParams;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 
@@ -68,28 +69,15 @@ const OPTE_VIRTUAL_GATEWAY_MAC: MacAddr6 =
 impl Gateway {
     /// Construct information about the gateway from an IP configuration.
     pub fn from_ip_config(ip: &PrivateIpConfig) -> Self {
-        let ips =
-            match ip {
-                PrivateIpConfig::V4(v4) => {
-                    let ip = v4.subnet().first_host();
-                    GatewayIps::V4(ip)
-                }
-                PrivateIpConfig::V6(v6) => {
-                    let ip =
-                        v6.subnet().iter().nth(1).expect(
-                            "IPv6 subnet must have at least 2 addresses",
-                        );
-                    GatewayIps::V6(ip)
-                }
-                PrivateIpConfig::DualStack { v4, v6 } => {
-                    let v4 = v4.subnet().first_host();
-                    let v6 =
-                        v6.subnet().iter().nth(1).expect(
-                            "IPv6 subnet must have at least 2 addresses",
-                        );
-                    GatewayIps::DualStack { v4, v6 }
-                }
-            };
+        let ips = match ip {
+            PrivateIpConfig::V4(v4) => GatewayIps::V4(v4.opte_gateway()),
+            PrivateIpConfig::V6(v6) => GatewayIps::V6(v6.opte_gateway()),
+            PrivateIpConfig::DualStack { v4, v6 } => {
+                let v4 = v4.opte_gateway();
+                let v6 = v6.opte_gateway();
+                GatewayIps::DualStack { v4, v6 }
+            }
+        };
         Self { mac: OPTE_VIRTUAL_GATEWAY_MAC, ips }
     }
 
@@ -106,6 +94,18 @@ impl Gateway {
         match &self.ips {
             GatewayIps::V6(v6) | GatewayIps::DualStack { v6, .. } => Some(&v6),
             GatewayIps::V4(_) => None,
+        }
+    }
+
+    /// Return the IPv4 address, if it exists, or the IPv6 address.
+    ///
+    /// At least one of these always exists.
+    pub fn ipv4_or_ipv6_addr(&self) -> IpAddr {
+        match &self.ips {
+            GatewayIps::V4(v4) | GatewayIps::DualStack { v4, .. } => {
+                IpAddr::V4(*v4)
+            }
+            GatewayIps::V6(v6) => IpAddr::V6(*v6),
         }
     }
 }

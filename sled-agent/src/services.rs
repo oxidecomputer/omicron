@@ -1309,19 +1309,8 @@ impl ServiceManager {
 
         // TODO-completeness: This needs to support dual-stack OPTE ports.
         // See https://github.com/oxidecomputer/omicron/issues/9309.
-        let opte_gateway =
-            port.gateway().ipv4_addr().map(|ip| ip.to_string()).unwrap_or_else(
-                || {
-                    port.gateway()
-                        .ipv6_addr()
-                        .expect("at least one IP address")
-                        .to_string()
-                },
-            );
-        let opte_ip =
-            port.ipv4_addr().map(|ip| ip.to_string()).unwrap_or_else(|| {
-                port.ipv6_addr().expect("at least one IP address").to_string()
-            });
+        let opte_gateway = port.gateway().ipv4_or_ipv6_addr().to_string();
+        let opte_ip = port.ipv4_or_ipv6_addr().to_string();
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder

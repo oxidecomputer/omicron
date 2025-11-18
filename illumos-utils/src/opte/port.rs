@@ -14,6 +14,7 @@ use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
@@ -89,6 +90,22 @@ impl Port {
     /// Return the VPC-private IPv6 address, if it exists.
     pub fn ipv6_addr(&self) -> Option<&Ipv6Addr> {
         self.inner.ip.ipv6_addr()
+    }
+
+    /// Return the VPC-private IPv4 address, if it exits, or the IPv6 address.
+    ///
+    /// One of these always exists.
+    pub fn ipv4_or_ipv6_addr(&self) -> IpAddr {
+        self.inner.ip.ipv4_addr().copied().map(IpAddr::V4).unwrap_or_else(
+            || {
+                self.inner
+                    .ip
+                    .ipv6_addr()
+                    .copied()
+                    .expect("At least one address always exists")
+                    .into()
+            },
+        )
     }
 
     pub fn name(&self) -> &str {

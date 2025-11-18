@@ -110,7 +110,14 @@ impl NetworkInterface {
         ipv6_subnet: oxnet::Ipv6Net,
     ) -> Result<internal::shared::NetworkInterface, Error> {
         let ip_config = match (self.ipv4, self.ipv6) {
-            (None, None) => unreachable!(),
+            (None, None) => {
+                return Err(Error::internal_error(&format!(
+                    "NIC with ID '{}' is in the database with neither an IPv4 nor \
+                IPv6 address, which out to be impossible and enforced by the \
+                database constraints",
+                    self.id(),
+                )));
+            }
             (None, Some(ip)) => {
                 // Check that all transit IPs are IPv6.
                 let transit_ips = self
@@ -278,29 +285,38 @@ impl ServiceNetworkInterface {
     }
 }
 
-// TODO-remove: Remove this when we support dual-stack service NICs. See
-// https://github.com/oxidecomputer/omicron/issues/9314.
+/// Errors converting from a ServiceNetworkInterface.
 #[derive(Debug, thiserror::Error)]
-#[error(
-    "Service NIC {nic_id} is dual-stack, \
-    only a single IPv4 or IPv6 address is supported"
-)]
-pub struct DualStackServiceNicError {
-    pub nic_id: Uuid,
+pub enum ServiceNicError {
+    #[error(
+        "Service NIC {nic_id} has no IP addresses at all, which \
+        ought to be impossible and enforced by the database constraints"
+    )]
+    NoIps { nic_id: Uuid },
+
+    // TODO-remove: Remove this when we support dual-stack service NICs. See
+    // https://github.com/oxidecomputer/omicron/issues/9314.
+    #[error(
+        "Service NIC {nic_id} is dual-stack, \
+        only a single IPv4 or IPv6 address is supported"
+    )]
+    DualStack { nic_id: Uuid },
 }
 
 impl TryFrom<&'_ ServiceNetworkInterface>
     for nexus_types::deployment::OmicronZoneNic
 {
-    type Error = DualStackServiceNicError;
+    type Error = ServiceNicError;
 
     fn try_from(nic: &ServiceNetworkInterface) -> Result<Self, Self::Error> {
         let ip = match (nic.ipv4, nic.ipv6) {
-            (None, None) => unreachable!("database constraint ensures this"),
+            (None, None) => {
+                return Err(ServiceNicError::NoIps { nic_id: nic.id() });
+            }
             (None, Some(ip)) => ip.into(),
             (Some(ip), None) => ip.into(),
             (Some(_), Some(_)) => {
-                return Err(DualStackServiceNicError { nic_id: nic.id() });
+                return Err(ServiceNicError::DualStack { nic_id: nic.id() });
             }
         };
         Ok(Self {
