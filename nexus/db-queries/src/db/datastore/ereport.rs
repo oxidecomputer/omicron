@@ -135,7 +135,7 @@ impl DataStore {
     fn ereport_fetch_matching_query(
         filters: &EreportFilters,
         pagparams: &DataPageParams<'_, (Uuid, DbEna)>,
-    ) -> impl RunnableQuery<Ereport> {
+    ) -> impl RunnableQuery<Ereport> + use<> {
         let mut query = paginated_multicolumn(
             dsl::ereport,
             (dsl::restart_id, dsl::ena),
