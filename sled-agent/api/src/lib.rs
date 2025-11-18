@@ -70,6 +70,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (8, REMOVE_SLED_ROLE),
     (7, MULTICAST_SUPPORT),
     (6, ADD_PROBE_PUT_ENDPOINT),
     (5, NEWTYPE_UUID_BUMP),
@@ -354,6 +355,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/sled-role",
+        versions = ..VERSION_REMOVE_SLED_ROLE,
     }]
     async fn sled_role_get(
         rqctx: RequestContext<Self::Context>,
