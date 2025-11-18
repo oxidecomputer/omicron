@@ -12,6 +12,7 @@ anyhow.workspace = true
 camino.workspace = true
 cargo_metadata.workspace = true
 clap.workspace = true
+iddqd.workspace = true
 newtype_derive.workspace = true
 parse-display.workspace = true
 petgraph.workspace = true

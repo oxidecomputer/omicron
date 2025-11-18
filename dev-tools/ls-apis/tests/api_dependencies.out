@@ -70,6 +70,7 @@ Nexus Internal API (client: nexus-client)
 
 Nexus Internal Lockstep API (client: nexus-lockstep-client)
     consumed by: omicron-sled-agent (omicron/sled-agent) via 1 path
+        status: expected, reason: RSS uses it, which isn't part of upgrade
 
 NTP Admin (client: ntp-admin-client)
     consumed by: omicron-nexus (omicron/nexus) via 2 paths

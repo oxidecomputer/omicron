@@ -6,13 +6,17 @@
 
 mod api_metadata;
 mod cargo;
+pub mod plural;
 mod system_apis;
 mod workspaces;
 
 pub use api_metadata::AllApiMetadata;
+pub use api_metadata::ApiConsumerStatus;
+pub use api_metadata::ApiExpectedConsumer;
 pub use api_metadata::ApiMetadata;
 pub use api_metadata::VersionedHow;
 pub use system_apis::ApiDependencyFilter;
+pub use system_apis::FailedConsumerCheck;
 pub use system_apis::SystemApis;
 
 use anyhow::{Context, Result};
@@ -25,7 +29,7 @@ use std::borrow::Borrow;
 #[macro_use]
 extern crate newtype_derive;
 
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone, Deserialize, Hash, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
 pub struct ClientPackageName(String);
 NewtypeDebug! { () pub struct ClientPackageName(String); }
@@ -62,7 +66,7 @@ impl Borrow<str> for ServerPackageName {
     }
 }
 
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Clone, Deserialize, Hash, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
 pub struct ServerComponentName(String);
 NewtypeDebug! { () pub struct ServerComponentName(String); }

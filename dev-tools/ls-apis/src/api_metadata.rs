@@ -228,6 +228,13 @@ pub struct ApiMetadata {
     pub label: String,
     /// package name of the server that provides the corresponding API
     pub server_package_name: ServerPackageName,
+    /// expected consumers (Rust packages) that use this API
+    ///
+    /// By default, we don't make any assertions about expected consumers. But
+    /// some APIs must have a fixed list of consumers, and we assert on that
+    /// via this array.
+    #[serde(default)]
+    pub consumers: ApiExpectedConsumers,
     /// human-readable notes about this API
     pub notes: Option<String>,
     /// describes how we've decided this API will be versioned
@@ -246,6 +253,110 @@ impl ApiMetadata {
     pub fn deployed(&self) -> bool {
         !self.dev_only
     }
+}
+
+/// Expected consumers (Rust packages) for an API.
+#[derive(Debug, Default)]
+pub enum ApiExpectedConsumers {
+    /// No assertions are made about consumers.
+    #[default]
+    Any,
+    /// Exactly these consumers are allowed.
+    Exactly(Vec<ApiExpectedConsumer>),
+}
+
+impl ApiExpectedConsumers {
+    pub fn status(
+        &self,
+        server_pkgname: &ServerComponentName,
+    ) -> ApiConsumerStatus {
+        match self {
+            ApiExpectedConsumers::Any => ApiConsumerStatus::NoAssertion,
+            ApiExpectedConsumers::Exactly(consumers) => {
+                if let Some(consumer) =
+                    consumers.iter().find(|c| c.name == *server_pkgname)
+                {
+                    ApiConsumerStatus::Expected {
+                        reason: consumer.reason.clone(),
+                    }
+                } else {
+                    ApiConsumerStatus::Unexpected
+                }
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ApiExpectedConsumers {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        struct ApiExpectedConsumersVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ApiExpectedConsumersVisitor {
+            type Value = ApiExpectedConsumers;
+
+            fn expecting(
+                &self,
+                formatter: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
+                formatter.write_str(
+                    "null (for no assertions) or a list of Rust package names",
+                )
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(ApiExpectedConsumers::Any)
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                Ok(ApiExpectedConsumers::Any)
+            }
+
+            fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let consumers = Vec::<ApiExpectedConsumer>::deserialize(
+                    serde::de::value::SeqAccessDeserializer::new(seq),
+                )?;
+                Ok(ApiExpectedConsumers::Exactly(consumers))
+            }
+        }
+
+        deserializer.deserialize_any(ApiExpectedConsumersVisitor)
+    }
+}
+
+/// Describes a single allowed consumer for an API.
+#[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ApiExpectedConsumer {
+    /// The name of the Rust package.
+    pub name: ServerComponentName,
+    /// The reason this consumer is allowed.
+    pub reason: String,
+}
+
+/// The status of an API consumer that was discovered by walking the Cargo
+/// metadata graph.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApiConsumerStatus {
+    /// No assertions were made about this API consumer.
+    NoAssertion,
+    /// The API consumer is expected to be used.
+    Expected { reason: String },
+    /// The API consumer was not expected. This is an error case.
+    Unexpected,
 }
 
 /// Describes a unit that combines one or more servers that get deployed

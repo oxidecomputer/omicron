@@ -347,6 +347,12 @@ server_package_name = "nexus-lockstep-api"
 # dependency with sled-agent-client, which is server-versioned.
 versioned_how = "client"
 versioned_how_reason = "Circular dependencies between Nexus and other services"
+# Exactly these consumers (Rust packages specified in one or more of the
+# `packages` arrays in the deployment_units table above) are allowed to use this
+# API. ls-apis check will error out if the list of consumers is incorrect.
+consumers = [
+     { name = "omicron-sled-agent", reason = "RSS uses it, which isn't part of upgrade" },
+]
 
 [[apis]]
 client_package_name = "oxide-client"

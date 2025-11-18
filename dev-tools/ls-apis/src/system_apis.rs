@@ -11,6 +11,9 @@ use crate::LoadArgs;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
 use crate::api_metadata::AllApiMetadata;
+use crate::api_metadata::ApiConsumerStatus;
+use crate::api_metadata::ApiExpectedConsumer;
+use crate::api_metadata::ApiExpectedConsumers;
 use crate::api_metadata::ApiMetadata;
 use crate::api_metadata::Evaluation;
 use crate::api_metadata::VersionedHow;
@@ -21,6 +24,9 @@ use anyhow::Result;
 use anyhow::{Context, anyhow, bail};
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
 use petgraph::graph::NodeIndex;
@@ -46,10 +52,7 @@ pub struct SystemApis {
     /// maps an API name (using the client package name as primary key) to the
     /// list of server components that use it
     /// (reverse of `apis_consumed`)
-    api_consumers: BTreeMap<
-        ClientPackageName,
-        BTreeMap<ServerComponentName, Vec<DepPath>>,
-    >,
+    api_consumers: BTreeMap<ClientPackageName, IdOrdMap<ApiConsumer>>,
 
     /// maps an API name to the server component(s) that expose that API
     api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
@@ -61,6 +64,54 @@ pub struct SystemApis {
 }
 
 type ApiProducerMap = BTreeMap<ServerComponentName, Vec<DepPath>>;
+
+#[derive(Debug)]
+struct ApiConsumer {
+    server_pkgname: ServerComponentName,
+    dep_paths: Vec<DepPath>,
+    status: ApiConsumerStatus,
+}
+
+impl ApiConsumer {
+    fn new(name: ServerComponentName, status: ApiConsumerStatus) -> Self {
+        Self { server_pkgname: name, dep_paths: Vec::new(), status }
+    }
+
+    fn add_path(&mut self, path: DepPath) {
+        self.dep_paths.push(path);
+    }
+}
+
+impl IdOrdItem for ApiConsumer {
+    type Key<'a> = &'a ServerComponentName;
+    fn key(&self) -> Self::Key<'_> {
+        &self.server_pkgname
+    }
+    id_upcast!();
+}
+
+/// Public form of an API consumer.
+#[derive(Debug)]
+pub struct ApiConsumerRef<'a> {
+    /// The name of the consumer.
+    pub server_pkgname: &'a ServerComponentName,
+    /// The list of paths through which this consumer depends on the client,
+    /// after filters have been applied.
+    pub dep_paths: Vec<&'a DepPath>,
+    /// The status of the consumer, such as whether it is expected to be present.
+    pub status: &'a ApiConsumerStatus,
+}
+
+impl<'a> IdOrdItem for ApiConsumerRef<'a> {
+    type Key<'b>
+        = &'b ServerComponentName
+    where
+        Self: 'b;
+    fn key(&self) -> Self::Key<'_> {
+        self.server_pkgname
+    }
+    id_upcast!();
+}
 
 impl SystemApis {
     /// Load information about APIs in the system based on both developer-
@@ -129,6 +180,28 @@ impl SystemApis {
             tracker.unit_server_components,
             tracker.api_producers,
         );
+
+        // Ensure that if allowed_consumers is defined, all consumers listed are
+        // specified by at least one deployment unit.
+        for api in api_metadata.apis() {
+            match &api.consumers {
+                ApiExpectedConsumers::Any => {}
+                ApiExpectedConsumers::Exactly(consumers) => {
+                    for consumer in consumers {
+                        if !server_component_units.contains_key(&consumer.name)
+                        {
+                            bail!(
+                                "api {} specifies unknown consumer: {} \
+                                 (with expected reason: {})",
+                                api.client_package_name,
+                                consumer.name,
+                                consumer.reason,
+                            );
+                        }
+                    }
+                }
+            }
+        }
 
         // Now that we've figured out what servers are where, walk dependencies
         // of each server component and assemble structures to find which APIs
@@ -200,6 +273,14 @@ impl SystemApis {
         &self,
     ) -> impl Iterator<Item = &DeploymentUnitName> {
         self.unit_server_components.keys()
+    }
+
+    /// Get the deployment unit associated with a server component
+    pub fn server_component_unit(
+        &self,
+        server_component: &ServerComponentName,
+    ) -> Option<&DeploymentUnitName> {
+        self.server_component_units.get(server_component)
     }
 
     /// For one deployment unit, iterate over the servers contained in it
@@ -274,18 +355,16 @@ impl SystemApis {
         &self,
         client: &ClientPackageName,
         filter: ApiDependencyFilter,
-    ) -> Result<
-        impl Iterator<Item = (&ServerComponentName, Vec<&DepPath>)> + '_ + use<'_>,
-    > {
-        let mut rv = Vec::new();
+    ) -> Result<IdOrdMap<ApiConsumerRef<'_>>> {
+        let mut rv = IdOrdMap::new();
 
         let Some(api_consumers) = self.api_consumers.get(client) else {
-            return Ok(rv.into_iter());
+            return Ok(rv);
         };
 
-        for (server_pkgname, dep_paths) in api_consumers {
+        for api_consumer in api_consumers {
             let mut include = Vec::new();
-            for p in dep_paths {
+            for p in &api_consumer.dep_paths {
                 if filter.should_include(
                     &self.api_metadata,
                     &self.workspaces,
@@ -297,11 +376,16 @@ impl SystemApis {
             }
 
             if !include.is_empty() {
-                rv.push((server_pkgname, include))
+                rv.insert_unique(ApiConsumerRef {
+                    server_pkgname: &api_consumer.server_pkgname,
+                    dep_paths: include,
+                    status: &api_consumer.status,
+                })
+                .expect("api_consumers is uniquely indexed by server_pkgname");
             }
         }
 
-        Ok(rv.into_iter())
+        Ok(rv)
     }
 
     /// Given the client package name for an API and the name of a server
@@ -555,16 +639,49 @@ impl SystemApis {
                 }
                 continue;
             }
+
+            for consumer in
+                self.api_consumers(&api.client_package_name, filter)?
+            {
+                // Are there any unexpected consumers?
+                match consumer.status {
+                    ApiConsumerStatus::NoAssertion
+                    | ApiConsumerStatus::Expected { .. } => {}
+                    ApiConsumerStatus::Unexpected => {
+                        dag_check.report_unexpected_consumer(
+                            &api.client_package_name,
+                            consumer.server_pkgname,
+                        );
+                    }
+                }
+            }
+
+            // Are there any missing consumers?
+            match &api.consumers {
+                ApiExpectedConsumers::Any => {}
+                ApiExpectedConsumers::Exactly(consumers) => {
+                    for expected in consumers {
+                        if !self
+                            .api_consumers(&api.client_package_name, filter)?
+                            .contains_key(&expected.name)
+                        {
+                            dag_check.report_missing_consumer(
+                                &api.client_package_name,
+                                expected,
+                            );
+                        }
+                    }
+                }
+            }
+
             for producer in self.api_producers(&api.client_package_name) {
                 let apis_consumed: BTreeSet<_> = self
                     .component_apis_consumed(producer, filter)?
                     .map(|(client_pkgname, _dep_path)| client_pkgname)
                     .collect();
-                let dependents: BTreeSet<_> = self
+                let consumers = self
                     .api_consumers(&api.client_package_name, filter)
-                    .unwrap()
-                    .map(|(dependent, _dep_path)| dependent)
-                    .collect();
+                    .unwrap();
 
                 if api.versioned_how == VersionedHow::Unknown {
                     // If we haven't determined how to manage versioning on this
@@ -590,7 +707,7 @@ impl SystemApis {
                             &api.client_package_name,
                             String::from("depends on itself"),
                         );
-                    } else if dependents.is_empty() {
+                    } else if consumers.is_empty() {
                         // If something has no consumers in deployed components, it
                         // can be server-managed.  (These are generally debug APIs.)
                         dag_check.propose_server(
@@ -616,9 +733,9 @@ impl SystemApis {
                 // produced by component C1, which uses API A2 produced by C2, which
                 // also uses A1).  In such cases, either A1 or A2 must be
                 // client-managed (or both).
-                for other_pkgname in dependents {
+                for c in consumers {
                     if let Some(dependency_clientpkg) =
-                        dependencies.get(other_pkgname)
+                        dependencies.get(c.server_pkgname)
                     {
                         let dependency_api = self
                             .api_metadata
@@ -682,6 +799,8 @@ pub struct DagCheck<'a> {
     /// most once in this structure.
     proposed_upick:
         BTreeMap<&'a ClientPackageName, BTreeSet<&'a ClientPackageName>>,
+    /// clients that failed assertions about consumers
+    failed_consumers: IdOrdMap<FailedConsumerCheck<'a>>,
 }
 
 impl<'a> DagCheck<'a> {
@@ -690,6 +809,7 @@ impl<'a> DagCheck<'a> {
             proposed_server_managed: BTreeMap::new(),
             proposed_client_managed: BTreeMap::new(),
             proposed_upick: BTreeMap::new(),
+            failed_consumers: IdOrdMap::new(),
         }
     }
 
@@ -747,6 +867,30 @@ impl<'a> DagCheck<'a> {
             .insert(client_pkgname2);
     }
 
+    fn report_unexpected_consumer(
+        &mut self,
+        client_pkgname: &'a ClientPackageName,
+        consumer_name: &'a ServerComponentName,
+    ) {
+        self.failed_consumers
+            .entry(client_pkgname)
+            .or_insert_with(|| FailedConsumerCheck::new(client_pkgname))
+            .unexpected
+            .insert(consumer_name);
+    }
+
+    fn report_missing_consumer(
+        &mut self,
+        client_pkgname: &'a ClientPackageName,
+        expected: &'a ApiExpectedConsumer,
+    ) {
+        self.failed_consumers
+            .entry(client_pkgname)
+            .or_insert_with(|| FailedConsumerCheck::new(client_pkgname))
+            .missing
+            .insert(&expected.name, &expected.reason);
+    }
+
     /// Returns a list of APIs (identified by client package name) that look
     /// like they could use server-side versioning, along with reasons
     pub fn proposed_server_managed(
@@ -775,6 +919,47 @@ impl<'a> DagCheck<'a> {
         self.proposed_upick
             .iter()
             .flat_map(|(c, others)| others.iter().map(|o| (*c, *o)))
+    }
+
+    /// Returns the map of all client package names and consumers that failed
+    /// consumers checks.
+    pub fn failed_consumers(&self) -> &IdOrdMap<FailedConsumerCheck<'a>> {
+        &self.failed_consumers
+    }
+}
+
+/// Information about an API that failed consumers checks.
+#[derive(Clone, Debug)]
+pub struct FailedConsumerCheck<'a> {
+    /// The API's client package name.
+    pub client_pkgname: &'a ClientPackageName,
+    /// Components that actually consume this API but that were not present in
+    /// the list of expected consumers.
+    pub unexpected: BTreeSet<&'a ServerComponentName>,
+    /// Components that were expected to consume this API but that were not
+    /// present in the list of actual consumers, along with the reason they
+    /// should be present.
+    pub missing: BTreeMap<&'a ServerComponentName, &'a str>,
+}
+
+impl<'a> IdOrdItem for FailedConsumerCheck<'a> {
+    type Key<'b>
+        = &'a ClientPackageName
+    where
+        Self: 'b;
+    fn key(&self) -> Self::Key<'_> {
+        self.client_pkgname
+    }
+    id_upcast!();
+}
+
+impl<'a> FailedConsumerCheck<'a> {
+    pub fn new(client_pkgname: &'a ClientPackageName) -> Self {
+        Self {
+            client_pkgname,
+            unexpected: BTreeSet::new(),
+            missing: BTreeMap::new(),
+        }
     }
 }
 
@@ -924,10 +1109,7 @@ struct ClientDependenciesTracker<'a> {
         ServerComponentName,
         BTreeMap<ClientPackageName, Vec<DepPath>>,
     >,
-    api_consumers: BTreeMap<
-        ClientPackageName,
-        BTreeMap<ServerComponentName, Vec<DepPath>>,
-    >,
+    api_consumers: BTreeMap<ClientPackageName, IdOrdMap<ApiConsumer>>,
 }
 
 impl<'a> ClientDependenciesTracker<'a> {
@@ -951,18 +1133,19 @@ impl<'a> ClientDependenciesTracker<'a> {
         pkgname: &str,
         dep_path: &DepPath,
     ) {
-        if self.api_metadata.client_pkgname_lookup(pkgname).is_none() {
+        let Some(api) = self.api_metadata.client_pkgname_lookup(pkgname) else {
             return;
-        }
+        };
 
         // This is the name of a known client package.  Record it.
+        let status = api.consumers.status(server_pkgname);
         let client_pkgname = ClientPackageName::from(pkgname.to_owned());
         self.api_consumers
             .entry(client_pkgname.clone())
-            .or_insert_with(BTreeMap::new)
-            .entry(server_pkgname.clone())
-            .or_insert_with(Vec::new)
-            .push(dep_path.clone());
+            .or_insert_with(IdOrdMap::new)
+            .entry(&server_pkgname)
+            .or_insert_with(|| ApiConsumer::new(server_pkgname.clone(), status))
+            .add_path(dep_path.clone());
         self.apis_consumed
             .entry(server_pkgname.clone())
             .or_insert_with(BTreeMap::new)
