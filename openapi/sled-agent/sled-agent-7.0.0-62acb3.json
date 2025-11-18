@@ -4863,7 +4863,7 @@
         ]
       },
       "InstanceEnsureBody": {
-        "description": "The body of a request to ensure that a instance and VMM are known to a sled agent.",
+        "description": "The body of a request to ensure that a instance and VMM are known to a sled agent (version 7, with multicast support).",
         "type": "object",
         "properties": {
           "instance_id": {
@@ -5051,7 +5051,7 @@
         ]
       },
       "InstanceSledLocalConfig": {
-        "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.",
+        "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional (version 7, with multicast).",
         "type": "object",
         "properties": {
           "dhcp_config": {
