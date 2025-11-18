@@ -15,12 +15,11 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::instance::InstanceMetadata;
-use sled_agent_types::instance::VmmSpec;
 use sled_agent_types::instance::InstanceMulticastMembership;
+use sled_agent_types::instance::VmmSpec;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use uuid::Uuid;
-
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
