@@ -57,7 +57,7 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
 
     fn analyze_open_case(
         &mut self,
-        sitrep: &mut SitrepBuilder<'_>,
+        _sitrep: &mut SitrepBuilder<'_>,
         case: &mut CaseBuilder,
     ) -> anyhow::Result<()> {
         slog::debug!(
@@ -267,8 +267,24 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
         Ok(())
     }
 
-    fn finish(&mut self, sitrep: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
-        todo!()
+    fn finish(
+        &mut self,
+        _sitrep: &mut SitrepBuilder<'_>,
+    ) -> anyhow::Result<()> {
+        
+        // TODO:
+        // 
+        // - scan all of our tracked cases (newly opened and inherited from
+        //   the parent sitrep)
+        // - debouncing
+        // - determine whether undiagnosed cases can now be diagnosed
+        // - determine whether those cases have been resolved (looking at 
+        //   any newly-added ereports, and inventory data/health endpoint
+        //   observations)
+        // - determine what Active Problems should be requested, updated,
+        //   and closed
+        // - determine what alerts should be requested
+        Ok(())
     }
 }
 
