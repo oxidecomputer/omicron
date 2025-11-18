@@ -4,10 +4,13 @@ ON omicron.public.ereport (
 )
 STORING (
     time_collected,
-    class,
+    collector_id,
     serial_number,
     part_number,
+    reporter,
     sled_id,
+    sp_type,
     sp_slot,
-    sp_type
+    class,
+    report
 );
