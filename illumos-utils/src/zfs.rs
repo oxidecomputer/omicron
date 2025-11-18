@@ -222,10 +222,10 @@ pub struct DestroySnapshotError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum EnsureDatasetVolumeErrorInner {
-    #[error("{0}")]
+    #[error(transparent)]
     Execution(#[from] crate::ExecutionError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     GetValue(#[from] GetValueError),
 
     #[error("value {value_name} parse error: {value} not a number!")]
