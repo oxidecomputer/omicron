@@ -328,16 +328,10 @@ impl Template {
                 {
                     err("set_critical in device template")
                 } else if unsafe {
-                    let mut os_path: Vec<i8> = path
-                        .as_os_str()
-                        .as_encoded_bytes()
-                        .iter()
-                        .map(|c| *c as i8)
-                        .collect();
-                    // The conversion from string to bytes above strips off the
-                    // required tailing NULL, which we replace here.
-                    os_path.push(0);
-
+                    use std::os::unix::ffi::OsStrExt;
+                    let os_path = std::ffi::CString::new(
+                        path.clone().into_os_string().as_bytes(),
+                    ).expect("a path from the OS should be convertable into a CString");
                     ct_dev_tmpl_set_minor(rawfd, os_path.as_ptr())
                 } != 0
                 {
