@@ -33,7 +33,7 @@ use nexus_types::external_api::params::{
 use nexus_types::external_api::shared::IpPoolReservationType;
 use nexus_types::external_api::shared::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_types::external_api::views::{
-    IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
+    IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
 };
 use nexus_types::identity::Resource;
 use omicron_common::api::external::{
@@ -306,8 +306,12 @@ async fn test_multicast_group_with_default_pool(
         IpPoolReservationType::ExternalSilos,
     );
 
-    object_create::<_, SystemIpPool>(&client, "/v1/system/ip-pools", &pool_params)
-        .await;
+    object_create::<_, SystemIpPool>(
+        &client,
+        "/v1/system/ip-pools",
+        &pool_params,
+    )
+    .await;
 
     // Add IPv4 multicast range - use unique range for this test
     let ipv4_range = IpRange::V4(
@@ -652,8 +656,12 @@ async fn test_multicast_ip_pool_range_validation(
         IpVersion::V4,
         IpPoolReservationType::ExternalSilos,
     );
-    object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
-        .await;
+    object_create::<_, SystemIpPool>(
+        client,
+        "/v1/system/ip-pools",
+        &pool_params,
+    )
+    .await;
 
     let range_url = "/v1/system/ip-pools/test-v4-pool/ranges/add";
 

@@ -1084,7 +1084,8 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::IpPoolPath>,
         query_params: Query<IpPoolRangePaginationParams>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolRange>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolRange>>, HttpError>
+    {
         Self::ip_pool_range_list(rqctx, path_params, query_params).await
     }
 

@@ -317,7 +317,9 @@ mod test {
     };
     use nexus_types::external_api::shared::IpPoolReservationType;
     use nexus_types::external_api::shared::{IpRange, Ipv4Range};
-    use nexus_types::external_api::views::{SystemIpPool, IpPoolRange, IpVersion};
+    use nexus_types::external_api::views::{
+        IpPoolRange, IpVersion, SystemIpPool,
+    };
     use omicron_common::api::external::{
         IdentityMetadataCreateParams, NameOrId,
     };
@@ -449,8 +451,12 @@ mod test {
             IpVersion::V4,
             IpPoolReservationType::ExternalSilos,
         );
-        object_create::<_, SystemIpPool>(client, "/v1/system/ip-pools", &pool_params)
-            .await;
+        object_create::<_, SystemIpPool>(
+            client,
+            "/v1/system/ip-pools",
+            &pool_params,
+        )
+        .await;
 
         // Add multicast IP range
         let asm_range = IpRange::V4(
