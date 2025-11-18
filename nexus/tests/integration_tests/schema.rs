@@ -3573,10 +3573,7 @@ mod migration_210 {
         let got = rows
             .into_iter()
             .map(|row| {
-                (
-                    row.get::<_, Uuid>("sled_id"),
-                    row.get::<_, String>("subnet"),
-                )
+                (row.get::<_, Uuid>("sled_id"), row.get::<_, String>("subnet"))
             })
             .collect::<BTreeSet<_>>();
         assert_eq!(expected, got);
