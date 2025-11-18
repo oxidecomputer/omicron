@@ -142,32 +142,32 @@ impl super::Nexus {
             // token is being used)
 
             // Validate the requested TTL against the silo's max TTL
-            if let Some(max) = silo_max_ttl {
-                if requested_ttl > max.0.into() {
-                    return Err(Error::invalid_request(&format!(
-                        "Requested TTL {} seconds exceeds maximum allowed \
-                         TTL for this silo of {} seconds",
-                        requested_ttl, max
-                    )));
-                }
+            if let Some(max) = silo_max_ttl
+                && requested_ttl > max.0.into()
+            {
+                return Err(Error::invalid_request(&format!(
+                    "Requested TTL {} seconds exceeds maximum allowed \
+                     TTL for this silo of {} seconds",
+                    requested_ttl, max
+                )));
             };
 
             let requested_exp =
                 Utc::now() + Duration::seconds(requested_ttl.0.into());
 
             // If currently authenticated via token, error if requested exceeds it
-            if let Some(auth_exp) = opctx.authn.device_token_expiration() {
-                if requested_exp > auth_exp {
-                    return Err(Error::invalid_request(
-                        "Requested token TTL would exceed the expiration time \
-                         of the token being used to authenticate the confirm \
-                         request. To get the full requested TTL, confirm \
-                         this token using a web console session. Alternatively, \
-                         omit requested TTL to get a token with the longest \
-                         allowed lifetime, determined by the lesser of the silo \
-                         max and the current token's expiration time.",
-                    ));
-                }
+            if let Some(auth_exp) = opctx.authn.device_token_expiration()
+                && requested_exp > auth_exp
+            {
+                return Err(Error::invalid_request(
+                    "Requested token TTL would exceed the expiration time \
+                     of the token being used to authenticate the confirm \
+                     request. To get the full requested TTL, confirm \
+                     this token using a web console session. Alternatively, \
+                     omit requested TTL to get a token with the longest \
+                     allowed lifetime, determined by the lesser of the silo \
+                     max and the current token's expiration time.",
+                ));
             }
 
             Some(requested_exp)

@@ -704,7 +704,6 @@ async fn test_device_token_cannot_extend_expiration(
         testctx,
         session_auth_response.device_code,
         client_id,
-        AuthnMode::Session(session_token.clone()),
     )
     .await;
 
@@ -746,7 +745,6 @@ async fn test_device_token_cannot_extend_expiration(
         testctx,
         session_auth_response2.device_code,
         client_id,
-        AuthnMode::Session(session_token),
     )
     .await;
 
@@ -788,13 +786,9 @@ async fn test_device_token_cannot_extend_expiration(
     .expect("failed to confirm initial token");
 
     // Fetch the initial token
-    let initial_token_grant = fetch_device_token(
-        testctx,
-        auth_response_1.device_code,
-        client_id,
-        AuthnMode::PrivilegedUser,
-    )
-    .await;
+    let initial_token_grant =
+        fetch_device_token(testctx, auth_response_1.device_code, client_id)
+            .await;
 
     let initial_token = initial_token_grant.access_token;
     let initial_expiration = initial_token_grant.time_expires.unwrap();
@@ -1130,7 +1124,6 @@ async fn fetch_device_token(
     testctx: &ClientTestContext,
     device_code: String,
     client_id: Uuid,
-    authn_mode: AuthnMode,
 ) -> DeviceAccessTokenGrant {
     NexusRequest::new(
         RequestBuilder::new(testctx, Method::POST, "/device/token")
@@ -1143,7 +1136,6 @@ async fn fetch_device_token(
             }))
             .expect_status(Some(StatusCode::OK)),
     )
-    .authn_as(authn_mode)
     .execute_and_parse_unwrap::<DeviceAccessTokenGrant>()
     .await
 }
