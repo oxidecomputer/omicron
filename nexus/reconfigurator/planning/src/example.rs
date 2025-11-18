@@ -13,6 +13,7 @@ use std::net::Ipv4Addr;
 
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
+use crate::planner::Planner;
 use crate::planner::rng::PlannerRng;
 use crate::system::RotStateOverrides;
 use crate::system::SledBuilder;
@@ -545,11 +546,11 @@ impl ExampleSystemBuilder {
         let mut builder = BlueprintBuilder::new_based_on(
             &self.log,
             &initial_blueprint,
-            &base_input,
             "test suite",
             rng.blueprint2_rng,
         )
         .unwrap();
+        Planner::update_builder_from_planning_input(&mut builder, &base_input);
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();

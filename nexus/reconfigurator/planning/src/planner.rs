@@ -183,14 +183,51 @@ impl<'a> Planner<'a> {
         inventory: &'a Collection,
         rng: PlannerRng,
     ) -> anyhow::Result<Planner<'a>> {
-        let blueprint = BlueprintBuilder::new_based_on(
+        let mut blueprint = BlueprintBuilder::new_based_on(
             &log,
             parent_blueprint,
-            input,
             creator,
             rng,
         )?;
+        Self::update_builder_from_planning_input(&mut blueprint, input);
         Ok(Planner { log, input, blueprint, inventory })
+    }
+
+    /// Update the internal state of `builder` to reflect changes between its
+    /// current blueprint and `input`.
+    ///
+    /// This method does not implement any real planning logic; it performs
+    /// strictly straightforward "update this value in the blueprint", such as
+    /// noting the latest internal and external DNS versions.
+    ///
+    /// This method is public and does not take `&self` so other planner-like
+    /// entities (`reconfigurator-cli` and tests) can easily reuse it if they
+    /// want to update a `BlueprintBuilder` they're using without running
+    /// through the planner proper.
+    pub fn update_builder_from_planning_input(
+        builder: &mut BlueprintBuilder,
+        input: &PlanningInput,
+    ) {
+        // Ensure we have an entry for every commissioned sled.
+        //
+        // If `input` has new sleds that weren't in `builder`'s parent
+        // blueprint, this will create empty configs for them.
+        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
+            builder.ensure_sled_exists(sled_id, details.resources.subnet);
+        }
+
+        // Update various blueprint fields that track changes to the system but
+        // that don't require any planning logic.
+        builder.set_cockroachdb_fingerprint(
+            input.cockroachdb_settings().state_fingerprint.clone(),
+        );
+        builder.set_internal_dns_version(input.internal_dns_version());
+        builder.set_external_dns_version(input.external_dns_version());
+        let oximeter_read_policy = input.oximeter_read_settings();
+        builder.set_oximeter_read_policy(
+            oximeter_read_policy.version.into(),
+            oximeter_read_policy.mode,
+        );
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
@@ -2350,18 +2387,8 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan_clickhouse_cluster_settings(&mut self) {
-        // Generate a new cluster config based on the policy and parent
-        // blueprint.
         let new_config = self.generate_current_clickhouse_cluster_config();
         self.blueprint.set_clickhouse_cluster_config(new_config);
-
-        // Not directly clickhouse cluster settings, but closely related: also
-        // update how we read from Oximeter based on the input policy.
-        let oximeter_read_policy = self.input.oximeter_read_settings();
-        self.blueprint.set_oximeter_read_policy(
-            oximeter_read_policy.version.into(),
-            oximeter_read_policy.mode,
-        );
     }
 
     fn generate_current_clickhouse_cluster_config(
@@ -3416,7 +3443,6 @@ pub(crate) mod test {
         let mut blueprint_builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &input,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )

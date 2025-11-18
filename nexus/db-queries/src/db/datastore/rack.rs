@@ -1208,7 +1208,6 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &EMPTY_BLUEPRINT,
-            &planning_input,
             test_name,
             PlannerRng::from_entropy(),
         )
@@ -1217,6 +1216,7 @@ mod test {
         for (sled_id, sled_resources) in
             planning_input.all_sled_resources(SledFilter::InService)
         {
+            builder.ensure_sled_exists(sled_id, sled_resources.subnet);
             builder
                 .sled_add_disks(sled_id, &sled_resources)
                 .expect("added disks");

@@ -2223,14 +2223,13 @@ fn cmd_blueprint_edit(
         .map(|c| c.clone())
         .unwrap_or_else(|| CollectionBuilder::new("sim").build());
 
-    let mut builder = BlueprintBuilder::new_based_on(
-        &sim.log,
-        blueprint,
-        &planning_input,
-        creator,
-        rng,
-    )
-    .context("creating blueprint builder")?;
+    let mut builder =
+        BlueprintBuilder::new_based_on(&sim.log, blueprint, creator, rng)
+            .context("creating blueprint builder")?;
+
+    // We're acting as the planner here, so we need to update the builder for
+    // any static changes in the input (e.g., new sleds, new DNS versions, ...).
+    Planner::update_builder_from_planning_input(&mut builder, &planning_input);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
