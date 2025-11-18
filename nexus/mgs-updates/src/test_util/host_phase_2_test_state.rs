@@ -220,14 +220,13 @@ mod api_impl {
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
     };
-    use sled_agent_api::v7::InstanceEnsureBody;
-    use sled_agent_api::v7::InstanceMulticastBody;
     use sled_agent_api::*;
     use sled_agent_types::bootstore::BootstoreStatus;
     use sled_agent_types::disk::DiskEnsureBody;
     use sled_agent_types::early_networking::EarlyNetworkConfig;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
+    use sled_agent_types::instance::InstanceMulticastBody;
     use sled_agent_types::instance::VmmPutStateBody;
     use sled_agent_types::instance::VmmPutStateResponse;
     use sled_agent_types::instance::VmmUnregisterResponse;
@@ -531,18 +530,10 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn vmm_register_v1(
+        async fn vmm_register(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
             _body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
-        ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-            unimplemented!()
-        }
-
-        async fn vmm_register_v7(
-            _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<VmmPathParam>,
-            _body: TypedBody<InstanceEnsureBody>,
         ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
             unimplemented!()
         }
