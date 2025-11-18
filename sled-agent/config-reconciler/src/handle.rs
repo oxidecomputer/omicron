@@ -374,7 +374,7 @@ impl ConfigReconcilerHandle {
                 Err(InventoryError::LedgerContentsNotAvailable)
             }
             Some(CurrentSledConfig::WaitingForInitialConfig) => Ok(None),
-            Some(CurrentSledConfig::Ledgered(config)) => Ok(Some(config)),
+            Some(CurrentSledConfig::Ledgered(config)) => Ok(Some(*config)),
         }
     }
 

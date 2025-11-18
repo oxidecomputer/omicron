@@ -847,9 +847,9 @@ mod test {
         while !changes.is_empty() {
             // check ordering
             assert!(
-                changes
-                    .windows(2)
-                    .all(|entries| entries[0].gen < entries[1].gen)
+                changes.windows(2).all(
+                    |entries| entries[0].generation < entries[1].generation
+                )
             );
 
             // check deleted status and version numbers
@@ -858,7 +858,7 @@ mod test {
                     // version should match a deleted entry
                     let deleted_nat = db_records
                         .iter()
-                        .find(|entry| entry.version_removed == Some(change.gen))
+                        .find(|entry| entry.version_removed == Some(change.generation))
                         .expect("did not find a deleted nat entry with a matching version number");
 
                     assert_eq!(
@@ -881,7 +881,7 @@ mod test {
                     // version should match an active nat entry
                     let added_nat = db_records
                         .iter()
-                        .find(|entry| entry.version_added == change.gen)
+                        .find(|entry| entry.version_added == change.generation)
                         .expect("did not find an active nat entry with a matching version number");
 
                     assert!(added_nat.version_removed.is_none());
@@ -904,7 +904,7 @@ mod test {
             // bump the count of changes seen
             total_changes += changes.len();
 
-            version = changes.last().unwrap().gen;
+            version = changes.last().unwrap().generation;
             changes =
                 datastore.nat_changeset(&opctx, version, limit).await.unwrap();
         }

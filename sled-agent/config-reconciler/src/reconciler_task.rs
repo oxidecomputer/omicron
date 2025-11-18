@@ -176,7 +176,7 @@ pub enum ReconcilerTaskStatus {
     WaitingForInternalDisks,
     WaitingForInitialConfig,
     PerformingReconciliation {
-        config: OmicronSledConfig,
+        config: Box<OmicronSledConfig>,
         started_at_time: DateTime<Utc>,
         started_at_instant: Instant,
     },
@@ -603,7 +603,7 @@ impl ReconcilerTask {
         };
 
         let inner = LatestReconciliationResult {
-            sled_config,
+            sled_config: *sled_config,
             external_disks_inventory: self.external_disks.to_inventory(),
             datasets: self.datasets.to_inventory(),
             orphaned_datasets: self.datasets.orphaned_datasets().clone(),

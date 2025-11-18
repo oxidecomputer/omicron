@@ -52,6 +52,55 @@ pub const IPV6_SSM_SUBNET: oxnet::Ipv6Net = oxnet::Ipv6Net::new_unchecked(
     12,
 );
 
+/// IPv4 multicast address range (224.0.0.0/4).
+/// See RFC 5771 (IPv4 Multicast Address Assignments):
+/// <https://www.rfc-editor.org/rfc/rfc5771>
+pub const IPV4_MULTICAST_RANGE: Ipv4Net =
+    Ipv4Net::new_unchecked(Ipv4Addr::new(224, 0, 0, 0), 4);
+
+/// IPv4 link-local multicast subnet (224.0.0.0/24).
+/// This range is reserved for local network control protocols and should not
+/// be routed beyond the local link. Includes addresses for protocols like
+/// OSPF (224.0.0.5), RIPv2 (224.0.0.9), and other local routing protocols.
+/// See RFC 5771 Section 4:
+/// <https://www.rfc-editor.org/rfc/rfc5771#section-4>
+pub const IPV4_LINK_LOCAL_MULTICAST_SUBNET: Ipv4Net =
+    Ipv4Net::new_unchecked(Ipv4Addr::new(224, 0, 0, 0), 24);
+
+/// IPv6 multicast address range (ff00::/8).
+/// See RFC 4291 (IPv6 Addressing Architecture):
+/// <https://www.rfc-editor.org/rfc/rfc4291>
+pub const IPV6_MULTICAST_RANGE: Ipv6Net =
+    Ipv6Net::new_unchecked(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 0), 8);
+
+/// IPv6 multicast prefix (ff00::/8) mask/value for scope checking.
+pub const IPV6_MULTICAST_PREFIX: u16 = 0xff00;
+
+/// Admin-scoped IPv6 multicast prefix (ff04::/16) as u16 for address
+/// construction and normalization of underlay multicast addresses.
+pub const IPV6_ADMIN_SCOPED_MULTICAST_PREFIX: u16 = 0xff04;
+
+/// IPv6 interface-local multicast subnet (ff01::/16).
+/// These addresses are not routable and should not be added to IP pools.
+/// See RFC 4291 Section 2.7 (multicast scope field):
+/// <https://www.rfc-editor.org/rfc/rfc4291#section-2.7>
+pub const IPV6_INTERFACE_LOCAL_MULTICAST_SUBNET: oxnet::Ipv6Net =
+    oxnet::Ipv6Net::new_unchecked(
+        Ipv6Addr::new(0xff01, 0, 0, 0, 0, 0, 0, 0),
+        16,
+    );
+
+/// IPv6 link-local multicast subnet (ff02::/16).
+/// These addresses are not routable beyond the local link and should not be
+/// added to IP pools.
+/// See RFC 4291 Section 2.7 (multicast scope field):
+/// <https://www.rfc-editor.org/rfc/rfc4291#section-2.7>
+pub const IPV6_LINK_LOCAL_MULTICAST_SUBNET: oxnet::Ipv6Net =
+    oxnet::Ipv6Net::new_unchecked(
+        Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0, 0),
+        16,
+    );
+
 /// maximum possible value for a tcp or udp port
 pub const MAX_PORT: u16 = u16::MAX;
 
@@ -446,18 +495,18 @@ impl JsonSchema for IpRange {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
                     external::label_schema(
                         "v4",
-                        gen.subschema_for::<Ipv4Range>(),
+                        generator.subschema_for::<Ipv4Range>(),
                     ),
                     external::label_schema(
                         "v6",
-                        gen.subschema_for::<Ipv6Range>(),
+                        generator.subschema_for::<Ipv6Range>(),
                     ),
                 ]),
                 ..Default::default()

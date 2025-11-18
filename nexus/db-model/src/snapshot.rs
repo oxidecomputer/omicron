@@ -50,7 +50,9 @@ pub struct Snapshot {
     // destination of all snapshot blocks
     pub destination_volume_id: DbTypedUuid<VolumeKind>,
 
-    pub gen: Generation,
+    #[diesel(column_name = "gen")]
+    #[serde(rename = "gen")]
+    pub generation: Generation,
     pub state: SnapshotState,
     pub block_size: BlockSize,
 

@@ -1,7 +1,7 @@
 [package]
 name = "nexus-inventory"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -21,7 +21,6 @@ futures.workspace = true
 gateway-client.workspace = true
 gateway-messages.workspace = true
 gateway-types.workspace = true
-id-map.workspace = true
 iddqd.workspace = true
 itertools.workspace = true
 nexus-sled-agent-shared.workspace = true

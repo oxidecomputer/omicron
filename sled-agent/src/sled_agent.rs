@@ -71,8 +71,8 @@ use sled_agent_config_reconciler::{
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
-    VmmStateRequested, VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
@@ -919,6 +919,30 @@ impl SledAgent {
         self.inner
             .instances
             .delete_external_ip(propolis_id, external_ip)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_join_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .join_multicast_group(propolis_id, multicast_body)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    pub async fn instance_leave_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        multicast_body: &InstanceMulticastBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .leave_multicast_group(propolis_id, multicast_body)
             .await
             .map_err(|e| Error::Instance(e))
     }

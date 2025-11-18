@@ -977,12 +977,12 @@ impl JsonSchema for DatasetKind {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         // The schema is a bit more complicated than this -- it's either one of
         // the fixed values or a string starting with "zone/" -- but this is
         // good enough for now.
-        let mut schema = <String>::json_schema(gen).into_object();
+        let mut schema = <String>::json_schema(generator).into_object();
         schema.metadata().description = Some(
             "The kind of dataset. See the `DatasetKind` enum \
              in omicron-common for possible values."
@@ -1005,15 +1005,20 @@ impl DatasetKind {
     }
 
     /// Returns true if this dataset is delegated to a non-global zone.
+    ///
+    /// Note: the `zoned` property of a dataset controls whether or not a
+    /// dataset is managed from a non-global zone. This function's intent is
+    /// different in the sense that it's asking whether or not a dataset will be
+    /// delegated to a non-global zone, not managed by a non-global zone.
     pub fn zoned(&self) -> bool {
         use DatasetKind::*;
         match self {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
 
-            TransientZoneRoot | TransientZone { .. } | Debug => false,
-
-            LocalStorage => true,
+            TransientZoneRoot | TransientZone { .. } | Debug | LocalStorage => {
+                false
+            }
         }
     }
 

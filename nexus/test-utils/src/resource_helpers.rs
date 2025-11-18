@@ -294,6 +294,44 @@ pub async fn create_ip_pool(
     (pool, range)
 }
 
+/// Create a multicast IP pool with a multicast range for testing.
+///
+/// The multicast IP range may be specified if it's important for testing specific
+/// multicast addresses, or a default multicast range (224.1.0.0 - 224.1.255.255)
+/// will be provided if the `ip_range` argument is `None`.
+pub async fn create_multicast_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ip_range: Option<IpRange>,
+) -> (IpPool, IpPoolRange) {
+    let pool = object_create(
+        client,
+        "/v1/system/ip-pools",
+        &params::IpPoolCreate::new_multicast(
+            IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::from("a multicast ip pool"),
+            },
+            ip_range
+                .map(|r| r.version())
+                .unwrap_or_else(|| views::IpVersion::V4),
+        ),
+    )
+    .await;
+
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(224, 1, 0, 0),
+            Ipv4Addr::new(224, 1, 255, 255),
+        ))
+        .unwrap()
+    });
+    let url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
+    let range = object_create(client, &url, &ip_range).await;
+    (pool, range)
+}
+
 pub async fn link_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
@@ -662,6 +700,8 @@ pub async fn create_instance(
         true,
         Default::default(),
         None,
+        // Multicast groups=
+        Vec::<NameOrId>::new(),
     )
     .await
 }
@@ -679,6 +719,7 @@ pub async fn create_instance_with(
     start: bool,
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
     cpu_platform: Option<InstanceCpuPlatform>,
+    multicast_groups: Vec<NameOrId>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 
@@ -705,6 +746,7 @@ pub async fn create_instance_with(
             start,
             auto_restart_policy,
             anti_affinity_groups: Vec::new(),
+            multicast_groups,
         },
     )
     .await
@@ -1238,33 +1280,56 @@ pub async fn projects_list(
     .collect()
 }
 
-/// Log in with test suite password, return session cookie
-pub async fn create_console_session<N: NexusServer>(
-    cptestctx: &ControlPlaneTestContext<N>,
+/// Log in and return session token
+pub async fn create_session_for_user(
+    testctx: &ClientTestContext,
+    silo_name: &str,
+    username: &str,
+    password: &str,
 ) -> String {
-    let testctx = &cptestctx.external_client;
-    let url = format!("/v1/login/{}/local", cptestctx.silo_name);
+    let url = format!("/v1/login/{silo_name}/local");
     let credentials = test_params::UsernamePasswordCredentials {
-        username: cptestctx.user_name.as_ref().parse().unwrap(),
-        password: TEST_SUITE_PASSWORD.to_string(),
+        username: username.parse().unwrap(),
+        password: password.to_string(),
     };
-    let login = RequestBuilder::new(&testctx, Method::POST, &url)
+    let login_response = RequestBuilder::new(&testctx, Method::POST, &url)
         .body(Some(&credentials))
         .expect_status(Some(StatusCode::NO_CONTENT))
         .execute()
         .await
         .expect("failed to log in");
 
-    let session_cookie = {
-        let header_name = header::SET_COOKIE;
-        login.headers.get(header_name).unwrap().to_str().unwrap().to_string()
-    };
-    let (session_token, rest) = session_cookie.split_once("; ").unwrap();
+    let cookie_header = login_response
+        .headers
+        .get(header::SET_COOKIE)
+        .expect("missing session cookie")
+        .to_str()
+        .expect("session cookie not a string");
 
-    assert!(session_token.starts_with("session="));
-    assert_eq!(rest, "Path=/; HttpOnly; SameSite=Lax; Max-Age=86400");
+    cookie_header
+        .split_once("session=")
+        .expect("malformed cookie")
+        .1
+        .split_once(';')
+        .expect("malformed cookie")
+        .0
+        .to_string()
+}
 
-    session_token.to_string()
+/// Log in with test suite password, return session cookie (formatted for Cookie
+/// header)
+pub async fn create_console_session<N: NexusServer>(
+    cptestctx: &ControlPlaneTestContext<N>,
+) -> String {
+    let token = create_session_for_user(
+        &cptestctx.external_client,
+        cptestctx.silo_name.as_str(),
+        cptestctx.user_name.as_ref(),
+        TEST_SUITE_PASSWORD,
+    )
+    .await;
+
+    format!("session={}", token)
 }
 
 #[derive(Debug)]

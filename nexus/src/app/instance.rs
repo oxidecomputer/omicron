@@ -54,6 +54,7 @@ use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::MulticastGroupUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use propolis_client::support::InstanceSerialConsoleHelper;
@@ -67,6 +68,7 @@ use sagas::instance_start;
 use sagas::instance_update;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
+use std::collections::HashSet;
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -314,6 +316,10 @@ async fn normalize_anti_affinity_groups(
 }
 
 impl super::Nexus {
+    /// Look up an instance by name or UUID.
+    ///
+    /// The `project` parameter is required for name-based lookup (provides scope)
+    /// and must NOT be specified for UUID-based lookup.
     pub fn instance_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -348,6 +354,121 @@ impl super::Nexus {
         }
     }
 
+    /// Handle multicast group membership changes during instance reconfiguration.
+    ///
+    /// Diff is computed against the instance's active memberships only
+    /// (i.e., rows with `time_deleted IS NULL`). Removed ("Left") rows are
+    /// ignored here and handled by the reconciler.
+    async fn handle_multicast_group_changes(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        multicast_groups: &[NameOrId],
+    ) -> Result<(), Error> {
+        let instance_id = authz_instance.id();
+
+        // Check if multicast is enabled - if not, skip all multicast operations
+        if !self.multicast_enabled() {
+            debug!(opctx.log,
+                   "multicast not enabled, skipping multicast group changes";
+                   "instance_id" => %instance_id,
+                   "requested_groups_count" => multicast_groups.len());
+            return Ok(());
+        }
+
+        debug!(
+            opctx.log,
+            "processing multicast group changes";
+            "instance_id" => %instance_id,
+            "requested_groups" => ?multicast_groups,
+            "requested_groups_count" => multicast_groups.len()
+        );
+
+        // Get current multicast group memberships (active-only)
+        let current_memberships = self
+            .datastore()
+            .multicast_group_members_list_by_instance(
+                opctx,
+                InstanceUuid::from_untyped_uuid(instance_id),
+                false,
+            )
+            .await?;
+        let current_group_ids: HashSet<_> =
+            current_memberships.iter().map(|m| m.external_group_id).collect();
+
+        debug!(
+            opctx.log,
+            "current multicast memberships";
+            "instance_id" => %instance_id,
+            "current_memberships_count" => current_memberships.len(),
+            "current_group_ids" => ?current_group_ids
+        );
+
+        // Resolve new multicast group names/IDs to group records
+        let mut new_group_ids = HashSet::new();
+        for group_name_or_id in multicast_groups {
+            let multicast_group_selector = params::MulticastGroupSelector {
+                multicast_group: group_name_or_id.clone(),
+            };
+            let multicast_group_lookup =
+                self.multicast_group_lookup(opctx, &multicast_group_selector)?;
+            let (.., db_group) =
+                multicast_group_lookup.fetch_for(authz::Action::Read).await?;
+            let id = db_group.id();
+            new_group_ids.insert(id);
+        }
+
+        // Determine which groups to leave and join
+        let groups_to_leave: Vec<_> =
+            current_group_ids.difference(&new_group_ids).cloned().collect();
+        let groups_to_join: Vec<_> =
+            new_group_ids.difference(&current_group_ids).cloned().collect();
+
+        debug!(
+            opctx.log,
+            "membership changes";
+            "instance_id" => %instance_id,
+            "groups_to_leave" => ?groups_to_leave,
+            "groups_to_join" => ?groups_to_join
+        );
+
+        // Remove members from groups that are no longer wanted
+        for group_id in groups_to_leave {
+            debug!(
+                opctx.log,
+                "removing member from group";
+                "instance_id" => %instance_id,
+                "group_id" => %group_id
+            );
+            self.datastore()
+                .multicast_group_member_detach_by_group_and_instance(
+                    opctx,
+                    MulticastGroupUuid::from_untyped_uuid(group_id),
+                    InstanceUuid::from_untyped_uuid(instance_id),
+                )
+                .await?;
+        }
+
+        // Add members to new groups
+        for group_id in groups_to_join {
+            debug!(
+                opctx.log,
+                "adding member to group (reconciler will handle dataplane updates)";
+                "instance_id" => %instance_id,
+                "group_id" => %group_id
+            );
+            self.datastore()
+                .multicast_group_member_attach_to_instance(
+                    opctx,
+                    MulticastGroupUuid::from_untyped_uuid(group_id),
+                    InstanceUuid::from_untyped_uuid(instance_id),
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
     pub(crate) async fn instance_reconfigure(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -363,6 +484,7 @@ impl super::Nexus {
             auto_restart_policy,
             boot_disk,
             cpu_platform,
+            multicast_groups,
         } = params;
 
         check_instance_cpu_memory_sizes(*ncpus, *memory)?;
@@ -398,9 +520,32 @@ impl super::Nexus {
             memory,
             cpu_platform,
         };
-        self.datastore()
+
+        // Update the instance configuration
+        let result = self
+            .datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
-            .await
+            .await;
+
+        // Handle multicast group updates if specified
+        if let Some(multicast_groups) = multicast_groups {
+            self.handle_multicast_group_changes(
+                opctx,
+                &authz_instance,
+                multicast_groups,
+            )
+            .await?;
+        }
+
+        // Return early with any database errors before activating reconciler
+        let instance_result = result?;
+
+        // Activate multicast reconciler after successful reconfiguration if multicast groups were modified
+        if multicast_groups.is_some() {
+            self.background_tasks.task_multicast_reconciler.activate();
+        }
+
+        Ok(instance_result)
     }
 
     pub(crate) async fn project_create_instance(
@@ -554,7 +699,9 @@ impl super::Nexus {
             }
         }
 
+        // Activate background tasks after successful instance creation
         self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
 
         // TODO: This operation should return the instance as it was created.
         // Refetching the instance state here won't return that version of the
@@ -627,7 +774,9 @@ impl super::Nexus {
             )
             .await?;
 
+        // Activate background tasks after successful saga completion
         self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
         Ok(())
     }
 
@@ -680,7 +829,9 @@ impl super::Nexus {
             )
             .await?;
 
+        // Activate background tasks after successful saga completion
         self.background_tasks.task_vpc_route_manager.activate();
+        self.background_tasks.task_multicast_reconciler.activate();
 
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
@@ -776,6 +927,11 @@ impl super::Nexus {
                     )
                     .await?;
 
+                // Activate multicast reconciler after successful instance start.
+                // The reconciler handles both group and member state, including
+                // Joining→Joined transitions now that sled_id is set.
+                self.background_tasks.task_multicast_reconciler.activate();
+
                 self.db_datastore
                     .instance_fetch_with_vmm(opctx, &authz_instance)
                     .await
@@ -805,6 +961,20 @@ impl super::Nexus {
                 IntendedState::Stopped,
             )
             .await?;
+
+        // Update multicast member state for this instance to "Left" and clear
+        // `sled_id` - only if multicast is enabled
+        if self.multicast_enabled() {
+            self.db_datastore
+                .multicast_group_members_detach_by_instance(
+                    opctx,
+                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                )
+                .await?;
+        }
+
+        // Activate multicast reconciler to handle switch-level changes
+        self.background_tasks.task_multicast_reconciler.activate();
 
         if let Err(e) = self
             .instance_request_state(
@@ -956,7 +1126,11 @@ impl super::Nexus {
                         InstanceStateChangeRequestAction::UpdateRuntime(
                             db::model::InstanceRuntimeState {
                                 time_updated: chrono::Utc::now(),
-                                r#gen: prev_runtime.r#gen.0.next().into(),
+                                generation: prev_runtime
+                                    .generation
+                                    .0
+                                    .next()
+                                    .into(),
                                 nexus_state: db::model::InstanceState::NoVmm,
                                 ..prev_runtime.clone()
                             },
@@ -1280,6 +1454,49 @@ impl super::Nexus {
             project_id: authz_project.id(),
         };
 
+        let mut multicast_groups = Vec::new();
+
+        if self.multicast_enabled() {
+            let multicast_members = self
+                .db_datastore
+                .multicast_group_members_list_by_instance(
+                    opctx,
+                    InstanceUuid::from_untyped_uuid(authz_instance.id()),
+                    false, // include_removed
+                )
+                .await
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to list multicast group members for instance: {e}"
+                    ))
+                })?;
+
+            for member in multicast_members {
+                // Get the group details for this membership
+                if let Ok(group) = self
+                    .db_datastore
+                    .multicast_group_fetch(
+                        opctx,
+                        omicron_uuid_kinds::MulticastGroupUuid::from_untyped_uuid(
+                            member.external_group_id,
+                        ),
+                    )
+                    .await
+                {
+                    multicast_groups.push(
+                        sled_agent_client::types::InstanceMulticastMembership {
+                            group_ip: group.multicast_ip.ip(),
+                            sources: group
+                                .source_ips
+                                .into_iter()
+                                .map(|src_ip| src_ip.ip())
+                                .collect(),
+                        },
+                    );
+                }
+            }
+        }
+
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
@@ -1287,6 +1504,7 @@ impl super::Nexus {
             ephemeral_ip,
             floating_ips,
             firewall_rules,
+            multicast_groups,
             dhcp_config: sled_agent_client::types::DhcpConfig {
                 dns_servers: self.external_dns_servers.clone(),
                 // TODO: finish designing instance DNS
@@ -1306,7 +1524,7 @@ impl super::Nexus {
         // state.
         let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
             time_updated: chrono::Utc::now(),
-            r#gen: initial_vmm.runtime.gen.next(),
+            r#gen: initial_vmm.runtime.generation.next(),
             state: match operation {
                 InstanceRegisterReason::Migrate { .. } => {
                     sled_agent_client::types::VmmState::Migrating
@@ -1394,7 +1612,7 @@ impl super::Nexus {
         let new_runtime = VmmRuntimeState {
             state: db::model::VmmState::Failed,
             time_state_updated: chrono::Utc::now(),
-            r#gen: db::model::Generation(vmm.runtime.r#gen.next()),
+            generation: db::model::Generation(vmm.runtime.generation.next()),
         };
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
@@ -2083,10 +2301,12 @@ impl super::Nexus {
         log: &slog::Logger,
         saga: steno::SagaDag,
         instance_id: InstanceUuid,
-    ) -> impl std::future::Future<Output = ()> + Send {
+    ) -> impl std::future::Future<Output = ()> + Send + use<> {
         let sagas = self.sagas.clone();
         let task_instance_updater =
             self.background_tasks.task_instance_updater.clone();
+        let task_multicast_reconciler =
+            self.background_tasks.task_multicast_reconciler.clone();
         let log = log.clone();
         async move {
             debug!(
@@ -2127,6 +2347,9 @@ impl super::Nexus {
                 // instance, kick the instance-updater background task
                 // to try and start it again in a timely manner.
                 task_instance_updater.activate();
+            } else {
+                // Activate multicast reconciler after successful saga completion
+                task_multicast_reconciler.activate();
             }
         }
     }
@@ -2477,6 +2700,7 @@ mod tests {
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());

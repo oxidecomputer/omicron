@@ -2,24 +2,30 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::api::external::Hostname;
-use omicron_common::api::internal::nexus::VmmRuntimeState;
-use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
-use omicron_common::api::internal::shared::SourceNatConfig;
+//! Sled agent types (version 6)
+//!
+//! Version 6 types (before multicast support was added in version 7).
+
+use std::net::{IpAddr, SocketAddr};
+
+use omicron_common::api::{
+    external::Hostname,
+    internal::{
+        nexus::VmmRuntimeState,
+        shared::{
+            DhcpConfig, NetworkInterface, ResolvedVpcFirewallRule,
+            SourceNatConfig,
+        },
+    },
+};
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
-use sled_agent_types::instance::InstanceMetadata;
-use sled_agent_types::instance::VmmSpec;
-use std::net::IpAddr;
-use std::net::SocketAddr;
+use serde::{Deserialize, Serialize};
+use sled_agent_types::instance::{InstanceMetadata, VmmSpec};
 use uuid::Uuid;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
-/// agent.
+/// agent (version 6, before multicast support).
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InstanceEnsureBody {
     /// The virtual hardware configuration this virtual machine should have when
@@ -49,7 +55,7 @@ pub struct InstanceEnsureBody {
 }
 
 /// Describes sled-local configuration that a sled-agent must establish to make
-/// the instance's virtual hardware fully functional.
+/// the instance's virtual hardware fully functional (version 6, before multicast).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstanceSledLocalConfig {
     pub hostname: Hostname,
@@ -63,39 +69,56 @@ pub struct InstanceSledLocalConfig {
     pub dhcp_config: DhcpConfig,
 }
 
-impl From<InstanceEnsureBody>
-    for sled_agent_types::instance::InstanceEnsureBody
+impl From<InstanceSledLocalConfig>
+    for sled_agent_types::instance::InstanceSledLocalConfig
 {
-    fn from(
-        v6: InstanceEnsureBody,
-    ) -> sled_agent_types::instance::InstanceEnsureBody {
-        sled_agent_types::instance::InstanceEnsureBody {
-            vmm_spec: v6.vmm_spec,
-            local_config: v6.local_config.into(),
-            vmm_runtime: v6.vmm_runtime,
-            instance_id: v6.instance_id,
-            migration_id: v6.migration_id,
-            propolis_addr: v6.propolis_addr,
-            metadata: v6.metadata,
+    fn from(v6: InstanceSledLocalConfig) -> Self {
+        let InstanceSledLocalConfig {
+            hostname,
+            nics,
+            source_nat,
+            ephemeral_ip,
+            floating_ips,
+            firewall_rules,
+            dhcp_config,
+        } = v6;
+
+        Self {
+            hostname,
+            nics,
+            source_nat,
+            ephemeral_ip,
+            floating_ips,
+            multicast_groups: Vec::new(),
+            firewall_rules,
+            dhcp_config,
+            delegated_zvols: Vec::new(),
         }
     }
 }
 
-impl From<InstanceSledLocalConfig>
-    for sled_agent_types::instance::InstanceSledLocalConfig
+impl From<InstanceEnsureBody>
+    for sled_agent_types::instance::InstanceEnsureBody
 {
-    fn from(
-        v6: InstanceSledLocalConfig,
-    ) -> sled_agent_types::instance::InstanceSledLocalConfig {
-        sled_agent_types::instance::InstanceSledLocalConfig {
-            hostname: v6.hostname,
-            nics: v6.nics,
-            source_nat: v6.source_nat,
-            ephemeral_ip: v6.ephemeral_ip,
-            floating_ips: v6.floating_ips,
-            firewall_rules: v6.firewall_rules,
-            dhcp_config: v6.dhcp_config,
-            delegated_zvols: vec![],
+    fn from(v6: InstanceEnsureBody) -> Self {
+        let InstanceEnsureBody {
+            vmm_spec,
+            local_config,
+            vmm_runtime,
+            instance_id,
+            migration_id,
+            propolis_addr,
+            metadata,
+        } = v6;
+
+        Self {
+            vmm_spec,
+            local_config: local_config.into(),
+            vmm_runtime,
+            instance_id,
+            migration_id,
+            propolis_addr,
+            metadata,
         }
     }
 }

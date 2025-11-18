@@ -40,7 +40,7 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -796,9 +796,9 @@ impl DataStore {
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
                         sled_agent_generation: *s.sled_agent_generation,
-                        disks: IdMap::new(),
-                        datasets: IdMap::new(),
-                        zones: IdMap::new(),
+                        disks: IdOrdMap::new(),
+                        datasets: IdOrdMap::new(),
+                        zones: IdOrdMap::new(),
                         remove_mupdate_override: s
                             .remove_mupdate_override
                             .map(|id| id.into()),
@@ -942,7 +942,13 @@ impl DataStore {
                                 e.to_string()
                             ))
                         })?;
-                    sled_config.zones.insert(zone);
+                    sled_config.zones.insert_unique(zone).map_err(|e| {
+                        Error::internal_error(&format!(
+                            "duplicate zone ID found, but \
+                             database guarantees uniqueness: {}",
+                            InlineErrorChain::new(&e),
+                        ))
+                    })?;
                 }
             }
         }
@@ -994,12 +1000,19 @@ impl DataStore {
                         ))
                     })?;
                     let disk_id = d.id;
-                    sled_config.disks.insert(d.try_into().map_err(|e| {
+                    let disk = d.try_into().map_err(|e| {
                         Error::internal_error(&format!(
                             "Cannot convert BpOmicronPhysicalDisk {}: {e}",
                             disk_id
                         ))
-                    })?);
+                    })?;
+                    sled_config.disks.insert_unique(disk).map_err(|e| {
+                        Error::internal_error(&format!(
+                            "duplicate disk ID found, but \
+                             database guarantees uniqueness: {}",
+                            InlineErrorChain::new(&e),
+                        ))
+                    })?;
                 }
             }
         }
@@ -1046,12 +1059,21 @@ impl DataStore {
                     })?;
 
                     let dataset_id = d.id;
-                    sled_config.datasets.insert(d.try_into().map_err(|e| {
+                    let dataset = d.try_into().map_err(|e| {
                         Error::internal_error(&format!(
                             "Cannot parse dataset {}: {e}",
                             dataset_id
                         ))
-                    })?);
+                    })?;
+                    sled_config.datasets.insert_unique(dataset).map_err(
+                        |e| {
+                            Error::internal_error(&format!(
+                                "duplicate dataset ID found, but \
+                                 database guarantees uniqueness: {}",
+                                InlineErrorChain::new(&e),
+                            ))
+                        },
+                    )?;
                 }
             }
         }
@@ -4307,8 +4329,12 @@ mod tests {
             .await
             .expect("add range to service ip pool");
         let zone_id = OmicronZoneUuid::new_v4();
-        blueprint.sleds.get_mut(&sled_id).unwrap().zones.insert(
-            BlueprintZoneConfig {
+        blueprint
+            .sleds
+            .get_mut(&sled_id)
+            .unwrap()
+            .zones
+            .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
                 filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
@@ -4347,8 +4373,8 @@ mod tests {
                     },
                 ),
                 image_source: BlueprintZoneImageSource::InstallDataset,
-            },
-        );
+            })
+            .expect("freshly generated zone IDs are unique");
 
         blueprint
     }

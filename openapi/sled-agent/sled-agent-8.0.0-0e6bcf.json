@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "7.0.0"
+    "version": "8.0.0"
   },
   "paths": {
     "/artifacts": {
@@ -355,84 +355,6 @@
         }
       }
     },
-    "/local-storage/{zpool_id}/{dataset_id}": {
-      "post": {
-        "summary": "Create a local storage dataset",
-        "operationId": "local_storage_dataset_ensure",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/DatasetUuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ExternalZpoolUuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LocalStorageDatasetEnsureRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "summary": "Delete a local storage dataset",
-        "operationId": "local_storage_dataset_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "dataset_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/DatasetUuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/ExternalZpoolUuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/network-bootstore-config": {
       "get": {
         "summary": "This API endpoint is only reading the local sled agent's view of the",
@@ -547,29 +469,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SledIdentifiers"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sled-role": {
-      "get": {
-        "operationId": "sled_role_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledRole"
                 }
               }
             }
@@ -1827,6 +1726,76 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/InstanceExternalIpBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/multicast-group": {
+      "put": {
+        "operationId": "vmm_join_multicast_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMulticastBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "vmm_leave_multicast_group",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/PropolisUuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceMulticastBody"
               }
             }
           },
@@ -4004,34 +3973,6 @@
         "type": "string",
         "format": "uuid"
       },
-      "DelegatedZvol": {
-        "description": "Delegate a ZFS volume to a zone",
-        "oneOf": [
-          {
-            "description": "Delegate a slice of the local storage dataset present on this pool into the zone.",
-            "type": "object",
-            "properties": {
-              "dataset_id": {
-                "$ref": "#/components/schemas/DatasetUuid"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "local_storage"
-                ]
-              },
-              "zpool_id": {
-                "$ref": "#/components/schemas/ExternalZpoolUuid"
-              }
-            },
-            "required": [
-              "dataset_id",
-              "type",
-              "zpool_id"
-            ]
-          }
-        ]
-      },
       "DhcpConfig": {
         "description": "DHCP configuration for a port\n\nNot present here: Hostname (DHCPv4 option 12; used in DHCPv6 option 39); we use `InstanceRuntimeState::hostname` for this value.",
         "type": "object",
@@ -4588,15 +4529,6 @@
           "mappings"
         ]
       },
-      "ExternalZpoolUuid": {
-        "x-rust-type": {
-          "crate": "omicron-uuid-kinds",
-          "path": "omicron_uuid_kinds::ExternalZpoolUuid",
-          "version": "*"
-        },
-        "type": "string",
-        "format": "uuid"
-      },
       "FileStorageBackend": {
         "description": "A storage backend backed by a file in the host system's file system.",
         "type": "object",
@@ -4866,24 +4798,6 @@
         "minLength": 1,
         "maxLength": 7
       },
-      "IdMapDatasetConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/DatasetConfig"
-        }
-      },
-      "IdMapOmicronPhysicalDiskConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
-        }
-      },
-      "IdMapOmicronZoneConfig": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/OmicronZoneConfig"
-        }
-      },
       "ImportExportPolicy": {
         "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
         "oneOf": [
@@ -5063,16 +4977,60 @@
           "src_propolis_addr"
         ]
       },
+      "InstanceMulticastBody": {
+        "description": "Request body for multicast group operations.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "join": {
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
+              }
+            },
+            "required": [
+              "join"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "leave": {
+                "$ref": "#/components/schemas/InstanceMulticastMembership"
+              }
+            },
+            "required": [
+              "leave"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "InstanceMulticastMembership": {
+        "description": "Represents a multicast group membership for an instance.",
+        "type": "object",
+        "properties": {
+          "group_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        },
+        "required": [
+          "group_ip",
+          "sources"
+        ]
+      },
       "InstanceSledLocalConfig": {
         "description": "Describes sled-local configuration that a sled-agent must establish to make the instance's virtual hardware fully functional.",
         "type": "object",
         "properties": {
-          "delegated_zvols": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DelegatedZvol"
-            }
-          },
           "dhcp_config": {
             "$ref": "#/components/schemas/DhcpConfig"
           },
@@ -5098,6 +5056,12 @@
           "hostname": {
             "$ref": "#/components/schemas/Hostname"
           },
+          "multicast_groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstanceMulticastMembership"
+            }
+          },
           "nics": {
             "type": "array",
             "items": {
@@ -5109,11 +5073,11 @@
           }
         },
         "required": [
-          "delegated_zvols",
           "dhcp_config",
           "firewall_rules",
           "floating_ips",
           "hostname",
+          "multicast_groups",
           "nics",
           "source_nat"
         ]
@@ -5550,32 +5514,6 @@
         },
         "required": [
           "status"
-        ]
-      },
-      "LocalStorageDatasetEnsureRequest": {
-        "description": "Dataset and Volume details for a Local Storage dataset ensure request",
-        "type": "object",
-        "properties": {
-          "dataset_size": {
-            "description": "Size of the parent dataset",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          },
-          "volume_size": {
-            "description": "Size of the zvol",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
-          }
-        },
-        "required": [
-          "dataset_size",
-          "volume_size"
         ]
       },
       "M2Slot": {
@@ -6018,10 +5956,38 @@
         "type": "object",
         "properties": {
           "datasets": {
-            "$ref": "#/components/schemas/IdMapDatasetConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/DatasetConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatasetConfig"
+            }
           },
           "disks": {
-            "$ref": "#/components/schemas/IdMapOmicronPhysicalDiskConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
           },
           "generation": {
             "$ref": "#/components/schemas/Generation"
@@ -6050,7 +6016,21 @@
             ]
           },
           "zones": {
-            "$ref": "#/components/schemas/IdMapOmicronZoneConfig"
+            "title": "IdOrdMapAsMap",
+            "x-rust-type": {
+              "crate": "iddqd",
+              "parameters": [
+                {
+                  "$ref": "#/components/schemas/OmicronZoneConfig"
+                }
+              ],
+              "path": "iddqd::IdOrdMap",
+              "version": "*"
+            },
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronZoneConfig"
+            }
           }
         },
         "required": [

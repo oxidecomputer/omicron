@@ -81,6 +81,7 @@ mod lldp;
 mod local_storage;
 mod lookup_interface;
 mod migration;
+pub mod multicast;
 mod nat_entry;
 mod network_interface;
 mod oximeter;

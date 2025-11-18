@@ -1076,9 +1076,7 @@ mod tests {
             (&|zones: &mut [BlueprintZoneConfig]| {
                 for zone in zones {
                     if let BlueprintZoneType::Nexus(
-                        blueprint_zone_type::Nexus {
-                            ref mut external_ip, ..
-                        },
+                        blueprint_zone_type::Nexus { external_ip, .. },
                     ) = &mut zone.zone_type
                     {
                         external_ip.ip = bogus_ip;
@@ -1096,8 +1094,7 @@ mod tests {
                 for zone in zones {
                     if let BlueprintZoneType::ExternalDns(
                         blueprint_zone_type::ExternalDns {
-                            ref mut dns_address,
-                            ..
+                            dns_address, ..
                         },
                     ) = &mut zone.zone_type
                     {
@@ -1115,8 +1112,7 @@ mod tests {
                 for zone in zones {
                     if let BlueprintZoneType::BoundaryNtp(
                         blueprint_zone_type::BoundaryNtp {
-                            ref mut external_ip,
-                            ..
+                            external_ip, ..
                         },
                     ) = &mut zone.zone_type
                     {
@@ -1200,7 +1196,7 @@ mod tests {
             let mut mutated_zones = zones.clone();
             for zone in &mut mutated_zones {
                 if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                    ref mut nic,
+                    nic,
                     ..
                 }) = &mut zone.zone_type
                 {
@@ -1227,7 +1223,7 @@ mod tests {
             let mut mutated_zones = zones.clone();
             for zone in &mut mutated_zones {
                 if let BlueprintZoneType::ExternalDns(
-                    blueprint_zone_type::ExternalDns { ref mut nic, .. },
+                    blueprint_zone_type::ExternalDns { nic, .. },
                 ) = &mut zone.zone_type
                 {
                     let expected_error = mutate_nic_fn(zone.id, nic);
@@ -1253,7 +1249,7 @@ mod tests {
             let mut mutated_zones = zones.clone();
             for zone in &mut mutated_zones {
                 if let BlueprintZoneType::BoundaryNtp(
-                    blueprint_zone_type::BoundaryNtp { ref mut nic, .. },
+                    blueprint_zone_type::BoundaryNtp { nic, .. },
                 ) = &mut zone.zone_type
                 {
                     let expected_error = mutate_nic_fn(zone.id, nic);
@@ -1430,9 +1426,15 @@ mod tests {
         bp1.id = BlueprintUuid::new_v4();
         bp1.parent_blueprint_id = Some(bp0.id);
         for &ip in &expected_ips {
-            bp1.sleds.get_mut(&sled_id).unwrap().zones.insert(
-                make_external_dns_zone(ip, BlueprintZoneDisposition::InService),
-            );
+            bp1.sleds
+                .get_mut(&sled_id)
+                .unwrap()
+                .zones
+                .insert_unique(make_external_dns_zone(
+                    ip,
+                    BlueprintZoneDisposition::InService,
+                ))
+                .expect("freshly generated zone IDs are unique");
         }
 
         // Insert bp1 and make it the target. Confirm we get back the expected
@@ -1461,15 +1463,18 @@ mod tests {
         bp2.parent_blueprint_id = Some(bp1.id);
         for &ip in &extra_ips {
             for i in 0..4 {
-                bp2.sleds.get_mut(&sled_id).unwrap().zones.insert(
-                    make_external_dns_zone(
+                bp2.sleds
+                    .get_mut(&sled_id)
+                    .unwrap()
+                    .zones
+                    .insert_unique(make_external_dns_zone(
                         ip,
                         BlueprintZoneDisposition::Expunged {
                             as_of_generation: Generation::new(),
                             ready_for_cleanup: i % 2 == 0,
                         },
-                    ),
-                );
+                    ))
+                    .expect("freshly generated zone IDs are unique");
             }
         }
 

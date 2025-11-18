@@ -4436,7 +4436,9 @@ async fn support_bundle_download_range(
     client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     range: (u64, u64),
-) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+) -> anyhow::Result<
+    impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<>,
+> {
     let range = format!("bytes={}-{}", range.0, range.1);
     Ok(client
         .support_bundle_download(id.as_untyped_uuid(), Some(&range))
@@ -4500,13 +4502,18 @@ async fn cmd_nexus_support_bundles_download(
     let stream =
         support_bundle_download_ranges(client, args.id, start, total_length);
 
+    let mut open_opts = OpenOptions::new();
+    open_opts.create(true);
+
     let sink: Box<dyn std::io::Write> = match &args.output {
         Some(path) => Box::new(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .truncate(!args.resume)
-                .open(path)?,
+            if args.resume {
+                open_opts.append(true)
+            } else {
+                open_opts.write(true).truncate(true)
+            }
+            .open(path)
+            .with_context(|| format!("failed to create {path}"))?,
         ),
         None => Box::new(std::io::stdout()),
     };

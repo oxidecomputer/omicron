@@ -69,9 +69,28 @@ pub struct InstanceSledLocalConfig {
     /// provided to an instance to allow inbound connectivity.
     pub ephemeral_ip: Option<IpAddr>,
     pub floating_ips: Vec<IpAddr>,
+    pub multicast_groups: Vec<InstanceMulticastMembership>,
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
     pub delegated_zvols: Vec<DelegatedZvol>,
+}
+
+/// Represents a multicast group membership for an instance.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct InstanceMulticastMembership {
+    pub group_ip: IpAddr,
+    // For Source-Specific Multicast (SSM)
+    pub sources: Vec<IpAddr>,
+}
+
+/// Request body for multicast group operations.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceMulticastBody {
+    Join(InstanceMulticastMembership),
+    Leave(InstanceMulticastMembership),
 }
 
 /// Metadata used to track statistics about an instance.
