@@ -326,6 +326,17 @@ impl Resource {
     }
 }
 
+/// Type alias for the SET clause builder function in AttachQueryTemplate.
+type SetClauseBuilder = Box<
+    dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder, uuid::Uuid)
+        + Send,
+>;
+
+/// Type alias for optional filter functions in AttachQueryTemplate.
+type FilterBuilder = Option<
+    Box<dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder) + Send>,
+>;
+
 /// Creates a statement for attaching a [`Resource`] object to a [`Collection`].
 ///
 /// This query allows callers to atomically check the state of a
@@ -338,16 +349,9 @@ pub struct AttachQueryTemplate {
     collection: Collection,
     resource: Resource,
     allow_from_attached: bool,
-    build_set_clause: Box<
-        dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder, uuid::Uuid)
-            + Send,
-    >,
-    collection_filter: Option<
-        Box<dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder) + Send>,
-    >,
-    resource_filter: Option<
-        Box<dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder) + Send>,
-    >,
+    build_set_clause: SetClauseBuilder,
+    collection_filter: FilterBuilder,
+    resource_filter: FilterBuilder,
 }
 
 impl AttachQueryTemplate {
@@ -457,6 +461,8 @@ impl AttachQueryTemplate {
     where
         ResourceType: Selectable<Pg> + Send + 'static,
         CollectionType: Selectable<Pg> + Send + 'static,
+        <ResourceType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
+        <CollectionType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
     {
         use crate::db::raw_query_builder::QueryBuilder;
         use diesel::sql_types;
@@ -466,8 +472,9 @@ impl AttachQueryTemplate {
         // Build the CTE query structure matching the QueryFragment implementation
 
         // WITH collection_by_id AS (...)
-        builder.sql("WITH collection_by_id AS (");
-        builder.sql("SELECT * FROM ");
+        builder.sql("WITH collection_by_id AS (SELECT ");
+        builder.fragment_unqualified(&CollectionType::as_select());
+        builder.sql(" FROM ");
         builder.sql(self.collection.table_name);
         builder.sql(" WHERE ");
         builder.sql(self.collection.id_column);
@@ -482,8 +489,9 @@ impl AttachQueryTemplate {
         builder.sql(" FOR UPDATE), ");
 
         // resource_by_id AS (...)
-        builder.sql("resource_by_id AS (");
-        builder.sql("SELECT * FROM ");
+        builder.sql("resource_by_id AS (SELECT ");
+        builder.fragment_unqualified(&ResourceType::as_select());
+        builder.sql(" FROM ");
         builder.sql(self.resource.table_name);
         builder.sql(" WHERE ");
         builder.sql(self.resource.id_column);
@@ -510,8 +518,9 @@ impl AttachQueryTemplate {
         builder.sql(" IS NULL), ");
 
         // collection_info AS (...)
-        builder.sql("collection_info AS (");
-        builder.sql("SELECT * FROM ");
+        builder.sql("collection_info AS (SELECT ");
+        builder.fragment_unqualified(&CollectionType::as_select());
+        builder.sql(" FROM ");
         builder.sql(self.collection.table_name);
         builder.sql(" WHERE ");
         builder.sql(self.collection.id_column);
@@ -522,8 +531,9 @@ impl AttachQueryTemplate {
         builder.sql(" IS NULL FOR UPDATE), ");
 
         // resource_info AS (...)
-        builder.sql("resource_info AS (");
-        builder.sql("SELECT * FROM ");
+        builder.sql("resource_info AS (SELECT ");
+        builder.fragment_unqualified(&ResourceType::as_select());
+        builder.sql(" FROM ");
         builder.sql(self.resource.table_name);
         builder.sql(" WHERE ");
         builder.sql(self.resource.id_column);
@@ -568,10 +578,14 @@ impl AttachQueryTemplate {
         builder.sql(
             "SELECT * FROM \
             (SELECT * FROM resource_count) \
-            LEFT JOIN (SELECT * FROM collection_by_id) ON TRUE \
-            LEFT JOIN (SELECT * FROM resource_by_id) ON TRUE \
-            LEFT JOIN (SELECT * FROM updated_resource) ON TRUE",
+            LEFT JOIN (SELECT ",
         );
+        builder.fragment_unqualified(&CollectionType::as_select());
+        builder.sql(" FROM collection_by_id) ON TRUE LEFT JOIN (SELECT ");
+        builder.fragment_unqualified(&ResourceType::as_select());
+        builder.sql(" FROM resource_by_id) ON TRUE LEFT JOIN (SELECT ");
+        builder.fragment_unqualified(&ResourceType::as_select());
+        builder.sql(" FROM updated_resource) ON TRUE");
 
         AttachQuery { query: builder.query() }
     }

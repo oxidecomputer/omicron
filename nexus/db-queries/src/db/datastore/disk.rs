@@ -79,10 +79,8 @@ fn disk_attach_query_template() -> collection_attach::AttachQueryTemplate {
     // plausibly could be.
     //
     // We currently only permit attaching disks to stopped instances.
-    let ok_to_attach_instance_states = vec![
-        db::model::InstanceState::Creating,
-        db::model::InstanceState::NoVmm,
-    ];
+    let ok_to_attach_instance_states =
+        [db::model::InstanceState::Creating, db::model::InstanceState::NoVmm];
 
     collection_attach::AttachQueryTemplate::new(
         collection_attach::Collection::new(

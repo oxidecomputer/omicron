@@ -9,8 +9,9 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::collection_attach;
 use crate::db::collection_attach::AttachError;
-use crate::db::collection_attach::DatastoreAttachTarget;
+use crate::db::collection_attach::AttachQuery;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::identity::Resource;
@@ -40,6 +41,7 @@ use crate::db::queries::vpc::InsertVpcQuery;
 use crate::db::queries::vpc::VniSearchIter;
 use crate::db::queries::vpc_subnet::InsertVpcSubnetError;
 use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
+use crate::db::raw_query_builder::QueryBuilder;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -94,6 +96,44 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
 use uuid::Uuid;
+
+/// Creates a database query template for attaching VPC subnets to custom routers.
+///
+/// This defines the complete SQL structure for the attach operation.
+/// Note: This uses `allow_from_attached = true` because subnets can be re-attached
+/// to different custom routers.
+fn vpc_subnet_to_router_attach_query_template()
+-> collection_attach::AttachQueryTemplate {
+    use diesel::sql_types;
+
+    collection_attach::AttachQueryTemplate::new(
+        collection_attach::Collection::new(
+            "vpc_router",   // collection table
+            "id",           // collection id column
+            "time_deleted", // collection time_deleted
+        ),
+        collection_attach::Resource::new(
+            "vpc_subnet",       // resource table
+            "id",               // resource id column
+            "custom_router_id", // resource FK column
+            "time_deleted",     // resource time_deleted
+        ),
+        true, // allow_from_attached - subnets can move between routers
+        |builder: &mut QueryBuilder, router_id: uuid::Uuid| {
+            // Build SET clause: time_modified, custom_router_id
+            builder.sql("time_modified = ");
+            builder.param().bind::<sql_types::Timestamptz, _>(Utc::now());
+            builder.sql(", custom_router_id = ");
+            builder.param().bind::<sql_types::Uuid, _>(router_id);
+        },
+        Some(|builder: &mut QueryBuilder| {
+            // Collection (router) filter: kind = Custom
+            builder.sql(" AND kind = ");
+            builder.param().bind::<sql_types::Text, _>("custom");
+        }),
+        None::<fn(&mut QueryBuilder)>, // No additional resource filter needed
+    )
+}
 
 impl DataStore {
     /// Load built-in VPCs into the database.
@@ -1194,22 +1234,14 @@ impl DataStore {
 
                     // Apply subnet->custom router attachment/detachment.
                     if let Some(authz_router) = custom_router {
-                        use nexus_db_schema::schema::vpc_router::dsl as router_dsl;
-                        use nexus_db_schema::schema::vpc_subnet::dsl as subnet_dsl;
+                        // Create the query template with all SQL structure
+                        let template = vpc_subnet_to_router_attach_query_template();
 
-                        let query = VpcRouter::attach_resource(
+                        // Build the query with runtime parameter values
+                        let query: AttachQuery<VpcSubnet, VpcRouter> = template.build(
                             authz_router.id(),
                             authz_subnet.id(),
-                            router_dsl::vpc_router.into_boxed().filter(
-                                router_dsl::kind.eq(VpcRouterKind::Custom),
-                            ),
-                            subnet_dsl::vpc_subnet.into_boxed(),
                             u32::MAX,
-                            diesel::update(subnet_dsl::vpc_subnet).set((
-                                subnet_dsl::time_modified.eq(Utc::now()),
-                                subnet_dsl::custom_router_id
-                                    .eq(authz_router.id()),
-                            )),
                         );
 
                         query

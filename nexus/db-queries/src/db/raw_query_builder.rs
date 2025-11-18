@@ -146,6 +146,72 @@ impl QueryBuilder {
         self
     }
 
+    /// Appends a Diesel QueryFragment (like `Type::as_select()`) to the query.
+    ///
+    /// This is useful for embedding expressions that Diesel generates, such as
+    /// column lists from the `Selectable` trait.
+    ///
+    /// If `strip_table_prefix` is true, removes table qualifiers from column names.
+    /// For example, `"instance"."id"` becomes `"id"`. This is useful when selecting
+    /// FROM a table where the table name is implied.
+    ///
+    /// # Safety
+    /// This trusts that Diesel's QueryFragment generates safe SQL without
+    /// injection vulnerabilities.
+    pub fn fragment<F>(&mut self, fragment: &F) -> &mut Self
+    where
+        F: diesel::query_builder::QueryFragment<Pg>,
+    {
+        self.fragment_with_options(fragment, false)
+    }
+
+    /// Like `fragment()`, but with the ability to strip table prefixes.
+    pub fn fragment_unqualified<F>(&mut self, fragment: &F) -> &mut Self
+    where
+        F: diesel::query_builder::QueryFragment<Pg>,
+    {
+        self.fragment_with_options(fragment, true)
+    }
+
+    // TODO: I REALLY don't want to merge this.
+    //
+    // Why does it exist:
+    // - AllColumnsOf makes it easy to list columns in "Database order", but
+    // hard to list columns in "Rust struct model order".
+    // - There are cases where these aren't aligned (e.g., SELECT *). It causes problems.
+    // - This is a hack to act as a workaround.
+    fn fragment_with_options<F>(
+        &mut self,
+        fragment: &F,
+        strip_table_prefix: bool,
+    ) -> &mut Self
+    where
+        F: diesel::query_builder::QueryFragment<Pg>,
+    {
+        use regex::Regex;
+
+        // Use debug_query to convert the fragment to SQL
+        let mut sql = diesel::debug_query::<Pg, _>(fragment).to_string();
+
+        // debug_query appends " -- binds: [...]" which we need to strip out
+        if let Some(pos) = sql.find(" -- binds:") {
+            sql.truncate(pos);
+        }
+
+        // If requested, strip table qualifiers: "table"."column" -> "column"
+        if strip_table_prefix {
+            // Match: "table"."column" and replace with just: "column"
+            // We capture the column name and replace the whole thing
+            // Need to include the closing quote in the pattern
+            let re = Regex::new(r#""[^"]+"\."([^"]+)""#).unwrap();
+            sql = re.replace_all(&sql, "\"$1\"").to_string();
+        }
+
+        self.sql(TrustedStr::i_take_responsibility_for_validating_this_string(
+            sql,
+        ))
+    }
+
     /// Takes the final boxed query
     pub fn query<T>(self) -> TypedSqlQuery<T> {
         TypedSqlQuery { inner: self.query.unwrap(), _phantom: PhantomData }
