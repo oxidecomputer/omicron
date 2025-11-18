@@ -1316,20 +1316,17 @@ pub async fn create_session_for_user(
         .to_string()
 }
 
-/// Log in with test suite password, return session cookie (formatted for Cookie
-/// header)
+/// Log in with test suite password. Returns session token.
 pub async fn create_console_session<N: NexusServer>(
     cptestctx: &ControlPlaneTestContext<N>,
 ) -> String {
-    let token = create_session_for_user(
+    create_session_for_user(
         &cptestctx.external_client,
         cptestctx.silo_name.as_str(),
         cptestctx.user_name.as_ref(),
         TEST_SUITE_PASSWORD,
     )
-    .await;
-
-    format!("session={}", token)
+    .await
 }
 
 #[derive(Debug)]
