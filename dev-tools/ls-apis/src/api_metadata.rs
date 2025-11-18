@@ -11,6 +11,9 @@ use crate::ServerPackageName;
 use crate::cargo::DepPath;
 use crate::workspaces::Workspaces;
 use anyhow::{Result, bail};
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use serde::Deserialize;
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -262,7 +265,7 @@ pub enum ApiExpectedConsumers {
     #[default]
     Any,
     /// Exactly these consumers are allowed.
-    Exactly(Vec<ApiExpectedConsumer>),
+    Exactly(IdOrdMap<ApiExpectedConsumer>),
 }
 
 impl ApiExpectedConsumers {
@@ -326,7 +329,8 @@ impl<'de> Deserialize<'de> for ApiExpectedConsumers {
             where
                 A: serde::de::SeqAccess<'de>,
             {
-                let consumers = Vec::<ApiExpectedConsumer>::deserialize(
+                // Note IdOrdMap deserializes as a sequence by default.
+                let consumers = IdOrdMap::<ApiExpectedConsumer>::deserialize(
                     serde::de::value::SeqAccessDeserializer::new(seq),
                 )?;
                 Ok(ApiExpectedConsumers::Exactly(consumers))
@@ -338,13 +342,21 @@ impl<'de> Deserialize<'de> for ApiExpectedConsumers {
 }
 
 /// Describes a single allowed consumer for an API.
-#[derive(Deserialize, Debug)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ApiExpectedConsumer {
     /// The name of the Rust package.
     pub name: ServerComponentName,
     /// The reason this consumer is allowed.
     pub reason: String,
+}
+
+impl IdOrdItem for ApiExpectedConsumer {
+    type Key<'a> = &'a ServerComponentName;
+    fn key(&self) -> Self::Key<'_> {
+        &self.name
+    }
+    id_upcast!();
 }
 
 /// The status of an API consumer that was discovered by walking the Cargo

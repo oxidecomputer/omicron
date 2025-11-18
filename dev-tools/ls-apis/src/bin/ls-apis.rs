@@ -7,6 +7,7 @@
 use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
+use indent_write::indentable::Indentable;
 use omicron_ls_apis::{
     AllApiMetadata, ApiConsumerStatus, ApiDependencyFilter, ApiMetadata,
     FailedConsumerCheck, LoadArgs, ServerComponentName, SystemApis,
@@ -146,7 +147,7 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
 }
 
 fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
-    let mut unexpected_count = 0;
+    let mut error_count = 0;
 
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
@@ -184,17 +185,22 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
                     println!("        status: expected, reason: {reason}");
                 }
                 ApiConsumerStatus::Unexpected => {
-                    println!("        status: UNEXPECTED");
-                    unexpected_count += 1;
+                    println!("        error: unexpected dependency");
+                    error_count += 1;
                 }
             }
         }
-        println!("");
+        if let Some(missing) = apis.missing_consumers(&api.client_package_name)
+        {
+            println!("{}", missing.display(apis).indented("    "));
+            error_count += missing.error_count();
+        }
+        println!();
     }
-    if unexpected_count > 0 {
+    if error_count > 0 {
         bail!(
-            "{unexpected_count} unexpected {} reported (see above)",
-            plural::consumers_str(unexpected_count)
+            "{error_count} {} reported (see above)",
+            plural::errors_str(error_count)
         );
     }
     Ok(())
@@ -347,22 +353,12 @@ fn run_check(apis: &SystemApis) -> Result<()> {
                     );
                 });
             println!(
-                "        unexpected dependency on {consumer} (part of {deployment_unit})"
+                "        error: unexpected dependency on {consumer} (part of {deployment_unit})"
             );
         }
-        for (consumer, reason) in &check.missing {
-            let deployment_unit =
-                apis.server_component_unit(consumer).unwrap_or_else(|| {
-                    panic!(
-                        "consumer {consumer} doesn't have an associated \
-                         deployment unit (this is checked at load time)"
-                    );
-                });
-            println!(
-                "        missing expected dependency on {consumer} \
-                 (part of {deployment_unit})"
-            );
-            println!("            reason this consumer is expected: {reason}");
+
+        if let Some(missing) = check.missing {
+            println!("{}", missing.display(apis).indented("        "));
         }
     }
 
@@ -421,7 +417,7 @@ fn run_check(apis: &SystemApis) -> Result<()> {
                     )
                 });
             print_failed_consumer_check(api, c, apis);
-            error_count += 1;
+            error_count += c.error_count();
         }
     }
 

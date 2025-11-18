@@ -4130,6 +4130,14 @@ pub trait NexusExternalApi {
     /// This endpoint is designed to be accessed by the user agent (browser),
     /// not the client requesting the token. So we do not actually return the
     /// token here; it will be returned in response to the poll on `/device/token`.
+    ///
+    /// Some special logic applies when authenticating this request with an
+    /// existing device token instead of a console session: the requested
+    /// TTL must not produce an expiration time later than the authenticating
+    /// token's expiration. If no TTL was specified in the initial grant
+    /// request, the expiration will be the lesser of the silo max and the
+    /// authenticating token's expiration time. To get the longest allowed
+    /// lifetime, omit the TTL and authenticate with a web console session.
     #[endpoint {
         method = POST,
         path = "/device/confirm",
