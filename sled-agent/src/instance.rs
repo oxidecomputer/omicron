@@ -1992,18 +1992,11 @@ impl InstanceRunner {
             opte_ports.push(port);
         }
 
-        // Each delegated Zvol requires (optionally) delegating the parent dataset
-        let datasets: Vec<_> = self
-            .delegated_zvols
-            .iter()
-            .filter_map(|delegated_zvol| match delegated_zvol {
-                DelegatedZvol::LocalStorage { .. } => {
-                    // Delegating the rdsk device does _not_ require delegating
-                    // the parent dataset.
-                    None
-                }
-            })
-            .collect();
+        // When delegatng a zvol, delegating the associated rdsk device does
+        // _not_ require delegating the parent dataset. Future types of
+        // delegated zvol may want to delegate either the parent dataset or
+        // some other one.
+        let datasets: Vec<zone::Dataset> = vec![];
 
         // For delegated devices, include the default list plus any for the
         // delegated zvol devices.
