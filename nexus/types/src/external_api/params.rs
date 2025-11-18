@@ -583,7 +583,7 @@ impl JsonSchema for Password {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -1456,7 +1456,7 @@ impl JsonSchema for UserData {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
@@ -1693,7 +1693,7 @@ impl JsonSchema for BlockSize {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2590,8 +2590,18 @@ impl TryFrom<String> for RelativeUri {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DeviceAuthRequest {
     pub client_id: Uuid,
-    /// Optional lifetime for the access token in seconds. If not specified, the
-    /// silo's max TTL will be used (if set).
+    /// Optional lifetime for the access token in seconds.
+    ///
+    /// This value will be validated during the confirmation step. If not
+    /// specified, it defaults to the silo's max TTL, which can be seen at
+    /// `/v1/auth-settings`.  If specified, must not exceed the silo's max TTL.
+    ///
+    /// Some special logic applies when authenticating the confirmation request
+    /// with an existing device token: the requested TTL must not produce an
+    /// expiration time later than the authenticating token's expiration. If no
+    /// TTL is specified, the expiration will be the lesser of the silo max and
+    /// the authenticating token's expiration time. To get the longest allowed
+    /// lifetime, omit the TTL and authenticate with a web console session.
     pub ttl_seconds: Option<NonZeroU32>,
 }
 

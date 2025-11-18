@@ -458,12 +458,15 @@ impl authn::external::SiloUserSilo for ServerContext {
 
 #[async_trait]
 impl authn::external::token::TokenContext for ServerContext {
-    async fn token_actor(
+    async fn authenticate_token(
         &self,
         token: String,
-    ) -> Result<authn::Actor, authn::Reason> {
+    ) -> Result<
+        (authn::Actor, Option<chrono::DateTime<chrono::Utc>>),
+        authn::Reason,
+    > {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.device_access_token_actor(opctx, token).await
+        self.nexus.authenticate_token(opctx, token).await
     }
 }
 

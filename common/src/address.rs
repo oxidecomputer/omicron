@@ -495,18 +495,18 @@ impl JsonSchema for IpRange {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
                     external::label_schema(
                         "v4",
-                        gen.subschema_for::<Ipv4Range>(),
+                        generator.subschema_for::<Ipv4Range>(),
                     ),
                     external::label_schema(
                         "v6",
-                        gen.subschema_for::<Ipv6Range>(),
+                        generator.subschema_for::<Ipv6Range>(),
                     ),
                 ]),
                 ..Default::default()

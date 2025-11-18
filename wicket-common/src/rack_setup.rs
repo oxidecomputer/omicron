@@ -566,10 +566,10 @@ impl JsonSchema for UserSpecifiedImportExportPolicy {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        r#gen: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         // The above is equivalent to an Option<Vec<IpNet>>.
-        Option::<Vec<IpNet>>::json_schema(gen)
+        Option::<Vec<IpNet>>::json_schema(r#gen)
     }
 }
 

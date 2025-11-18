@@ -1196,7 +1196,9 @@ mod tests {
                     propolis_id: Some(vmm1_id.into_untyped_uuid()),
                     dst_propolis_id: None,
                     migration_id: None,
-                    gen: Generation::from(instance1.runtime().gen.next()),
+                    generation: Generation::from(
+                        instance1.runtime().generation.next(),
+                    ),
                     time_updated: Utc::now(),
                     time_last_auto_restarted: None,
                 },
@@ -1223,7 +1225,9 @@ mod tests {
                     propolis_id: Some(vmm2_id.into_untyped_uuid()),
                     dst_propolis_id: None,
                     migration_id: None,
-                    gen: Generation::from(instance2.runtime().gen.next()),
+                    generation: Generation::from(
+                        instance2.runtime().generation.next(),
+                    ),
                     time_updated: Utc::now(),
                     time_last_auto_restarted: None,
                 },
@@ -1250,7 +1254,9 @@ mod tests {
                     propolis_id: Some(vmm3_id.into_untyped_uuid()),
                     dst_propolis_id: None,
                     migration_id: None,
-                    gen: Generation::from(instance3.runtime().gen.next()),
+                    generation: Generation::from(
+                        instance3.runtime().generation.next(),
+                    ),
                     time_updated: Utc::now(),
                     time_last_auto_restarted: None,
                 },
@@ -1550,7 +1556,9 @@ mod tests {
                     propolis_id: Some(vmm_id.into_untyped_uuid()),
                     dst_propolis_id: None,
                     migration_id: None,
-                    gen: Generation::from(instance.runtime().gen.next()),
+                    generation: Generation::from(
+                        instance.runtime().generation.next(),
+                    ),
                     time_updated: Utc::now(),
                     time_last_auto_restarted: None,
                 },

@@ -4433,7 +4433,9 @@ async fn support_bundle_download_range(
     client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     range: (u64, u64),
-) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+) -> anyhow::Result<
+    impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<>,
+> {
     let range = format!("bytes={}-{}", range.0, range.1);
     Ok(client
         .support_bundle_download(id.as_untyped_uuid(), Some(&range))

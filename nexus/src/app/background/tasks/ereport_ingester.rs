@@ -364,7 +364,7 @@ impl Ingester {
         &self,
         opctx: &OpContext,
         clients: &[GatewayClient],
-        EreportQueryParams { ref committed_ena,ref start_ena, restart_id }: &EreportQueryParams,
+        EreportQueryParams { committed_ena,start_ena, restart_id }: &EreportQueryParams,
         sp_type: nexus_types::inventory::SpType,
         slot: u16,
         status: &mut Option<EreporterStatus>,
@@ -755,7 +755,7 @@ mod tests {
             class: impl Into<Option<&'static str>>,
             mut json: serde_json::Value,
         ) -> ExpectedEreport {
-            if let serde_json::Value::Object(ref mut map) = &mut json {
+            if let serde_json::Value::Object(map) = &mut json {
                 map.insert(
                     "baseboard_part_number".to_string(),
                     self.part.into(),

@@ -37,9 +37,6 @@ use propolis_client::Client as PropolisClient;
 use propolis_client::instance_spec::{ComponentV0, SpecKey};
 use rand::SeedableRng;
 use rand::prelude::IteratorRandom;
-use sled_agent_api::v7::{
-    InstanceMulticastMembership, InstanceSledLocalConfig,
-};
 use sled_agent_config_reconciler::AvailableDatasetsReceiver;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleCause;
@@ -589,7 +586,7 @@ impl InstanceRunner {
         async fn stop_timeout_completed(
             stop_timeout: &mut Option<Pin<Box<tokio::time::Sleep>>>,
         ) {
-            if let Some(ref mut timeout) = stop_timeout {
+            if let Some(timeout) = stop_timeout {
                 timeout.await
             } else {
                 std::future::pending().await
@@ -1475,7 +1472,7 @@ fn propolis_error_code(
     error: &PropolisClientError,
 ) -> Option<PropolisErrorCode> {
     // Is this a structured error response from the Propolis server?
-    let propolis_client::Error::ErrorResponse(ref rv) = &error else {
+    let propolis_client::Error::ErrorResponse(rv) = &error else {
         return None;
     };
 
@@ -2491,11 +2488,11 @@ mod tests {
     use propolis_client::types::{
         InstanceMigrateStatusResponse, InstanceStateMonitorResponse,
     };
-    use sled_agent_api::v7::InstanceEnsureBody;
     use sled_agent_config_reconciler::{
         CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
         InternalDisksReceiver,
     };
+    use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::config::MountConfig;
     use std::net::SocketAddrV6;
@@ -2715,7 +2712,7 @@ mod tests {
             local_config,
             vmm_runtime: VmmRuntimeState {
                 state: VmmState::Starting,
-                gen: Generation::new(),
+                generation: Generation::new(),
                 time_updated: Default::default(),
             },
             propolis_addr,
@@ -3423,7 +3420,7 @@ mod tests {
             .send(InstanceMonitorMessage {
                 update: InstanceMonitorUpdate::State(
                     InstanceStateMonitorResponse {
-                        gen: 5,
+                        r#gen: 5,
                         migration: InstanceMigrateStatusResponse {
                             migration_in: None,
                             migration_out: None,

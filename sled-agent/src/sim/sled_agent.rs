@@ -56,14 +56,13 @@ use propolis_client::{
 };
 use range_requests::PotentialRange;
 use sled_agent_api::SupportBundleMetadata;
-use sled_agent_api::v7::InstanceMulticastMembership;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
 use sled_agent_types::instance::{
-    InstanceExternalIpBody, VmmPutStateResponse, VmmStateRequested,
-    VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 
 use slog::Logger;
@@ -200,43 +199,12 @@ impl SledAgent {
         })
     }
 
-    /// Idempotently ensures that the given API Instance (described by
-    /// `api_instance`) exists on this server in the given runtime state
-    /// (described by `target`).
-    // Keep the v1 method for compatibility but it just delegates to v2
-    pub async fn instance_register_v1(
-        self: &Arc<Self>,
-        propolis_id: PropolisUuid,
-        instance: sled_agent_types::instance::InstanceEnsureBody,
-    ) -> Result<SledVmmState, Error> {
-        // Convert v1 to v7 for internal processing
-        let v5_instance = sled_agent_api::v7::InstanceEnsureBody {
-            vmm_spec: instance.vmm_spec,
-            local_config: sled_agent_api::v7::InstanceSledLocalConfig {
-                hostname: instance.local_config.hostname,
-                nics: instance.local_config.nics,
-                source_nat: instance.local_config.source_nat,
-                ephemeral_ip: instance.local_config.ephemeral_ip,
-                floating_ips: instance.local_config.floating_ips,
-                multicast_groups: Vec::new(), // v1 doesn't support multicast
-                firewall_rules: instance.local_config.firewall_rules,
-                dhcp_config: instance.local_config.dhcp_config,
-            },
-            vmm_runtime: instance.vmm_runtime,
-            instance_id: instance.instance_id,
-            migration_id: instance.migration_id,
-            propolis_addr: instance.propolis_addr,
-            metadata: instance.metadata,
-        };
-        self.instance_register(propolis_id, v5_instance).await
-    }
-
     pub async fn instance_register(
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
-        instance: sled_agent_api::v7::InstanceEnsureBody,
+        instance: InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
-        let sled_agent_api::v7::InstanceEnsureBody {
+        let InstanceEnsureBody {
             vmm_spec,
             local_config,
             instance_id,
@@ -266,7 +234,7 @@ impl SledAgent {
                 disk_state: DiskState::Attached(
                     instance_id.into_untyped_uuid(),
                 ),
-                gen: omicron_common::api::external::Generation::new(),
+                generation: omicron_common::api::external::Generation::new(),
                 time_updated: chrono::Utc::now(),
             };
 
@@ -344,7 +312,7 @@ impl SledAgent {
             migration_id.map(|migration_id| MigrationRuntimeState {
                 migration_id,
                 state: MigrationState::Pending,
-                gen: Generation::new(),
+                generation: Generation::new(),
                 time_updated: chrono::Utc::now(),
             });
 
@@ -722,7 +690,7 @@ impl SledAgent {
     pub async fn instance_join_multicast_group(
         &self,
         propolis_id: PropolisUuid,
-        membership: &sled_agent_api::v7::InstanceMulticastMembership,
+        membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
             return Err(Error::internal_error(
@@ -741,7 +709,7 @@ impl SledAgent {
     pub async fn instance_leave_multicast_group(
         &self,
         propolis_id: PropolisUuid,
-        membership: &sled_agent_api::v7::InstanceMulticastMembership,
+        membership: &InstanceMulticastMembership,
     ) -> Result<(), Error> {
         if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
             return Err(Error::internal_error(

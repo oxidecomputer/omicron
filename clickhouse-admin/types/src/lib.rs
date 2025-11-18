@@ -12,7 +12,7 @@ use itertools::Itertools;
 use omicron_common::api::external::Generation;
 use schemars::{
     JsonSchema,
-    gen::SchemaGenerator,
+    r#gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
 };
 use serde::{Deserialize, Serialize};
@@ -41,8 +41,8 @@ pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
 
 // Used for schemars to be able to be used with camino:
 // See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
-pub fn path_schema(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+pub fn path_schema(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(generator).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }
