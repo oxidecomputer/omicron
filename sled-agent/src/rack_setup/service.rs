@@ -145,7 +145,8 @@ use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
-use trust_quorum::NodeApiError;
+use trust_quorum::{NodeApiError, ProxyError};
+use trust_quorum_protocol::CommitError;
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
@@ -255,6 +256,9 @@ pub enum SetupServiceError {
 
     #[error("Trust quorum error")]
     TrustQuorum(#[from] NodeApiError),
+
+    #[error("Trust quorum proxy commit error")]
+    TrustQuorumProxy(#[from] ProxyError<CommitError>),
 }
 
 // The workload / information allocated to a single sled.
@@ -1500,7 +1504,7 @@ async fn init_trust_quorum(
     trust_quorum_handle: trust_quorum::NodeTaskHandle,
     members: BTreeSet<BaseboardId>,
     rack_id: RackUuid,
-) -> Result<(), NodeApiError> {
+) -> Result<(), SetupServiceError> {
     let threshold =
         trust_quorum_protocol::Threshold((members.len() as u8 / 2 + 1) as u8);
 
@@ -1533,7 +1537,28 @@ async fn init_trust_quorum(
 
     info!(log, "RSS: Starting to commit trust quorum initial configuration");
     // Continue to commit at all nodes until done
-    loop {}
+    let mut acked = BTreeSet::new();
+    let proxy = trust_quorum_handle.proxy();
+    // TODO: Retries? Timeouts?
+    for id in &members {
+        info!(log, "RSS: Attempting to commit initial trust quorum at {id}");
+        match proxy
+            .commit(id.clone(), rack_id, trust_quorum_protocol::Epoch(1))
+            .await?
+        {
+            trust_quorum::CommitStatus::Committed => {
+                info!(log, "RSS: Committed initial trust quorum at {id}");
+                let _ = acked.insert(id.clone());
+            }
+            trust_quorum::CommitStatus::Pending => {
+                error!(
+                    log,
+                    "RSS: Failed to commit {id} to trust quorum: Pending"
+                );
+                // TODO: Return error if we are to be consistent
+            }
+        }
+    }
 
     Ok(())
 }
