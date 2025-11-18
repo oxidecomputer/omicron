@@ -6,6 +6,7 @@ probe_view                               (get    "/experimental/v1/probes/{probe
 support_bundle_download                  (get    "/experimental/v1/system/support-bundles/{bundle_id}/download")
 support_bundle_download_file             (get    "/experimental/v1/system/support-bundles/{bundle_id}/download/{file}")
 support_bundle_index                     (get    "/experimental/v1/system/support-bundles/{bundle_id}/index")
+ip_pool_range_list                       (get    "/v1/ip-pools/{pool}/ranges")
 ping                                     (get    "/v1/ping")
 networking_switch_port_lldp_neighbors    (get    "/v1/system/hardware/rack-switch-port/{rack_id}/{switch_location}/{port}/lldp/neighbors")
 networking_switch_port_lldp_config_view  (get    "/v1/system/hardware/switch-port/{port}/lldp/config")

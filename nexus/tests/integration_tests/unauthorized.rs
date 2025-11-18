@@ -176,7 +176,6 @@ async fn test_unauthorized() {
     info!(log, "verifying endpoints");
     print!("{}", VERIFY_HEADER);
     for endpoint in &*VERIFY_ENDPOINTS {
-        println!("{endpoint:#?}");
         let setup_response = setup_results.get(&endpoint.url);
         verify_endpoint(&log, client, endpoint, setup_response).await;
     }

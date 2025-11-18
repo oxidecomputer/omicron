@@ -1095,7 +1095,7 @@ async fn test_ip_pool_multicast_range_rejects_v6(
         IpVersion::V4,
         IpPoolReservationType::ExternalSilos,
     );
-    object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
+    object_create::<_, SystemIpPool>(client, "/v1/system/ip-pools", &pool_params)
         .await;
 
     // Try to add an IPv6 multicast range (ff30::/12 is SSM)

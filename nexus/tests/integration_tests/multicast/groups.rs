@@ -306,7 +306,7 @@ async fn test_multicast_group_with_default_pool(
         IpPoolReservationType::ExternalSilos,
     );
 
-    object_create::<_, IpPool>(&client, "/v1/system/ip-pools", &pool_params)
+    object_create::<_, SystemIpPool>(&client, "/v1/system/ip-pools", &pool_params)
         .await;
 
     // Add IPv4 multicast range - use unique range for this test

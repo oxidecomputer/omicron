@@ -1072,6 +1072,22 @@ pub trait NexusExternalApi {
         query_params: Query<IpPoolRangePaginationParams>,
     ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolRange>>, HttpError>;
 
+    /// List ranges for IP pool
+    ///
+    /// Ranges are ordered by their first address.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/ip-pools/{pool}/ranges",
+        tags = ["system/ip-pools"],
+    }]
+    async fn system_ip_pool_range_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::IpPoolPath>,
+        query_params: Query<IpPoolRangePaginationParams>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolRange>>, HttpError> {
+        Self::ip_pool_range_list(rqctx, path_params, query_params).await
+    }
+
     /// Add range to IP pool.
     ///
     /// IPv6 ranges are not allowed yet for unicast pools.
