@@ -84,7 +84,9 @@ impl From<shared::IpPoolReservationType> for IpPoolReservationType {
     fn from(value: shared::IpPoolReservationType) -> Self {
         match value {
             shared::IpPoolReservationType::ExternalSilos => Self::ExternalSilos,
-            shared::IpPoolReservationType::SystemInternal => Self::SystemInternal,
+            shared::IpPoolReservationType::SystemInternal => {
+                Self::SystemInternal
+            }
         }
     }
 }

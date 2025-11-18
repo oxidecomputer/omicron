@@ -1045,6 +1045,7 @@ pub static DEMO_MULTICAST_IP_POOL_CREATE: LazyLock<params::IpPoolCreate> =
                 description: String::from("a multicast IP pool"),
             },
             IpVersion::V4,
+            IpPoolReservationType::ExternalSilos,
         )
     });
 pub static DEMO_MULTICAST_IP_POOL_URL: LazyLock<String> = LazyLock::new(|| {

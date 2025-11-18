@@ -30,6 +30,7 @@ use nexus_types::external_api::params::{
     IpPoolCreate, MulticastGroupCreate, MulticastGroupMemberAdd,
     MulticastGroupUpdate,
 };
+use nexus_types::external_api::shared::IpPoolReservationType;
 use nexus_types::external_api::shared::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_types::external_api::views::{
     IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
@@ -302,6 +303,7 @@ async fn test_multicast_group_with_default_pool(
             description: "Default multicast IP pool for testing".to_string(),
         },
         IpVersion::V4,
+        IpPoolReservationType::ExternalSilos,
     );
 
     object_create::<_, IpPool>(&client, "/v1/system/ip-pools", &pool_params)
@@ -648,6 +650,7 @@ async fn test_multicast_ip_pool_range_validation(
             description: "IPv4 multicast pool for validation tests".to_string(),
         },
         IpVersion::V4,
+        IpPoolReservationType::ExternalSilos,
     );
     object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
         .await;

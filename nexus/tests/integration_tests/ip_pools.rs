@@ -1093,6 +1093,7 @@ async fn test_ip_pool_multicast_range_rejects_v6(
             description: "Multicast pool for IPv6 rejection test".to_string(),
         },
         IpVersion::V4,
+        IpPoolReservationType::ExternalSilos,
     );
     object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
         .await;

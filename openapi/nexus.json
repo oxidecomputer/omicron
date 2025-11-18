@@ -22082,10 +22082,10 @@
             ]
           },
           {
-            "description": "The pool is reserved for Oxide internal use.",
+            "description": "The pool is reserved for internal system use.",
             "type": "string",
             "enum": [
-              "oxide_internal"
+              "system_internal"
             ]
           }
         ]

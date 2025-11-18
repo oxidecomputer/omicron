@@ -25,9 +25,10 @@ use nexus_types::external_api::params::{
     InstanceCreate, InstanceNetworkInterfaceAttachment, IpPoolCreate,
     MulticastGroupCreate,
 };
+use nexus_types::external_api::shared::IpPoolReservationType;
 use nexus_types::external_api::shared::{IpRange, Ipv4Range};
 use nexus_types::external_api::views::{
-    IpPool, IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember,
+    IpPoolRange, IpVersion, MulticastGroup, MulticastGroupMember, SystemIpPool,
 };
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{
@@ -100,7 +101,7 @@ pub(crate) struct MulticastGroupForTest {
 pub(crate) async fn create_multicast_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
-) -> IpPool {
+) -> SystemIpPool {
     create_multicast_ip_pool_with_range(
         client,
         pool_name,
@@ -116,16 +117,17 @@ pub(crate) async fn create_multicast_ip_pool_with_range(
     pool_name: &str,
     range_start: (u8, u8, u8, u8),
     range_end: (u8, u8, u8, u8),
-) -> IpPool {
+) -> SystemIpPool {
     let pool_params = IpPoolCreate::new_multicast(
         IdentityMetadataCreateParams {
             name: pool_name.parse().unwrap(),
             description: "Multicast IP pool for testing".to_string(),
         },
         IpVersion::V4,
+        IpPoolReservationType::ExternalSilos,
     );
 
-    let pool: IpPool =
+    let pool: SystemIpPool =
         object_create(client, "/v1/system/ip-pools", &pool_params).await;
 
     // Add IPv4 ASM range
@@ -1119,7 +1121,7 @@ pub(crate) async fn multicast_group_attach(
 /// Create multiple multicast groups from the same pool.
 pub(crate) async fn create_multicast_groups(
     client: &ClientTestContext,
-    pool: &IpPool,
+    pool: &SystemIpPool,
     group_specs: &[MulticastGroupForTest],
 ) -> Vec<MulticastGroup> {
     let create_futures = group_specs.iter().map(|spec| {

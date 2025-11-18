@@ -2031,9 +2031,10 @@ mod tests {
         let (authz_pool, db_pool) = context
             .db
             .datastore()
-            .ip_pools_service_lookup(
+            .fetch_first_system_internal_ip_pool(
                 context.db.opctx(),
-                nexus_db_model::IpVersion::V6,
+                authz::Action::CreateChild,
+                Some(nexus_db_model::IpVersion::V6),
             )
             .await
             .expect("should be able to lookup service IP Pool");

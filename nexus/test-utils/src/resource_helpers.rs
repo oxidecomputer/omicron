@@ -20,6 +20,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
+use nexus_types::external_api::shared::IpPoolReservationType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::AffinityGroup;
@@ -308,7 +309,7 @@ pub async fn create_multicast_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-) -> (IpPool, IpPoolRange) {
+) -> (SystemIpPool, IpPoolRange) {
     let pool = object_create(
         client,
         "/v1/system/ip-pools",
@@ -320,6 +321,7 @@ pub async fn create_multicast_ip_pool(
             ip_range
                 .map(|r| r.version())
                 .unwrap_or_else(|| views::IpVersion::V4),
+            IpPoolReservationType::ExternalSilos,
         ),
     )
     .await;

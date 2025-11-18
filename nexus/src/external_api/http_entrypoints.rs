@@ -7,10 +7,10 @@
 use super::{
     console_api, params,
     views::{
-        self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
+        self, Certificate, FloatingIp, Group, IdentityProvider, Image,
         IpPoolRange, MulticastGroup, PhysicalDisk, Project, Rack, Silo,
-        SiloQuotas, SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
-        Utilization, Vpc, VpcRouter, VpcSubnet,
+        SiloQuotas, SiloUtilization, Sled, Snapshot, SshKey, SystemIpPool,
+        User, UserBuiltin, Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::app::external_endpoints::authority_for_request;
