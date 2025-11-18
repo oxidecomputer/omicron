@@ -251,14 +251,14 @@ impl LatestReconciliationResult {
             DatasetKind::LocalStorage => LOCAL_STORAGE_DATASET,
             DatasetKind::TransientZoneRoot => ZONE_DATASET,
 
-            DatasetKind::Clickhouse |
-            DatasetKind::ClickhouseKeeper |
-            DatasetKind::ClickhouseServer |
-            DatasetKind::Cockroach |
-            DatasetKind::Crucible |
-            DatasetKind::ExternalDns |
-            DatasetKind::InternalDns |
-            DatasetKind::TransientZone { .. } => unreachable!(
+            DatasetKind::Clickhouse
+            | DatasetKind::ClickhouseKeeper
+            | DatasetKind::ClickhouseServer
+            | DatasetKind::Cockroach
+            | DatasetKind::Crucible
+            | DatasetKind::ExternalDns
+            | DatasetKind::InternalDns
+            | DatasetKind::TransientZone { .. } => unreachable!(
                 "private function called with unexpected kind {kind:?}"
             ),
         };
