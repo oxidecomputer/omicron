@@ -33,11 +33,19 @@ use tufaceous_artifact::ArtifactHash;
 /// The location to look for images shipped with the RAM disk.
 pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
 
+/// Measurements for testing
+///
+pub const TESTING_MEASUREMENTS_PATH: &str = "/opt/oxide/sled-agent/pkg/";
+pub const TESTING_MEASUREMENTS_FILE: &str = "testing-measurements";
+
 /// Current status of the zone image resolver.
 #[derive(Clone, Debug)]
 pub struct ResolverStatus {
     /// The zone manifest status.
     pub zone_manifest: ZoneManifestStatus,
+
+    /// The measurement manifest status.
+    pub measurement_manifest: MeasurementManifestStatus,
 
     /// The mupdate override status.
     pub mupdate_override: MupdateOverrideStatus,
@@ -46,6 +54,8 @@ pub struct ResolverStatus {
     ///
     /// This is injected by tests.
     pub image_directory_override: Option<Utf8PathBuf>,
+
+    pub measurement_directory_override: Option<Utf8PathBuf>,
 }
 
 impl ResolverStatus {
@@ -54,7 +64,89 @@ impl ResolverStatus {
         ZoneImageResolverInventory {
             zone_manifest: self.zone_manifest.to_inventory(),
             mupdate_override: self.mupdate_override.to_inventory(),
+            // Adding the measurement to inventory will come later
         }
+    }
+}
+
+/// Describes the current state of zone manifests.
+#[derive(Clone, Debug)]
+pub struct MeasurementManifestStatus {
+    /// The path to the measurement manifest JSON on the boot disk.
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// Status of the boot disk.
+    pub boot_disk_result:
+        Result<ZoneManifestArtifactsResult, ZoneManifestReadError>,
+
+    /// Status of the non-boot disks. This results in warnings in case of a
+    /// mismatch.
+    pub non_boot_disk_metadata: IdOrdMap<ZoneManifestNonBootInfo>,
+}
+
+type MeasurementEntry =
+    Result<(String, ArtifactHash), ZoneManifestZoneHashError>;
+
+impl MeasurementManifestStatus {
+    /// Convert this status to the inventory format.
+    pub fn to_inventory(&self) -> ZoneManifestInventory {
+        let boot_inventory = match &self.boot_disk_result {
+            Ok(artifacts_result) => Ok(artifacts_result.to_boot_inventory()),
+            Err(error) => Err(InlineErrorChain::new(error).to_string()),
+        };
+
+        let non_boot_status = self
+            .non_boot_disk_metadata
+            .iter()
+            .map(|info| ZoneManifestNonBootInventory {
+                zpool_id: info.zpool_id,
+                path: info.path.clone(),
+                is_valid: info.result.is_valid(),
+                message: info.result.display().to_string(),
+            })
+            .collect();
+
+        ZoneManifestInventory {
+            boot_disk_path: self.boot_disk_path.clone(),
+            boot_inventory,
+            non_boot_status,
+        }
+    }
+
+    pub fn all_measurements(
+        &self,
+    ) -> Result<Vec<MeasurementEntry>, ZoneManifestZoneHashError> {
+        let artifacts_result =
+            self.boot_disk_result.as_ref().map_err(|err| {
+                ZoneManifestZoneHashError::ReadBootDisk(err.clone())
+            })?;
+
+        let mut results = Vec::new();
+        for artifact in artifacts_result.data.clone() {
+            match artifact.status {
+                ArtifactReadResult::Valid => {
+                    results
+                        .push(Ok((artifact.file_name, artifact.expected_hash)));
+                }
+                ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
+                    results.push(Err(
+                        ZoneManifestZoneHashError::SizeHashMismatch {
+                            expected_size: artifact.expected_size,
+                            expected_hash: artifact.expected_hash,
+                            actual_size,
+                            actual_hash,
+                        },
+                    ));
+                }
+                // XXX FIXME I think we want the file name here too for error reporting
+                ArtifactReadResult::Error(err) => {
+                    results.push(Err(ZoneManifestZoneHashError::ReadArtifact(
+                        err.clone(),
+                    )));
+                }
+            }
+        }
+        Ok(results)
     }
 }
 

@@ -32,6 +32,7 @@ use tufaceous_artifact::ArtifactHash;
 pub struct OverridePaths {
     pub install_dataset: Utf8PathBuf,
     pub zones_json: Utf8PathBuf,
+    pub measurements_json: Utf8PathBuf,
     pub mupdate_override_json: Utf8PathBuf,
 }
 
@@ -40,9 +41,16 @@ impl OverridePaths {
         let install_dataset =
             Utf8PathBuf::from(format!("pool/int/{uuid}/install"));
         let zones_json = install_dataset.join(OmicronZoneManifest::FILE_NAME);
+        let measurements_json =
+            install_dataset.join(OmicronZoneManifest::MEASUREMENT_FILE_NAME);
         let mupdate_override_json =
             install_dataset.join(MupdateOverrideInfo::FILE_NAME);
-        Self { install_dataset, zones_json, mupdate_override_json }
+        Self {
+            install_dataset,
+            zones_json,
+            measurements_json,
+            mupdate_override_json,
+        }
     }
 }
 

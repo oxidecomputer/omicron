@@ -1295,6 +1295,7 @@ mod tests {
     use omicron_uuid_kinds::DatasetUuid;
     use omicron_uuid_kinds::MupdateOverrideUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types::zone_images::MeasurementManifestStatus;
     use sled_agent_types::zone_images::MupdateOverrideStatus;
     use sled_agent_types::zone_images::OmicronZoneFileSource;
     use sled_agent_types::zone_images::RemoveMupdateOverrideBootSuccess;
@@ -1501,6 +1502,17 @@ mod tests {
                 removed_ddm_prefixes: Default::default(),
                 // successful status containing no artifacts
                 resolver_status: ResolverStatus {
+                    measurement_manifest: MeasurementManifestStatus {
+                        boot_disk_path: boot_disk_path.clone(),
+                        boot_disk_result: Ok(ZoneManifestArtifactsResult {
+                            manifest: OmicronZoneManifest {
+                                source: OmicronZoneManifestSource::SledAgent,
+                                zones: IdOrdMap::new(),
+                            },
+                            data: IdOrdMap::new(),
+                        }),
+                        non_boot_disk_metadata: IdOrdMap::new(),
+                    },
                     zone_manifest: ZoneManifestStatus {
                         boot_disk_path: boot_disk_path.clone(),
                         boot_disk_result: Ok(ZoneManifestArtifactsResult {
@@ -1518,6 +1530,7 @@ mod tests {
                         non_boot_disk_overrides: IdOrdMap::new(),
                     },
                     image_directory_override: None,
+                    measurement_directory_override: None,
                 },
             }
         }
