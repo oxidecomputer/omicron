@@ -520,7 +520,7 @@ impl CollectionStepOutput {
     ) {
         match self {
             CollectionStepOutput::Ereports(status) => {
-                report.ereports = status;
+                report.ereports = Some(status);
             }
             CollectionStepOutput::SavingSpDumps { listed_sps } => {
                 report.listed_sps = listed_sps;
@@ -1296,29 +1296,19 @@ impl BundleCollection {
             return Ok(CollectionStepOutput::None);
         };
         let ereports_dir = dir.join("ereports");
-        let mut n_collected = 0;
-        let status = match self
-            .save_ereports(
-                ereport_filters.clone(),
-                ereports_dir,
-                &mut n_collected,
-            )
+        let mut status = SupportBundleEreportStatus::default();
+        if let Err(err) = self
+            .save_ereports(ereport_filters.clone(), ereports_dir, &mut status)
             .await
         {
-            Ok(()) => SupportBundleEreportStatus::Collected { n_collected },
-            Err(err) => {
-                warn!(
-                    &self.log,
-                    "Support bundle: ereport collection failed \
-                     ({n_collected} collected successfully)";
-                    InlineErrorChain::new(err.as_ref()),
-                );
-
-                SupportBundleEreportStatus::Failed {
-                    n_collected,
-                    error: err.to_string(),
-                }
-            }
+            warn!(
+                &self.log,
+                "Support bundle: ereport collection failed \
+                 ({} collected successfully)",
+                 status.n_collected;
+                InlineErrorChain::new(err.as_ref())
+            );
+            status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
         };
 
         Ok(CollectionStepOutput::Ereports(status))
@@ -1328,7 +1318,7 @@ impl BundleCollection {
         self: &Arc<Self>,
         filters: EreportFilters,
         dir: Utf8PathBuf,
-        ereports_collected: &mut usize,
+        status: &mut SupportBundleEreportStatus,
     ) -> anyhow::Result<()> {
         let mut paginator = Paginator::new(
             datastore::SQL_BATCH_SIZE,
@@ -1350,17 +1340,33 @@ impl BundleCollection {
                 (ereport.restart_id.into_untyped_uuid(), ereport.ena)
             });
 
+            let prev_n_collected = status.n_collected;
             let n_ereports = ereports.len();
+            status.n_found += n_ereports;
+
             for ereport in ereports {
-                write_ereport(ereport.into(), &dir).await?;
-                *ereports_collected += 1;
+                match ereport.try_into() {
+                    Ok(ereport) => {
+                        write_ereport(ereport, &dir).await?;
+                        status.n_collected += 1;
+                    }
+                    Err(err) => {
+                        warn!(&self.log, "invalid ereport"; "error" => %err);
+                        status.errors.push(err.to_string());
+                    }
+                }
             }
-            debug!(self.log, "Support bundle: added {n_ereports} ereports");
+            debug!(
+                self.log,
+                "Support bundle: added {} ereports ({} found)",
+                status.n_collected - prev_n_collected,
+                n_ereports
+            );
         }
 
         info!(
             self.log,
-            "Support bundle: collected {} total ereports", *ereports_collected
+            "Support bundle: collected {} total ereports", status.n_collected
         );
         Ok(())
     }
@@ -2273,7 +2279,11 @@ mod test {
         assert!(report.activated_in_db_ok);
         assert_eq!(
             report.ereports,
-            SupportBundleEreportStatus::Collected { n_collected: 7 }
+            Some(SupportBundleEreportStatus {
+                n_collected: 7,
+                n_found: 7,
+                errors: Vec::new()
+            })
         );
 
         let observed_bundle = datastore

@@ -131,7 +131,8 @@ async fn cmd_db_ereport_list(
         ena: Ena,
         #[tabled(display_with = "display_option_blank")]
         class: Option<&'report str>,
-        source: Reporter,
+        #[tabled(display_with = "display_option_error")]
+        source: Option<Reporter>,
         #[tabled(display_with = "display_option_blank", rename = "S/N")]
         serial: Option<&'report str>,
         #[tabled(display_with = "display_option_blank", rename = "P/N")]
@@ -140,7 +141,16 @@ async fn cmd_db_ereport_list(
 
     impl<'report> From<&'report db::model::Ereport> for EreportRow<'report> {
         fn from(ereport: &'report db::model::Ereport) -> Self {
-            let reporter = ereport.reporter();
+            let source = match ereport.reporter() {
+                Ok(reporter) => Some(reporter),
+                Err(e) => {
+                    eprintln!(
+                        "error: ereport {} has an invalid reporter. {e}.",
+                        ereport.id()
+                    );
+                    None
+                }
+            };
             let &db::model::Ereport {
                 restart_id,
                 ena: DbEna(ena),
@@ -155,7 +165,7 @@ async fn cmd_db_ereport_list(
                 restart_id: restart_id.into_untyped_uuid(),
                 ena,
                 class: class.as_deref(),
-                source: reporter,
+                source,
                 serial: serial_number.as_deref(),
                 part_number: part_number.as_deref(),
             }
@@ -414,7 +424,10 @@ async fn cmd_db_ereporters(
             let identity = match reporter.try_into() {
                 Ok(reporter) => Some(reporter),
                 Err(err) => {
-                    eprintln!("{err}");
+                    eprintln!(
+                        "error: encounted an invalid reporter entry for \
+                         reporter ID {id}: {err}",
+                    );
                     None
                 }
             };

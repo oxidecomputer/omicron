@@ -2627,20 +2627,31 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
                 match ereports {
-                    SupportBundleEreportStatus::NotRequested => {
+                    None => {
                         println!("      ereport collection was not requested");
                     }
-                    SupportBundleEreportStatus::Failed {
-                        error,
+                    Some(SupportBundleEreportStatus {
+                        errors,
                         n_collected,
-                    } => {
+                        n_found,
+                    }) if !errors.is_empty() => {
                         println!("      ereport collection failed:");
+                        println!(
+                            "        total matching ereports found: {n_found}"
+                        );
                         println!(
                             "        ereports collected successfully: {n_collected}"
                         );
-                        println!("        error: {error}");
+                        println!("        errors:");
+                        for error in errors {
+                            println!("          {error}");
+                        }
                     }
-                    SupportBundleEreportStatus::Collected { n_collected } => {
+                    Some(SupportBundleEreportStatus {
+                        n_collected, ..
+                    }) => {
+                        // If ereport collection succeeded, n_found should be
+                        // equal to n_collected.
                         println!("      ereports collected: {n_collected}");
                     }
                 }

@@ -281,20 +281,25 @@ pub struct SupportBundleCollectionReport {
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
 
-    /// Status of ereport collection.
-    pub ereports: SupportBundleEreportStatus,
+    /// Status of ereport collection, or `None` if no ereports were requested
+    /// for this support bundle.
+    pub ereports: Option<SupportBundleEreportStatus>,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub enum SupportBundleEreportStatus {
-    /// Ereports were not requested for this bundle.
-    NotRequested,
-
-    /// Ereports were collected successfully.
-    Collected { n_collected: usize },
-
-    /// Ereport collection failed, though some ereports may have been written.
-    Failed { n_collected: usize, error: String },
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleEreportStatus {
+    /// The total number of ereports found that match the requested filters.
+    ///
+    /// This may be greater than `n_collected` if some ereports were malformed.
+    pub n_found: usize,
+    /// The total number of ereports added to the bundle.
+    ///
+    /// This may be non-zero even if some errors occurred.
+    pub n_collected: usize,
+    /// Any errors which occurred while collecting ereports. Some errors may be
+    /// fatal and result in the termination of ereport collection, while others
+    /// may only indicate a failure to collect a particular ereport.
+    pub errors: Vec<String>,
 }
 
 impl SupportBundleCollectionReport {
@@ -304,7 +309,7 @@ impl SupportBundleCollectionReport {
             listed_in_service_sleds: false,
             listed_sps: false,
             activated_in_db_ok: false,
-            ereports: SupportBundleEreportStatus::NotRequested,
+            ereports: None,
         }
     }
 }

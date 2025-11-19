@@ -15,6 +15,7 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use nexus_db_schema::schema::ereport;
 use nexus_types::fm::ereport::{self as types, Ena, EreportId};
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{EreporterRestartKind, OmicronZoneKind, SledKind};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -138,17 +139,16 @@ impl Ereport {
     /// Returns the [`types::Reporter`] identifying the entity that reported
     /// this ereport.
     ///
-    /// # Panics
-    ///
-    /// This function assumes that the database record for this ereport is
-    /// valid, and panics if it does not contain either a non-NULL `sp_type` and
-    /// `sp_slot` XOR a non-NULL `sled_id`.
+    /// This function requires that the database record for this ereport is
+    /// valid, and returns an error if it does not contain either a non-NULL
+    /// `sp_type` and `sp_slot` XOR a non-NULL `sled_id`.
     ///
     /// This constraint is enforced by the `reporter_identity_validity` CHECK
-    /// constraint in the database schema, so this should not panic unless an
-    /// ereport is manually constructed in memory with invalid values.
-    pub fn reporter(&self) -> types::Reporter {
-        self.reporter.try_into().unwrap()
+    /// constraint in the database schema, so this should not return an error
+    /// unless an ereport is manually constructed in memory with invalid
+    /// values, or the database schema has changed.
+    pub fn reporter(&self) -> Result<types::Reporter, Error> {
+        self.reporter.try_into()
     }
 
     pub fn new(
@@ -186,8 +186,9 @@ impl From<types::Ereport> for Ereport {
     }
 }
 
-impl From<Ereport> for types::Ereport {
-    fn from(ereport: Ereport) -> Self {
+impl TryFrom<Ereport> for types::Ereport {
+    type Error = Error;
+    fn try_from(ereport: Ereport) -> Result<Self, Self::Error> {
         let id = ereport.id();
         let Ereport {
             collector_id,
@@ -199,7 +200,12 @@ impl From<Ereport> for types::Ereport {
             reporter,
             ..
         } = ereport;
-        types::Ereport {
+        let reporter = reporter.try_into().map_err(|e: Error| {
+            e.internal_context(format!(
+                "ereport {id} has an invalid reporter identity"
+            ))
+        })?;
+        Ok(types::Ereport {
             data: types::EreportData {
                 id,
                 time_collected,
@@ -209,8 +215,8 @@ impl From<Ereport> for types::Ereport {
                 class,
                 report,
             },
-            reporter: reporter.try_into().unwrap(),
-        }
+            reporter,
+        })
     }
 }
 
@@ -234,42 +240,40 @@ impl From<types::Reporter> for Reporter {
 }
 
 impl TryFrom<Reporter> for types::Reporter {
-    type Error = anyhow::Error;
+    type Error = Error;
     fn try_from(reporter: Reporter) -> Result<Self, Self::Error> {
-        Ok(match reporter {
+        match reporter {
             Reporter {
                 reporter: EreporterType::Sp,
                 sp_type: Some(sp_type),
                 sp_slot: Some(slot),
                 ..
-            } => Self::Sp {
+            } => Ok(Self::Sp {
                 sp_type: sp_type.into(),
                 slot: crate::SqlU16::from(slot).0,
-            },
+            }),
             Reporter {
                 reporter: EreporterType::Sp, sp_type, sp_slot, ..
-            } => {
-                anyhow::bail!(
+            } => Err(Error::InternalError {
+                internal_message: format!(
                     "the 'reporter_identity_validity' CHECK constraint \
                      should enforce that ereports with reporter='sp' have \
                      a non-NULL SP type and slot, but this ereport has \
                      sp_type={sp_type:?} and sp_slot={sp_slot:?}",
-                )
-            }
+                ),
+            }),
             Reporter {
                 reporter: EreporterType::Host,
                 sled_id: Some(id),
                 ..
-            } => Self::HostOs { sled: id.into() },
+            } => Ok(Self::HostOs { sled: id.into() }),
             Reporter {
                 reporter: EreporterType::Host, sled_id: None, ..
-            } => {
-                anyhow::bail!(
-                    "the 'reporter_identity_validity' CHECK constraint \
+            } => Err(Error::internal_error(
+                "the 'reporter_identity_validity' CHECK constraint \
                      should enforce that ereports with reporter='host' \
                      have a non-NULL sled_id, but this ereport does not",
-                )
-            }
-        })
+            )),
+        }
     }
 }

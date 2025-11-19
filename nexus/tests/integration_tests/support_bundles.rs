@@ -493,7 +493,11 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
             listed_in_service_sleds: true,
             listed_sps: true,
             activated_in_db_ok: true,
-            ereports: SupportBundleEreportStatus::Collected { n_collected: 0 },
+            ereports: Some(SupportBundleEreportStatus {
+                n_collected: 0,
+                n_found: 0,
+                errors: Vec::new()
+            })
         })
     );
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
@@ -591,7 +595,11 @@ async fn test_support_bundle_range_requests(
             listed_in_service_sleds: true,
             listed_sps: true,
             activated_in_db_ok: true,
-            ereports: SupportBundleEreportStatus::Collected { n_collected: 0 },
+            ereports: Some(SupportBundleEreportStatus {
+                n_collected: 0,
+                n_found: 0,
+                errors: Vec::new()
+            })
         })
     );
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
