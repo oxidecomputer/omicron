@@ -890,5 +890,20 @@ mod api_impl {
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }
+
+        async fn local_storage_dataset_ensure(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<LocalStoragePathParam>,
+            _body: TypedBody<LocalStorageDatasetEnsureRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn local_storage_dataset_delete(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<LocalStoragePathParam>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
     }
 }

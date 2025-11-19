@@ -24,7 +24,8 @@ use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
-    NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
+    DelegatedZvol, NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers,
+    SourceNatConfig,
 };
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -559,6 +560,9 @@ struct InstanceRunner {
 
     // Queue to notify the sled agent's metrics task about our VNICs.
     metrics_queue: MetricsRequestQueue,
+
+    // Zvols to delegate to the Propolis zone
+    delegated_zvols: Vec<DelegatedZvol>,
 }
 
 impl InstanceRunner {
@@ -1689,6 +1693,7 @@ impl Instance {
             zone_builder_factory,
             zone_bundler,
             metrics_queue,
+            delegated_zvols: local_config.delegated_zvols,
         };
 
         let runner_handle = tokio::task::spawn(async move {
@@ -2063,6 +2068,24 @@ impl InstanceRunner {
             opte_ports.push(port);
         }
 
+        // When delegatng a zvol, delegating the associated rdsk device does
+        // _not_ require delegating the parent dataset. Future types of
+        // delegated zvol may want to delegate either the parent dataset or
+        // some other one.
+        let datasets: Vec<zone::Dataset> = vec![];
+
+        // For delegated devices, include the default list plus any for the
+        // delegated zvol devices.
+        let mut devices = vec![
+            zone::Device { name: "/dev/vmm/*".to_string() },
+            zone::Device { name: "/dev/vmmctl".to_string() },
+            zone::Device { name: "/dev/viona".to_string() },
+        ];
+
+        for delegated_zvol in &self.delegated_zvols {
+            devices.push(zone::Device { name: delegated_zvol.zvol_device() });
+        }
+
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
         let zname = propolis_zone_name(&self.propolis_id);
@@ -2074,6 +2097,7 @@ impl InstanceRunner {
             .into_iter()
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?;
+
         let installed_zone = self
             .zone_builder_factory
             .builder()
@@ -2085,14 +2109,10 @@ impl InstanceRunner {
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
                 self.propolis_id.into_untyped_uuid(),
             ))
-            .with_datasets(&[])
+            .with_datasets(&datasets)
             .with_filesystems(&[])
             .with_data_links(&[])
-            .with_devices(&[
-                zone::Device { name: "/dev/vmm/*".to_string() },
-                zone::Device { name: "/dev/vmmctl".to_string() },
-                zone::Device { name: "/dev/viona".to_string() },
-            ])
+            .with_devices(&devices)
             .with_opte_ports(opte_ports)
             .with_links(vec![])
             .with_limit_priv(vec![])
@@ -2705,6 +2725,7 @@ mod tests {
                 host_domain: None,
                 search_domains: vec![],
             },
+            delegated_zvols: vec![],
         };
 
         InstanceInitialState {
@@ -3316,6 +3337,7 @@ mod tests {
                 zone_builder_factory,
                 zone_bundler,
                 metrics_queue,
+                delegated_zvols: local_config.delegated_zvols,
             }
         }
     }

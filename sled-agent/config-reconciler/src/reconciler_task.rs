@@ -24,6 +24,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use sled_storage::config::MountConfig;
+use sled_storage::dataset::LOCAL_STORAGE_DATASET;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::disk::Disk;
@@ -128,28 +129,28 @@ impl ReconcilerResult {
             .unwrap_or(TimeSyncStatus::NotYetChecked)
     }
 
-    pub(crate) fn all_mounted_debug_datasets(
+    pub(crate) fn all_mounted_datasets_of_kind(
         &self,
+        kind: DatasetKind,
     ) -> impl Iterator<Item = PathInPool> + '_ {
         let Some(latest_result) = &self.latest_result else {
             return Either::Left(std::iter::empty());
         };
         Either::Right(
-            latest_result
-                .all_mounted_datasets(&self.mount_config, DatasetKind::Debug),
+            latest_result.all_mounted_datasets(&self.mount_config, kind),
         )
+    }
+
+    pub(crate) fn all_mounted_debug_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::Debug)
     }
 
     pub(crate) fn all_mounted_zone_root_datasets(
         &self,
     ) -> impl Iterator<Item = PathInPool> + '_ {
-        let Some(latest_result) = &self.latest_result else {
-            return Either::Left(std::iter::empty());
-        };
-        Either::Right(latest_result.all_mounted_datasets(
-            &self.mount_config,
-            DatasetKind::TransientZoneRoot,
-        ))
+        self.all_mounted_datasets_of_kind(DatasetKind::TransientZoneRoot)
     }
 
     pub(crate) fn to_inventory(
@@ -160,6 +161,12 @@ impl ReconcilerResult {
         let latest_result =
             self.latest_result.as_ref().map(|r| r.to_inventory());
         (status, latest_result)
+    }
+
+    pub(crate) fn all_mounted_local_storage_datasets(
+        &self,
+    ) -> impl Iterator<Item = PathInPool> + '_ {
+        self.all_mounted_datasets_of_kind(DatasetKind::LocalStorage)
     }
 }
 
@@ -241,8 +248,17 @@ impl LatestReconciliationResult {
         // handle the specific `DatasetKind`s used by our callers.
         let mountpoint = match &kind {
             DatasetKind::Debug => U2_DEBUG_DATASET,
+            DatasetKind::LocalStorage => LOCAL_STORAGE_DATASET,
             DatasetKind::TransientZoneRoot => ZONE_DATASET,
-            _ => unreachable!(
+
+            DatasetKind::Clickhouse
+            | DatasetKind::ClickhouseKeeper
+            | DatasetKind::ClickhouseServer
+            | DatasetKind::Cockroach
+            | DatasetKind::Crucible
+            | DatasetKind::ExternalDns
+            | DatasetKind::InternalDns
+            | DatasetKind::TransientZone { .. } => unreachable!(
                 "private function called with unexpected kind {kind:?}"
             ),
         };
