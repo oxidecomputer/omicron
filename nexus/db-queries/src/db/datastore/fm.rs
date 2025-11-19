@@ -202,7 +202,7 @@ impl DataStore {
                                         "failed to fetch ereport {ereport_id} for case {}",
                                         case.id,
                                     )))?
-                                    .into();
+                                    .try_into()?;
                                 entry.insert(Arc::new(ereport)).clone()
                             }
                         };
