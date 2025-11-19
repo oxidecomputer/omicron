@@ -10,7 +10,7 @@ use crate::helpers::const_max_len;
 use crate::helpers::datetime_opt_rfc3339_concise;
 use crate::helpers::datetime_rfc3339_concise;
 use crate::helpers::display_option_blank;
-use crate::helpers::display_option_error;
+use crate::helpers::display_option_invalid;
 
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -131,7 +131,7 @@ async fn cmd_db_ereport_list(
         ena: Ena,
         #[tabled(display_with = "display_option_blank")]
         class: Option<&'report str>,
-        #[tabled(display_with = "display_option_error")]
+        #[tabled(display_with = "display_option_invalid")]
         source: Option<Reporter>,
         #[tabled(display_with = "display_option_blank", rename = "S/N")]
         serial: Option<&'report str>,
@@ -409,7 +409,7 @@ async fn cmd_db_ereporters(
         #[tabled(display_with = "datetime_opt_rfc3339_concise")]
         first_seen: Option<DateTime<Utc>>,
         id: Uuid,
-        #[tabled(display_with = "display_option_error")]
+        #[tabled(display_with = "display_option_invalid")]
         identity: Option<Reporter>,
         #[tabled(display_with = "display_option_blank", rename = "S/N")]
         serial: Option<String>,

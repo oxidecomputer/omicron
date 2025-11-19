@@ -50,11 +50,13 @@ pub(crate) fn display_option_blank<T: std::fmt::Display>(
     opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
 }
 
-/// Display the string `<ERROR>` for an Option<T> if it's None.
-pub(crate) fn display_option_error<T: std::fmt::Display>(
+/// Display the string `<INVALID>` for an Option<T> if it's None.
+pub(crate) fn display_option_invalid<T: std::fmt::Display>(
     opt: &Option<T>,
 ) -> String {
-    opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "<ERROR>".to_string())
+    opt.as_ref()
+        .map(|x| x.to_string())
+        .unwrap_or_else(|| "<INVALID>".to_string())
 }
 
 // Format a `chrono::DateTime` in RFC3339 with milliseconds precision and using
