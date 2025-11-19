@@ -31,6 +31,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
@@ -681,6 +682,7 @@ pub struct InstanceSledLocalConfig {
     pub multicast_groups: Vec<InstanceMulticastMembership>,
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
+    pub delegated_zvols: Vec<DelegatedZvol>,
 }
 
 impl TryFrom<InstanceSledLocalConfig>
@@ -708,6 +710,7 @@ impl TryFrom<InstanceSledLocalConfig>
             multicast_groups: value.multicast_groups,
             firewall_rules,
             dhcp_config: value.dhcp_config,
+            delegated_zvols: value.delegated_zvols,
         })
     }
 }

@@ -29,7 +29,7 @@ use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::inventory::v8;
+use sled_agent_types::inventory::v9;
 use sled_hardware_types::Baseboard;
 use sled_hardware_types::SledCpuFamily;
 use std::collections::BTreeMap;
@@ -59,48 +59,9 @@ pub struct Inventory {
     pub zone_image_resolver: ZoneImageResolverInventory,
 }
 
-impl From<Inventory> for v8::Inventory {
-    fn from(value: Inventory) -> Self {
-        let Inventory {
-            sled_id,
-            sled_agent_address,
-            sled_role,
-            baseboard,
-            usable_hardware_threads,
-            usable_physical_ram,
-            cpu_family,
-            reservoir_size,
-            disks,
-            zpools,
-            datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            zone_image_resolver,
-        } = value;
-        Self {
-            sled_id,
-            sled_agent_address,
-            sled_role,
-            baseboard,
-            usable_hardware_threads,
-            usable_physical_ram,
-            cpu_family,
-            reservoir_size,
-            disks,
-            zpools,
-            datasets,
-            ledgered_sled_config: ledgered_sled_config.map(Into::into),
-            reconciler_status: reconciler_status.into(),
-            last_reconciliation: last_reconciliation.map(Into::into),
-            zone_image_resolver,
-        }
-    }
-}
-
-impl From<v8::Inventory> for Inventory {
-    fn from(value: v8::Inventory) -> Self {
-        let v8::Inventory {
+impl From<v9::Inventory> for Inventory {
+    fn from(value: v9::Inventory) -> Self {
+        let v9::Inventory {
             sled_id,
             sled_agent_address,
             sled_role,
@@ -154,7 +115,7 @@ pub struct OmicronSledConfig {
     pub host_phase_2: HostPhase2DesiredSlots,
 }
 
-impl From<OmicronSledConfig> for v8::OmicronSledConfig {
+impl From<OmicronSledConfig> for v9::OmicronSledConfig {
     fn from(value: OmicronSledConfig) -> Self {
         Self {
             generation: value.generation,
@@ -167,8 +128,8 @@ impl From<OmicronSledConfig> for v8::OmicronSledConfig {
     }
 }
 
-impl From<v8::OmicronSledConfig> for OmicronSledConfig {
-    fn from(value: v8::OmicronSledConfig) -> Self {
+impl From<v9::OmicronSledConfig> for OmicronSledConfig {
+    fn from(value: v9::OmicronSledConfig) -> Self {
         Self {
             generation: value.generation,
             disks: value.disks,
@@ -207,7 +168,7 @@ impl IdOrdItem for OmicronZoneConfig {
     id_upcast!();
 }
 
-impl From<OmicronZoneConfig> for v8::OmicronZoneConfig {
+impl From<OmicronZoneConfig> for v9::OmicronZoneConfig {
     fn from(value: OmicronZoneConfig) -> Self {
         Self {
             id: value.id,
@@ -218,8 +179,8 @@ impl From<OmicronZoneConfig> for v8::OmicronZoneConfig {
     }
 }
 
-impl From<v8::OmicronZoneConfig> for OmicronZoneConfig {
-    fn from(value: v8::OmicronZoneConfig) -> Self {
+impl From<v9::OmicronZoneConfig> for OmicronZoneConfig {
+    fn from(value: v9::OmicronZoneConfig) -> Self {
         Self {
             id: value.id,
             filesystem_pool: value.filesystem_pool,
@@ -322,7 +283,7 @@ pub enum OmicronZoneType {
     },
 }
 
-impl From<OmicronZoneType> for v8::OmicronZoneType {
+impl From<OmicronZoneType> for v9::OmicronZoneType {
     fn from(value: OmicronZoneType) -> Self {
         match value {
             OmicronZoneType::BoundaryNtp {
@@ -399,10 +360,10 @@ impl From<OmicronZoneType> for v8::OmicronZoneType {
     }
 }
 
-impl From<v8::OmicronZoneType> for OmicronZoneType {
-    fn from(value: v8::OmicronZoneType) -> Self {
+impl From<v9::OmicronZoneType> for OmicronZoneType {
+    fn from(value: v9::OmicronZoneType) -> Self {
         match value {
-            v8::OmicronZoneType::BoundaryNtp {
+            v9::OmicronZoneType::BoundaryNtp {
                 address,
                 ntp_servers,
                 dns_servers,
@@ -417,31 +378,31 @@ impl From<v8::OmicronZoneType> for OmicronZoneType {
                 nic,
                 snat_cfg,
             },
-            v8::OmicronZoneType::Clickhouse { address, dataset } => {
+            v9::OmicronZoneType::Clickhouse { address, dataset } => {
                 Self::Clickhouse { address, dataset }
             }
-            v8::OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+            v9::OmicronZoneType::ClickhouseKeeper { address, dataset } => {
                 Self::ClickhouseKeeper { address, dataset }
             }
-            v8::OmicronZoneType::ClickhouseServer { address, dataset } => {
+            v9::OmicronZoneType::ClickhouseServer { address, dataset } => {
                 Self::ClickhouseServer { address, dataset }
             }
-            v8::OmicronZoneType::CockroachDb { address, dataset } => {
+            v9::OmicronZoneType::CockroachDb { address, dataset } => {
                 Self::CockroachDb { address, dataset }
             }
-            v8::OmicronZoneType::Crucible { address, dataset } => {
+            v9::OmicronZoneType::Crucible { address, dataset } => {
                 Self::Crucible { address, dataset }
             }
-            v8::OmicronZoneType::CruciblePantry { address } => {
+            v9::OmicronZoneType::CruciblePantry { address } => {
                 Self::CruciblePantry { address }
             }
-            v8::OmicronZoneType::ExternalDns {
+            v9::OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 nic,
             } => Self::ExternalDns { dataset, http_address, dns_address, nic },
-            v8::OmicronZoneType::InternalDns {
+            v9::OmicronZoneType::InternalDns {
                 dataset,
                 http_address,
                 dns_address,
@@ -454,10 +415,10 @@ impl From<v8::OmicronZoneType> for OmicronZoneType {
                 gz_address,
                 gz_address_index,
             },
-            v8::OmicronZoneType::InternalNtp { address } => {
+            v9::OmicronZoneType::InternalNtp { address } => {
                 Self::InternalNtp { address }
             }
-            v8::OmicronZoneType::Nexus {
+            v9::OmicronZoneType::Nexus {
                 internal_address,
                 external_ip,
                 nic,
@@ -471,7 +432,7 @@ impl From<v8::OmicronZoneType> for OmicronZoneType {
                 external_tls,
                 external_dns_servers,
             },
-            v8::OmicronZoneType::Oximeter { address } => {
+            v9::OmicronZoneType::Oximeter { address } => {
                 Self::Oximeter { address }
             }
         }
@@ -496,7 +457,7 @@ pub struct ConfigReconcilerInventory {
     pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
 }
 
-impl From<ConfigReconcilerInventory> for v8::ConfigReconcilerInventory {
+impl From<ConfigReconcilerInventory> for v9::ConfigReconcilerInventory {
     fn from(value: ConfigReconcilerInventory) -> Self {
         Self {
             last_reconciled_config: value.last_reconciled_config.into(),
@@ -510,8 +471,8 @@ impl From<ConfigReconcilerInventory> for v8::ConfigReconcilerInventory {
     }
 }
 
-impl From<v8::ConfigReconcilerInventory> for ConfigReconcilerInventory {
-    fn from(value: v8::ConfigReconcilerInventory) -> Self {
+impl From<v9::ConfigReconcilerInventory> for ConfigReconcilerInventory {
+    fn from(value: v9::ConfigReconcilerInventory) -> Self {
         Self {
             last_reconciled_config: value.last_reconciled_config.into(),
             external_disks: value.external_disks,
@@ -547,7 +508,7 @@ pub enum ConfigReconcilerInventoryStatus {
 }
 
 impl From<ConfigReconcilerInventoryStatus>
-    for v8::ConfigReconcilerInventoryStatus
+    for v9::ConfigReconcilerInventoryStatus
 {
     fn from(value: ConfigReconcilerInventoryStatus) -> Self {
         match value {
@@ -568,13 +529,13 @@ impl From<ConfigReconcilerInventoryStatus>
     }
 }
 
-impl From<v8::ConfigReconcilerInventoryStatus>
+impl From<v9::ConfigReconcilerInventoryStatus>
     for ConfigReconcilerInventoryStatus
 {
-    fn from(value: v8::ConfigReconcilerInventoryStatus) -> Self {
+    fn from(value: v9::ConfigReconcilerInventoryStatus) -> Self {
         match value {
-            v8::ConfigReconcilerInventoryStatus::NotYetRun => Self::NotYetRun,
-            v8::ConfigReconcilerInventoryStatus::Running {
+            v9::ConfigReconcilerInventoryStatus::NotYetRun => Self::NotYetRun,
+            v9::ConfigReconcilerInventoryStatus::Running {
                 config,
                 started_at,
                 running_for,
@@ -583,7 +544,7 @@ impl From<v8::ConfigReconcilerInventoryStatus>
                 started_at,
                 running_for,
             },
-            v8::ConfigReconcilerInventoryStatus::Idle {
+            v9::ConfigReconcilerInventoryStatus::Idle {
                 completed_at,
                 ran_for,
             } => Self::Idle { completed_at, ran_for },

@@ -369,7 +369,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v3::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::v8_omicron_config_put(rqctx, body.map(Into::into)).await
+        Self::v9_omicron_config_put(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -385,13 +385,12 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        operation_id = "vmm_register",
         versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
+        body: TypedBody<InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
 
     #[endpoint {
@@ -399,7 +398,7 @@ pub trait SledAgentApi {
         path = "/vmms/{propolis_id}",
         operation_id = "vmm_register",
         versions =
-            VERSION_MULTICAST_SUPPORT..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES
+            VERSION_DELEGATE_ZVOL_TO_PROPOLIS..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES
     }]
     async fn v9_vmm_register(
         rqctx: RequestContext<Self::Context>,
@@ -423,7 +422,7 @@ pub trait SledAgentApi {
         path_params: Path<VmmPathParam>,
         body: TypedBody<v8::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
+        Self::v9_vmm_register(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -596,10 +595,10 @@ pub trait SledAgentApi {
         path = "/vpc/{vpc_id}/firewall/rules",
         versions = ..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
-    async fn v8_vpc_firewall_rules_put(
+    async fn v9_vpc_firewall_rules_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VpcPathParam>,
-        body: TypedBody<v8::VpcFirewallRulesEnsureBody>,
+        body: TypedBody<v9::VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let body = body.try_map(VpcFirewallRulesEnsureBody::try_from)?;
         Self::vpc_firewall_rules_put(rqctx, path_params, body).await
@@ -696,9 +695,9 @@ pub trait SledAgentApi {
         versions =
             VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
-    async fn v8_inventory(
+    async fn v9_inventory(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v8::Inventory>, HttpError> {
+    ) -> Result<HttpResponseOk<v9::Inventory>, HttpError> {
         let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
         inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
@@ -713,9 +712,9 @@ pub trait SledAgentApi {
     async fn v3_inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v3::Inventory>, HttpError> {
-        Self::v8_inventory(rqctx)
+        Self::v9_inventory(rqctx)
             .await
-            .map(|HttpResponseOk(v8)| HttpResponseOk(v3::Inventory::from(v8)))
+            .map(|HttpResponseOk(inv)| HttpResponseOk(v3::Inventory::from(inv)))
     }
 
     /// Fetch sled identifiers

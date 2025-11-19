@@ -6,6 +6,7 @@
 //!
 //! Version 6 types (before multicast support was added in version 7).
 
+use crate::v8;
 use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
 use omicron_common::api::internal::nexus::HostIdentifier;
@@ -69,9 +70,7 @@ pub struct InstanceSledLocalConfig {
     pub dhcp_config: DhcpConfig,
 }
 
-impl From<InstanceSledLocalConfig>
-    for sled_agent_types::inventory::v8::InstanceSledLocalConfig
-{
+impl From<InstanceSledLocalConfig> for v8::InstanceSledLocalConfig {
     fn from(v6: InstanceSledLocalConfig) -> Self {
         let InstanceSledLocalConfig {
             hostname,
@@ -94,14 +93,11 @@ impl From<InstanceSledLocalConfig>
             multicast_groups: Vec::new(),
             firewall_rules,
             dhcp_config,
-            delegated_zvols: Vec::new(),
         }
     }
 }
 
-impl From<InstanceEnsureBody>
-    for sled_agent_types::inventory::v8::InstanceEnsureBody
-{
+impl From<InstanceEnsureBody> for v8::InstanceEnsureBody {
     fn from(v6: InstanceEnsureBody) -> Self {
         let InstanceEnsureBody {
             vmm_spec,
@@ -138,9 +134,7 @@ pub struct ResolvedVpcFirewallRule {
     pub priority: external::VpcFirewallRulePriority,
 }
 
-impl From<ResolvedVpcFirewallRule>
-    for sled_agent_types::inventory::v8::ResolvedVpcFirewallRule
-{
+impl From<ResolvedVpcFirewallRule> for v8::ResolvedVpcFirewallRule {
     fn from(v6: ResolvedVpcFirewallRule) -> Self {
         let ResolvedVpcFirewallRule {
             status,

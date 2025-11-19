@@ -52,7 +52,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use sled_agent_types::inventory::v8::OmicronZonesConfig as OmicronZonesConfigV8;
+use sled_agent_types::inventory::v9::OmicronZonesConfig as OmicronZonesConfigV9;
 use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
 use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
 use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
@@ -382,15 +382,15 @@ pub fn representative() -> Representative {
     let sled14_data = include_str!("../example-data/madrid-sled14.json");
     let sled16_data = include_str!("../example-data/madrid-sled16.json");
     let sled17_data = include_str!("../example-data/madrid-sled17.json");
-    let sled14_v8: OmicronZonesConfigV8 =
+    let sled14_v9: OmicronZonesConfigV9 =
         serde_json::from_str(sled14_data).unwrap();
-    let sled16_v8: OmicronZonesConfigV8 =
+    let sled16_v9: OmicronZonesConfigV9 =
         serde_json::from_str(sled16_data).unwrap();
-    let sled17_v8: OmicronZonesConfigV8 =
+    let sled17_v9: OmicronZonesConfigV9 =
         serde_json::from_str(sled17_data).unwrap();
-    let sled14 = OmicronZonesConfig::try_from(sled14_v8).unwrap();
-    let sled16 = OmicronZonesConfig::try_from(sled16_v8).unwrap();
-    let sled17 = OmicronZonesConfig::try_from(sled17_v8).unwrap();
+    let sled14 = OmicronZonesConfig::try_from(sled14_v9).unwrap();
+    let sled16 = OmicronZonesConfig::try_from(sled16_v9).unwrap();
+    let sled17 = OmicronZonesConfig::try_from(sled17_v9).unwrap();
 
     // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
     // datasets for now, and add to them below for sled14.
