@@ -13,7 +13,7 @@ use slog::Logger;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufWriter;
 
-use crate::HELIOS_REPO;
+use crate::HELIOS_PKGREPO;
 use crate::Jobs;
 use crate::cmd::Command;
 
@@ -130,7 +130,7 @@ set name=variant.opensolaris.zone value=global value=nonglobal
     manifest.write_all(preamble.as_bytes()).await?;
 
     let stdout = Command::new("pkg")
-        .args(["list", "-g", HELIOS_REPO, "-F", "json"])
+        .args(["list", "-g", HELIOS_PKGREPO, "-F", "json"])
         .args(["-o", "fmri", "-n", "*"])
         .ensure_stdout(&logger)
         .await?;
