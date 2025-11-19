@@ -61,9 +61,10 @@ use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
-    VmmStateRequested, VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
+
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -99,6 +100,9 @@ pub struct SledAgent {
     /// lists of external IPs assigned to instances
     pub external_ips:
         Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
+    /// multicast group memberships for instances
+    pub multicast_groups:
+        Mutex<HashMap<PropolisUuid, HashSet<InstanceMulticastMembership>>>,
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
@@ -180,6 +184,7 @@ impl SledAgent {
             simulated_upstairs,
             v2p_mappings: Mutex::new(HashSet::new()),
             external_ips: Mutex::new(HashMap::new()),
+            multicast_groups: Mutex::new(HashMap::new()),
             vpc_routes: Mutex::new(HashMap::new()),
             mock_propolis: futures::lock::Mutex::new(None),
             config: config.clone(),
@@ -194,9 +199,6 @@ impl SledAgent {
         })
     }
 
-    /// Idempotently ensures that the given API Instance (described by
-    /// `api_instance`) exists on this server in the given runtime state
-    /// (described by `target`).
     pub async fn instance_register(
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
@@ -232,7 +234,7 @@ impl SledAgent {
                 disk_state: DiskState::Attached(
                     instance_id.into_untyped_uuid(),
                 ),
-                gen: omicron_common::api::external::Generation::new(),
+                generation: omicron_common::api::external::Generation::new(),
                 time_updated: chrono::Utc::now(),
             };
 
@@ -310,7 +312,7 @@ impl SledAgent {
             migration_id.map(|migration_id| MigrationRuntimeState {
                 migration_id,
                 state: MigrationState::Pending,
-                gen: Generation::new(),
+                generation: Generation::new(),
                 time_updated: chrono::Utc::now(),
             });
 
@@ -689,6 +691,44 @@ impl SledAgent {
         let my_eips = eips.entry(propolis_id).or_default();
 
         my_eips.remove(&body_args);
+
+        Ok(())
+    }
+
+    pub async fn instance_join_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        membership: &InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't join multicast group for VMM that's not registered",
+            ));
+        }
+
+        let mut groups = self.multicast_groups.lock().unwrap();
+        let my_groups = groups.entry(propolis_id).or_default();
+
+        my_groups.insert(membership.clone());
+
+        Ok(())
+    }
+
+    pub async fn instance_leave_multicast_group(
+        &self,
+        propolis_id: PropolisUuid,
+        membership: &InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
+            return Err(Error::internal_error(
+                "can't leave multicast group for VMM that's not registered",
+            ));
+        }
+
+        let mut groups = self.multicast_groups.lock().unwrap();
+        let my_groups = groups.entry(propolis_id).or_default();
+
+        my_groups.remove(membership);
 
         Ok(())
     }

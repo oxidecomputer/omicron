@@ -27,6 +27,7 @@ pub mod inventory_collection;
 pub mod inventory_load;
 pub mod lookup_region_port;
 pub mod metrics_producer_gc;
+pub mod multicast;
 pub mod nat_cleanup;
 pub mod networking;
 pub mod phantom_disks;

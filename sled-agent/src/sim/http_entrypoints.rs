@@ -41,8 +41,8 @@ use sled_agent_types::bootstore::BootstoreStatus;
 use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
-use sled_agent_types::instance::InstanceEnsureBody;
 use sled_agent_types::instance::InstanceExternalIpBody;
+use sled_agent_types::instance::InstanceMulticastBody;
 use sled_agent_types::instance::VmmPutStateBody;
 use sled_agent_types::instance::VmmPutStateResponse;
 use sled_agent_types::instance::VmmUnregisterResponse;
@@ -85,7 +85,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceEnsureBody>,
+        body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
@@ -143,6 +143,58 @@ impl SledAgentApi for SledAgentSimImpl {
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         sa.instance_delete_external_ip(id, &body_args).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_join_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+
+        match body_args {
+            InstanceMulticastBody::Join(membership) => {
+                sa.instance_join_multicast_group(propolis_id, &membership)
+                    .await?;
+            }
+            InstanceMulticastBody::Leave(_) => {
+                // This endpoint is for joining - reject leave operations
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Join endpoint cannot process Leave operations".to_string(),
+                ));
+            }
+        }
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let propolis_id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+
+        match body_args {
+            InstanceMulticastBody::Leave(membership) => {
+                sa.instance_leave_multicast_group(propolis_id, &membership)
+                    .await?;
+            }
+            InstanceMulticastBody::Join(_) => {
+                // This endpoint is for leaving - reject join operations
+                return Err(HttpError::for_bad_request(
+                    None,
+                    "Leave endpoint cannot process Join operations".to_string(),
+                ));
+            }
+        }
+
         Ok(HttpResponseUpdatedNoContent())
     }
 

@@ -120,7 +120,7 @@ pub enum BlueprintKind {
 impl fmt::Display for BlueprintKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BlueprintKind::NoZonesWithActiveNexusGeneration(gen) => {
+            BlueprintKind::NoZonesWithActiveNexusGeneration(r#gen) => {
                 write!(f, "No zones with active nexus generation @ {gen}",)
             }
         }

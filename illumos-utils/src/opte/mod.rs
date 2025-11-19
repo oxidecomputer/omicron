@@ -31,6 +31,7 @@ use oxide_vpc::api::RouterTarget;
 pub use oxide_vpc::api::Vni;
 use oxnet::IpNet;
 pub use port::Port;
+pub use port_manager::MulticastGroupCfg;
 pub use port_manager::PortCreateParams;
 pub use port_manager::PortManager;
 pub use port_manager::PortTicket;
@@ -110,7 +111,7 @@ impl Gateway {
     }
 }
 
-/// Convert a nexus `IpNet` to an OPTE `IpCidr`.
+/// Convert a nexus [IpNet] to an OPTE [IpCidr].
 fn net_to_cidr(net: IpNet) -> IpCidr {
     match net {
         IpNet::V4(net) => IpCidr::Ip4(Ipv4Cidr::new(
@@ -124,9 +125,10 @@ fn net_to_cidr(net: IpNet) -> IpCidr {
     }
 }
 
-/// Convert a nexus `RouterTarget` to an OPTE `RouterTarget`.
+/// Convert a nexus [shared::RouterTarget] to an OPTE [RouterTarget].
 ///
-/// This is effectively a `From` impl, but defined for two out-of-crate types.
+/// This is effectively a [`From`] impl, but defined for two
+/// out-of-crate types.
 /// We map internet gateways that target the (single) "system" VPC IG to
 /// `InternetGateway(None)`. Everything else is mapped directly, translating IP
 /// address types as needed.

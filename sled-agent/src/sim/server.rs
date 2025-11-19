@@ -10,13 +10,13 @@ use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
 use crate::nexus::{ConvertInto, NexusClient};
 use crate::rack_setup::SledConfig;
-use crate::rack_setup::service::build_initial_blueprint_from_sled_configs;
+use crate::rack_setup::service::{PlannedSledDescription, ServicePlan};
 use crate::rack_setup::{
     from_ipaddr_to_external_floating_ip,
     from_sockaddr_to_external_floating_addr,
 };
 use crate::sim::SimulatedUpstairs;
-use anyhow::{Context as _, anyhow};
+use anyhow::{Context as _, anyhow, bail};
 use crucible_agent_client::types::State as RegionState;
 use iddqd::IdOrdMap;
 use illumos_utils::zpool::ZpoolName;
@@ -60,7 +60,6 @@ use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
 use sled_agent_types::rack_init::RecoverySiloConfig;
 use slog::{Drain, Logger, info};
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
@@ -392,7 +391,6 @@ pub async fn run_standalone_server(
     let dns_config =
         dns_config_builder.build_full_config_for_initial_generation();
     dns.initialize_with_config(&log, &dns_config).await?;
-    let internal_dns_version = dns_config.generation;
 
     let all_u2_zpools = server.sled_agent.get_zpools();
     let get_random_zpool = || {
@@ -583,32 +581,48 @@ pub async fn run_standalone_server(
         None => vec![],
     };
 
-    let omicron_physical_disks_config =
-        server.sled_agent.omicron_physical_disks_list()?;
-    let mut sled_configs = BTreeMap::new();
-    sled_configs.insert(
-        config.id,
-        SledConfig {
-            disks: omicron_physical_disks_config
-                .disks
-                .into_iter()
-                .map(|config| BlueprintPhysicalDiskConfig {
-                    disposition: BlueprintPhysicalDiskDisposition::InService,
-                    identity: config.identity,
-                    id: config.id,
-                    pool_id: config.pool_id,
-                })
-                .collect(),
-            datasets: server.sled_agent.datasets_config_list()?.datasets,
-            zones,
-        },
-    );
+    let blueprint = {
+        let omicron_physical_disks_config =
+            server.sled_agent.omicron_physical_disks_list()?;
+        let underlay_address = match server.http_server.local_addr() {
+            SocketAddr::V4(_) => {
+                bail!("sled_agent_ip must be v6")
+            }
+            SocketAddr::V6(addr) => addr,
+        };
+        let inventory = server.sled_agent.inventory(underlay_address.into())?;
+        let mut all_sleds = IdOrdMap::new();
+        all_sleds.insert_overwrite(PlannedSledDescription {
+            underlay_address,
+            sled_id: config.id,
+            config: SledConfig {
+                disks: omicron_physical_disks_config
+                    .disks
+                    .into_iter()
+                    .map(|config| BlueprintPhysicalDiskConfig {
+                        disposition:
+                            BlueprintPhysicalDiskDisposition::InService,
+                        identity: config.identity,
+                        id: config.id,
+                        pool_id: config.pool_id,
+                    })
+                    .collect(),
+                datasets: server.sled_agent.datasets_config_list()?.datasets,
+                zones,
+            },
+        });
 
-    let blueprint = build_initial_blueprint_from_sled_configs(
-        &sled_configs,
-        internal_dns_version,
-    )
-    .context("could not construct initial blueprint")?;
+        let plan = ServicePlan { all_sleds, dns_config: dns_config.clone() };
+        let generation = inventory
+            .ledgered_sled_config
+            .context(
+                "simulated inventory does not have a ledgered sled config",
+            )?
+            .generation;
+        plan.to_blueprint(generation)
+            .context("could not construct initial blueprint")?
+    };
+
     let rack_init_request = RackInitializationRequest {
         blueprint,
         physical_disks,

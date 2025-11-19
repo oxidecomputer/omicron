@@ -415,7 +415,7 @@ table! {
 
         destination_volume_id -> Uuid,
 
-        gen -> Int8,
+        r#gen -> Int8,
         state -> crate::enums::SnapshotStateEnum,
         block_size -> crate::enums::BlockSizeEnum,
         size_bytes -> Int8,
@@ -2773,6 +2773,57 @@ table! {
         volume_id -> Nullable<Uuid>,
     }
 }
+
+table! {
+    multicast_group (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
+        vni -> Int4,
+        multicast_ip -> Inet,
+        source_ips -> Array<Inet>,
+        mvlan -> Nullable<Int2>,
+        underlay_group_id -> Nullable<Uuid>,
+        tag -> Nullable<Text>,
+        state -> crate::enums::MulticastGroupStateEnum,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+    }
+}
+
+table! {
+    multicast_group_member (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        external_group_id -> Uuid,
+        parent_id -> Uuid,
+        sled_id -> Nullable<Uuid>,
+        state -> crate::enums::MulticastGroupMemberStateEnum,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+    }
+}
+
+table! {
+    underlay_multicast_group (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        multicast_ip -> Inet,
+        tag -> Nullable<Text>,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
 
 table! {

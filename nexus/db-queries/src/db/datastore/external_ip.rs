@@ -728,8 +728,8 @@ impl DataStore {
         .map(|res| res.map(|(ip, _do_saga)| ip))
     }
 
-    /// Delete all non-floating IP addresses associated with the provided instance
-    /// ID.
+    /// Delete all non-floating IP addresses associated with the provided
+    /// instance ID.
     ///
     /// This method returns the number of records deleted, rather than the usual
     /// `DeleteResult`. That's mostly useful for tests, but could be important
@@ -841,7 +841,7 @@ impl DataStore {
             .find(|v| v.kind == IpKind::Ephemeral))
     }
 
-    /// Fetch all external IP addresses of any kind for the provided probe
+    /// Fetch all external IP addresses of any kind for the provided probe.
     pub async fn probe_lookup_external_ips(
         &self,
         opctx: &OpContext,

@@ -736,7 +736,7 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn available_internal_dns_subnets(
         &self,
-    ) -> Result<impl Iterator<Item = DnsSubnet>, Error> {
+    ) -> Result<impl Iterator<Item = DnsSubnet> + use<>, Error> {
         // TODO-multirack We need the rack subnet to know what the reserved
         // internal DNS subnets are. Pick any sled; this isn't right in
         // multirack (either DNS will be on a wider subnet or we need to pick a

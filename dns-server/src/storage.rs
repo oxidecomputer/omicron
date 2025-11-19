@@ -681,7 +681,9 @@ impl Store {
         self.prune_trees(trees_to_prune, "too new");
     }
 
-    fn all_name_trees(&self) -> impl Iterator<Item = (Generation, String)> {
+    fn all_name_trees(
+        &self,
+    ) -> impl Iterator<Item = (Generation, String)> + use<> {
         self.db.tree_names().into_iter().filter_map(|tree_name_bytes| {
             let tree_name = std::str::from_utf8(&tree_name_bytes).ok()?;
             let parts = tree_name.splitn(4, '_').collect::<Vec<_>>();
@@ -1098,7 +1100,7 @@ mod test {
     fn generations_with_trees(store: &Store) -> Vec<Generation> {
         store
             .all_name_trees()
-            .map(|(gen, _)| gen)
+            .map(|(r#gen, _)| r#gen)
             .collect::<BTreeSet<Generation>>()
             .into_iter()
             .collect()

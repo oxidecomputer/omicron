@@ -63,6 +63,12 @@ pub trait TestInterfaces {
     async fn set_disk_as_faulted(&self, disk_id: &Uuid) -> Result<bool, Error>;
 
     fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration);
+
+    /// Manually invalidate multicast caches and activate reconciler.
+    ///
+    /// This simulates topology changes that would require cache invalidation,
+    /// such as backplane configuration changes or sled movements.
+    fn invalidate_multicast_caches(&self);
 }
 
 #[async_trait]
@@ -163,5 +169,15 @@ impl TestInterfaces for super::Nexus {
     fn set_samael_max_issue_delay(&self, max_issue_delay: chrono::Duration) {
         let mut mid = self.samael_max_issue_delay.lock().unwrap();
         *mid = Some(max_issue_delay);
+    }
+
+    fn invalidate_multicast_caches(&self) {
+        if let Some(flag) =
+            &self.background_tasks_internal.multicast_invalidate_cache
+        {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.background_tasks
+                .activate(&self.background_tasks.task_multicast_reconciler);
+        }
     }
 }

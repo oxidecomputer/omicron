@@ -42,7 +42,7 @@ use sled_agent_types::{
     early_networking::EarlyNetworkConfig,
     firewall_rules::VpcFirewallRulesEnsureBody,
     instance::{
-        InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
+        InstanceExternalIpBody, InstanceMulticastBody, VmmPutStateBody,
         VmmPutStateResponse, VmmUnregisterResponse,
     },
     sled::AddSledRequest,
@@ -54,6 +54,11 @@ use sled_agent_types::{
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
+
+/// Copies of data types that changed between v3 and v4.
+mod v3;
+/// Copies of data types that changed between v6 and v7.
+mod v6;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -67,7 +72,9 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
-    (7, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
+    (9, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
+    (8, REMOVE_SLED_ROLE),
+    (7, MULTICAST_SUPPORT),
     (6, ADD_PROBE_PUT_ENDPOINT),
     (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
@@ -366,6 +373,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/sled-role",
+        versions = ..VERSION_REMOVE_SLED_ROLE,
     }]
     async fn sled_role_get(
         rqctx: RequestContext<Self::Context>,
@@ -374,32 +382,32 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
+        operation_id = "vmm_register",
+        versions = VERSION_MULTICAST_SUPPORT..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceEnsureBody>,
+        body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
 
     #[endpoint {
-        operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
-        versions = ..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+        operation_id = "vmm_register",
+        versions = ..VERSION_MULTICAST_SUPPORT
     }]
     async fn v6_vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
         body: TypedBody<v6::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        let body = body.try_map(InstanceEnsureBody::try_from)?;
-        Self::vmm_register(rqctx, path_params, body).await
+        Self::vmm_register(rqctx, path_params, body.map(Into::into)).await
     }
 
     #[endpoint {
         method = DELETE,
-        path = "/vmms/{propolis_id}",
+        path = "/vmms/{propolis_id}"
     }]
     async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
@@ -443,6 +451,28 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceExternalIpBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/multicast-group",
+        versions = VERSION_MULTICAST_SUPPORT..,
+    }]
+    async fn vmm_join_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/multicast-group",
+        versions = VERSION_MULTICAST_SUPPORT..,
+    }]
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {

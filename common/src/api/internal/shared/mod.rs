@@ -925,7 +925,7 @@ impl JsonSchema for DatasetKind {
     }
 
     fn json_schema(
-        generator: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         // The schema is a bit more complicated than this -- it's either one of
         // the fixed values or a string starting with "zone/" -- but this is
