@@ -6657,8 +6657,8 @@ ON omicron.public.user_data_export (state);
       * consider that "i don't know my own identity" is a reasonable condition
       * to want to generate an ereport about!
       */
-     serial_number STRING,
-     part_number STRING,
+      part_number STRING,
+      serial_number STRING,
 
      /*
       * The ereport class, which indicates the category of event reported.
