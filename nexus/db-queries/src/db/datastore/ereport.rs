@@ -352,7 +352,9 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use dropshot::PaginationOrder;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use std::num::NonZeroU32;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn explain_sp_latest_ereport_id() {
@@ -533,6 +535,70 @@ mod tests {
         );
 
         eprintln!("--- explanation: {explanation}");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ereport_fetch_matching_time_range_only() {
+        let logctx =
+            dev::test_setup_log("test_ereport_fetch_matching_time_range_only");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let id = fm::EreportId {
+            restart_id: EreporterRestartUuid::new_v4(),
+            ena: ereport_types::Ena(2),
+        };
+        let ereport = fm::EreportData {
+            id,
+            time_collected: Utc::now(),
+            collector_id: OmicronZoneUuid::new_v4(),
+            part_number: Some("my cool CPN".to_string()),
+            serial_number: Some("my cool serial".to_string()),
+            class: Some("my cool ereport".to_string()),
+            report: serde_json::json!({}),
+        };
+        datastore
+            .ereports_insert(
+                &opctx,
+                fm::Reporter::Sp {
+                    sp_type: nexus_types::inventory::SpType::Sled,
+                    slot: 19,
+                },
+                vec![ereport.clone()],
+            )
+            .await
+            .expect("insert should succeed");
+
+        let pagparams = DataPageParams {
+            marker: None,
+            direction: PaginationOrder::Ascending,
+            limit: NonZeroU32::new(100).unwrap(),
+        };
+        let found_ereports = datastore
+            .ereport_fetch_matching(
+                opctx,
+                &EreportFilters {
+                    start_time: Some(
+                        ereport.time_collected - Duration::from_secs(600),
+                    ),
+                    ..Default::default()
+                },
+                &pagparams,
+            )
+            .await
+            .expect("fetch matching should succeed");
+        dbg!(&found_ereports);
+
+        assert_eq!(found_ereports.len(), 1);
+        assert_eq!(found_ereports[0].id(), id);
+        assert_eq!(found_ereports[0].collector_id, ereport.collector_id.into());
+        assert_eq!(&found_ereports[0].part_number, &ereport.part_number);
+        assert_eq!(&found_ereports[0].serial_number, &ereport.serial_number);
+        assert_eq!(&found_ereports[0].class, &ereport.class);
+        assert_eq!(&found_ereports[0].report, &ereport.report);
 
         db.terminate().await;
         logctx.cleanup_successful();
