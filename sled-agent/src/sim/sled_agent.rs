@@ -46,15 +46,17 @@ use omicron_common::disk::{
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
-    SupportBundleUuid, ZpoolUuid,
+    DatasetUuid, ExternalZpoolUuid, GenericUuid, PhysicalDiskUuid,
+    PropolisUuid, SledUuid, SupportBundleUuid, ZpoolUuid,
 };
 use oxnet::Ipv6Net;
+use propolis_client::instance_spec::FileStorageBackend;
 use propolis_client::instance_spec::SpecKey;
 use propolis_client::{
     Client as PropolisClient, types::InstanceInitializationMethod,
 };
 use range_requests::PotentialRange;
+use sled_agent_api::LocalStorageDatasetEnsureRequest;
 use sled_agent_api::SupportBundleMetadata;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
@@ -221,6 +223,24 @@ impl SledAgent {
                 &"could not allocate an instance: ran out of CPUs!",
             ));
         };
+
+        // Make sure each file backend was ensured before changing any state
+        for (_id, disk) in vmm_spec.file_backends() {
+            let FileStorageBackend { path, .. } = disk;
+
+            // The FileStorageBackend path will be the full device path, so
+            // strip the beginning, including the first part of the external
+            // pool name.
+            let dataset = path.strip_prefix("/dev/zvol/rdsk/oxp_").unwrap();
+
+            // what remains is: UUID/crypt/local_storage/UUID/vol
+            let parts: Vec<&str> = dataset.split("/").collect();
+            let zpool_id: ZpoolUuid = parts[0].parse().unwrap();
+            let dataset_id: DatasetUuid = parts[3].parse().unwrap();
+
+            // This panics if this dataset was not already created
+            self.storage.lock().get_local_storage_dataset(zpool_id, dataset_id);
+        }
 
         for (id, _disk) in vmm_spec.crucible_backends() {
             let SpecKey::Uuid(id) = id else {
@@ -1063,6 +1083,17 @@ impl SledAgent {
                 RouteSet { version: new.version, routes: new.routes },
             );
         }
+    }
+
+    pub fn ensure_local_storage_dataset(
+        &self,
+        zpool_id: ExternalZpoolUuid,
+        dataset_id: DatasetUuid,
+        request: LocalStorageDatasetEnsureRequest,
+    ) {
+        self.storage
+            .lock()
+            .ensure_local_storage_dataset(zpool_id, dataset_id, request);
     }
 }
 

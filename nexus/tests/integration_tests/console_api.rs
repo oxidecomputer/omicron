@@ -52,7 +52,8 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to clear cookie and 204 on logout");
 
     // log in and pull the token out of the header so we can use it for authed requests
-    let session_token = create_console_session(cptestctx).await;
+    let session_cookie =
+        format!("session={}", create_console_session(cptestctx).await);
 
     let project_params = ProjectCreate {
         identity: IdentityMetadataCreateParams {
@@ -101,7 +102,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // now make same requests with cookie
     RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .body(Some(&project_params))
         // TODO: explicit expect_status not needed. decide whether to keep it anyway
         .expect_status(Some(StatusCode::CREATED))
@@ -110,7 +111,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to create org with session cookie");
 
     RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .expect_console_asset()
         .execute()
         .await
@@ -124,7 +125,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
 
     // logout with an actual session should delete the session in the db
     RequestBuilder::new(&testctx, Method::POST, "/v1/logout")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .expect_status(Some(StatusCode::NO_CONTENT))
         // logout also clears the cookie client-side
         .expect_response_header(
@@ -151,7 +152,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
     // now the same requests with the same session cookie should 401/302 because
     // logout also deletes the session server-side
     RequestBuilder::new(&testctx, Method::POST, "/v1/projects")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .body(Some(&project_params))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
@@ -159,7 +160,7 @@ async fn test_sessions(cptestctx: &ControlPlaneTestContext) {
         .expect("failed to get 401 for unauthed API request");
 
     RequestBuilder::new(&testctx, Method::GET, "/projects/whatever")
-        .header(header::COOKIE, &session_token)
+        .header(header::COOKIE, &session_cookie)
         .expect_status(Some(StatusCode::FOUND))
         .execute()
         .await
@@ -173,8 +174,9 @@ async fn expect_console_page(
 ) {
     let mut builder = RequestBuilder::new(testctx, Method::GET, path);
 
-    if let Some(session_token) = session_token {
-        builder = builder.header(http::header::COOKIE, &session_token)
+    if let Some(token) = session_token {
+        builder =
+            builder.header(http::header::COOKIE, &format!("session={token}"))
     }
 
     let console_page = builder
@@ -954,13 +956,13 @@ async fn test_session_idle_timeout_deletes_session() {
     let testctx = &cptestctx.external_client;
 
     // Start session
-    let session_cookie = create_console_session(&cptestctx).await;
+    let session_token = create_console_session(&cptestctx).await;
 
     // sleep here not necessary given TTL of 0
 
     // Make a request with the expired session cookie
     let me_response = RequestBuilder::new(testctx, Method::GET, "/v1/me")
-        .header(header::COOKIE, &session_cookie)
+        .header(header::COOKIE, &format!("session={}", session_token))
         .expect_status(Some(StatusCode::UNAUTHORIZED))
         .execute()
         .await
@@ -977,10 +979,9 @@ async fn test_session_idle_timeout_deletes_session() {
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
 
-    let token = session_cookie.strip_prefix("session=").unwrap();
     let db_token_error = nexus
         .datastore()
-        .session_lookup_by_token(&opctx, token.to_string())
+        .session_lookup_by_token(&opctx, session_token)
         .await
         .expect_err("session should be deleted");
     assert_matches::assert_matches!(

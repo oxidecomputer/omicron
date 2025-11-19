@@ -23,7 +23,6 @@ use gateway_client::types::SpIgnition;
 use gateway_types::component::SpType;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
-use nexus_db_model::Ereport;
 use nexus_db_model::Sled;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
@@ -35,6 +34,7 @@ use nexus_db_queries::db::datastore::EreportFilters;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_reconfigurator_preparation::reconfigurator_state_load;
 use nexus_types::deployment::SledFilter;
+use nexus_types::fm::Ereport;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
@@ -497,8 +497,7 @@ type CollectionStepFn = Box<
 >;
 
 enum CollectionStepOutput {
-    HostEreports(SupportBundleEreportStatus),
-    SpEreports(SupportBundleEreportStatus),
+    Ereports(SupportBundleEreportStatus),
     SavingSpDumps { listed_sps: bool },
     // NOTE: The distinction between this and "Spawn" is pretty artificial -
     // it's just to preserve a part of the report which says "we tried to
@@ -520,11 +519,8 @@ impl CollectionStepOutput {
         steps: &mut Vec<(&'static str, CollectionStepFn)>,
     ) {
         match self {
-            CollectionStepOutput::HostEreports(status) => {
-                report.host_ereports = status;
-            }
-            CollectionStepOutput::SpEreports(status) => {
-                report.sp_ereports = status;
+            CollectionStepOutput::Ereports(status) => {
+                report.ereports = Some(status);
             }
             CollectionStepOutput::SavingSpDumps { listed_sps } => {
                 report.listed_sps = listed_sps;
@@ -907,74 +903,6 @@ impl BundleCollection {
         Ok(CollectionStepOutput::None)
     }
 
-    async fn collect_host_ereports(
-        self: &Arc<Self>,
-        dir: &Utf8Path,
-    ) -> anyhow::Result<CollectionStepOutput> {
-        let Some(ref ereport_filters) = self.request.ereport_query else {
-            debug!(self.log, "Support bundle: ereports not requested");
-            return Ok(CollectionStepOutput::None);
-        };
-        let ereports_dir = dir.join("ereports");
-        let status = match self
-            .save_host_ereports(ereport_filters.clone(), ereports_dir.clone())
-            .await
-        {
-            Ok(n_collected) => {
-                SupportBundleEreportStatus::Collected { n_collected }
-            }
-            Err((n_collected, err)) => {
-                warn!(
-                    &self.log,
-                    "Support bundle: host ereport collection failed \
-                     ({n_collected} collected successfully)";
-                    InlineErrorChain::new(err.as_ref()),
-                );
-
-                SupportBundleEreportStatus::Failed {
-                    n_collected,
-                    error: err.to_string(),
-                }
-            }
-        };
-
-        Ok(CollectionStepOutput::HostEreports(status))
-    }
-
-    async fn collect_sp_ereports(
-        self: &Arc<Self>,
-        dir: &Utf8Path,
-    ) -> anyhow::Result<CollectionStepOutput> {
-        let Some(ref ereport_filters) = self.request.ereport_query else {
-            debug!(self.log, "Support bundle: ereports not requested");
-            return Ok(CollectionStepOutput::None);
-        };
-        let ereports_dir = dir.join("ereports");
-        let status = match self
-            .save_sp_ereports(ereport_filters.clone(), ereports_dir.clone())
-            .await
-        {
-            Ok(n_collected) => {
-                SupportBundleEreportStatus::Collected { n_collected }
-            }
-            Err((n_collected, err)) => {
-                warn!(
-                    &self.log,
-                    "Support bundle: SP ereport collection failed \
-                     ({n_collected} collected successfully)";
-                    InlineErrorChain::new(err.as_ref()),
-                );
-
-                SupportBundleEreportStatus::Failed {
-                    n_collected,
-                    error: err.to_string(),
-                }
-            }
-        };
-
-        Ok(CollectionStepOutput::SpEreports(status))
-    }
-
     async fn get_or_initialize_mgs_client<'a>(
         &self,
         mgs_client: &'a OnceCell<Arc<Option<MgsClient>>>,
@@ -1127,15 +1055,9 @@ impl BundleCollection {
                 }),
             ),
             (
-                "host ereports",
+                "ereports",
                 Box::new(|collection, dir| {
-                    collection.collect_host_ereports(dir).boxed()
-                }),
-            ),
-            (
-                "SP ereports",
-                Box::new(|collection, dir| {
-                    collection.collect_sp_ereports(dir).boxed()
+                    collection.collect_ereports(dir).boxed()
                 }),
             ),
             (
@@ -1365,12 +1287,39 @@ impl BundleCollection {
         return Ok(CollectionStepOutput::None);
     }
 
-    async fn save_host_ereports(
+    async fn collect_ereports(
+        self: &Arc<Self>,
+        dir: &Utf8Path,
+    ) -> anyhow::Result<CollectionStepOutput> {
+        let Some(ref ereport_filters) = self.request.ereport_query else {
+            debug!(self.log, "Support bundle: ereports not requested");
+            return Ok(CollectionStepOutput::None);
+        };
+        let ereports_dir = dir.join("ereports");
+        let mut status = SupportBundleEreportStatus::default();
+        if let Err(err) = self
+            .save_ereports(ereport_filters.clone(), ereports_dir, &mut status)
+            .await
+        {
+            warn!(
+                &self.log,
+                "Support bundle: ereport collection failed \
+                 ({} collected successfully)",
+                 status.n_collected;
+                InlineErrorChain::new(err.as_ref())
+            );
+            status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
+        };
+
+        Ok(CollectionStepOutput::Ereports(status))
+    }
+
+    async fn save_ereports(
         self: &Arc<Self>,
         filters: EreportFilters,
         dir: Utf8PathBuf,
-    ) -> Result<usize, (usize, anyhow::Error)> {
-        let mut reports = 0;
+        status: &mut SupportBundleEreportStatus,
+    ) -> anyhow::Result<()> {
         let mut paginator = Paginator::new(
             datastore::SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -1378,88 +1327,48 @@ impl BundleCollection {
         while let Some(p) = paginator.next() {
             let ereports = self
                 .datastore
-                .host_ereports_fetch_matching(
+                .ereport_fetch_matching(
                     &self.opctx,
                     &filters,
                     &p.current_pagparams(),
                 )
                 .await
                 .map_err(|e| {
-                    (
-                        reports,
-                        e.internal_context(
-                            "failed to query for host OS ereports",
-                        )
-                        .into(),
-                    )
+                    e.internal_context("failed to query for ereports")
                 })?;
             paginator = p.found_batch(&ereports, &|ereport| {
                 (ereport.restart_id.into_untyped_uuid(), ereport.ena)
             });
+
+            let prev_n_collected = status.n_collected;
             let n_ereports = ereports.len();
+            status.n_found += n_ereports;
+
             for ereport in ereports {
-                write_ereport(ereport.into(), &dir)
-                    .await
-                    .map_err(|e| (reports, e))?;
-                reports += 1;
+                match ereport.try_into() {
+                    Ok(ereport) => {
+                        write_ereport(ereport, &dir).await?;
+                        status.n_collected += 1;
+                    }
+                    Err(err) => {
+                        warn!(&self.log, "invalid ereport"; "error" => %err);
+                        status.errors.push(err.to_string());
+                    }
+                }
             }
             debug!(
                 self.log,
-                "Support bundle: added {n_ereports} host OS ereports"
+                "Support bundle: added {} ereports ({} found)",
+                status.n_collected - prev_n_collected,
+                n_ereports
             );
         }
 
         info!(
             self.log,
-            "Support bundle: collected {} total host ereports", reports
+            "Support bundle: collected {} total ereports", status.n_collected
         );
-        Ok(reports)
-    }
-
-    async fn save_sp_ereports(
-        self: &Arc<Self>,
-        filters: EreportFilters,
-        dir: Utf8PathBuf,
-    ) -> Result<usize, (usize, anyhow::Error)> {
-        let mut reports = 0;
-        let mut paginator = Paginator::new(
-            datastore::SQL_BATCH_SIZE,
-            dropshot::PaginationOrder::Ascending,
-        );
-        while let Some(p) = paginator.next() {
-            let ereports = self
-                .datastore
-                .sp_ereports_fetch_matching(
-                    &self.opctx,
-                    &filters,
-                    &p.current_pagparams(),
-                )
-                .await
-                .map_err(|e| {
-                    (
-                        reports,
-                        e.internal_context("failed to query for SP ereports")
-                            .into(),
-                    )
-                })?;
-            paginator = p.found_batch(&ereports, &|ereport| {
-                (ereport.restart_id.into_untyped_uuid(), ereport.ena)
-            });
-            let n_ereports = ereports.len();
-            for ereport in ereports {
-                write_ereport(ereport.into(), &dir)
-                    .await
-                    .map_err(|e| (reports, e))?;
-                reports += 1;
-            }
-            debug!(self.log, "Support bundle: added {n_ereports} SP ereports");
-        }
-
-        info!(
-            self.log,
-            "Support bundle: collected {} total SP ereports", reports
-        );
-        Ok(reports)
+        Ok(())
     }
 
     async fn create_mgs_client(&self) -> anyhow::Result<MgsClient> {
@@ -1537,7 +1446,7 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
     // metadata --- we must check that it doesn't contain any characters
     // unsuitable for use in a filesystem path.
     let pn = ereport
-        .metadata
+        .data
         .part_number
         .as_deref()
         // If the part or serial numbers contain any unsavoury characters, it
@@ -1548,24 +1457,25 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_part");
     let sn = ereport
-        .metadata
+        .data
         .serial_number
         .as_deref()
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_serial");
+    let id = &ereport.data.id;
 
     let dir = dir
         .join(format!("{pn}-{sn}"))
         // N.B. that we call `into_untyped_uuid()` here, as the `Display`
         // implementation for a typed UUID appends " (ereporter_restart)", which
         // we don't want.
-        .join(ereport.id.restart_id.into_untyped_uuid().to_string());
+        .join(id.restart_id.into_untyped_uuid().to_string());
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("failed to create directory '{dir}'"))?;
-    let file_path = dir.join(format!("{}.json", ereport.id.ena));
+    let file_path = dir.join(format!("{}.json", id.ena));
     let json = serde_json::to_vec(&ereport).with_context(|| {
-        format!("failed to serialize ereport {pn}:{sn}/{}", ereport.id)
+        format!("failed to serialize ereport {pn}:{sn}/{id}")
     })?;
     tokio::fs::write(&file_path, json)
         .await
@@ -1958,6 +1868,8 @@ mod test {
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
+    use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
@@ -2108,48 +2020,34 @@ mod test {
     }
 
     async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
-        use crate::db;
-
         const SP_SERIAL: &str = "BRM42000069";
         const HOST_SERIAL: &str = "BRM66600042";
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.sp_ereports_insert(&opctx, db::model::SpType::Sled, 8, vec![
-            db::model::SpEreport {
-                restart_id: sp_restart_id.into(),
-                ena: ereport_types::Ena(1).into(),
+        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: 8}, vec![
+            EreportData {
+                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
-                time_deleted: None,
-                collector_id: OmicronZoneUuid::new_v4().into(),
-                sp_type: db::model::SpType::Sled,
-                sp_slot: 8.into(),
+                collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello world": true})
             },
-            db::model::SpEreport {
-                restart_id: sp_restart_id.into(),
-                ena: ereport_types::Ena(2).into(),
+            EreportData {
+                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(2) },
                 time_collected: chrono::Utc::now(),
-                time_deleted: None,
-                collector_id: OmicronZoneUuid::new_v4().into(),
-                sp_type: db::model::SpType::Sled,
-                sp_slot: 8.into(),
+                collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.something.blah".to_string()),
                 report: serde_json::json!({"system_working": "seems to be",})
             },
-            db::model::SpEreport {
-                restart_id: EreporterRestartUuid::new_v4().into(),
-                ena: ereport_types::Ena(1).into(),
+            EreportData {
+                id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
-                time_deleted: None,
-                collector_id: OmicronZoneUuid::new_v4().into(),
-                sp_type: db::model::SpType::Sled,
-                sp_slot: 8.into(),
+                collector_id: OmicronZoneUuid::new_v4(),
                 // Let's do a silly one! No VPD, to make sure that's also
                 // handled correctly.
                 part_number: None,
@@ -2162,18 +2060,16 @@ mod test {
         // host-OS and SP ereports are different for when we make assertions
         // about the bundle report.
         datastore
-            .sp_ereports_insert(
+            .ereports_insert(
                 &opctx,
-                db::model::SpType::Switch,
-                1,
-                vec![db::model::SpEreport {
-                    restart_id: EreporterRestartUuid::new_v4().into(),
-                    ena: ereport_types::Ena(1).into(),
+                Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
+                vec![EreportData {
+                    id: EreportId {
+                        restart_id: EreporterRestartUuid::new_v4(),
+                        ena: ereport_types::Ena(1),
+                    },
                     time_collected: chrono::Utc::now(),
-                    time_deleted: None,
-                    collector_id: OmicronZoneUuid::new_v4().into(),
-                    sp_type: db::model::SpType::Switch,
-                    sp_slot: 1.into(),
+                    collector_id: OmicronZoneUuid::new_v4(),
                     part_number: Some("9130000006".to_string()),
                     serial_number: Some("BRM41000555".to_string()),
                     class: Some("ereport.fake.whatever".to_string()),
@@ -2183,33 +2079,32 @@ mod test {
             .await
             .expect("failed to insert another fake SP ereport");
         // And some host OS ones...
-        let sled_id = SledUuid::new_v4();
-        let restart_id = EreporterRestartUuid::new_v4().into();
+        let restart_id = EreporterRestartUuid::new_v4();
         datastore
-            .host_ereports_insert(
+            .ereports_insert(
                 &opctx,
-                sled_id,
+                Reporter::HostOs { sled: SledUuid::new_v4() },
                 vec![
-                    db::model::HostEreport {
-                        restart_id,
-                        ena: ereport_types::Ena(1).into(),
+                    EreportData {
+                        id: EreportId {
+                            restart_id,
+                            ena: ereport_types::Ena(1),
+                        },
                         time_collected: chrono::Utc::now(),
-                        time_deleted: None,
-                        collector_id: OmicronZoneUuid::new_v4().into(),
-                        sled_id: sled_id.into(),
-                        sled_serial: HOST_SERIAL.to_string(),
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever".to_string()),
                         report: serde_json::json!({"hello_world": true}),
                     },
-                    db::model::HostEreport {
-                        restart_id,
-                        ena: ereport_types::Ena(2).into(),
+                    EreportData {
+                        id: EreportId {
+                            restart_id,
+                            ena: ereport_types::Ena(2),
+                        },
                         time_collected: chrono::Utc::now(),
-                        time_deleted: None,
-                        collector_id: OmicronZoneUuid::new_v4().into(),
-                        sled_id: sled_id.into(),
-                        sled_serial: HOST_SERIAL.to_string(),
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever.thingy".to_string()),
                         report: serde_json::json!({"goodbye_world": false}),
@@ -2218,21 +2113,16 @@ mod test {
             )
             .await
             .expect("failed to insert fake host OS ereports");
-        // And another one with the same serial but different restart/sled IDs
-        let sled_id = SledUuid::new_v4();
         datastore
-            .host_ereports_insert(
+            .ereports_insert(
                 &opctx,
-                sled_id,
+                Reporter::HostOs { sled: SledUuid::new_v4() },
                 vec![
-                    db::model::HostEreport {
-                        restart_id: EreporterRestartUuid::new_v4().into(),
-                        ena: ereport_types::Ena(1).into(),
+                    EreportData {
+                        id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
                         time_collected: chrono::Utc::now(),
-                        time_deleted: None,
-                        collector_id: OmicronZoneUuid::new_v4().into(),
-                        sled_id: sled_id.into(),
-                        sled_serial: HOST_SERIAL.to_string(),
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.something.hostos_related".to_string()),
                         report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
@@ -2388,12 +2278,12 @@ mod test {
         assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
         assert_eq!(
-            report.host_ereports,
-            SupportBundleEreportStatus::Collected { n_collected: 3 }
-        );
-        assert_eq!(
-            report.sp_ereports,
-            SupportBundleEreportStatus::Collected { n_collected: 4 }
+            report.ereports,
+            Some(SupportBundleEreportStatus {
+                n_collected: 7,
+                n_found: 7,
+                errors: Vec::new()
+            })
         );
 
         let observed_bundle = datastore
