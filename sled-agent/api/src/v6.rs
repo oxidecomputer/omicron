@@ -94,6 +94,7 @@ impl From<InstanceSledLocalConfig>
             multicast_groups: Vec::new(),
             firewall_rules,
             dhcp_config,
+            delegated_zvols: Vec::new(),
         }
     }
 }

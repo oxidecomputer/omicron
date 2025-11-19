@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Sled-agent API types that changed from v8 to v9.
+//! Sled-agent API types that changed from v9 to v10.
 
 use crate::instance::InstanceMetadata;
 use crate::instance::InstanceMulticastMembership;

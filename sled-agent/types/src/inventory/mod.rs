@@ -9,4 +9,4 @@
 //! directly in the `sled-agent-api` crate. The current versions of the types
 //! should be in `nexus-sled-agent-shared`.
 
-pub mod v8;
+pub mod v9;

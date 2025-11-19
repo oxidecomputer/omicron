@@ -14,14 +14,15 @@ use omicron_common::api::{
     internal::{
         nexus::{SledVmmState, VmmRuntimeState},
         shared::{
-            DhcpConfig, NetworkInterface, ResolvedVpcFirewallRule,
-            SourceNatConfig,
+            DelegatedZvol, DhcpConfig, NetworkInterface,
+            ResolvedVpcFirewallRule, SourceNatConfig,
         },
     },
 };
 use omicron_uuid_kinds::InstanceUuid;
 use propolis_client::instance_spec::{
-    ComponentV0, CrucibleStorageBackend, SpecKey, VirtioNetworkBackend,
+    ComponentV0, CrucibleStorageBackend, FileStorageBackend, SpecKey,
+    VirtioNetworkBackend,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,7 @@ pub struct InstanceSledLocalConfig {
     pub multicast_groups: Vec<InstanceMulticastMembership>,
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
+    pub delegated_zvols: Vec<DelegatedZvol>,
 }
 
 /// Represents a multicast group membership for an instance.
@@ -221,6 +223,17 @@ impl VmmSpec {
         self.0.components.iter().filter_map(
             |(key, component)| match component {
                 ComponentV0::VirtioNetworkBackend(be) => Some((key, be)),
+                _ => None,
+            },
+        )
+    }
+
+    pub fn file_backends(
+        &self,
+    ) -> impl Iterator<Item = (&SpecKey, &FileStorageBackend)> {
+        self.0.components.iter().filter_map(
+            |(key, component)| match component {
+                ComponentV0::FileStorageBackend(be) => Some((key, be)),
                 _ => None,
             },
         )
