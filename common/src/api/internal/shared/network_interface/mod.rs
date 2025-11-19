@@ -455,7 +455,7 @@ impl PrivateIpv4Config {
     /// Return the OPTE gateway address implied by this subnet.
     ///
     /// OPTE is always expected to be at the first host address in the subnet.
-    /// See https://rfd.shared.oxide.computer/rfd/0021#network_ip_address_usage.
+    /// See <https://rfd.shared.oxide.computer/rfd/0021#network_ip_address_usage>.
     pub fn opte_gateway(&self) -> Ipv4Addr {
         self.subnet.first_host()
     }
@@ -555,7 +555,7 @@ impl PrivateIpv6Config {
     /// Return the OPTE gateway address implied by this subnet.
     ///
     /// OPTE is always expected to be at the first host address in the subnet.
-    /// See https://rfd.shared.oxide.computer/rfd/0021#network_ip_address_usage.
+    /// See <https://rfd.shared.oxide.computer/rfd/0021#network_ip_address_usage>.
     pub fn opte_gateway(&self) -> Ipv6Addr {
         self.subnet.iter().nth(1).expect("prefix is exactly /64")
     }
