@@ -549,6 +549,7 @@ pub enum AuthnMode {
     PrivilegedUser,
     SiloUser(SiloUserUuid),
     Session(String),
+    DeviceToken(String),
 }
 
 impl AuthnMode {
@@ -578,6 +579,10 @@ impl AuthnMode {
             AuthnMode::Session(session_token) => {
                 let header_value = format!("session={}", session_token);
                 parse_header_pair(http::header::COOKIE, header_value)
+            }
+            AuthnMode::DeviceToken(token) => {
+                let header_value = format!("Bearer {}", token);
+                parse_header_pair(http::header::AUTHORIZATION, header_value)
             }
         }
     }
