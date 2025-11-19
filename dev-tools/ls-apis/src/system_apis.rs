@@ -55,7 +55,8 @@ pub struct SystemApis {
     /// (reverse of `apis_consumed`)
     api_consumers: BTreeMap<ClientPackageName, IdOrdMap<ApiConsumer>>,
     /// API consumers that were expected but not found
-    missing_consumers: BTreeMap<ClientPackageName, ApiMissingConsumers>,
+    missing_expected_consumers:
+        BTreeMap<ClientPackageName, ApiMissingConsumers>,
 
     /// maps an API name to the server component(s) that expose that API
     api_producers: BTreeMap<ClientPackageName, ApiProducerMap>,
@@ -184,12 +185,12 @@ impl SystemApis {
             tracker.api_producers,
         );
 
-        // Ensure that if allowed_consumers is defined, all consumers listed are
-        // specified by at least one deployment unit.
+        // Ensure that if restricted_to_consumers is defined, all consumers
+        // listed are specified by at least one deployment unit.
         for api in api_metadata.apis() {
-            match &api.consumers {
-                ApiExpectedConsumers::Any => {}
-                ApiExpectedConsumers::Exactly(consumers) => {
+            match &api.restricted_to_consumers {
+                ApiExpectedConsumers::Unrestricted => {}
+                ApiExpectedConsumers::Restricted(consumers) => {
                     for consumer in consumers {
                         if !server_component_units.contains_key(&consumer.name)
                         {
@@ -235,7 +236,7 @@ impl SystemApis {
 
         let (apis_consumed, api_consumers) =
             (deps_tracker.apis_consumed, deps_tracker.api_consumers);
-        let mut missing_consumers = BTreeMap::new();
+        let mut missing_expected_consumers = BTreeMap::new();
 
         // Make sure that each API is produced by at least one producer.
         for api in api_metadata.apis() {
@@ -260,10 +261,10 @@ impl SystemApis {
                 );
             }
 
-            // Are any consumers missing?
-            match &api.consumers {
-                ApiExpectedConsumers::Any => {}
-                ApiExpectedConsumers::Exactly(expected_consumers) => {
+            // Do any of the expected consumers of this API not actually use it?
+            match &api.restricted_to_consumers {
+                ApiExpectedConsumers::Unrestricted => {}
+                ApiExpectedConsumers::Restricted(expected_consumers) => {
                     let actual_consumers =
                         api_consumers.get(&api.client_package_name);
                     let missing: IdOrdMap<_> = expected_consumers
@@ -276,7 +277,7 @@ impl SystemApis {
                         .cloned()
                         .collect();
                     if !missing.is_empty() {
-                        missing_consumers.insert(
+                        missing_expected_consumers.insert(
                             api.client_package_name.clone(),
                             ApiMissingConsumers { missing },
                         );
@@ -290,7 +291,7 @@ impl SystemApis {
             unit_server_components,
             apis_consumed,
             api_consumers,
-            missing_consumers,
+            missing_expected_consumers,
             api_producers,
             api_metadata,
             workspaces,
@@ -419,13 +420,13 @@ impl SystemApis {
 
     /// Get the consumers for an API that were expected but not found.
     ///
-    /// Returns `None` if there are no missing consumers, or if no assertions
-    /// were made about the set of expected consumers.
-    pub fn missing_consumers(
+    /// Returns `None` if there are no missing expected consumers, or if the set
+    /// of expected consumers is unrestricted.
+    pub fn missing_expected_consumers(
         &self,
         client: &ClientPackageName,
     ) -> Option<&ApiMissingConsumers> {
-        self.missing_consumers.get(client)
+        self.missing_expected_consumers.get(client)
     }
 
     /// Given the client package name for an API and the name of a server
@@ -698,9 +699,9 @@ impl SystemApis {
 
             // Are there any missing consumers?
             if let Some(missing) =
-                self.missing_consumers(&api.client_package_name)
+                self.missing_expected_consumers(&api.client_package_name)
             {
-                dag_check.report_missing_consumers(
+                dag_check.report_missing_expected_consumers(
                     &api.client_package_name,
                     missing,
                 );
@@ -911,7 +912,7 @@ impl<'a> DagCheck<'a> {
             .insert(consumer_name);
     }
 
-    fn report_missing_consumers(
+    fn report_missing_expected_consumers(
         &mut self,
         client_pkgname: &'a ClientPackageName,
         missing: &'a ApiMissingConsumers,
@@ -1223,7 +1224,7 @@ impl<'a> ClientDependenciesTracker<'a> {
         };
 
         // This is the name of a known client package.  Record it.
-        let status = api.consumers.status(server_pkgname);
+        let status = api.restricted_to_consumers.status(server_pkgname);
         let client_pkgname = ClientPackageName::from(pkgname.to_owned());
         self.api_consumers
             .entry(client_pkgname.clone())

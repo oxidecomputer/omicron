@@ -190,7 +190,8 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
                 }
             }
         }
-        if let Some(missing) = apis.missing_consumers(&api.client_package_name)
+        if let Some(missing) =
+            apis.missing_expected_consumers(&api.client_package_name)
         {
             println!("{}", missing.display(apis).indented("    "));
             error_count += missing.error_count();

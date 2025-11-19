@@ -20,6 +20,7 @@ daft.workspace = true
 derive-where.workspace = true
 derive_more.workspace = true
 dropshot.workspace = true
+ereport-types.workspace = true
 futures.workspace = true
 http.workspace = true
 humantime.workspace = true

@@ -237,7 +237,7 @@ pub struct ApiMetadata {
     /// some APIs must have a fixed list of consumers, and we assert on that
     /// via this array.
     #[serde(default)]
-    pub consumers: ApiExpectedConsumers,
+    pub restricted_to_consumers: ApiExpectedConsumers,
     /// human-readable notes about this API
     pub notes: Option<String>,
     /// describes how we've decided this API will be versioned
@@ -261,11 +261,11 @@ impl ApiMetadata {
 /// Expected consumers (Rust packages) for an API.
 #[derive(Debug, Default)]
 pub enum ApiExpectedConsumers {
-    /// No assertions are made about consumers.
+    /// This API has no configured restrictions on which consumers can use it.
     #[default]
-    Any,
-    /// Exactly these consumers are allowed.
-    Exactly(IdOrdMap<ApiExpectedConsumer>),
+    Unrestricted,
+    /// This API is restricted to exactly these consumers.
+    Restricted(IdOrdMap<ApiExpectedConsumer>),
 }
 
 impl ApiExpectedConsumers {
@@ -274,8 +274,10 @@ impl ApiExpectedConsumers {
         server_pkgname: &ServerComponentName,
     ) -> ApiConsumerStatus {
         match self {
-            ApiExpectedConsumers::Any => ApiConsumerStatus::NoAssertion,
-            ApiExpectedConsumers::Exactly(consumers) => {
+            ApiExpectedConsumers::Unrestricted => {
+                ApiConsumerStatus::NoAssertion
+            }
+            ApiExpectedConsumers::Restricted(consumers) => {
                 if let Some(consumer) =
                     consumers.iter().find(|c| c.name == *server_pkgname)
                 {
@@ -315,14 +317,14 @@ impl<'de> Deserialize<'de> for ApiExpectedConsumers {
             where
                 E: Error,
             {
-                Ok(ApiExpectedConsumers::Any)
+                Ok(ApiExpectedConsumers::Unrestricted)
             }
 
             fn visit_none<E>(self) -> Result<Self::Value, E>
             where
                 E: Error,
             {
-                Ok(ApiExpectedConsumers::Any)
+                Ok(ApiExpectedConsumers::Unrestricted)
             }
 
             fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
@@ -333,7 +335,7 @@ impl<'de> Deserialize<'de> for ApiExpectedConsumers {
                 let consumers = IdOrdMap::<ApiExpectedConsumer>::deserialize(
                     serde::de::value::SeqAccessDeserializer::new(seq),
                 )?;
-                Ok(ApiExpectedConsumers::Exactly(consumers))
+                Ok(ApiExpectedConsumers::Restricted(consumers))
             }
         }
 
