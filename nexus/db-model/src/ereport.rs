@@ -121,7 +121,7 @@ pub struct Reporter {
     /// location when requesting ereports through MGS.
     pub sp_slot: Option<SpMgsSlot>,
 
-    /// For host OS ereports ,the sled UUID of the sled-agent from which this
+    /// For host OS ereports, the sled UUID of the sled-agent from which this
     /// ereport was received.
     ///
     /// This is never NULL for host OS ereports (i.e. those with `reporter ==
