@@ -96,3 +96,8 @@ source = { kind = "fake", size = "1MiB" }
 name = "fake-switch-rot-bootloader"
 version = "non-semver-2"
 source = { kind = "fake", size = "1MiB" }
+
+[[artifact.measurement_corpus]]
+name = "fake-corpus"
+version = "2.0.0"
+source = { kind = "fake", size = "1MiB" }

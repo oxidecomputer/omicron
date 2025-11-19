@@ -76,6 +76,46 @@ pub(crate) async fn build_tuf_repo(
         }
     }
 
+    let mut measurement_corpus = vec![];
+
+    for entry in std::fs::read_dir(
+        output_dir.join("hubris-staging").join("measurement_corpus"),
+    )
+    .context("failed to read `hubris-staging/measurement_corpus")?
+    {
+        let entry = entry?;
+
+        let corim = rats_corim::Corim::from_file(entry.path())?;
+
+        measurement_corpus.push(DeserializedArtifactData {
+            name: format!("staging-{}", corim.id),
+            version: ArtifactVersion::new(corim.get_version()?.clone())?,
+            source: DeserializedArtifactSource::File {
+                path: Utf8PathBuf::from_path_buf(entry.path()).unwrap(),
+            },
+        });
+    }
+
+    for entry in std::fs::read_dir(
+        output_dir.join("hubris-production").join("measurement_corpus"),
+    )
+    .context("failed to read `hubris-production/measurement_corpus")?
+    {
+        let entry = entry?;
+        let corim = rats_corim::Corim::from_file(entry.path())?;
+        measurement_corpus.push(DeserializedArtifactData {
+            name: format!("production-{}", corim.id),
+            version: ArtifactVersion::new(corim.get_version()?.clone())?,
+            source: DeserializedArtifactSource::File {
+                path: Utf8PathBuf::from_path_buf(entry.path()).unwrap(),
+            },
+        });
+    }
+
+    manifest
+        .artifacts
+        .insert(KnownArtifactKind::MeasurementCorpus, measurement_corpus);
+
     // Add the OS images.
     manifest.artifacts.insert(
         KnownArtifactKind::Host,
@@ -115,6 +155,7 @@ pub(crate) async fn build_tuf_repo(
                 .join(format!("{}.tar.gz", package)),
         });
     }
+
     manifest.artifacts.insert(
         KnownArtifactKind::ControlPlane,
         vec![DeserializedArtifactData {
