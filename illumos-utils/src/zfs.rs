@@ -1155,16 +1155,18 @@ impl Zfs {
             .await
             .map_err(|err| EnsureDatasetErrorRaw::from(err))?;
 
-        // We ensure that the currently running process has the ability to
-        // act on the underlying mountpoint.
-        if !zoned {
-            let mut command = Command::new(PFEXEC);
-            let user = whoami::username();
-            let mount = format!("{mountpoint}");
-            let cmd = command.args(["chown", "-R", &user, &mount]);
-            execute_async(cmd)
-                .await
-                .map_err(|err| EnsureDatasetErrorRaw::from(err))?;
+        // For non-root, we ensure that the currently running process has the
+        // ability to act on the underlying mountpoint.
+        let user = whoami::username();
+        if user != "root" {
+            if !zoned {
+                let mut command = Command::new(PFEXEC);
+                let mount = format!("{mountpoint}");
+                let cmd = command.args(["chown", "-R", &user, &mount]);
+                execute_async(cmd)
+                    .await
+                    .map_err(|err| EnsureDatasetErrorRaw::from(err))?;
+            }
         }
 
         Self::set_values(name, props.as_slice())
