@@ -7,6 +7,7 @@
 use crate::mupdate_override::AllMupdateOverrides;
 use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
+use omicron_common::update::OmicronInstallManifest;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
@@ -55,13 +56,19 @@ impl ZoneImageSourceResolver {
     pub fn status(&self) -> ResolverStatus {
         let inner = self.inner.lock().unwrap();
         let zone_manifest = inner.zone_manifests.status();
+        let measurement_manifest =
+            inner.measurement_manifests.measurement_status();
         let mupdate_override = inner.mupdate_overrides.status();
         let image_directory_override = inner.image_directory_override.clone();
+        let measurement_directory_override =
+            inner.measurement_directory_override.clone();
 
         ResolverStatus {
             mupdate_override,
             zone_manifest,
+            measurement_manifest,
             image_directory_override,
+            measurement_directory_override,
         }
     }
 
@@ -84,9 +91,14 @@ impl ZoneImageSourceResolver {
 struct ResolverInner {
     log: slog::Logger,
     image_directory_override: Option<Utf8PathBuf>,
+    measurement_directory_override: Option<Utf8PathBuf>,
     // Store all collected information for zones -- we're going to need to
     // report this via inventory.
     zone_manifests: AllZoneManifests,
+    // Store all collected information for zones -- we're going to need to
+    // report this via inventory.
+    measurement_manifests: AllZoneManifests,
+
     // Store all collected information for mupdate overrides -- we're going to
     // need to report this via inventory.
     mupdate_overrides: AllMupdateOverrides,
@@ -99,14 +111,25 @@ impl ResolverInner {
     ) -> Self {
         let log = log.new(o!("component" => "ZoneImageSourceResolver"));
 
-        let zone_manifests = AllZoneManifests::read_all(&log, &internal_disks);
+        let zone_manifests = AllZoneManifests::read_all(
+            &log,
+            OmicronInstallManifest::ZONES_FILE_NAME,
+            &internal_disks,
+        );
+        let measurement_manifests = AllZoneManifests::read_all_measurements(
+            &log,
+            OmicronInstallManifest::MEASUREMENT_FILE_NAME,
+            &internal_disks,
+        );
         let mupdate_overrides =
             AllMupdateOverrides::read_all(&log, &internal_disks);
 
         Self {
             log,
             image_directory_override: None,
+            measurement_directory_override: None,
             zone_manifests,
+            measurement_manifests,
             mupdate_overrides,
         }
     }
@@ -126,9 +149,9 @@ mod tests {
     };
     use sled_agent_types::inventory::{HostPhase2DesiredContents, ZoneKind};
     use sled_agent_types::zone_images::{
-        MupdateOverrideReadError, OmicronZoneFileSource,
+        ManifestHashError, MupdateOverrideReadError, OmicronZoneFileSource,
         OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,
-        ZoneManifestReadError, ZoneManifestZoneHashError,
+        ZoneManifestReadError,
     };
     use sled_agent_zone_images_examples::{
         BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext, deserialize_error,
@@ -169,7 +192,7 @@ mod tests {
             OmicronZoneFileSource {
                 location: OmicronZoneImageLocation::InstallDataset {
                     hash: Err(ZoneImageLocationError::ZoneHash(
-                        ZoneManifestZoneHashError::ReadBootDisk(
+                        ManifestHashError::ReadBootDisk(
                             ZoneManifestReadError::InstallMetadata(
                                 deserialize_error(
                                     dir.path(),
@@ -228,7 +251,7 @@ mod tests {
             OmicronZoneFileSource {
                 location: OmicronZoneImageLocation::InstallDataset {
                     hash: Ok(manifest
-                        .zones
+                        .files
                         .get(
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
@@ -330,7 +353,7 @@ mod tests {
                 location: OmicronZoneImageLocation::InstallDataset {
                     // The hash should be looked up from the zone manifest.
                     hash: Ok(manifest
-                        .zones
+                        .files
                         .get(
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )
@@ -454,7 +477,7 @@ mod tests {
                 location: OmicronZoneImageLocation::InstallDataset {
                     // The hash should be looked up from the zone manifest.
                     hash: Ok(manifest
-                        .zones
+                        .files
                         .get(
                             ZoneKind::CockroachDb.artifact_in_install_dataset()
                         )

@@ -52,6 +52,7 @@ use sled_agent_types::inventory::OrphanedDataset;
 use sled_agent_types::inventory::SledCpuFamily;
 use sled_agent_types::inventory::SledRole;
 use sled_agent_types::inventory::ZoneImageResolverInventory;
+use sled_agent_types::zone_images::MeasurementManifestStatus;
 use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
 use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
 use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
@@ -837,6 +838,51 @@ pub fn zone_image_resolver(
 
     // Generate a status struct first.
     let status = ResolverStatus {
+        measurement_manifest: MeasurementManifestStatus {
+            boot_disk_path: dir_path.join(&BOOT_PATHS.measurements_json),
+            boot_disk_result: boot_zm_result.clone(),
+            non_boot_disk_metadata: id_ord_map! {
+                // Non-boot disk metadata that matches.
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_PATHS.measurements_json),
+                    // XXX Technically, if the boot disk had an error, this
+                    // can't be Matches. We choose to punt on this issue because
+                    // the conversion to the inventory type squishes down
+                    // errors into a string.
+                    result: ZoneManifestNonBootResult::Matches(
+                        cx.expected_result(
+                            &dir_path.join(&NON_BOOT_PATHS.install_dataset)
+                        )
+                    ),
+                },
+                // Non-boot disk mismatch (measurements different + errors).
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_2_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_2_PATHS.measurements_json),
+                    result: ZoneManifestNonBootResult::Mismatch(
+                        ZoneManifestNonBootMismatch::ValueMismatch {
+                            non_boot_disk_result: invalid_cx.expected_result(
+                                &dir_path.join(&NON_BOOT_2_PATHS.install_dataset),
+                            ),
+                        },
+                    ),
+                },
+                // Non-boot disk mismatch (error reading measurement manifest).
+                ZoneManifestNonBootInfo {
+                    zpool_id: NON_BOOT_3_UUID,
+                    dataset_dir: dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                    path: dir_path.join(&NON_BOOT_3_PATHS.measurements_json),
+                    result: ZoneManifestNonBootResult::ReadError(
+                        dataset_missing_error(
+                            &dir_path.join(&NON_BOOT_3_PATHS.install_dataset),
+                        ).into(),
+                    ),
+                },
+            },
+        },
         zone_manifest: ZoneManifestStatus {
             boot_disk_path: dir_path.join(&BOOT_PATHS.zones_json),
             boot_disk_result: boot_zm_result,
@@ -917,6 +963,7 @@ pub fn zone_image_resolver(
             },
         },
         image_directory_override: None,
+        measurement_directory_override: None,
     };
 
     status.to_inventory()
