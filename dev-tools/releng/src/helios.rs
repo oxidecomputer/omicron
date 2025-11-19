@@ -161,7 +161,7 @@ async fn passthru_incorporation_manifest(
     version: String,
 ) -> Result<()> {
     let stdout = Command::new("pkgrepo")
-        .args(["contents", "-m", "-s", HELIOS_REPO])
+        .args(["contents", "-m", "-s", HELIOS_PKGREPO])
         .arg(format!("pkg://{PUBLISHER}/{INCORP_NAME}@{version},5.11"))
         .ensure_stdout(&logger)
         .await?;
