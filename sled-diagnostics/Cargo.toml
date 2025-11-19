@@ -1,7 +1,7 @@
 [package]
 name = "sled-diagnostics"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 
 [lints]
 workspace = true
@@ -10,9 +10,11 @@ workspace = true
 anyhow.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
+chrono.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 futures.workspace = true
 illumos-utils.workspace = true
+jiff.workspace = true
 libc.workspace = true
 omicron-workspace-hack.workspace = true
 once_cell.workspace = true
@@ -26,7 +28,7 @@ slog.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 zfs-test-harness.workspace = true
-zip = { workspace = true, features = ["zstd"] }
+zip = { workspace = true, features = ["jiff-02","zstd"] }
 
 [dev-dependencies]
 omicron-common.workspace = true

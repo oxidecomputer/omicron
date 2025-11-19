@@ -50,14 +50,17 @@ use nexus_types::deployment::ClickhouseMode;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::OximeterReadPolicy;
+use nexus_types::fm;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::internal_api::background::BlueprintRendezvousStatus;
+use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use nexus_types::internal_api::background::EreporterStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionReplacementStatus;
@@ -65,6 +68,8 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SitrepGcStatus;
+use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
@@ -1189,6 +1194,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
+        "probe_distributor" => {
+            print_task_probe_distributor(details);
+        }
         "read_only_region_replacement_start" => {
             print_task_read_only_region_replacement_start(details);
         }
@@ -1233,6 +1241,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "webhook_deliverator" => {
             print_task_webhook_deliverator(details);
+        }
+        "fm_sitrep_loader" => {
+            print_task_fm_sitrep_loader(details);
+        }
+        "fm_sitrep_gc" => {
+            print_task_fm_sitrep_gc(details);
         }
         _ => {
             println!(
@@ -1477,6 +1491,26 @@ fn print_task_blueprint_loader(details: &serde_json::Value) {
     }
 }
 
+fn print_datasets_rendezvous_stats(
+    stats: &DatasetsRendezvousStats,
+    dataset_name: &'static str,
+) {
+    let DatasetsRendezvousStats {
+        num_inserted,
+        num_already_exist,
+        num_not_in_inventory,
+        num_tombstoned,
+        num_already_tombstoned,
+    } = stats;
+
+    println!("    {dataset_name} rendezvous counts:");
+    println!("        num_inserted:           {num_inserted}");
+    println!("        num_already_exist:      {num_already_exist}");
+    println!("        num_not_in_inventory:   {num_not_in_inventory}");
+    println!("        num_tombstoned:         {num_tombstoned}");
+    println!("        num_already_tombstoned: {num_already_tombstoned}");
+}
+
 fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
     match serde_json::from_value::<BlueprintRendezvousStatus>(details.clone()) {
         Err(error) => eprintln!(
@@ -1489,27 +1523,13 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
                 "    inventory collection: {}",
                 status.inventory_collection_id
             );
-            println!("    debug_dataset rendezvous counts:");
-            println!(
-                "        num_inserted:           {}",
-                status.stats.debug_dataset.num_inserted
+
+            print_datasets_rendezvous_stats(
+                &status.stats.debug_dataset,
+                "debug_dataset",
             );
-            println!(
-                "        num_already_exist:      {}",
-                status.stats.debug_dataset.num_already_exist
-            );
-            println!(
-                "        num_not_in_inventory:   {}",
-                status.stats.debug_dataset.num_not_in_inventory
-            );
-            println!(
-                "        num_tombstoned:         {}",
-                status.stats.debug_dataset.num_tombstoned
-            );
-            println!(
-                "        num_already_tombstoned: {}",
-                status.stats.debug_dataset.num_already_tombstoned
-            );
+
+            // crucible datasets have a different number of rendezvous stats
             println!("    crucible_dataset rendezvous counts:");
             println!(
                 "        num_inserted:         {}",
@@ -1522,6 +1542,11 @@ fn print_task_blueprint_rendezvous(details: &serde_json::Value) {
             println!(
                 "        num_not_in_inventory: {}",
                 status.stats.crucible_dataset.num_not_in_inventory
+            );
+
+            print_datasets_rendezvous_stats(
+                &status.stats.local_storage_dataset,
+                "local_storage_dataset",
             );
         }
     }
@@ -2106,6 +2131,32 @@ fn print_task_phantom_disks(details: &serde_json::Value) {
                 "    number of phantom disk delete errors: {}",
                 success.phantom_disk_deleted_err
             );
+        }
+    };
+}
+
+fn print_task_probe_distributor(details: &serde_json::Value) {
+    match serde_json::from_value::<ProbeDistributorStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(ProbeDistributorStatus { probes_by_sled, errors }) => {
+            let n_total_probes: usize = probes_by_sled.values().sum();
+            println!("    succesfully-pushed probes: {} total", n_total_probes);
+            for (sled_id, count) in probes_by_sled {
+                if count == 0 {
+                    continue;
+                }
+                println!("      sled_id={} n_probes={}", sled_id, count);
+            }
+            println!("    errors while pushing probes: {} total", errors.len());
+            for err in errors {
+                println!(
+                    "      sled_id={} sled_ip={} error={}",
+                    err.sled_id, err.sled_ip, err.error,
+                );
+            }
         }
     };
 }
@@ -3096,6 +3147,68 @@ mod ereporter_status_fields {
         REPORTERS_WITH_ERRORS,
     ]) + 1;
     pub const NUM_WIDTH: usize = 4;
+}
+
+fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
+    match serde_json::from_value::<SitrepLoadStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(SitrepLoadStatus::Error(error)) => {
+            println!("    task did not complete successfully: {error}");
+        }
+        Ok(SitrepLoadStatus::NoSitrep) => {
+            println!("    no FM situation report available to load");
+        }
+        Ok(SitrepLoadStatus::Loaded { version, time_loaded }) => {
+            println!(
+                "    loaded latest FM situation report as of {}:",
+                humantime::format_rfc3339_millis(time_loaded.into())
+            );
+            let fm::SitrepVersion { id, version, time_made_current } = version;
+            println!("        sitrep {id:?} (v{version})");
+            println!(
+                "        made current at: {}",
+                humantime::format_rfc3339_millis(time_made_current.into()),
+            );
+        }
+    };
+}
+
+fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
+    let SitrepGcStatus {
+        orphaned_sitreps_found,
+        orphaned_sitreps_deleted,
+        errors,
+    } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    pub const ORPHANS_FOUND: &str = "orphaned sitreps found:";
+    pub const ORPHANS_DELETED: &str = "orphaned sitreps deleted:";
+    pub const ERRORS: &str = "errors:";
+    pub const WIDTH: usize =
+        const_max_len(&[ERRORS, ORPHANS_FOUND, ORPHANS_DELETED]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+    if !errors.is_empty() {
+        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        for error in errors {
+            println!("      > {error}")
+        }
+    }
+
+    println!("    {ORPHANS_FOUND:<WIDTH$}{orphaned_sitreps_found:>NUM_WIDTH$}");
+    println!(
+        "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+    );
 }
 
 const ERRICON: &str = "/!\\";
@@ -4323,7 +4436,9 @@ async fn support_bundle_download_range(
     client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     range: (u64, u64),
-) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+) -> anyhow::Result<
+    impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<>,
+> {
     let range = format!("bytes={}-{}", range.0, range.1);
     Ok(client
         .support_bundle_download(id.as_untyped_uuid(), Some(&range))
@@ -4387,13 +4502,18 @@ async fn cmd_nexus_support_bundles_download(
     let stream =
         support_bundle_download_ranges(client, args.id, start, total_length);
 
+    let mut open_opts = OpenOptions::new();
+    open_opts.create(true);
+
     let sink: Box<dyn std::io::Write> = match &args.output {
         Some(path) => Box::new(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .truncate(!args.resume)
-                .open(path)?,
+            if args.resume {
+                open_opts.append(true)
+            } else {
+                open_opts.write(true).truncate(true)
+            }
+            .open(path)
+            .with_context(|| format!("failed to create {path}"))?,
         ),
         None => Box::new(std::io::stdout()),
     };

@@ -140,6 +140,7 @@ use super::{
     ACTION_GENERATE_ID, ActionRegistry, NexusActionContext, NexusSaga,
     SagaInitError,
 };
+use crate::app::db::datastore::CrucibleDisk;
 use crate::app::db::datastore::InstanceAndActiveVmm;
 use crate::app::sagas::common_storage::get_pantry_address;
 use crate::app::sagas::declare_saga_actions;
@@ -818,7 +819,7 @@ enum DriveAction {
 
     /// If the Volume is currently running in a Propolis server, then send the
     /// volume replacement request there.
-    Propolis { step: db::model::RegionReplacementStep, disk: db::model::Disk },
+    Propolis { step: db::model::RegionReplacementStep, disk: CrucibleDisk },
 }
 
 async fn srrd_drive_region_replacement_prepare(
@@ -1020,7 +1021,7 @@ async fn srrd_drive_region_replacement_prepare(
                 // The disk is not attached to an instance. Is it attached to a
                 // Pantry right now (aka performing bulk import)?
 
-                if let Some(address) = &disk.pantry_address {
+                if let Some(address) = &disk.pantry_address() {
                     // TODO currently unsupported
                     return Err(ActionError::action_failed(format!(
                         "disk {} attached to {address}, not supported",
@@ -1480,7 +1481,7 @@ async fn execute_propolis_drive_action(
     step_vmm_id: Uuid,
     vmm: db::model::Vmm,
     client: propolis_client::Client,
-    disk: db::model::Disk,
+    disk: CrucibleDisk,
     disk_new_volume_vcr: String,
 ) -> Result<bool, ActionError> {
     // This client could be for a different VMM than the step was

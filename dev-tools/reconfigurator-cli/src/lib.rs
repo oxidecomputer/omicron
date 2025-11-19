@@ -20,6 +20,7 @@ use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_planning::example::{
     ExampleSystemBuilder, extract_tuf_repo_description, tuf_assemble,
 };
@@ -1258,7 +1259,7 @@ enum SetArgs {
     NumNexus { num_nexus: u16 },
     /// specify the generation of Nexus zones that are considered active when
     /// running the blueprint planner
-    ActiveNexusGen { gen: Generation },
+    ActiveNexusGen { r#gen: Generation },
     /// Control the set of Nexus zones seen as input to the planner
     NexusZones {
         #[clap(long, conflicts_with = "active")]
@@ -2134,8 +2135,11 @@ fn cmd_blueprint_blippy(
     let resolved_id =
         state.system().resolve_blueprint_id(args.blueprint_id.into())?;
     let blueprint = state.system().get_blueprint(&resolved_id)?;
-    let report =
-        Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
+    let planning_input = sim
+        .planning_input(blueprint)
+        .context("failed to construct planning input")?;
+    let report = Blippy::new(&blueprint, &planning_input)
+        .into_report(BlippyReportSortKey::Severity);
     Ok(Some(format!("{}", report.display())))
 }
 
@@ -2223,7 +2227,6 @@ fn cmd_blueprint_edit(
         &sim.log,
         blueprint,
         &planning_input,
-        &latest_collection,
         creator,
         rng,
     )
@@ -2245,8 +2248,20 @@ fn cmd_blueprint_edit(
                 &planning_input,
                 ZoneKind::Nexus,
             )?;
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .context("failed to construct external networking allocator")?
+            .for_new_nexus()
+            .context("failed to pick an external IP for Nexus")?;
             builder
-                .sled_add_zone_nexus(sled_id, image_source, nexus_generation)
+                .sled_add_zone_nexus(
+                    sled_id,
+                    image_source,
+                    external_ip,
+                    nexus_generation,
+                )
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
@@ -2955,10 +2970,10 @@ fn cmd_set(
                 .set_target_nexus_zone_count(usize::from(num_nexus));
             rv
         }
-        SetArgs::ActiveNexusGen { gen } => {
+        SetArgs::ActiveNexusGen { r#gen } => {
             let rv =
                 format!("will use active Nexus zones from generation {gen}");
-            state.config_mut().set_active_nexus_zone_generation(gen);
+            state.config_mut().set_active_nexus_zone_generation(r#gen);
             rv
         }
         SetArgs::NexusZones {

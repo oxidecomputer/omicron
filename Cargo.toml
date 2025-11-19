@@ -60,7 +60,6 @@ members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
-    "id-map",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -143,6 +142,7 @@ members = [
     "test-utils",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
     "typed-rng",
@@ -222,7 +222,6 @@ default-members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
-    "id-map",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -304,6 +303,7 @@ default-members = [
     "sp-sim",
     "trust-quorum",
     "trust-quorum/gfss",
+    "trust-quorum/protocol",
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
     "test-utils",
@@ -320,6 +320,9 @@ default-members = [
     "zone-setup",
 ]
 resolver = "3"
+
+[workspace.package]
+edition = "2024"
 
 #
 # Tree-wide lint configuration.
@@ -370,6 +373,7 @@ assert_matches = "1.5.0"
 assert_cmd = "2.0.17"
 async-bb8-diesel = "0.2"
 async-trait = "0.1.89"
+attest-mock = { git = "https://github.com/oxidecomputer/dice-util", rev = "10952e8d9599b735b85d480af3560a11700e5b64" }
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -413,10 +417,10 @@ crossterm = { version = "0.29.0", features = ["event-stream"] }
 # NOTE: if you change the pinned revision of the `crucible` dependencies, you
 # must also update the references in package-manifest.toml to match the new
 # revision.
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "102b0bb8305cfbc3fa74c52d643d716653756372" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "7103cd3a3d7b0112d2949dd135db06fef0c156bb" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "7103cd3a3d7b0112d2949dd135db06fef0c156bb" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "7103cd3a3d7b0112d2949dd135db06fef0c156bb" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "7103cd3a3d7b0112d2949dd135db06fef0c156bb" }
 # NOTE: See above!
 csv = "1.3.1"
 curve25519-dalek = "4"
@@ -438,14 +442,14 @@ dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
 dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.2.2"
-dropshot-api-manager-types = "0.2.2"
+dropshot-api-manager = "0.2.3"
+dropshot-api-manager-types = "0.2.3"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
 expectorate = "1.2.0"
 fatfs = "0.3.6"
-filetime = "0.2.25"
+filetime = "0.2.26"
 flate2 = "1.1.2"
 float-ord = "0.3.2"
 flume = "0.11.1"
@@ -463,14 +467,15 @@ gateway-client = { path = "clients/gateway-client" }
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
 #
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6bd2660d651332f38949cdfd3d23d751ca54b120", default-features = false, features = ["debug-impls"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6bd2660d651332f38949cdfd3d23d751ca54b120", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "6bd2660d651332f38949cdfd3d23d751ca54b120" }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", default-features = false, features = ["debug-impls"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 trust-quorum = { path = "trust-quorum" }
+trust-quorum-protocol = { path = "trust-quorum/protocol" }
 trust-quorum-test-utils = { path = "trust-quorum/test-utils" }
 glob = "0.3.2"
 guppy = "0.17.20"
@@ -497,8 +502,7 @@ hyper = "1.6.0"
 hyper-util = "0.1.16"
 hyper-rustls = "0.27.7"
 hyper-staticfile = "0.10.1"
-iddqd = { version = "0.3.13", features = ["daft", "serde", "schemars08"] }
-id-map = { path = "id-map" }
+iddqd = { version = "0.3.16", features = ["daft", "serde", "schemars08"] }
 illumos-utils = { path = "illumos-utils" }
 iana-time-zone = "0.1.63"
 indent_write = "2.2.0"
@@ -644,10 +648,10 @@ progenitor-client = "0.10.0"
 # NOTE: if you change the pinned revision of the `bhyve_api` and propolis
 # dependencies, you must also update the references in package-manifest.toml to
 # match the new revision.
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
-propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "8e9252917993e36d43dce96b4409ef151b7d4442" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9" }
 # NOTE: see above!
 proptest = "1.7.0"
 qorb = "0.4.1"
@@ -660,7 +664,7 @@ rand_distr = "0.5.1"
 rand_seeder = "0.4.0"
 range-requests = { path = "range-requests" }
 ratatui = "0.29.0"
-raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "0a8dbd2311263f6a59ea58089e33c8331436ff3a" }
+raw-cpuid = { git = "https://github.com/oxidecomputer/rust-cpuid.git", rev = "a4cf01df76f35430ff5d39dc2fe470bcb953503b" }
 rayon = "1.10"
 rcgen = "0.12.1"
 reconfigurator-cli = { path = "dev-tools/reconfigurator-cli" }
@@ -724,7 +728,8 @@ slog-term = "2.9.1"
 smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "7da1f0b5dcd3d631da18b43ba78a84b1a2b425ee" }
+sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210" }
+sprockets-tls-test-utils = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "dea3bbfac7d9d3c45f088898fcd05ee5d2ec2210" }
 sqlformat = "0.3.5"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
@@ -798,7 +803,8 @@ newtype-uuid = { version = "1.3.1", default-features = false }
 newtype-uuid-macros = "0.1.0"
 omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
-scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs" }
+scim2-rs = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "c78005db837a71f94c3b8efac9a64cfbdb2d527f" }
+scim2-test-client = { git = "https://github.com/oxidecomputer/scim2-rs", rev = "c78005db837a71f94c3b8efac9a64cfbdb2d527f" }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that

@@ -283,6 +283,7 @@ impl_dyn_authorized_resource_for_resource!(authz::Alert);
 impl_dyn_authorized_resource_for_resource!(authz::AlertReceiver);
 impl_dyn_authorized_resource_for_resource!(authz::WebhookSecret);
 impl_dyn_authorized_resource_for_resource!(authz::Zpool);
+impl_dyn_authorized_resource_for_resource!(authz::MulticastGroup);
 
 impl_dyn_authorized_resource_for_global!(authz::AlertClassList);
 impl_dyn_authorized_resource_for_global!(authz::BlueprintConfig);
@@ -291,6 +292,7 @@ impl_dyn_authorized_resource_for_global!(authz::Database);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);
 impl_dyn_authorized_resource_for_global!(authz::IpPoolList);
+impl_dyn_authorized_resource_for_global!(authz::MulticastGroupList);
 impl_dyn_authorized_resource_for_global!(authz::AuditLog);
 impl_dyn_authorized_resource_for_global!(authz::Inventory);
 impl_dyn_authorized_resource_for_global!(authz::QuiesceState);
@@ -348,6 +350,23 @@ impl DynAuthorizedResource for authz::SiloUserList {
     }
 }
 
+impl DynAuthorizedResource for authz::SiloGroupList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: group list", self.silo().resource_name())
+    }
+}
+
 impl DynAuthorizedResource for authz::SiloUserSessionList {
     fn do_authorize<'a, 'b>(
         &'a self,
@@ -399,5 +418,22 @@ impl DynAuthorizedResource for authz::ScimClientBearerTokenList {
             "{}: scim client bearer token list",
             self.silo().resource_name()
         )
+    }
+}
+
+impl DynAuthorizedResource for authz::VpcList {
+    fn do_authorize<'a, 'b>(
+        &'a self,
+        opctx: &'b OpContext,
+        action: authz::Action,
+    ) -> BoxFuture<'a, Result<(), Error>>
+    where
+        'b: 'a,
+    {
+        opctx.authorize(action, self).boxed()
+    }
+
+    fn resource_name(&self) -> String {
+        format!("{}: vpc list", self.project().resource_name())
     }
 }

@@ -74,7 +74,8 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        opctx.authorize(authz::Action::CreateChild, &authz_project).await?;
+        let authz_vpc_list = authz::VpcList::new(authz_project.clone());
+        opctx.authorize(authz::Action::CreateChild, &authz_vpc_list).await?;
 
         let saga_params = sagas::vpc_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -124,7 +125,8 @@ impl super::Nexus {
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
     ) -> DeleteResult {
-        let (.., authz_vpc, db_vpc) = vpc_lookup.fetch().await?;
+        let (.., authz_vpc, db_vpc) =
+            vpc_lookup.fetch_for(authz::Action::Delete).await?;
 
         let authz_vpc_router = authz::VpcRouter::new(
             authz_vpc.clone(),

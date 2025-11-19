@@ -115,7 +115,7 @@ impl PeerAddresses {
         self.peers.len()
     }
 
-    pub(crate) fn display(&self) -> impl fmt::Display {
+    pub(crate) fn display(&self) -> impl fmt::Display + use<> {
         self.peers().iter().join(", ")
     }
 }

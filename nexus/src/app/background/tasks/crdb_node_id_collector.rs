@@ -299,37 +299,49 @@ mod tests {
         let crdb_addr1: SocketAddrV6 = "[2001:db8::1]:1111".parse().unwrap();
         let crdb_addr2: SocketAddrV6 = "[2001:db8::2]:1234".parse().unwrap();
         let crdb_addr3: SocketAddrV6 = "[2001:db8::3]:1234".parse().unwrap();
-        bp_sled.zones.insert(make_crdb_zone_config(
-            BlueprintZoneDisposition::InService,
-            crdb_id1,
-            crdb_addr1,
-        ));
-        bp_sled.zones.insert(make_crdb_zone_config(
-            BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            },
-            crdb_id2,
-            crdb_addr2,
-        ));
-        bp_sled.zones.insert(make_crdb_zone_config(
-            BlueprintZoneDisposition::InService,
-            crdb_id3,
-            crdb_addr3,
-        ));
+        bp_sled
+            .zones
+            .insert_unique(make_crdb_zone_config(
+                BlueprintZoneDisposition::InService,
+                crdb_id1,
+                crdb_addr1,
+            ))
+            .expect("freshly generated zone IDs are unique");
+        bp_sled
+            .zones
+            .insert_unique(make_crdb_zone_config(
+                BlueprintZoneDisposition::Expunged {
+                    as_of_generation: Generation::new(),
+                    ready_for_cleanup: false,
+                },
+                crdb_id2,
+                crdb_addr2,
+            ))
+            .expect("freshly generated zone IDs are unique");
+        bp_sled
+            .zones
+            .insert_unique(make_crdb_zone_config(
+                BlueprintZoneDisposition::InService,
+                crdb_id3,
+                crdb_addr3,
+            ))
+            .expect("freshly generated zone IDs are unique");
 
         // Also add a non-CRDB zone to ensure it's filtered out.
-        bp_sled.zones.insert(BlueprintZoneConfig {
-            disposition: BlueprintZoneDisposition::InService,
-            id: OmicronZoneUuid::new_v4(),
-            filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
-            zone_type: BlueprintZoneType::CruciblePantry(
-                blueprint_zone_type::CruciblePantry {
-                    address: "[::1]:0".parse().unwrap(),
-                },
-            ),
-            image_source: BlueprintZoneImageSource::InstallDataset,
-        });
+        bp_sled
+            .zones
+            .insert_unique(BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: OmicronZoneUuid::new_v4(),
+                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
+                zone_type: BlueprintZoneType::CruciblePantry(
+                    blueprint_zone_type::CruciblePantry {
+                        address: "[::1]:0".parse().unwrap(),
+                    },
+                ),
+                image_source: BlueprintZoneImageSource::InstallDataset,
+            })
+            .expect("freshly generated zone IDs are unique");
 
         // We expect to see CRDB zones 1 and 3 with their IPs but the ports
         // changed to `COCKROACH_ADMIN_PORT`.

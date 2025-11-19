@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use futures::StreamExt;
 use installinator_client::ClientError;
@@ -23,7 +23,7 @@ pub(crate) struct ArtifactIdOpts {
     /// Retrieve artifact ID from IPCC
     #[clap(
         long,
-        required_unless_present_any = ["update_id", "host_phase_2", "control_plane", "installinator_doc"]
+        required_unless_present_any = ["update_id", "installinator_doc"]
     )]
     from_ipcc: bool,
 
@@ -36,22 +36,8 @@ pub(crate) struct ArtifactIdOpts {
 
     #[clap(
         long,
-        conflicts_with_all = ["from_ipcc", "installinator_doc"],
-        required_unless_present_any = ["from_ipcc", "installinator_doc"],
-    )]
-    host_phase_2: Option<ArtifactHash>,
-
-    #[clap(
-        long,
-        conflicts_with_all = ["from_ipcc", "installinator_doc"],
-        required_unless_present_any = ["from_ipcc", "installinator_doc"],
-    )]
-    control_plane: Option<ArtifactHash>,
-
-    #[clap(
-        long,
-        conflicts_with_all = ["from_ipcc", "host_phase_2", "control_plane"],
-        required_unless_present_any = ["from_ipcc", "host_phase_2", "control_plane"],
+        conflicts_with_all = ["from_ipcc"],
+        required_unless_present_any = ["from_ipcc"],
     )]
     installinator_doc: Option<ArtifactHash>,
 }
@@ -63,20 +49,14 @@ impl ArtifactIdOpts {
             let image_id = ipcc
                 .installinator_image_id()
                 .context("error retrieving installinator image ID")?;
-            Ok(LookupId::from_image_id(&image_id))
+            LookupId::from_image_id(&image_id)
         } else {
             let update_id = self.update_id.unwrap();
-            let kind =
-                if let Some(installinator_doc_hash) = self.installinator_doc {
-                    LookupIdKind::Document(installinator_doc_hash)
-                } else {
-                    LookupIdKind::Hashes {
-                        host_phase_2: self.host_phase_2.unwrap(),
-                        control_plane: self.control_plane.unwrap(),
-                    }
-                };
+            let document = self
+                .installinator_doc
+                .context("error retrieving installinator doc hash")?;
 
-            Ok(LookupId { update_id, kind })
+            Ok(LookupId { update_id, document })
         }
     }
 }
@@ -84,31 +64,23 @@ impl ArtifactIdOpts {
 /// Identifiers used by installinator to retrieve artifacts.
 pub(crate) struct LookupId {
     pub(crate) update_id: MupdateUuid,
-    pub(crate) kind: LookupIdKind,
+    pub(crate) document: ArtifactHash,
 }
 
 impl LookupId {
-    fn from_image_id(image_id: &InstallinatorImageId) -> Self {
+    fn from_image_id(image_id: &InstallinatorImageId) -> Result<Self> {
         // This sentinel hash is used to indicate that the host phase 2 hash is
         // actually the hash to the installinator document.
-        let kind = if image_id.control_plane == ArtifactHash([0; 32]) {
-            LookupIdKind::Document(image_id.host_phase_2)
-        } else {
-            LookupIdKind::Hashes {
-                host_phase_2: image_id.host_phase_2,
-                control_plane: image_id.control_plane,
-            }
-        };
 
-        Self { update_id: image_id.update_id, kind }
+        if image_id.control_plane != ArtifactHash([0; 32]) {
+            bail!("non-zero control plane hash, this isn't using doc format");
+        }
+
+        Ok(Self {
+            update_id: image_id.update_id,
+            document: image_id.host_phase_2,
+        })
     }
-}
-
-/// Either an installinator document hash, or host phase 2 and control plane
-/// hashes.
-pub(crate) enum LookupIdKind {
-    Document(ArtifactHash),
-    Hashes { host_phase_2: ArtifactHash, control_plane: ArtifactHash },
 }
 
 /// The host phase 2 and control plane hashes to download.
@@ -155,7 +127,29 @@ impl ArtifactClient {
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
-        let client = installinator_client::Client::new(&endpoint, log.clone());
+
+        // Set a connect timeout of 15 seconds (the progenitor default), and a
+        // total timeout of 5 minutes. The progenitor default for the total
+        // timeout is 15 seconds, which can easily be exceeded for large
+        // downloads. (Don't set the total timeout to be too long, though,
+        // because we're fetching ~2GiB artifacts over a LAN which really should
+        // take less than 5 minutes.)
+        //
+        // Do not set a read timeout here -- instead, read timeouts are handled
+        // by the fetch loop. (Why is the read timeout handled by the fetch
+        // loop? So that it can also apply to the mock peer backend, and logic
+        // shared across both.)
+        let client = reqwest::ClientBuilder::new()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(5 * 60))
+            .build()
+            .expect("installinator artifact client created");
+        let client = installinator_client::Client::new_with_client(
+            &endpoint,
+            client,
+            log.clone(),
+        );
+
         Self { log, client }
     }
 
@@ -212,7 +206,7 @@ impl ArtifactClient {
         report: EventReport,
     ) -> Result<(), ClientError> {
         self.client
-            .report_progress(&update_id, &report)
+            .report_progress(&update_id, &report.into_generic())
             .await
             .map(|resp| resp.into_inner())
     }

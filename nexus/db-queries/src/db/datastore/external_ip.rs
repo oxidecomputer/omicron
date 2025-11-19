@@ -243,40 +243,68 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         data: IncompleteExternalIp,
     ) -> Result<ExternalIp, TransactionError<Error>> {
-        use diesel::result::DatabaseErrorKind::UniqueViolation;
         // Name needs to be cloned out here (if present) to give users a
         // sensible error message on name collision.
         let name = data.name().clone();
         let explicit_ip = data.explicit_ip().is_some();
         NextExternalIp::new(data).get_result_async(conn).await.map_err(|e| {
+            use diesel::result::DatabaseErrorKind::NotNullViolation;
+            use diesel::result::DatabaseErrorKind::UniqueViolation;
             use diesel::result::Error::DatabaseError;
             use diesel::result::Error::NotFound;
+            let emit_err_msg = |explicit_ip: bool,
+                                msg: &str|
+             -> TransactionError<Error> {
+                if explicit_ip {
+                    TransactionError::CustomError(Error::invalid_request(
+                        "Requested external IP address not available",
+                    ))
+                } else {
+                    TransactionError::CustomError(Error::insufficient_capacity(
+                        "No external IP addresses available",
+                        msg,
+                    ))
+                }
+            };
             match e {
-                NotFound => {
-                    if explicit_ip {
+                DatabaseError(NotNullViolation, ref info)
+                    if info.message().contains("in column \"ip\"") =>
+                {
+                    emit_err_msg(
+                        explicit_ip,
+                        "NextExternalIp::new tried to insert NULL ip",
+                    )
+                }
+                NotFound => emit_err_msg(
+                    explicit_ip,
+                    "NextExternalIp::new returned NotFound",
+                ),
+                DatabaseError(UniqueViolation, ref info) => {
+                    // Attempt to re-use same IP address.
+                    if info.constraint_name() == Some("external_ip_unique") {
                         TransactionError::CustomError(Error::invalid_request(
                             "Requested external IP address not available",
                         ))
+                    // Floating IP: name conflict
+                    } else if info
+                        .constraint_name()
+                        .map(|name| name.starts_with("lookup_floating_"))
+                        .unwrap_or(false)
+                    {
+                        TransactionError::CustomError(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Conflict(
+                                ResourceType::FloatingIp,
+                                name.as_ref()
+                                    .map(|m| m.as_str())
+                                    .unwrap_or_default(),
+                            ),
+                        ))
                     } else {
                         TransactionError::CustomError(
-                            Error::insufficient_capacity(
-                                "No external IP addresses available",
-                                "NextExternalIp::new returned NotFound",
-                            ),
+                            crate::db::queries::external_ip::from_diesel(e),
                         )
                     }
-                }
-                // Floating IP: name conflict
-                DatabaseError(UniqueViolation, ..) if name.is_some() => {
-                    TransactionError::CustomError(public_error_from_diesel(
-                        e,
-                        ErrorHandler::Conflict(
-                            ResourceType::FloatingIp,
-                            name.as_ref()
-                                .map(|m| m.as_str())
-                                .unwrap_or_default(),
-                        ),
-                    ))
                 }
                 _ => {
                     if retryable(&e) {
@@ -700,8 +728,8 @@ impl DataStore {
         .map(|res| res.map(|(ip, _do_saga)| ip))
     }
 
-    /// Delete all non-floating IP addresses associated with the provided instance
-    /// ID.
+    /// Delete all non-floating IP addresses associated with the provided
+    /// instance ID.
     ///
     /// This method returns the number of records deleted, rather than the usual
     /// `DeleteResult`. That's mostly useful for tests, but could be important
@@ -813,7 +841,7 @@ impl DataStore {
             .find(|v| v.kind == IpKind::Ephemeral))
     }
 
-    /// Fetch all external IP addresses of any kind for the provided probe
+    /// Fetch all external IP addresses of any kind for the provided probe.
     pub async fn probe_lookup_external_ips(
         &self,
         opctx: &OpContext,

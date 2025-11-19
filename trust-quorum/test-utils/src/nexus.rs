@@ -10,7 +10,7 @@ use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use trust_quorum::{
+use trust_quorum_protocol::{
     BaseboardId, Epoch, LrtqUpgradeMsg, ReconfigureMsg, Threshold,
 };
 

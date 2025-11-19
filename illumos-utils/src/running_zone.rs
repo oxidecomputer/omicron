@@ -140,7 +140,7 @@ mod zenter {
     type ct_evthdl_t = *mut c_void;
 
     #[link(name = "contract")]
-    extern "C" {
+    unsafe extern "C" {
         fn ct_tmpl_set_critical(fd: c_int, events: c_uint) -> c_int;
         fn ct_tmpl_set_informative(fd: c_int, events: c_uint) -> c_int;
         fn ct_pr_tmpl_set_fatal(fd: c_int, events: c_uint) -> c_int;
@@ -155,7 +155,7 @@ mod zenter {
     }
 
     #[link(name = "c")]
-    extern "C" {
+    unsafe extern "C" {
         pub fn zone_enter(zid: zoneid_t) -> c_int;
     }
 

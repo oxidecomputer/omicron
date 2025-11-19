@@ -15,15 +15,21 @@ use nexus_test_utils::resource_helpers::create_anti_affinity_group;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_floating_ip;
+use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::create_vpc;
+use nexus_test_utils::resource_helpers::grant_iam;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::project_get;
 use nexus_test_utils::resource_helpers::projects_list;
+use nexus_test_utils::resource_helpers::test_params;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::external_api::shared::SiloRole;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::Project;
+use nexus_types::external_api::views::Silo;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
@@ -173,6 +179,7 @@ async fn test_project_deletion_with_instance(
             start: false,
             auto_restart_policy: Default::default(),
             anti_affinity_groups: Vec::new(),
+            multicast_groups: Vec::new(),
         },
     )
     .await;
@@ -463,4 +470,59 @@ async fn test_project_deletion_with_anti_affinity_group(
         .await
         .unwrap();
     delete_project(&project_url, &client).await;
+}
+
+#[nexus_test]
+async fn test_limited_collaborator_cannot_create_project(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+    let silo: Silo = NexusRequest::object_get(
+        client,
+        &format!("/v1/system/silos/{}", DEFAULT_SILO.name()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // Create a user with limited-collaborator role at silo level
+    let limited_user = create_local_user(
+        client,
+        &silo,
+        &"limited-project-user".parse().unwrap(),
+        test_params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
+    grant_iam(
+        client,
+        &silo_url,
+        SiloRole::LimitedCollaborator,
+        limited_user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Attempt to create a project - should fail with 403 Forbidden
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, "/v1/projects")
+            .body(Some(&params::ProjectCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "forbidden-project".parse().unwrap(),
+                    description: "should not be created".to_string(),
+                },
+            }))
+            .expect_status(Some(StatusCode::FORBIDDEN)),
+    )
+    .authn_as(AuthnMode::SiloUser(limited_user.id))
+    .execute()
+    .await
+    .expect("request should complete")
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(error.message, "Forbidden");
 }

@@ -373,7 +373,7 @@ impl IncompleteExternalIp {
             pool_id,
             project_id: Some(project_id),
             explicit_ip: Some(explicit_ip.into()),
-            explicit_port_range: None,
+            explicit_port_range: Some((0, u16::MAX.into())),
             state: kind.initial_state(),
         }
     }
@@ -398,7 +398,7 @@ impl IncompleteExternalIp {
 
                 (
                     IpKind::Floating,
-                    None,
+                    Some((0, u16::MAX.into())),
                     Some(name),
                     Some(zone_kind.report_str().to_string()),
                     state,

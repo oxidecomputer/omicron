@@ -38,6 +38,7 @@ pub use nexus_db_fixed_data::user_builtin::USER_SAGA_RECOVERY;
 pub use nexus_db_fixed_data::user_builtin::USER_SERVICE_BALANCER;
 
 use crate::authz;
+use chrono::{DateTime, Utc};
 use newtype_derive::NewtypeDisplay;
 use nexus_db_fixed_data::silo::DEFAULT_SILO;
 use nexus_types::external_api::shared::FleetRole;
@@ -84,12 +85,27 @@ impl Context {
         &self,
     ) -> Result<&Actor, omicron_common::api::external::Error> {
         match &self.kind {
-            Kind::Authenticated(Details { actor }, ..) => Ok(actor),
+            Kind::Authenticated(Details { actor, .. }, ..) => Ok(actor),
             Kind::Unauthenticated => {
                 Err(omicron_common::api::external::Error::Unauthenticated {
                     internal_message: "Actor required".to_string(),
                 })
             }
+        }
+    }
+
+    /// Returns the expiration time if authenticated via a device token.
+    ///
+    /// This is used to prevent token lifetime extension during token creation:
+    /// a new token created using an existing token should not outlive the
+    /// token used to authenticate.
+    pub fn device_token_expiration(&self) -> Option<DateTime<Utc>> {
+        match &self.kind {
+            Kind::Authenticated(
+                Details { device_token_expiration, .. },
+                ..,
+            ) => *device_token_expiration,
+            Kind::Unauthenticated => None,
         }
     }
 
@@ -216,7 +232,10 @@ impl Context {
     fn context_for_builtin_user(user_builtin_id: BuiltInUserUuid) -> Context {
         Context {
             kind: Kind::Authenticated(
-                Details { actor: Actor::UserBuiltin { user_builtin_id } },
+                Details {
+                    actor: Actor::UserBuiltin { user_builtin_id },
+                    device_token_expiration: None,
+                },
                 None,
             ),
             schemes_tried: Vec::new(),
@@ -234,6 +253,7 @@ impl Context {
                         silo_user_id: USER_TEST_PRIVILEGED.id(),
                         silo_id: USER_TEST_PRIVILEGED.silo_id,
                     },
+                    device_token_expiration: None,
                 },
                 Some(SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap()),
             ),
@@ -261,7 +281,10 @@ impl Context {
     ) -> Context {
         Context {
             kind: Kind::Authenticated(
-                Details { actor: Actor::SiloUser { silo_user_id, silo_id } },
+                Details {
+                    actor: Actor::SiloUser { silo_user_id, silo_id },
+                    device_token_expiration: None,
+                },
                 Some(silo_authn_policy),
             ),
             schemes_tried: Vec::new(),
@@ -273,7 +296,10 @@ impl Context {
     pub fn for_scim(silo_id: Uuid) -> Context {
         Context {
             kind: Kind::Authenticated(
-                Details { actor: Actor::Scim { silo_id } },
+                Details {
+                    actor: Actor::Scim { silo_id },
+                    device_token_expiration: None,
+                },
                 // This should never be non-empty, we don't want the SCIM user
                 // to ever have associated roles.
                 Some(SiloAuthnPolicy::new(BTreeMap::default())),
@@ -391,6 +417,11 @@ enum Kind {
 pub struct Details {
     /// the actor performing the request
     actor: Actor,
+    /// When the device token expires. Present only when authenticating via
+    /// a device token. This is a slightly awkward fit but is included here
+    /// because we need to use this to clamp the expiration time when device
+    /// tokens are confirmed using an existing device token.
+    device_token_expiration: Option<DateTime<Utc>>,
 }
 
 /// Who is performing an operation

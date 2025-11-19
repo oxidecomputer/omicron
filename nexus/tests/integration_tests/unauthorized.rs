@@ -359,6 +359,32 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
             body: serde_json::to_value(&*DEMO_STOPPED_INSTANCE_CREATE).unwrap(),
             id_routes: vec!["/v1/instances/{id}"],
         },
+        // Create a multicast IP pool
+        SetupReq::Post {
+            url: &DEMO_IP_POOLS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_CREATE)
+                .unwrap(),
+            id_routes: vec!["/v1/ip-pools/{id}"],
+        },
+        // Create a multicast IP pool range
+        SetupReq::Post {
+            url: &DEMO_MULTICAST_IP_POOL_RANGES_ADD_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_RANGE).unwrap(),
+            id_routes: vec![],
+        },
+        // Link multicast pool to default silo
+        SetupReq::Post {
+            url: &DEMO_MULTICAST_IP_POOL_SILOS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_SILOS_BODY)
+                .unwrap(),
+            id_routes: vec![],
+        },
+        // Create a multicast group in the Project
+        SetupReq::Post {
+            url: &MULTICAST_GROUPS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_GROUP_CREATE).unwrap(),
+            id_routes: vec!["/v1/multicast-groups/{id}"],
+        },
         // Create an affinity group in the Project
         SetupReq::Post {
             url: &DEMO_PROJECT_URL_AFFINITY_GROUPS,

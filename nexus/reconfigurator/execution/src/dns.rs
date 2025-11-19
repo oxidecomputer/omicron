@@ -316,7 +316,6 @@ mod test {
     use crate::Sled;
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
-    use id_map::IdMap;
     use internal_dns_resolver::Resolver;
     use internal_dns_types::config::Host;
     use internal_dns_types::config::Zone;
@@ -330,9 +329,9 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -377,7 +376,6 @@ mod test {
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::internal_api::params::Srv;
     use nexus_types::silo::silo_dns_name;
-    use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::REPO_DEPOT_PORT;
@@ -692,7 +690,7 @@ mod test {
             // Convert the inventory `OmicronZonesConfig`s into
             // `BlueprintZoneConfig`s. This is going to get more painful over
             // time as we add to blueprints, but for now we can make this work.
-            let zones = ledgered_sled_config
+            let zones: IdOrdMap<_> = ledgered_sled_config
                 .zones
                 .into_iter()
                 .map(|config| -> BlueprintZoneConfig {
@@ -712,8 +710,8 @@ mod test {
                 BlueprintSledConfig {
                     state: SledState::Active,
                     sled_agent_generation: ledgered_sled_config.generation,
-                    disks: IdMap::new(),
-                    datasets: IdMap::new(),
+                    disks: IdOrdMap::new(),
+                    datasets: IdOrdMap::new(),
                     zones,
                     remove_mupdate_override: None,
                     host_phase_2:
@@ -750,8 +748,13 @@ mod test {
         // not currently in service.
         let out_of_service_id = OmicronZoneUuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
-        blueprint.sleds.values_mut().next().unwrap().zones.insert(
-            BlueprintZoneConfig {
+        blueprint
+            .sleds
+            .values_mut()
+            .next()
+            .unwrap()
+            .zones
+            .insert_unique(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Expunged {
                     as_of_generation: Generation::new(),
                     ready_for_cleanup: false,
@@ -769,8 +772,8 @@ mod test {
                     },
                 ),
                 image_source: BlueprintZoneImageSource::InstallDataset,
-            },
-        );
+            })
+            .expect("duplicate zone");
 
         // To generate the blueprint's DNS config, we need to make up a
         // different set of information about the Quiesced fake system.
@@ -1532,63 +1535,73 @@ mod test {
             .into_iter()
             .map(|z| z.nexus_id())
             .collect();
-        let planning_input = {
-            let mut builder = PlanningInputFromDb {
-                sled_rows: &sled_rows,
-                zpool_rows: &zpool_rows,
-                ip_pool_range_rows: &ip_pool_range_rows,
-                internal_dns_version: dns_initial_internal.generation.into(),
-                external_dns_version: dns_latest_external.generation.into(),
-                // These are not used because we're not actually going through
-                // the planner.
-                cockroachdb_settings: &CockroachDbSettings::empty(),
-                external_ip_rows: &[],
-                service_nic_rows: &[],
-                target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
-                target_nexus_zone_count: NEXUS_REDUNDANCY,
-                target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
-                target_oximeter_zone_count: OXIMETER_REDUNDANCY,
-                target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
-                target_cockroachdb_cluster_version:
-                    CockroachDbClusterVersion::POLICY,
-                target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
-                clickhouse_policy: None,
-                oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: TufRepoPolicy::initial(),
-                old_repo: TufRepoPolicy::initial(),
-                planner_config: PlannerConfig::default(),
-                active_nexus_zones,
-                not_yet_nexus_zones: BTreeSet::new(),
-                log,
-            }
-            .build()
-            .unwrap()
-            .into_builder();
-
-            // We'll need another (fake) external IP for this new Nexus.
-            builder
-                .policy_mut()
-                .service_ip_pool_ranges
-                .push(IpRange::from(IpAddr::V4(Ipv4Addr::LOCALHOST)));
-
-            builder.build()
-        };
-        let collection = CollectionBuilder::new("test").build();
+        let planning_input = PlanningInputFromDb {
+            sled_rows: &sled_rows,
+            zpool_rows: &zpool_rows,
+            ip_pool_range_rows: &ip_pool_range_rows,
+            external_dns_external_ips: BTreeSet::new(),
+            internal_dns_version: dns_initial_internal.generation.into(),
+            external_dns_version: dns_latest_external.generation.into(),
+            // These are not used because we're not actually going through
+            // the planner.
+            cockroachdb_settings: &CockroachDbSettings::empty(),
+            external_ip_rows: &[],
+            service_nic_rows: &[],
+            target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
+            target_nexus_zone_count: NEXUS_REDUNDANCY,
+            target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
+            target_oximeter_zone_count: OXIMETER_REDUNDANCY,
+            target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
+            target_cockroachdb_cluster_version:
+                CockroachDbClusterVersion::POLICY,
+            target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
+            clickhouse_policy: None,
+            oximeter_read_policy: OximeterReadPolicy::new(1),
+            tuf_repo: TufRepoPolicy::initial(),
+            old_repo: TufRepoPolicy::initial(),
+            planner_config: PlannerConfig::default(),
+            active_nexus_zones,
+            not_yet_nexus_zones: BTreeSet::new(),
+            log,
+        }
+        .build()
+        .unwrap();
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
             &planning_input,
-            &collection,
             "test suite",
             PlannerRng::from_entropy(),
         )
         .unwrap();
         let sled_id =
             blueprint.sleds().next().expect("expected at least one sled");
+
+        // Adding a Nexus zone requires an available external IP address. If we
+        // were to look at the current blueprint and the external IP policy,
+        // we'd see three IP pools, each containing a single IP address used by
+        // one service:
+        //
+        // * 1.2.3.4 (boundary NTP)
+        // * 127.0.0.1 (Nexus)
+        // * ::1 (external DNS)
+        //
+        // However, when the allocator compiles its list of "IPs already in
+        // use", it _ignores_ loopback addresses, meaning we still have two
+        // external IPs available for new zones (127.0.0.1 and ::1).
+        let new_nexus_external_ip =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator")
+            .for_new_nexus()
+            .expect("found external IP for Nexus");
         builder
             .sled_add_zone_nexus(
                 sled_id,
                 BlueprintZoneImageSource::InstallDataset,
+                new_nexus_external_ip,
                 blueprint.nexus_generation,
             )
             .unwrap();

@@ -837,7 +837,7 @@ impl RestrictedQuery {
         relation: &mut TableFactor,
     ) -> Result<IndexSet<TimeseriesName>, OxdbError> {
         match relation {
-            TableFactor::Table { ref mut name, args, with_hints, .. } => {
+            TableFactor::Table { name, args, with_hints, .. } => {
                 if args.is_some() || !with_hints.is_empty() {
                     return unsupported!(
                         "Table functions and hints are not supported"

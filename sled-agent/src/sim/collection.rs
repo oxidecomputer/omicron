@@ -404,7 +404,7 @@ mod test {
     ) -> (SimObject<SimInstance>, Receiver<()>) {
         let vmm_state = VmmRuntimeState {
             state: VmmState::Starting,
-            gen: Generation::new(),
+            generation: Generation::new(),
             time_updated: Utc::now(),
         };
 
@@ -421,7 +421,7 @@ mod test {
         let initial_runtime = {
             DiskRuntimeState {
                 disk_state: initial_state,
-                gen: Generation::new(),
+                generation: Generation::new(),
                 time_updated: Utc::now(),
             }
         };
@@ -437,7 +437,7 @@ mod test {
 
         info!(logctx.log, "new instance"; "state" => ?r1);
         assert_eq!(r1.vmm_state.state, VmmState::Starting);
-        assert_eq!(r1.vmm_state.gen, Generation::new());
+        assert_eq!(r1.vmm_state.generation, Generation::new());
 
         // There's no asynchronous transition going on yet so a
         // transition_finish() shouldn't change anything.
@@ -447,7 +447,7 @@ mod test {
         assert!(instance.object.desired().is_none());
         assert_eq!(r1.vmm_state.time_updated, rnext.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, rnext.vmm_state.state);
-        assert_eq!(r1.vmm_state.gen, rnext.vmm_state.gen);
+        assert_eq!(r1.vmm_state.generation, rnext.vmm_state.generation);
         assert!(rx.try_next().is_err());
 
         // Stopping an instance that was never started synchronously destroys
@@ -457,7 +457,7 @@ mod test {
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         let rnext = instance.object.current();
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, VmmState::Destroyed);
         assert!(rx.try_next().is_err());
@@ -476,7 +476,7 @@ mod test {
 
         info!(logctx.log, "new instance"; "state" => ?r1);
         assert_eq!(r1.vmm_state.state, VmmState::Starting);
-        assert_eq!(r1.vmm_state.gen, Generation::new());
+        assert_eq!(r1.vmm_state.generation, Generation::new());
 
         // There's no asynchronous transition going on yet so a
         // transition_finish() shouldn't change anything.
@@ -486,7 +486,7 @@ mod test {
         let rnext = instance.object.current();
         assert_eq!(r1.vmm_state.time_updated, rnext.vmm_state.time_updated);
         assert_eq!(r1.vmm_state.state, rnext.vmm_state.state);
-        assert_eq!(r1.vmm_state.gen, rnext.vmm_state.gen);
+        assert_eq!(r1.vmm_state.generation, rnext.vmm_state.generation);
         assert!(rx.try_next().is_err());
 
         // Set up a transition to Running. This has no immediate effect on the
@@ -501,7 +501,7 @@ mod test {
         // The VMM should still be Starting and its generation should not have
         // changed (the transition to Running is queued but hasn't executed).
         let rnext = instance.object.current();
-        assert_eq!(rnext.vmm_state.gen, rprev.vmm_state.gen);
+        assert_eq!(rnext.vmm_state.generation, rprev.vmm_state.generation);
         assert_eq!(rnext.vmm_state.time_updated, rprev.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, VmmState::Starting);
         rprev = rnext;
@@ -509,19 +509,19 @@ mod test {
         // Now poke the instance. It should transition to Running.
         instance.transition_finish();
         let rnext = instance.object.current();
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert!(instance.object.desired().is_none());
         assert!(rx.try_next().is_err());
         assert_eq!(rprev.vmm_state.state, VmmState::Starting);
         assert_eq!(rnext.vmm_state.state, VmmState::Running);
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         rprev = rnext;
 
         // There shouldn't be anything left on the queue now.
         instance.transition_finish();
         let rnext = instance.object.current();
-        assert_eq!(rprev.vmm_state.gen, rnext.vmm_state.gen);
+        assert_eq!(rprev.vmm_state.generation, rnext.vmm_state.generation);
 
         // If we transition again to "Running", the process should complete
         // immediately.
@@ -530,7 +530,7 @@ mod test {
         assert!(instance.object.desired().is_none());
         assert!(rx.try_next().is_err());
         let rnext = instance.object.current();
-        assert_eq!(rnext.vmm_state.gen, rprev.vmm_state.gen);
+        assert_eq!(rnext.vmm_state.generation, rprev.vmm_state.generation);
         assert_eq!(rnext.vmm_state.time_updated, rprev.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, rprev.vmm_state.state);
         rprev = rnext;
@@ -542,7 +542,7 @@ mod test {
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
         let rnext = instance.object.current();
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, VmmState::Stopping);
         rprev = rnext;
@@ -551,7 +551,7 @@ mod test {
         // Stopped.
         instance.transition_finish();
         let rnext = instance.object.current();
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert!(instance.object.desired().is_some());
         assert_eq!(rprev.vmm_state.state, VmmState::Stopping);
@@ -563,7 +563,7 @@ mod test {
         // it is ready to be started again.
         instance.transition_finish();
         let rnext = instance.object.current();
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert!(instance.object.desired().is_some());
         assert_eq!(rprev.vmm_state.state, VmmState::Stopping);
@@ -575,7 +575,7 @@ mod test {
         // Propolis ID.
         instance.transition_finish();
         let rnext = instance.object.current();
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert_eq!(rprev.vmm_state.state, VmmState::Stopping);
         assert_eq!(rnext.vmm_state.state, VmmState::Destroyed);
@@ -593,7 +593,7 @@ mod test {
 
         info!(logctx.log, "new instance"; "state" => ?r1);
         assert_eq!(r1.vmm_state.state, VmmState::Starting);
-        assert_eq!(r1.vmm_state.gen, Generation::new());
+        assert_eq!(r1.vmm_state.generation, Generation::new());
         assert!(
             instance.transition(VmmStateRequested::Running).unwrap().is_none()
         );
@@ -605,7 +605,7 @@ mod test {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
 
         // Now reboot the instance. This is dispatched to Propolis, which will
         // move to the Rebooting state and then back to Running.
@@ -613,7 +613,7 @@ mod test {
             instance.transition(VmmStateRequested::Reboot).unwrap().is_none()
         );
         let (rprev, rnext) = (rnext, instance.object.current());
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated > rprev.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, VmmState::Rebooting);
         instance.transition_finish();
@@ -624,7 +624,7 @@ mod test {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated > rprev.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, VmmState::Rebooting);
         assert!(instance.object.desired().is_some());
@@ -636,7 +636,7 @@ mod test {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
+        assert!(rnext.vmm_state.generation > rprev.vmm_state.generation);
         assert!(rnext.vmm_state.time_updated > rprev.vmm_state.time_updated);
         assert_eq!(rnext.vmm_state.state, VmmState::Running);
         logctx.cleanup_successful();
@@ -657,7 +657,7 @@ mod test {
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
         assert_eq!(r1.disk_state, DiskState::Creating);
-        assert_eq!(r1.gen, Generation::new());
+        assert_eq!(r1.generation, Generation::new());
 
         // Try transitioning to every other detached state.
         let detached_states = vec![
@@ -670,7 +670,7 @@ mod test {
             assert!(!rprev.disk_state.is_attached());
             disk.transition(requested.clone()).unwrap();
             let rnext = disk.object.current().clone();
-            assert!(rnext.gen > rprev.gen);
+            assert!(rnext.generation > rprev.generation);
             assert!(rnext.time_updated >= rprev.time_updated);
             assert_eq!(rnext.disk_state, next);
             rprev = rnext;
@@ -686,7 +686,7 @@ mod test {
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
         assert_eq!(r1.disk_state, DiskState::Creating);
-        assert_eq!(r1.gen, Generation::new());
+        assert_eq!(r1.generation, Generation::new());
 
         let id = uuid::Uuid::new_v4();
         let rprev = r1;
@@ -697,7 +697,7 @@ mod test {
                 .is_none()
         );
         let rnext = disk.object.current();
-        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.generation > rprev.generation);
         assert!(rnext.time_updated >= rprev.time_updated);
         assert_eq!(rnext.disk_state, DiskState::Attaching(id));
         assert!(rnext.disk_state.is_attached());
@@ -707,13 +707,13 @@ mod test {
         disk.transition_finish();
         let rnext = disk.object.current();
         assert_eq!(rnext.disk_state, DiskState::Attached(id));
-        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.generation > rprev.generation);
         assert!(rnext.time_updated >= rprev.time_updated);
         let rprev = rnext;
 
         disk.transition_finish();
         let rnext = disk.object.current();
-        assert_eq!(rnext.gen, rprev.gen);
+        assert_eq!(rnext.generation, rprev.generation);
         assert_eq!(rnext.disk_state, DiskState::Attached(id));
         assert!(rnext.disk_state.is_attached());
         let rprev = rnext;
@@ -725,7 +725,7 @@ mod test {
                 .is_none()
         );
         let rnext = disk.object.current();
-        assert_eq!(rnext.gen, rprev.gen);
+        assert_eq!(rnext.generation, rprev.generation);
         let rprev = rnext;
 
         // It's illegal to go straight to attached to a different instance.
@@ -739,14 +739,14 @@ mod test {
             panic!("unexpected error type");
         }
         let rnext = disk.object.current();
-        assert_eq!(rprev.gen, rnext.gen);
+        assert_eq!(rprev.generation, rnext.generation);
         let rprev = rnext;
 
         // If we go to a different detached state, we go through the async
         // transition again.
         disk.transition(DiskStateRequested::Detached).unwrap();
         let rnext = disk.object.current();
-        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.generation > rprev.generation);
         assert_eq!(rnext.disk_state, DiskState::Detaching(id));
         assert!(rnext.disk_state.is_attached());
         let rprev = rnext;
@@ -754,7 +754,7 @@ mod test {
         disk.transition_finish();
         let rnext = disk.object.current();
         assert_eq!(rnext.disk_state, DiskState::Detached);
-        assert!(rnext.gen > rprev.gen);
+        assert!(rnext.generation > rprev.generation);
 
         // Verify that it works fine to change directions in the middle of an
         // async transition.
@@ -775,7 +775,7 @@ mod test {
 
         info!(logctx.log, "new disk"; "disk_state" => ?r1.disk_state);
         assert_eq!(r1.disk_state, DiskState::Creating);
-        assert_eq!(r1.gen, Generation::new());
+        assert_eq!(r1.generation, Generation::new());
 
         let id = uuid::Uuid::new_v4();
         disk.transition(DiskStateRequested::Attached(id)).unwrap();

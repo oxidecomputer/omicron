@@ -14,6 +14,7 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::CrucibleDisk;
 use omicron_common::api::external::Error;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetry;
 use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
@@ -74,11 +75,14 @@ pub(crate) async fn call_pantry_attach_for_disk(
     log: &slog::Logger,
     opctx: &OpContext,
     nexus: &Nexus,
-    disk_id: Uuid,
+    disk: &CrucibleDisk,
     pantry_address: SocketAddrV6,
 ) -> Result<(), ActionError> {
-    let (.., disk) = LookupPath::new(opctx, nexus.datastore())
-        .disk_id(disk_id)
+    // Perform an authz check but use the argument CrucibleDisk later in the
+    // function
+
+    let (.., _disk) = LookupPath::new(opctx, nexus.datastore())
+        .disk_id(disk.id())
         .fetch_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
@@ -104,7 +108,7 @@ pub(crate) async fn call_pantry_attach_for_disk(
     call_pantry_attach_for_volume(
         log,
         nexus,
-        disk_id,
+        disk.id(),
         volume_construction_request,
         pantry_address,
     )

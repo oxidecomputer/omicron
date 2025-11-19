@@ -471,6 +471,72 @@ impl AuthorizedResource for IpPoolList {
     }
 }
 
+/// Synthetic, fleet-scoped resource representing the `/v1/multicast-groups`
+/// collection.
+///
+/// **Authorization Model:**
+/// - Multicast groups are fleet-wide resources (similar to IP pools).
+/// - Any authenticated user within a silo in the fleet can create, list, read,
+///   and modify groups. This includes project collaborators, silo collaborators,
+///   and silo admins.
+/// - Cross-silo multicast communication is enabled by fleet-wide access.
+///
+/// The fleet-level collection endpoint (`/v1/multicast-groups`) allows:
+/// - Any authenticated user within the fleet's silos to create and list groups.
+/// - Instances from different projects and silos can join the same multicast groups.
+///
+/// See `omicron.polar` for the detailed policy rules that grant fleet-wide
+/// access to authenticated silo users for multicast group operations.
+#[derive(Clone, Copy, Debug)]
+pub struct MulticastGroupList;
+
+/// Singleton representing the [`MulticastGroupList`] itself for authz purposes.
+pub const MULTICAST_GROUP_LIST: MulticastGroupList = MulticastGroupList;
+
+impl Eq for MulticastGroupList {}
+
+impl PartialEq for MulticastGroupList {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl oso::PolarClass for MulticastGroupList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &MulticastGroupList| FLEET)
+    }
+}
+
+impl AuthorizedResource for MulticastGroupList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on the MulticastGroupList, only permissions. But we
+        // still need to load the Fleet-related roles to verify that the actor's
+        // role on the Fleet (possibly conferred from a Silo role).
+        load_roles_for_resource_tree(&FLEET, opctx, authn, roleset).boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Similar to IpPoolList, the audit log is a collection that doesn't exist in
 // the database as an entity distinct from its children (IP pools, or in this
 // case, audit log entries). We need a dummy resource here because we need
@@ -770,6 +836,55 @@ impl AuthorizedResource for SiloUserList {
     }
 }
 
+/// Synthetic resource describing the list of Groups in a Silo
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SiloGroupList(Silo);
+
+impl SiloGroupList {
+    pub fn new(silo: Silo) -> Self {
+        SiloGroupList(silo)
+    }
+
+    pub fn silo(&self) -> &Silo {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for SiloGroupList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("silo", |list: &SiloGroupList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for SiloGroupList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Silo-related roles.
+        self.silo().load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 // Note the session list and the token list have exactly the same behavior
 
 /// Synthetic resource for managing a user's sessions
@@ -865,6 +980,55 @@ impl AuthorizedResource for SiloUserTokenList {
     ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
         // To check for silo admin, we need to load roles from the parent silo.
         self.silo_user().parent.load_roles(opctx, authn, roleset)
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
+/// Synthetic resource describing the list of VPCs in a Project
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VpcList(Project);
+
+impl VpcList {
+    pub fn new(project: Project) -> VpcList {
+        VpcList(project)
+    }
+
+    pub fn project(&self) -> &Project {
+        &self.0
+    }
+}
+
+impl oso::PolarClass for VpcList {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("project", |list: &VpcList| list.0.clone())
+    }
+}
+
+impl AuthorizedResource for VpcList {
+    fn load_roles<'fut>(
+        &'fut self,
+        opctx: &'fut OpContext,
+        authn: &'fut authn::Context,
+        roleset: &'fut mut RoleSet,
+    ) -> futures::future::BoxFuture<'fut, Result<(), Error>> {
+        // There are no roles on this resource, but we still need to load the
+        // Project-related roles.
+        self.project().load_roles(opctx, authn, roleset)
     }
 
     fn on_unauthorized(
@@ -1081,12 +1245,23 @@ impl ApiResourceWithRolesType for Project {
     type AllowedRoles = ProjectRole;
 }
 
+// ============================================================================
+// Project Resources - Non-Networking (InProjectLimited)
+//
+// These resources can be created and modified by users with the
+// "limited-collaborator" role and above. These are "regular" project resources
+// that users can work with without needing permission to reconfigure network
+// infrastructure.
+//
+// Examples: Instances, Disks, Snapshots, Images, Floating IPs
+// ============================================================================
+
 authz_resource! {
     name = "Disk",
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1094,7 +1269,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1102,7 +1277,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1110,7 +1285,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1118,7 +1293,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1126,7 +1301,7 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
 
 authz_resource! {
@@ -1134,15 +1309,30 @@ authz_resource! {
     parent = "Instance",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
 }
+
+// ============================================================================
+// Project Resources - Networking Infrastructure (InProjectFull)
+//
+// These resources require the full "collaborator" role to create or modify.
+// Users with only the "limited-collaborator" role can *read* these resources
+// (via viewer inheritance) but cannot create or modify them.
+//
+// This distinction allows organizations to restrict who can reconfigure the
+// network topology while still allowing those users to work with compute
+// resources (instances, disks, etc.) within the existing network.
+//
+// Resources in this category: VPCs, Subnets, Routers, Router Routes,
+// Internet Gateways, and their child resources (IP pools, IP addresses)
+// ============================================================================
 
 authz_resource! {
     name = "Vpc",
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1150,7 +1340,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1158,7 +1348,7 @@ authz_resource! {
     parent = "VpcRouter",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1166,7 +1356,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1174,7 +1364,7 @@ authz_resource! {
     parent = "Vpc",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1182,7 +1372,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1190,7 +1380,7 @@ authz_resource! {
     parent = "InternetGateway",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectFull,
 }
 
 authz_resource! {
@@ -1198,7 +1388,40 @@ authz_resource! {
     parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
-    polar_snippet = InProject,
+    polar_snippet = InProjectLimited,
+}
+
+// MulticastGroup Authorization
+//
+// MulticastGroups are **fleet-scoped resources** (parent = "Fleet"), similar to
+// IP pools, to enable efficient cross-project and cross-silo multicast
+// communication.
+//
+// Authorization rules:
+// - Creating/modifying groups: Any authenticated user within a silo in the fleet.
+//   This includes project collaborators, silo collaborators, and silo admins.
+// - Listing groups: Any authenticated user within a silo in the fleet
+// - Viewing individual groups: Any authenticated user within a silo in the fleet
+// - Attaching instances to groups: only requires Instance::Modify permission
+//   (users can attach their own instances to any fleet-scoped group)
+//
+// Fleet::Admin role can also perform all operations via the parent Fleet relation.
+//
+// See omicron.polar for the special `has_permission` rules that grant create/modify/
+// list/read access to authenticated silo users (including project collaborators),
+// enabling cross-project and cross-silo multicast communication without requiring
+// Fleet::Admin or Fleet::Viewer roles.
+//
+// Member management: `MulticastGroup` member attachments/detachments (instances
+// joining/leaving groups) use the existing `MulticastGroup` and `Instance`
+// authz resources rather than creating a separate `MulticastGroupMember` authz
+// resource.
+authz_resource! {
+    name = "MulticastGroup",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
 }
 
 // Customer network integration resources nested below "Fleet"

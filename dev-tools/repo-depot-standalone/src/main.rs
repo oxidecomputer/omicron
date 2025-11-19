@@ -124,6 +124,12 @@ impl RepoDepotStandalone {
                 bind_address: self.listen_addr,
                 ..Default::default()
             })
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    repo_depot_api::latest_version(),
+                ),
+            )))
             .start()
             .context("failed to create server")?;
 
@@ -182,7 +188,7 @@ impl RepoMetadata {
     pub async fn data_for_hash(
         &self,
         requested_sha: &ArtifactHash,
-    ) -> Option<anyhow::Result<ReaderStream<impl AsyncRead>>> {
+    ) -> Option<anyhow::Result<ReaderStream<impl AsyncRead + use<>>>> {
         let (repo_index, artifact_hash_id) =
             self.targets_by_hash.get(requested_sha)?;
         let repo = &self.repos[*repo_index];
