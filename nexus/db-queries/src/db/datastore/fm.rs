@@ -795,9 +795,39 @@ impl DataStore {
             .map(|id| id.into_untyped_uuid())
             .collect::<Vec<_>>();
 
-        // TODO(eliza): when other tables are added to store data that is part
-        // of the sitrep, we'll need to delete any records with matching IDs in
-        // those tables, too!
+        let case_ereports_deleted = diesel::delete(
+            case_ereport_dsl::fm_ereport_in_case
+                .filter(case_ereport_dsl::sitrep_id.eq_any(ids.clone())),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("failed to delete case ereport assignments")
+        })?;
+
+        // Delete alert requests.
+        let alert_requests_deleted = diesel::delete(
+            alert_req_dsl::fm_alert_request
+                .filter(alert_req_dsl::sitrep_id.eq_any(ids.clone())),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("failed to delete alert requests")
+        })?;
+
+        // Delete case metadata records.
+        let cases_deleted = diesel::delete(
+            case_dsl::fm_case.filter(case_dsl::sitrep_id.eq_any(ids.clone())),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("failed to delete case metadata")
+        })?;
 
         // Delete the sitrep metadata entries *last*. This is necessary because
         // the rest of the delete operation is unsynchronized, and it is
@@ -806,10 +836,27 @@ impl DataStore {
         // the one that is used to determine whether a sitrep "exists" so that
         // the sitrep GC task can determine if it needs to be deleted, so don't
         // touch it until all the other records are gone.
-        diesel::delete(sitrep_dsl::fm_sitrep.filter(sitrep_dsl::id.eq_any(ids)))
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        let sitreps_deleted = diesel::delete(
+            sitrep_dsl::fm_sitrep.filter(sitrep_dsl::id.eq_any(ids.clone())),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("failed to delete sitrep metadata")
+        })?;
+
+        slog::debug!(
+            &opctx.log,
+            "deleted {sitreps_deleted} sitreps";
+            "ids" => ?ids,
+            "sitreps_deleted" => sitreps_deleted,
+            "cases_deleted" => cases_deleted,
+            "alert_requests_deleted" => alert_requests_deleted,
+            "case_ereports_deleted" => case_ereports_deleted,
+        );
+
+        Ok(sitreps_deleted)
     }
 
     pub async fn fm_sitrep_version_list(
