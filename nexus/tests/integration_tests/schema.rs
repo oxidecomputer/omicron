@@ -3485,7 +3485,7 @@ const HOST_EREPORT_SLED_ID: Uuid =
 const EREPORT_SLED_SERIAL: &str = "BRM6900420";
 const GIMLET_PART_NUMBER: &str = "913-0000019";
 
-fn before_208_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn before_210_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         ctx.client
             .execute(
@@ -3556,7 +3556,7 @@ fn before_208_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_208_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+fn after_210_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     Box::pin(async move {
         let host_rows = ctx
             .client
@@ -3778,8 +3778,8 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
         DataMigrationFns::new().before(before_207_0_0).after(after_207_0_0),
     );
     map.insert(
-        Version::new(208, 0, 0),
-        DataMigrationFns::new().before(before_208_0_0).after(after_208_0_0),
+        Version::new(210, 0, 0),
+        DataMigrationFns::new().before(before_210_0_0).after(after_210_0_0),
     );
     map
 }
