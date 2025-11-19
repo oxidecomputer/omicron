@@ -1,1 +1,1 @@
-DROP TABLE IF EXISTS omicron.public.sp_ereport;
+DROP TABLE IF EXISTS omicron.public.host_ereport;

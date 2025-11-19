@@ -529,21 +529,26 @@ mod tests {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
-        assert!(
-            !explanation.contains("FULL SCAN"),
-            "Found an unexpected FULL SCAN: {explanation}",
-        );
-
         eprintln!("--- explanation: {explanation}");
 
         db.terminate().await;
         logctx.cleanup_successful();
     }
 
+    // This test tests that the `ereport_fetch_matching` queries succeed with
+    // filters that only select ereports over a time range, and the default (no
+    // filters).
+    //
+    // We test these cases because we are concerned that they may fail due to
+    // performing a full-table scan. Unfortunately, we cannot easily check this
+    // using an `EXPLAIN` test, as these queries may perform a FULL SCAN over an
+    // *index*, which is permissable. It's annoying to properly parse the
+    // EXPLAIN output to determine if a FULL SCAN is performed over an index or
+    // a full table, so rather than asserting they don't do a full scan that
+    // way, we just perform a query and make sure it returns something.
     #[tokio::test]
-    async fn test_ereport_fetch_matching_time_range_only() {
-        let logctx =
-            dev::test_setup_log("test_ereport_fetch_matching_time_range_only");
+    async fn test_ereport_fetch_matching() {
+        let logctx = dev::test_setup_log("test_ereport_fetch_matching");
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
@@ -572,12 +577,40 @@ mod tests {
             .await
             .expect("insert should succeed");
 
+        #[track_caller]
+        fn check_results(
+            found_ereports: Vec<Ereport>,
+            expected_id: &fm::EreportId,
+            expected: &fm::EreportData,
+        ) {
+            assert_eq!(found_ereports.len(), 1);
+            assert_eq!(&found_ereports[0].id(), expected_id);
+            assert_eq!(
+                found_ereports[0].collector_id,
+                expected.collector_id.into()
+            );
+            assert_eq!(&found_ereports[0].part_number, &expected.part_number);
+            assert_eq!(
+                &found_ereports[0].serial_number,
+                &expected.serial_number
+            );
+            assert_eq!(&found_ereports[0].class, &expected.class);
+            assert_eq!(&found_ereports[0].report, &expected.report);
+        }
+
         let pagparams = DataPageParams {
             marker: None,
             direction: PaginationOrder::Ascending,
             limit: NonZeroU32::new(100).unwrap(),
         };
-        let found_ereports = datastore
+
+        let found_default = datastore
+            .ereport_fetch_matching(opctx, &Default::default(), &pagparams)
+            .await
+            .expect("fetch matching with default filters should succeed");
+        check_results(dbg!(found_default), &id, &ereport);
+
+        let found_by_time_range = datastore
             .ereport_fetch_matching(
                 opctx,
                 &EreportFilters {
@@ -589,16 +622,34 @@ mod tests {
                 &pagparams,
             )
             .await
-            .expect("fetch matching should succeed");
-        dbg!(&found_ereports);
+            .expect("fetch matching with time range filters should succeed");
+        check_results(dbg!(found_by_time_range), &id, &ereport);
 
-        assert_eq!(found_ereports.len(), 1);
-        assert_eq!(found_ereports[0].id(), id);
-        assert_eq!(found_ereports[0].collector_id, ereport.collector_id.into());
-        assert_eq!(&found_ereports[0].part_number, &ereport.part_number);
-        assert_eq!(&found_ereports[0].serial_number, &ereport.serial_number);
-        assert_eq!(&found_ereports[0].class, &ereport.class);
-        assert_eq!(&found_ereports[0].report, &ereport.report);
+        let found_by_serial = datastore
+            .ereport_fetch_matching(
+                opctx,
+                &EreportFilters {
+                    only_serials: vec!["my cool serial".to_string()],
+                    ..Default::default()
+                },
+                &pagparams,
+            )
+            .await
+            .expect("fetch matching with serial number filters should succeed");
+        check_results(dbg!(found_by_serial), &id, &ereport);
+
+        let found_by_class = datastore
+            .ereport_fetch_matching(
+                opctx,
+                &EreportFilters {
+                    only_classes: vec!["my cool ereport".to_string()],
+                    ..Default::default()
+                },
+                &pagparams,
+            )
+            .await
+            .expect("fetch matching with class filters should succeed");
+        check_results(dbg!(found_by_class), &id, &ereport);
 
         db.terminate().await;
         logctx.cleanup_successful();
