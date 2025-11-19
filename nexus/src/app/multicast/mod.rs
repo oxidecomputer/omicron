@@ -121,7 +121,7 @@ impl super::Nexus {
         let authz_pool = match &params.pool {
             Some(pool_selector) => {
                 let authz_pool = self
-                    .ip_pool_lookup(opctx, &pool_selector)?
+                    .ip_pool_lookup(opctx, &pool_selector)
                     .lookup_for(authz::Action::CreateChild)
                     .await?
                     .0;

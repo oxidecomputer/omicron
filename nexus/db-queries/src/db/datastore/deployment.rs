@@ -4316,9 +4316,13 @@ mod tests {
         ))
         .unwrap();
         let (service_authz_ip_pool, service_ip_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+            .fetch_first_system_internal_ip_pool(
+                &opctx,
+                authz::Action::CreateChild,
+                Some(IpVersion::V4),
+            )
             .await
-            .expect("lookup service ip pool");
+            .expect("Failed authz check on delegated IP Pool");
         datastore
             .ip_pool_add_range(
                 &opctx,
@@ -4458,9 +4462,13 @@ mod tests {
             })
             .expect("found external IP");
         let (service_authz_ip_pool, service_ip_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
+            .fetch_first_system_internal_ip_pool(
+                &opctx,
+                authz::Action::CreateChild,
+                Some(IpVersion::V4),
+            )
             .await
-            .expect("lookup service ip pool");
+            .expect("Failed authz check for delegated IP Pool");
         datastore
             .ip_pool_add_range(
                 &opctx,

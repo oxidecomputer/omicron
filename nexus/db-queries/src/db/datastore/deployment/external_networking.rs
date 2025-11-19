@@ -92,6 +92,15 @@ impl DataStore {
         // Looking up the service pool IDs requires an opctx; we'll do this at
         // most once inside the loop below, when we first encounter an address
         // of the same IP version.
+        //
+        // TODO-correctness: We really need to know which delegated IP Pool to
+        // select an address from. It's not clear how we do that today, but we
+        // could make the IpPoolReservationType more fine-grained.
+        //
+        // In the meantime, select the first one for a specific IP version,
+        // which is no worse than today.
+        //
+        // See: https://github.com/oxidecomputer/omicron/issues/8949.
         let mut v4_pool = None;
         let mut v6_pool = None;
 
@@ -118,10 +127,13 @@ impl DataStore {
             let pool = match pool_ref {
                 Some(p) => p,
                 None => {
-                    let new = self
-                        .ip_pools_service_lookup(opctx, version.into())
-                        .await?
-                        .1;
+                    let (_, new) = self
+                        .fetch_first_system_internal_ip_pool(
+                            opctx,
+                            nexus_auth::authz::Action::CreateChild,
+                            Some(version.into()),
+                        )
+                        .await?;
                     *pool_ref = Some(new);
                     pool_ref.as_ref().unwrap()
                 }
@@ -693,9 +705,13 @@ mod tests {
             datastore: &DataStore,
         ) {
             let (ip_pool, db_pool) = datastore
-                .ip_pools_service_lookup(&opctx, IpVersion::V4.into())
+                .fetch_first_system_internal_ip_pool(
+                    &opctx,
+                    nexus_auth::authz::Action::CreateChild,
+                    Some(IpVersion::V4.into()),
+                )
                 .await
-                .expect("failed to find service IP pool");
+                .expect("Failed authz check on delegated IP Pool");
             datastore
                 .ip_pool_add_range(
                     &opctx,

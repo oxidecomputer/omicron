@@ -745,6 +745,22 @@ impl RelayState {
     }
 }
 
+/// Indicates what resources an IP Pool is reserved for.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpPoolReservationType {
+    /// The pool is reserved for use by external customer Silos.
+    ExternalSilos,
+    /// The pool is reserved for internal system use.
+    SystemInternal,
+}
+
+impl IpPoolReservationType {
+    pub const fn external_silos() -> Self {
+        Self::ExternalSilos
+    }
+}
+
 /// Type of IP pool.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "snake_case")]

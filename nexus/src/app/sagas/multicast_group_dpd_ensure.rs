@@ -315,8 +315,11 @@ mod test {
     use nexus_types::external_api::params::{
         IpPoolCreate, MulticastGroupCreate,
     };
+    use nexus_types::external_api::shared::IpPoolReservationType;
     use nexus_types::external_api::shared::{IpRange, Ipv4Range};
-    use nexus_types::external_api::views::{IpPool, IpPoolRange, IpVersion};
+    use nexus_types::external_api::views::{
+        IpPoolRange, IpVersion, SystemIpPool,
+    };
     use omicron_common::api::external::{
         IdentityMetadataCreateParams, NameOrId,
     };
@@ -446,9 +449,14 @@ mod test {
                 description: "Multicast IP pool for saga test".to_string(),
             },
             IpVersion::V4,
+            IpPoolReservationType::ExternalSilos,
         );
-        object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
-            .await;
+        object_create::<_, SystemIpPool>(
+            client,
+            "/v1/system/ip-pools",
+            &pool_params,
+        )
+        .await;
 
         // Add multicast IP range
         let asm_range = IpRange::V4(

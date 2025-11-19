@@ -20,6 +20,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::Baseboard;
+use nexus_types::external_api::shared::IpPoolReservationType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::AffinityGroup;
@@ -29,8 +30,8 @@ use nexus_types::external_api::views::FloatingIp;
 use nexus_types::external_api::views::InternetGateway;
 use nexus_types::external_api::views::InternetGatewayIpAddress;
 use nexus_types::external_api::views::InternetGatewayIpPool;
-use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
+use nexus_types::external_api::views::SystemIpPool;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::VpcSubnet;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
@@ -268,18 +269,23 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-) -> (IpPool, IpPoolRange) {
-    let pool_params = params::IpPoolCreate::new(
-        IdentityMetadataCreateParams {
-            name: pool_name.parse().unwrap(),
-            description: String::from("an ip pool"),
+) -> (SystemIpPool, IpPoolRange) {
+    let pool = object_create(
+        client,
+        "/v1/system/ip-pools",
+        &params::IpPoolCreate {
+            identity: IdentityMetadataCreateParams {
+                name: pool_name.parse().unwrap(),
+                description: String::from("an ip pool"),
+            },
+            ip_version: ip_range
+                .map(|r| r.version())
+                .unwrap_or_else(views::IpVersion::v4),
+            pool_type: shared::IpPoolType::Unicast,
+            reservation_type: shared::IpPoolReservationType::ExternalSilos,
         },
-        ip_range
-            .as_ref()
-            .map(|r| r.version())
-            .unwrap_or_else(views::IpVersion::v4),
-    );
-    let pool = object_create(client, "/v1/system/ip-pools", &pool_params).await;
+    )
+    .await;
 
     let ip_range = ip_range.unwrap_or_else(|| {
         use std::net::Ipv4Addr;
@@ -303,7 +309,7 @@ pub async fn create_multicast_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-) -> (IpPool, IpPoolRange) {
+) -> (SystemIpPool, IpPoolRange) {
     let pool = object_create(
         client,
         "/v1/system/ip-pools",
@@ -315,6 +321,7 @@ pub async fn create_multicast_ip_pool(
             ip_range
                 .map(|r| r.version())
                 .unwrap_or_else(|| views::IpVersion::V4),
+            IpPoolReservationType::ExternalSilos,
         ),
     )
     .await;
@@ -350,7 +357,7 @@ pub async fn link_ip_pool(
 /// What you want for any test that is not testing IP logic specifically
 pub async fn create_default_ip_pool(
     client: &ClientTestContext,
-) -> views::IpPool {
+) -> views::SystemIpPool {
     let (pool, ..) = create_ip_pool(&client, "default", None).await;
     link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
     pool

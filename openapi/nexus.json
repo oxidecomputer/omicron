@@ -5435,7 +5435,7 @@
           "projects"
         ],
         "summary": "List IP pools",
-        "operationId": "project_ip_pool_list",
+        "operationId": "ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -5471,7 +5471,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloIpPoolResultsPage"
+                  "$ref": "#/components/schemas/IpPoolResultsPage"
                 }
               }
             }
@@ -5494,7 +5494,7 @@
           "projects"
         ],
         "summary": "Fetch IP pool",
-        "operationId": "project_ip_pool_view",
+        "operationId": "ip_pool_view",
         "parameters": [
           {
             "in": "path",
@@ -5512,7 +5512,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloIpPool"
+                  "$ref": "#/components/schemas/IpPool"
                 }
               }
             }
@@ -5523,6 +5523,68 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        }
+      }
+    },
+    "/v1/ip-pools/{pool}/ranges": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "List ranges for IP pool",
+        "description": "Ranges are ordered by their first address.",
+        "operationId": "ip_pool_range_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
@@ -8776,7 +8838,7 @@
           "system/ip-pools"
         ],
         "summary": "List IP pools",
-        "operationId": "ip_pool_list",
+        "operationId": "system_ip_pool_list",
         "parameters": [
           {
             "in": "query",
@@ -8812,7 +8874,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPoolResultsPage"
+                  "$ref": "#/components/schemas/SystemIpPoolResultsPage"
                 }
               }
             }
@@ -8834,7 +8896,7 @@
         ],
         "summary": "Create IP pool",
         "description": "IPv6 is not yet supported for unicast pools.",
-        "operationId": "ip_pool_create",
+        "operationId": "system_ip_pool_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -8851,7 +8913,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPool"
+                  "$ref": "#/components/schemas/SystemIpPool"
                 }
               }
             }
@@ -8871,7 +8933,7 @@
           "system/ip-pools"
         ],
         "summary": "Fetch IP pool",
-        "operationId": "ip_pool_view",
+        "operationId": "system_ip_pool_view",
         "parameters": [
           {
             "in": "path",
@@ -8889,7 +8951,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPool"
+                  "$ref": "#/components/schemas/SystemIpPool"
                 }
               }
             }
@@ -8907,7 +8969,7 @@
           "system/ip-pools"
         ],
         "summary": "Update IP pool",
-        "operationId": "ip_pool_update",
+        "operationId": "system_ip_pool_update",
         "parameters": [
           {
             "in": "path",
@@ -8935,7 +8997,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPool"
+                  "$ref": "#/components/schemas/SystemIpPool"
                 }
               }
             }
@@ -8953,7 +9015,7 @@
           "system/ip-pools"
         ],
         "summary": "Delete IP pool",
-        "operationId": "ip_pool_delete",
+        "operationId": "system_ip_pool_delete",
         "parameters": [
           {
             "in": "path",
@@ -8985,7 +9047,7 @@
         ],
         "summary": "List ranges for IP pool",
         "description": "Ranges are ordered by their first address.",
-        "operationId": "ip_pool_range_list",
+        "operationId": "system_ip_pool_range_list",
         "parameters": [
           {
             "in": "path",
@@ -9047,7 +9109,7 @@
         ],
         "summary": "Add range to IP pool.",
         "description": "IPv6 ranges are not allowed yet for unicast pools.\n\nFor multicast pools, all ranges must be either Any-Source Multicast (ASM) or Source-Specific Multicast (SSM), but not both. Mixing ASM and SSM ranges in the same pool is not allowed.\n\nASM: IPv4 addresses outside 232.0.0.0/8, IPv6 addresses with flag field != 3 SSM: IPv4 addresses in 232.0.0.0/8, IPv6 addresses with flag field = 3",
-        "operationId": "ip_pool_range_add",
+        "operationId": "system_ip_pool_range_add",
         "parameters": [
           {
             "in": "path",
@@ -9095,7 +9157,7 @@
           "system/ip-pools"
         ],
         "summary": "Remove range from IP pool",
-        "operationId": "ip_pool_range_remove",
+        "operationId": "system_ip_pool_range_remove",
         "parameters": [
           {
             "in": "path",
@@ -9130,13 +9192,54 @@
         }
       }
     },
+    "/v1/system/ip-pools/{pool}/reserve": {
+      "post": {
+        "tags": [
+          "system/ip-pools"
+        ],
+        "summary": "Reserve an IP Pool for use by specific resources.",
+        "operationId": "system_ip_pool_reserve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolReservationUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/ip-pools/{pool}/silos": {
       "get": {
         "tags": [
           "system/ip-pools"
         ],
         "summary": "List IP pool's linked silos",
-        "operationId": "ip_pool_silo_list",
+        "operationId": "system_ip_pool_silo_list",
         "parameters": [
           {
             "in": "path",
@@ -9203,7 +9306,7 @@
         ],
         "summary": "Link IP pool to silo",
         "description": "Users in linked silos can allocate external IPs from this pool for their instances. A silo can have at most one default pool. IPs are allocated from the default pool when users ask for one without specifying a pool.",
-        "operationId": "ip_pool_silo_link",
+        "operationId": "system_ip_pool_silo_link",
         "parameters": [
           {
             "in": "path",
@@ -9252,7 +9355,7 @@
         ],
         "summary": "Make IP pool default for silo",
         "description": "When a user asks for an IP (e.g., at instance create time) without specifying a pool, the IP comes from the default pool if a default is configured. When a pool is made the default for a silo, any existing default will remain linked to the silo, but will no longer be the default.",
-        "operationId": "ip_pool_silo_update",
+        "operationId": "system_ip_pool_silo_update",
         "parameters": [
           {
             "in": "path",
@@ -9306,7 +9409,7 @@
         ],
         "summary": "Unlink IP pool from silo",
         "description": "Will fail if there are any outstanding IPs allocated in the silo.",
-        "operationId": "ip_pool_silo_unlink",
+        "operationId": "system_ip_pool_silo_unlink",
         "parameters": [
           {
             "in": "path",
@@ -9344,7 +9447,7 @@
           "system/ip-pools"
         ],
         "summary": "Fetch IP pool utilization",
-        "operationId": "ip_pool_utilization_view",
+        "operationId": "system_ip_pool_utilization_view",
         "parameters": [
           {
             "in": "path",
@@ -9366,154 +9469,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/ip-pools-service": {
-      "get": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "Fetch Oxide service IP pool",
-        "operationId": "ip_pool_service_view",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPool"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/ip-pools-service/ranges": {
-      "get": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "List IP ranges for the Oxide service pool",
-        "description": "Ranges are ordered by their first address.",
-        "operationId": "ip_pool_service_range_list",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "description": "Maximum number of items returned by a single call",
-            "schema": {
-              "nullable": true,
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 1
-            }
-          },
-          {
-            "in": "query",
-            "name": "page_token",
-            "description": "Token returned by previous call to retrieve the subsequent page",
-            "schema": {
-              "nullable": true,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolRangeResultsPage"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-dropshot-pagination": {
-          "required": []
-        }
-      }
-    },
-    "/v1/system/ip-pools-service/ranges/add": {
-      "post": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "Add IP range to Oxide service pool",
-        "description": "IPv6 ranges are not allowed yet.",
-        "operationId": "ip_pool_service_range_add",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpRange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IpPoolRange"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/ip-pools-service/ranges/remove": {
-      "post": {
-        "tags": [
-          "system/ip-pools"
-        ],
-        "summary": "Remove IP range from Oxide service pool",
-        "operationId": "ip_pool_service_range_remove",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/IpRange"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -11363,7 +11318,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SiloIpPoolResultsPage"
+                  "$ref": "#/components/schemas/IpPoolResultsPage"
                 }
               }
             }
@@ -22019,7 +21974,7 @@
         ]
       },
       "IpPool": {
-        "description": "A collection of IP ranges. If a pool is linked to a silo, IP addresses from the pool can be allocated within that silo",
+        "description": "An IP pool in the context of a silo",
         "type": "object",
         "properties": {
           "description": {
@@ -22032,26 +21987,22 @@
             "format": "uuid"
           },
           "ip_version": {
-            "description": "The IP version for the pool.",
+            "description": "The IP version of the pool.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/IpVersion"
               }
             ]
           },
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "type": "boolean"
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "pool_type": {
-            "description": "Type of IP pool (unicast or multicast)",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/IpPoolType"
               }
             ]
           },
@@ -22070,8 +22021,8 @@
           "description",
           "id",
           "ip_version",
+          "is_default",
           "name",
-          "pool_type",
           "time_created",
           "time_modified"
         ]
@@ -22101,6 +22052,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/IpPoolType"
+              }
+            ]
+          },
+          "reservation_type": {
+            "description": "Which resources the IP Pool is reserved for.\n\nThe default is reserved for external silos.",
+            "default": "external_silos",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolReservationType"
               }
             ]
           }
@@ -22171,6 +22131,42 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "IpPoolReservationType": {
+        "description": "Indicates what resources an IP Pool is reserved for.",
+        "oneOf": [
+          {
+            "description": "The pool is reserved for use by external customer Silos.",
+            "type": "string",
+            "enum": [
+              "external_silos"
+            ]
+          },
+          {
+            "description": "The pool is reserved for internal system use.",
+            "type": "string",
+            "enum": [
+              "system_internal"
+            ]
+          }
+        ]
+      },
+      "IpPoolReservationUpdate": {
+        "description": "Parameters for modifying the reservation type of an IP Pool.",
+        "type": "object",
+        "properties": {
+          "reservation_type": {
+            "description": "What resources an IP Pool is reserved for.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolReservationType"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reservation_type"
         ]
       },
       "IpPoolResultsPage": {
@@ -24938,72 +24934,6 @@
           }
         ]
       },
-      "SiloIpPool": {
-        "description": "An IP pool in the context of a silo",
-        "type": "object",
-        "properties": {
-          "description": {
-            "description": "human-readable free-form text about a resource",
-            "type": "string"
-          },
-          "id": {
-            "description": "unique, immutable, system-controlled identifier for each resource",
-            "type": "string",
-            "format": "uuid"
-          },
-          "is_default": {
-            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
-            "type": "boolean"
-          },
-          "name": {
-            "description": "unique, mutable, user-controlled identifier for each resource",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          },
-          "time_created": {
-            "description": "timestamp when this resource was created",
-            "type": "string",
-            "format": "date-time"
-          },
-          "time_modified": {
-            "description": "timestamp when this resource was last modified",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "description",
-          "id",
-          "is_default",
-          "name",
-          "time_created",
-          "time_modified"
-        ]
-      },
-      "SiloIpPoolResultsPage": {
-        "description": "A single page of results",
-        "type": "object",
-        "properties": {
-          "items": {
-            "description": "list of items on this page of results",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SiloIpPool"
-            }
-          },
-          "next_page": {
-            "nullable": true,
-            "description": "token used to fetch the next page of results (if any)",
-            "type": "string"
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
       "SiloQuotas": {
         "description": "A collection of resource counts used to set the virtual capacity of a silo",
         "type": "object",
@@ -26755,6 +26685,94 @@
         "required": [
           "interface_config_id",
           "vlan_id"
+        ]
+      },
+      "SystemIpPool": {
+        "description": "A collection of IP ranges. If a pool is linked to a silo, IP addresses from the pool can be allocated within that silo. IP Pools may also be delegated for internal use by Oxide, such as running API servers or NTP daemons.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip_version": {
+            "description": "The IP version for the pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpVersion"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "pool_type": {
+            "description": "Type of IP pool (unicast or multicast)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolType"
+              }
+            ]
+          },
+          "reservation_type": {
+            "description": "Resources the IP Pool is reserved for.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpPoolReservationType"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "ip_version",
+          "name",
+          "pool_type",
+          "reservation_type",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SystemIpPoolResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SystemIpPool"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "TargetRelease": {

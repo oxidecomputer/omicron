@@ -67,16 +67,36 @@ impl_enum_type!(
     pub enum IpPoolReservationType;
 
     ExternalSilos => b"external_silos"
-    OxideInternal => b"oxide_internal"
+    SystemInternal => b"system_internal"
 );
 
 impl ::std::fmt::Display for IpPoolReservationType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             IpPoolReservationType::ExternalSilos => "external_silos",
-            IpPoolReservationType::OxideInternal => "oxide_internal",
+            IpPoolReservationType::SystemInternal => "system_internal",
         };
         f.write_str(s)
+    }
+}
+
+impl From<shared::IpPoolReservationType> for IpPoolReservationType {
+    fn from(value: shared::IpPoolReservationType) -> Self {
+        match value {
+            shared::IpPoolReservationType::ExternalSilos => Self::ExternalSilos,
+            shared::IpPoolReservationType::SystemInternal => {
+                Self::SystemInternal
+            }
+        }
+    }
+}
+
+impl From<IpPoolReservationType> for shared::IpPoolReservationType {
+    fn from(value: IpPoolReservationType) -> Self {
+        match value {
+            IpPoolReservationType::ExternalSilos => Self::ExternalSilos,
+            IpPoolReservationType::SystemInternal => Self::SystemInternal,
+        }
     }
 }
 
@@ -226,15 +246,13 @@ impl IpPool {
     }
 }
 
-impl From<IpPool> for views::IpPool {
+impl From<IpPool> for views::SystemIpPool {
     fn from(pool: IpPool) -> Self {
-        let identity = pool.identity();
-        let pool_type = pool.pool_type;
-
         Self {
-            identity,
-            pool_type: pool_type.into(),
+            identity: pool.identity(),
+            pool_type: pool.pool_type.into(),
             ip_version: pool.ip_version.into(),
+            reservation_type: pool.reservation_type.into(),
         }
     }
 }

@@ -7,18 +7,15 @@
 use crate::external_api::params;
 use crate::external_api::shared;
 use ipnetwork::IpNetwork;
-use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
 use nexus_db_model::IpPool;
 use nexus_db_model::IpPoolReservationType;
 use nexus_db_model::IpPoolType;
-use nexus_db_model::IpPoolUpdate;
 use nexus_db_model::IpVersion;
 use nexus_db_queries::authz;
 use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::model::Name;
 use nexus_types::identity::Resource;
 use omicron_common::address::{
     IPV4_LINK_LOCAL_MULTICAST_SUBNET, IPV4_SSM_SUBNET,
@@ -33,28 +30,10 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
-use ref_cast::RefCast;
 use std::matches;
 use uuid::Uuid;
-
-/// Helper to make it easier to 404 on attempts to manipulate internal pools
-fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
-    match pool_lookup {
-        lookup::IpPool::Name(_, name) => {
-            Error::not_found_by_name(ResourceType::IpPool, &name)
-        }
-        lookup::IpPool::OwnedName(_, name) => {
-            Error::not_found_by_name(ResourceType::IpPool, &name)
-        }
-        lookup::IpPool::PrimaryKey(_, id) => {
-            Error::not_found_by_id(ResourceType::IpPool, &id)
-        }
-        lookup::IpPool::Error(_, error) => error.to_owned(),
-    }
-}
 
 /// Validate multicast-specific constraints for IP ranges.
 ///
@@ -132,19 +111,8 @@ impl super::Nexus {
         &'a self,
         opctx: &'a OpContext,
         pool: &'a NameOrId,
-    ) -> LookupResult<lookup::IpPool<'a>> {
-        match pool {
-            NameOrId::Name(name) => {
-                let pool = LookupPath::new(opctx, &self.db_datastore)
-                    .ip_pool_name(Name::ref_cast(name));
-                Ok(pool)
-            }
-            NameOrId::Id(id) => {
-                let pool =
-                    LookupPath::new(opctx, &self.db_datastore).ip_pool_id(*id);
-                Ok(pool)
-            }
-        }
+    ) -> lookup::IpPool<'a> {
+        self.db_datastore.ip_pool_lookup(opctx, pool)
     }
 
     pub(crate) async fn ip_pool_create(
@@ -210,7 +178,7 @@ impl super::Nexus {
         db::model::IpPoolResource,
     )> {
         let (authz_pool, pool) = self
-            .ip_pool_lookup(opctx, pool)?
+            .ip_pool_lookup(opctx, pool)
             // TODO-robustness: https://github.com/oxidecomputer/omicron/issues/3995
             // Checking CreateChild works because it is the permission for
             // allocating IPs from a pool, which any authenticated user has.
@@ -248,7 +216,7 @@ impl super::Nexus {
         self.db_datastore.ip_pool_silo_list(opctx, &authz_pool, pagparams).await
     }
 
-    // List pools for a given silo
+    /// List pools for a given silo
     pub(crate) async fn silo_ip_pool_list(
         &self,
         opctx: &OpContext,
@@ -264,6 +232,7 @@ impl super::Nexus {
         self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
+    /// Link a customer Silo to an IP Pool.
     pub(crate) async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
@@ -272,10 +241,6 @@ impl super::Nexus {
     ) -> CreateResult<db::model::IpPoolResource> {
         let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
 
         let (authz_silo,) = self
             .silo_lookup(&opctx, silo_link.silo.clone())?
@@ -294,6 +259,7 @@ impl super::Nexus {
             .await
     }
 
+    /// Unlink a customer Silo from an IP Pool.
     pub(crate) async fn ip_pool_unlink_silo(
         &self,
         opctx: &OpContext,
@@ -303,10 +269,6 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
-
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -315,6 +277,7 @@ impl super::Nexus {
             .await
     }
 
+    /// Update whether an IP Pool is the default for a Silo.
     pub(crate) async fn ip_pool_silo_update(
         &self,
         opctx: &OpContext,
@@ -324,10 +287,6 @@ impl super::Nexus {
     ) -> CreateResult<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
 
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
@@ -358,10 +317,6 @@ impl super::Nexus {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Delete).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
-
         self.db_datastore.ip_pool_delete(opctx, &authz_pool, &db_pool).await
     }
 
@@ -373,14 +328,9 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::IpPool> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
-
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
-
-        let updates_db = IpPoolUpdate::from(updates.clone());
-
-        self.db_datastore.ip_pool_update(opctx, &authz_pool, updates_db).await
+        self.db_datastore
+            .ip_pool_update(opctx, &authz_pool, updates.clone().into())
+            .await
     }
 
     pub(crate) async fn ip_pool_list_ranges(
@@ -391,10 +341,6 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::IpPoolRange> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
-
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
 
         self.db_datastore
             .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
@@ -409,10 +355,6 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::IpPoolRange> {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
-
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
 
         // Disallow V6 ranges until IPv6 is fully supported by the networking
         // subsystem. Instead of changing the API to reflect that (making this
@@ -512,158 +454,29 @@ impl super::Nexus {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
-            return Err(not_found_from_lookup(pool_lookup));
-        }
-
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
 
-    // The "ip_pool_service_..." functions look up IP pools for Oxide service usage,
-    // rather than for VMs.
+    // We no longer have explicit, hidden IP Pools for Oxide use, but this
+    // comment still applies. We might want to have different IP Pools for AZs,
+    // especially for pools delegated for Oxide services.
     //
     // TODO(https://github.com/oxidecomputer/omicron/issues/1276): Should be
     // accessed via AZ UUID, probably.
 
-    pub(crate) async fn ip_pool_service_fetch(
+    /// Reserve an IP Pool for a specific use.
+    pub(crate) async fn ip_pool_reserve(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<db::model::IpPool> {
-        // TODO: https://github.com/oxidecomputer/omicron/issues/8881
+        ip_pool: &NameOrId,
+        reservation_type: IpPoolReservationType,
+    ) -> UpdateResult<()> {
         let (authz_pool, db_pool) = self
-            .db_datastore
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
+            .ip_pool_lookup(opctx, ip_pool)
+            .fetch_for(authz::Action::Modify)
             .await?;
-        opctx.authorize(authz::Action::Read, &authz_pool).await?;
-        Ok(db_pool)
-    }
-
-    pub(crate) async fn ip_pool_service_list_ranges(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, IpNetwork>,
-    ) -> ListResultVec<db::model::IpPoolRange> {
-        // TODO: https://github.com/oxidecomputer/omicron/issues/8881
-        let (authz_pool, ..) = self
-            .db_datastore
-            .ip_pools_service_lookup(opctx, IpVersion::V4)
-            .await?;
-        opctx.authorize(authz::Action::Read, &authz_pool).await?;
         self.db_datastore
-            .ip_pool_list_ranges(opctx, &authz_pool, pagparams)
+            .ip_pool_reserve(opctx, &authz_pool, &db_pool, reservation_type)
             .await
-    }
-
-    pub(crate) async fn ip_pool_service_add_range(
-        &self,
-        opctx: &OpContext,
-        range: &shared::IpRange,
-    ) -> UpdateResult<db::model::IpPoolRange> {
-        let (authz_pool, db_pool) = self
-            .db_datastore
-            .ip_pools_service_lookup(opctx, range.version().into())
-            .await?;
-        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
-
-        // Disallow V6 ranges until IPv6 is fully supported by the networking
-        // subsystem. Instead of changing the API to reflect that (making this
-        // endpoint inconsistent with the rest) and changing it back when we
-        // add support, we accept them at the API layer and error here. It
-        // would be nice if we could do it in the datastore layer, but we'd
-        // have no way of creating IPv6 ranges for the purpose of testing IP
-        // pool utilization.
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/8761.
-        if matches!(range, shared::IpRange::V6(_)) {
-            return Err(Error::invalid_request(
-                "IPv6 ranges are not allowed yet",
-            ));
-        }
-
-        // Validate uniformity and pool type constraints.
-        // Extract first/last addresses once and reuse for all validation checks.
-        match range {
-            shared::IpRange::V4(v4_range) => {
-                let first = v4_range.first_address();
-                let last = v4_range.last_address();
-                let first_is_multicast = first.is_multicast();
-                let last_is_multicast = last.is_multicast();
-
-                // Ensure range doesn't span multicast/unicast boundary
-                if first_is_multicast != last_is_multicast {
-                    return Err(Error::invalid_request(
-                        "IP range cannot span multicast and unicast address spaces",
-                    ));
-                }
-
-                // Validate pool type matches range type
-                match db_pool.pool_type {
-                    IpPoolType::Multicast => {
-                        if !first_is_multicast {
-                            return Err(Error::invalid_request(
-                                "Cannot add unicast address range to multicast IP pool",
-                            ));
-                        }
-                        validate_multicast_range(range)?;
-                    }
-                    IpPoolType::Unicast => {
-                        if first_is_multicast {
-                            return Err(Error::invalid_request(
-                                "Cannot add multicast address range to unicast IP pool",
-                            ));
-                        }
-                    }
-                }
-            }
-            shared::IpRange::V6(v6_range) => {
-                let first = v6_range.first_address();
-                let last = v6_range.last_address();
-                let first_is_multicast = first.is_multicast();
-                let last_is_multicast = last.is_multicast();
-
-                // Ensure range doesn't span multicast/unicast boundary
-                if first_is_multicast != last_is_multicast {
-                    return Err(Error::invalid_request(
-                        "IP range cannot span multicast and unicast address spaces",
-                    ));
-                }
-
-                // Validate pool type matches range type
-                match db_pool.pool_type {
-                    IpPoolType::Multicast => {
-                        if !first_is_multicast {
-                            return Err(Error::invalid_request(
-                                "Cannot add unicast address range to multicast IP pool",
-                            ));
-                        }
-                        validate_multicast_range(range)?;
-                    }
-                    IpPoolType::Unicast => {
-                        if first_is_multicast {
-                            return Err(Error::invalid_request(
-                                "Cannot add multicast address range to unicast IP pool",
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-
-        self.db_datastore
-            .ip_pool_add_range(opctx, &authz_pool, &db_pool, range)
-            .await
-    }
-
-    pub(crate) async fn ip_pool_service_delete_range(
-        &self,
-        opctx: &OpContext,
-        range: &shared::IpRange,
-    ) -> DeleteResult {
-        let (authz_pool, ..) = self
-            .db_datastore
-            .ip_pools_service_lookup(opctx, range.version().into())
-            .await?;
-        opctx.authorize(authz::Action::Modify, &authz_pool).await?;
-        self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
 }

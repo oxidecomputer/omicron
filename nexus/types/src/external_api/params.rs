@@ -6,6 +6,7 @@
 //! resources.
 
 use crate::external_api::shared;
+use crate::external_api::shared::IpPoolReservationType;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use http::Uri;
@@ -1035,6 +1036,11 @@ pub struct IpPoolCreate {
     /// Type of IP pool (defaults to Unicast)
     #[serde(default)]
     pub pool_type: shared::IpPoolType,
+    /// Which resources the IP Pool is reserved for.
+    ///
+    /// The default is reserved for external silos.
+    #[serde(default = "IpPoolReservationType::external_silos")]
+    pub reservation_type: IpPoolReservationType,
 }
 
 impl IpPoolCreate {
@@ -1042,16 +1048,28 @@ impl IpPoolCreate {
     pub fn new(
         identity: IdentityMetadataCreateParams,
         ip_version: IpVersion,
+        reservation_type: IpPoolReservationType,
     ) -> Self {
-        Self { identity, ip_version, pool_type: shared::IpPoolType::Unicast }
+        Self {
+            identity,
+            ip_version,
+            pool_type: shared::IpPoolType::Unicast,
+            reservation_type,
+        }
     }
 
     /// Create parameters for a multicast IP pool
     pub fn new_multicast(
         identity: IdentityMetadataCreateParams,
         ip_version: IpVersion,
+        reservation_type: IpPoolReservationType,
     ) -> Self {
-        Self { identity, ip_version, pool_type: shared::IpPoolType::Multicast }
+        Self {
+            identity,
+            ip_version,
+            pool_type: shared::IpPoolType::Multicast,
+            reservation_type,
+        }
     }
 }
 
@@ -1060,6 +1078,13 @@ impl IpPoolCreate {
 pub struct IpPoolUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+}
+
+/// Parameters for modifying the reservation type of an IP Pool.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct IpPoolReservationUpdate {
+    /// What resources an IP Pool is reserved for.
+    pub reservation_type: IpPoolReservationType,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

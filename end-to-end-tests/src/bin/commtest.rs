@@ -7,9 +7,9 @@ use oxide_client::{
     ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
     ClientVpcsExt,
     types::{
-        IpPoolCreate, IpPoolLinkSilo, IpPoolType, IpRange, IpVersion, Name,
-        NameOrId, PingStatus, ProbeCreate, ProbeInfo, ProjectCreate,
-        UsernamePasswordCredentials,
+        IpPoolCreate, IpPoolLinkSilo, IpPoolReservationType, IpPoolType,
+        IpRange, IpVersion, Name, NameOrId, PingStatus, ProbeCreate, ProbeInfo,
+        ProjectCreate, UsernamePasswordCredentials,
     },
 };
 use std::{
@@ -280,44 +280,45 @@ async fn rack_prepare(
     })?;
 
     let pool_name = "default";
-    api_retry!(
-        if let Err(e) = oxide.ip_pool_view().pool("default").send().await {
-            if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
-                print!("default ip pool does not exist, creating ...");
-                let ip_version = if args.ip_pool_begin.is_ipv4() {
-                    IpVersion::V4
-                } else {
-                    IpVersion::V6
-                };
-                oxide
-                    .ip_pool_create()
-                    .body(IpPoolCreate {
-                        name: pool_name.parse().unwrap(),
-                        description: "Default IP pool".to_string(),
-                        ip_version,
-                        pool_type: IpPoolType::Unicast,
-                    })
-                    .send()
-                    .await?;
-                oxide
-                    .ip_pool_silo_link()
-                    .pool(pool_name)
-                    .body(IpPoolLinkSilo {
-                        silo: NameOrId::Name("recovery".parse().unwrap()),
-                        is_default: true,
-                    })
-                    .send()
-                    .await?;
-                println!("done");
-                Ok(())
+    api_retry!(if let Err(e) =
+        oxide.system_ip_pool_view().pool("default").send().await
+    {
+        if let Some(reqwest::StatusCode::NOT_FOUND) = e.status() {
+            print!("default ip pool does not exist, creating ...");
+            let ip_version = if args.ip_pool_begin.is_ipv4() {
+                IpVersion::V4
             } else {
-                Err(e)
-            }
-        } else {
-            println!("default ip pool already exists");
+                IpVersion::V6
+            };
+            oxide
+                .system_ip_pool_create()
+                .body(IpPoolCreate {
+                    name: pool_name.parse().unwrap(),
+                    description: "Default IP pool".to_string(),
+                    ip_version,
+                    pool_type: IpPoolType::Unicast,
+                    reservation_type: IpPoolReservationType::ExternalSilos,
+                })
+                .send()
+                .await?;
+            oxide
+                .system_ip_pool_silo_link()
+                .pool(pool_name)
+                .body(IpPoolLinkSilo {
+                    silo: NameOrId::Name("recovery".parse().unwrap()),
+                    is_default: true,
+                })
+                .send()
+                .await?;
+            println!("done");
             Ok(())
+        } else {
+            Err(e)
         }
-    )?;
+    } else {
+        println!("default ip pool already exists");
+        Ok(())
+    })?;
 
     let pool = api_retry!(
         oxide
@@ -346,7 +347,7 @@ async fn rack_prepare(
         print!("ip range does not exist, creating ... ");
         api_retry!(
             oxide
-                .ip_pool_range_add()
+                .system_ip_pool_range_add()
                 .pool(Name::try_from("default").unwrap())
                 .body(range.clone())
                 .send()

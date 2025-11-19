@@ -11,8 +11,6 @@ use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
-use crate::db::datastore::SERVICE_IPV6_POOL_NAME;
 use crate::db::identity::Resource;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
@@ -43,6 +41,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_errors::public_error_from_diesel_lookup;
 use nexus_db_lookup::DbConnection;
 use nexus_db_lookup::LookupPath;
+use nexus_db_lookup::lookup;
 use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_model::IpVersion;
@@ -62,40 +61,12 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use ref_cast::RefCast;
 use uuid::Uuid;
-
-/// Helper type with both an authz IP Pool and the actual DB record.
-#[derive(Debug, Clone)]
-pub struct ServiceIpPool {
-    pub authz_pool: authz::IpPool,
-    pub db_pool: IpPool,
-}
-
-/// Helper type with service IP Pool information for both IP versions.
-#[derive(Debug, Clone)]
-pub struct ServiceIpPools {
-    pub ipv4: ServiceIpPool,
-    pub ipv6: ServiceIpPool,
-}
-
-impl ServiceIpPools {
-    /// Return the IP Pool appropriate for a range, based on its version.
-    pub fn pool_for_range(&self, range: &IpRange) -> &ServiceIpPool {
-        if range.first_address().is_ipv4() { &self.ipv4 } else { &self.ipv6 }
-    }
-
-    /// Return the IP Pool appropriate for an IP version.
-    pub fn pool_for_version(&self, version: IpVersion) -> &IpPool {
-        match version {
-            IpVersion::V4 => &self.ipv4.db_pool,
-            IpVersion::V6 => &self.ipv6.db_pool,
-        }
-    }
-}
 
 // Error message emitted when a user attempts to link an IP Pool and internal
 // Silo, but the pool is already reserved for internal use, or vice versa.
@@ -114,6 +85,20 @@ const LAST_POOL_ERROR: &str = "Cannot delete the last IP Pool reserved for \
     before deleting this one.";
 
 impl DataStore {
+    /// Lookup an IP Pool directly.
+    pub fn ip_pool_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        pool: &'a NameOrId,
+    ) -> lookup::IpPool<'a> {
+        match pool {
+            NameOrId::Name(name) => {
+                LookupPath::new(opctx, self).ip_pool_name(Name::ref_cast(name))
+            }
+            NameOrId::Id(id) => LookupPath::new(opctx, self).ip_pool_id(*id),
+        }
+    }
+
     /// List IP Pools by their reservation type, IP version, and pool type.
     pub async fn ip_pools_list_paginated(
         &self,
@@ -202,6 +187,39 @@ impl DataStore {
             pagparams,
         )
         .await
+    }
+
+    /// List all IP Pools, making as many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn ip_pools_list_batched(
+        &self,
+        opctx: &OpContext,
+        reservation_type: IpPoolReservationType,
+        version: Option<IpVersion>,
+    ) -> ListResultVec<IpPool> {
+        opctx.check_complex_operations_allowed()?;
+        let mut pools = Vec::new();
+        let mut paginator = Paginator::new(
+            SQL_BATCH_SIZE,
+            dropshot::PaginationOrder::Ascending,
+        );
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .ip_pools_list_paginated(
+                    opctx,
+                    reservation_type,
+                    version,
+                    None,
+                    &PaginatedBy::Id(p.current_pagparams()),
+                )
+                .await?;
+            paginator = p.found_batch(&batch, &|r| r.id());
+            pools.extend(batch);
+        }
+        Ok(pools)
     }
 
     /// Look up whether the given pool is available to users in the current
@@ -310,24 +328,36 @@ impl DataStore {
             })
     }
 
-    /// Look up internal service IP Pools for both IP versions.
-    ///
-    /// This is useful when you need to handle resources like external IPs where
-    /// the actual address might be from either IP version.
-    //
-    // TODO-remove: Use list_ip_pools_for_internal instead.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8947.
-    pub async fn ip_pools_service_lookup_both_versions(
+    /// Fetch the first IP Pool reserved for Oxide internal system use.
+    pub(crate) async fn fetch_first_system_internal_ip_pool(
         &self,
         opctx: &OpContext,
-    ) -> LookupResult<ServiceIpPools> {
-        let ipv4 = self.ip_pools_service_lookup(opctx, IpVersion::V4).await?;
-        let ipv6 = self.ip_pools_service_lookup(opctx, IpVersion::V6).await?;
-        Ok(ServiceIpPools {
-            ipv4: ServiceIpPool { authz_pool: ipv4.0, db_pool: ipv4.1 },
-            ipv6: ServiceIpPool { authz_pool: ipv6.0, db_pool: ipv6.1 },
-        })
+        action: authz::Action,
+        version: Option<IpVersion>,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        let pools = self
+            .ip_pools_list_paginated(
+                opctx,
+                IpPoolReservationType::SystemInternal,
+                version,
+                None,
+                &PaginatedBy::Id(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: 1.try_into().unwrap(),
+                }),
+            )
+            .await?;
+        let Some(pool) = pools.get(0) else {
+            let ver = version
+                .map(|ver| format!("IP{ver}"))
+                .unwrap_or_else(|| String::from("any IP version"));
+            let message = format!("No delegated IP Pool for {ver}");
+            return Err(Error::internal_error(message.as_str()));
+        };
+        self.ip_pool_lookup(opctx, &NameOrId::Id(pool.id()))
+            .fetch_for(action)
+            .await
     }
 
     /// Look up the default IP pool for the current silo. If there is no default
@@ -398,28 +428,6 @@ impl DataStore {
         };
         opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
         Ok(authz_pool)
-    }
-
-    /// Look up IP pool intended for internal services by its well-known name.
-    ///
-    /// This method may require an index by Availability Zone in the future.
-    //
-    // TODO-remove: Use ip_pools_list_paginated with the right enum type
-    // instead.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8947.
-    pub async fn ip_pools_service_lookup(
-        &self,
-        opctx: &OpContext,
-        ip_version: IpVersion,
-    ) -> LookupResult<(authz::IpPool, IpPool)> {
-        let name = match ip_version {
-            IpVersion::V4 => SERVICE_IPV4_POOL_NAME,
-            IpVersion::V6 => SERVICE_IPV6_POOL_NAME,
-        };
-        let name =
-            Name(name.parse().expect("should be able to parse builtin names"));
-        LookupPath::new(&opctx, self).ip_pool_name(&name).fetch().await
     }
 
     /// Creates a new IP pool.
@@ -537,36 +545,6 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
-    }
-
-    /// Check whether the pool is internal by checking that it exists and is
-    /// associated with the internal silo
-    //
-    // TODO-remove: This should go away when we let operators reserve any IP
-    // Pools for internal Oxide usage. The pool belongs to them even in that
-    // case, and so we should show it to them.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/8947.
-    pub async fn ip_pool_is_internal(
-        &self,
-        opctx: &OpContext,
-        authz_pool: &authz::IpPool,
-    ) -> LookupResult<bool> {
-        use nexus_db_schema::schema::ip_pool;
-        ip_pool::table
-            .find(authz_pool.id())
-            .filter(ip_pool::time_deleted.is_null())
-            .select(
-                ip_pool::reservation_type
-                    .eq(IpPoolReservationType::OxideInternal),
-            )
-            .first_async::<bool>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .optional()
-            .map(|result| result.unwrap_or(false))
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn ip_pool_update(
@@ -838,7 +816,7 @@ impl DataStore {
         if ip_pool_resource.resource_id == INTERNAL_SILO_ID {
             return Err(Error::invalid_request(
                 "IP Pools should not be linked to the internal Oxide silo. \
-                    Reserve the Pool for `oxide_internal` use instead.",
+                    Reserve the Pool for `system_internal` use instead.",
             ));
         }
         opctx
@@ -1855,7 +1833,7 @@ fn reserve_ip_pool_query(
         IpPoolReservationType::ExternalSilos => {
             reserve_external_ip_pool_query(pool, reservation_type)
         }
-        IpPoolReservationType::OxideInternal => {
+        IpPoolReservationType::SystemInternal => {
             reserve_internal_ip_pool_query(pool, reservation_type)
         }
     }
@@ -1968,11 +1946,13 @@ mod test {
         link_ip_pool_to_external_silo_query, reserve_ip_pool_query,
         unlink_ip_pool_from_external_silo_query,
     };
+    use crate::db::datastore::{
+        SERVICE_IPV4_POOL_NAME, SERVICE_IPV6_POOL_NAME,
+    };
     use crate::db::explain::ExplainableAsync as _;
     use crate::db::model::{
         IpPool, IpPoolResource, IpPoolResourceType, Project,
     };
-    use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use assert_matches::assert_matches;
@@ -1995,6 +1975,7 @@ mod test {
     use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
         DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
+        NameOrId,
     };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
@@ -2209,74 +2190,6 @@ mod test {
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_internal_ip_pools() {
-        let logctx = dev::test_setup_log("test_internal_ip_pools");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        for version in [IpVersion::V4, IpVersion::V6] {
-            // confirm internal pools appear as internal
-            let (authz_pool, pool) = datastore
-                .ip_pools_service_lookup(&opctx, version)
-                .await
-                .unwrap();
-            assert_eq!(pool.ip_version, version);
-
-            let is_internal =
-                datastore.ip_pool_is_internal(&opctx, &authz_pool).await;
-            assert_eq!(is_internal, Ok(true));
-
-            // another random pool should not be considered internal
-            let identity = IdentityMetadataCreateParams {
-                name: format!("other-{version}-pool").parse().unwrap(),
-                description: "".to_string(),
-            };
-            let other_pool = datastore
-                .ip_pool_create(
-                    &opctx,
-                    IpPool::new(
-                        &identity,
-                        version,
-                        IpPoolReservationType::ExternalSilos,
-                    ),
-                )
-                .await
-                .expect("Failed to create IP pool");
-            assert_eq!(other_pool.ip_version, version);
-
-            let authz_other_pool = authz::IpPool::new(
-                authz::FLEET,
-                other_pool.id(),
-                LookupType::ById(other_pool.id()),
-            );
-            let is_internal =
-                datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
-            assert_eq!(is_internal, Ok(false));
-
-            // now link it to the current silo, and it is still not internal.
-            let silo_id = opctx.authn.silo_required().unwrap().id();
-            let is_default = matches!(version, IpVersion::V4);
-            let link = IpPoolResource {
-                ip_pool_id: other_pool.id(),
-                resource_type: IpPoolResourceType::Silo,
-                resource_id: silo_id,
-                is_default,
-            };
-            datastore
-                .ip_pool_link_silo(&opctx, link)
-                .await
-                .expect("Failed to link IP pool to silo");
-
-            let is_internal =
-                datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
-            assert_eq!(is_internal, Ok(false));
-        }
 
         db.terminate().await;
         logctx.cleanup_successful();
@@ -2872,7 +2785,7 @@ mod test {
                     IpPool::new(
                         &identity,
                         IpVersion::V4,
-                        IpPoolReservationType::OxideInternal,
+                        IpPoolReservationType::SystemInternal,
                     ),
                 )
                 .await
@@ -2881,32 +2794,15 @@ mod test {
         }
         assert_eq!(oxide_pools.len(), N_POOLS);
 
-        let fetch_paginated = |reservation_type| async move {
-            let mut found = Vec::with_capacity(N_POOLS);
-            let mut paginator = Paginator::new(
-                NonZeroU32::new(5).unwrap(),
-                dropshot::PaginationOrder::Ascending,
-            );
-            while let Some(page) = paginator.next() {
-                let batch = datastore
-                    .ip_pools_list_paginated(
-                        opctx,
-                        reservation_type,
-                        None,
-                        None,
-                        &PaginatedBy::Id(page.current_pagparams()),
-                    )
-                    .await
-                    .expect("Should be able to list pools with pagination");
-                paginator = page.found_batch(&batch, &|pool| pool.id());
-                found.extend(batch.into_iter());
-            }
-            found
-        };
-
         // Paginate all the customer-reserved.
-        let customer_pools_found =
-            fetch_paginated(IpPoolReservationType::ExternalSilos).await;
+        let customer_pools_found = datastore
+            .ip_pools_list_batched(
+                opctx,
+                IpPoolReservationType::ExternalSilos,
+                None,
+            )
+            .await
+            .unwrap();
         assert_eq!(customer_pools.len(), customer_pools_found.len());
         assert_eq!(customer_pools, customer_pools_found);
 
@@ -2916,14 +2812,24 @@ mod test {
         // pools. These will go away in the future, so we'll unfortunately need
         // to update this test at that time. Until then, fetch those service
         // pools explicitly and add them.
-        let oxide_reserved_found =
-            fetch_paginated(IpPoolReservationType::OxideInternal).await;
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/8946.
+        let oxide_reserved_found = datastore
+            .ip_pools_list_batched(
+                opctx,
+                IpPoolReservationType::SystemInternal,
+                None,
+            )
             .await
             .unwrap();
-        oxide_pools.push(pools.ipv4.db_pool);
-        oxide_pools.push(pools.ipv6.db_pool);
+        for name in [SERVICE_IPV4_POOL_NAME, SERVICE_IPV6_POOL_NAME] {
+            let (.., pool) = datastore
+                .ip_pool_lookup(opctx, &(name.parse().unwrap()))
+                .fetch()
+                .await
+                .expect("able to lookup builtin service pool");
+            oxide_pools.push(pool);
+        }
         oxide_pools.sort_by_key(|pool| pool.id());
         assert_eq!(oxide_pools.len(), oxide_reserved_found.len());
         assert_eq!(oxide_pools, oxide_reserved_found);
@@ -2976,9 +2882,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn cannot_link_oxide_internal_pool_to_external_silo() {
+    async fn cannot_link_system_internal_pool_to_external_silo() {
         let logctx = dev::test_setup_log(
-            "cannot_link_oxide_internal_pool_to_external_silo",
+            "cannot_link_system_internal_pool_to_external_silo",
         );
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
@@ -2994,7 +2900,7 @@ mod test {
                 IpPool::new(
                     &identity,
                     IpVersion::V4,
-                    IpPoolReservationType::OxideInternal,
+                    IpPoolReservationType::SystemInternal,
                 ),
             )
             .await
@@ -3068,7 +2974,7 @@ mod test {
                 opctx,
                 &authz_pool,
                 &db_pool,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
             )
             .await;
         let Err(Error::InvalidRequest { message }) = &res else {
@@ -3221,15 +3127,29 @@ mod test {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Fetch the pools.
+        // Fetch all the internal pools.
         let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
+            .ip_pools_list_batched(
+                opctx,
+                IpPoolReservationType::SystemInternal,
+                None,
+            )
             .await
             .unwrap();
+        assert_eq!(pools.len(), 2);
+        let mut pools = pools.into_iter();
+
+        // Fetch the first pool and lookup and authz object.
+        let first_pool = pools.next().expect("Checked above");
+        let (authz_pool, ..) = datastore
+            .ip_pool_lookup(opctx, &NameOrId::Id(first_pool.id()))
+            .fetch()
+            .await
+            .expect("able to lookup internal IP Pool");
 
         // We should be able to delete one of these.
         let _ = datastore
-            .ip_pool_delete(opctx, &pools.ipv4.authz_pool, &pools.ipv4.db_pool)
+            .ip_pool_delete(opctx, &authz_pool, &first_pool)
             .await
             .expect(
                 "Should be able to delete internally-reserved \
@@ -3237,18 +3157,11 @@ mod test {
             );
 
         // Check there's only one left.
-        let pagparams = &PaginatedBy::Id(DataPageParams {
-            marker: None,
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: 100.try_into().unwrap(),
-        });
         let l = datastore
-            .ip_pools_list_paginated(
+            .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
-                None,
-                &pagparams,
             )
             .await
             .unwrap();
@@ -3256,9 +3169,14 @@ mod test {
 
         // We should _not_ be able to delete the other now, because there's only
         // one left.
-        let res = datastore
-            .ip_pool_delete(opctx, &pools.ipv6.authz_pool, &pools.ipv6.db_pool)
-            .await;
+        let second_pool = pools.next().expect("Checked above");
+        let (authz_pool, ..) = datastore
+            .ip_pool_lookup(opctx, &NameOrId::Id(second_pool.id()))
+            .fetch()
+            .await
+            .expect("able to lookup internal IP Pool");
+        let res =
+            datastore.ip_pool_delete(opctx, &authz_pool, &second_pool).await;
 
         let Err(Error::InvalidRequest { message }) = &res else {
             panic!(
@@ -3269,12 +3187,10 @@ mod test {
         assert_eq!(message.external_message(), LAST_POOL_ERROR);
 
         let l = datastore
-            .ip_pools_list_paginated(
+            .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
-                None,
-                &pagparams,
             )
             .await
             .unwrap();
@@ -3294,16 +3210,28 @@ mod test {
 
         // Fetch the pools.
         let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
+            .ip_pools_list_batched(
+                opctx,
+                IpPoolReservationType::SystemInternal,
+                None,
+            )
             .await
-            .unwrap();
+            .expect("able to list all IP Pools");
+        assert_eq!(pools.len(), 2);
+        let mut pools = pools.into_iter();
+        let first_pool = pools.next().expect("Checked above");
+        let (authz_pool, ..) = datastore
+            .ip_pool_lookup(opctx, &NameOrId::Id(first_pool.id()))
+            .fetch()
+            .await
+            .expect("able to lookup IP Pool");
 
         // We should be able to reserve one of these for external use.
         let _ = datastore
             .ip_pool_reserve(
                 opctx,
-                &pools.ipv4.authz_pool,
-                &pools.ipv4.db_pool,
+                &authz_pool,
+                &first_pool,
                 IpPoolReservationType::ExternalSilos,
             )
             .await
@@ -3313,18 +3241,11 @@ mod test {
             );
 
         // Check there's only one left.
-        let pagparams = &PaginatedBy::Id(DataPageParams {
-            marker: None,
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: 100.try_into().unwrap(),
-        });
         let l = datastore
-            .ip_pools_list_paginated(
+            .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
-                None,
-                &pagparams,
             )
             .await
             .unwrap();
@@ -3332,11 +3253,17 @@ mod test {
 
         // We should _not_ be able to reserve the other for external use now,
         // because there's only one left for internal use.
+        let next_pool = pools.next().expect("Checked above");
+        let (authz_pool, ..) = datastore
+            .ip_pool_lookup(opctx, &NameOrId::Id(next_pool.id()))
+            .fetch()
+            .await
+            .expect("able to lookup IP Pool");
         let res = datastore
             .ip_pool_reserve(
                 opctx,
-                &pools.ipv6.authz_pool,
-                &pools.ipv6.db_pool,
+                &authz_pool,
+                &next_pool,
                 IpPoolReservationType::ExternalSilos,
             )
             .await;
@@ -3350,12 +3277,10 @@ mod test {
         assert_eq!(message.external_message(), LAST_POOL_ERROR);
 
         let l = datastore
-            .ip_pools_list_paginated(
+            .ip_pools_list_batched(
                 opctx,
-                IpPoolReservationType::OxideInternal,
+                IpPoolReservationType::SystemInternal,
                 None,
-                None,
-                &pagparams,
             )
             .await
             .unwrap();
@@ -3374,21 +3299,28 @@ mod test {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Get pool, add a range, allocate an external IP.
-        let pools = datastore
-            .ip_pools_service_lookup_both_versions(opctx)
+        let pool = datastore
+            .ip_pools_list_batched(
+                opctx,
+                IpPoolReservationType::SystemInternal,
+                Some(IpVersion::V4),
+            )
             .await
-            .unwrap();
+            .expect("able to list IP Pools")
+            .into_iter()
+            .next()
+            .expect("At least 1 IP Pools");
+        let (authz_pool, ..) = datastore
+            .ip_pool_lookup(opctx, &NameOrId::Id(pool.id()))
+            .fetch()
+            .await
+            .expect("able to lookup IP Pool");
         let ip_range = IpRange::V4(Ipv4Range {
             first: Ipv4Addr::new(1, 1, 1, 1),
             last: Ipv4Addr::new(1, 1, 1, 10),
         });
         datastore
-            .ip_pool_add_range(
-                opctx,
-                &pools.ipv4.authz_pool,
-                &pools.ipv4.db_pool,
-                &ip_range,
-            )
+            .ip_pool_add_range(opctx, &authz_pool, &pool, &ip_range)
             .await
             .unwrap();
 
@@ -3417,8 +3349,8 @@ mod test {
         let res = datastore
             .ip_pool_reserve(
                 opctx,
-                &pools.ipv4.authz_pool,
-                &pools.ipv4.db_pool,
+                &authz_pool,
+                &pool,
                 IpPoolReservationType::ExternalSilos,
             )
             .await;
@@ -3437,8 +3369,8 @@ mod test {
             .expect("Should be able to delete external IP");
         let _ = datastore.ip_pool_reserve(
             opctx,
-            &pools.ipv4.authz_pool,
-            &pools.ipv4.db_pool,
+            &authz_pool,
+            &pool,
             IpPoolReservationType::ExternalSilos,
         ).await
             .expect(
@@ -3473,7 +3405,7 @@ mod test {
         };
         let query = reserve_ip_pool_query(
             &ip_pool,
-            IpPoolReservationType::OxideInternal,
+            IpPoolReservationType::SystemInternal,
         );
         let _ = query
             .explain_async(&conn)
@@ -3501,7 +3433,7 @@ mod test {
         };
         let query = reserve_ip_pool_query(
             &ip_pool,
-            IpPoolReservationType::OxideInternal,
+            IpPoolReservationType::SystemInternal,
         );
         expectorate_query_contents(
             &query,
@@ -3529,7 +3461,7 @@ mod test {
             ip_version: IpVersion::V4,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
-            reservation_type: IpPoolReservationType::OxideInternal,
+            reservation_type: IpPoolReservationType::SystemInternal,
         };
         let query = reserve_ip_pool_query(
             &ip_pool,
@@ -3557,7 +3489,7 @@ mod test {
             ip_version: IpVersion::V4,
             pool_type: IpPoolType::Unicast,
             rcgen: 0,
-            reservation_type: IpPoolReservationType::OxideInternal,
+            reservation_type: IpPoolReservationType::SystemInternal,
         };
         let query = reserve_ip_pool_query(
             &ip_pool,

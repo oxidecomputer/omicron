@@ -289,9 +289,9 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         },
         // Create the default IP pool
         SetupReq::Post {
-            url: &DEMO_IP_POOLS_URL,
+            url: &DEMO_SYSTEM_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
-            id_routes: vec!["/v1/ip-pools/{id}"],
+            id_routes: vec!["/v1/system/ip-pools/{id}"],
         },
         // Create an IP pool range
         SetupReq::Post {
@@ -361,10 +361,10 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
         },
         // Create a multicast IP pool
         SetupReq::Post {
-            url: &DEMO_IP_POOLS_URL,
+            url: &DEMO_SYSTEM_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_MULTICAST_IP_POOL_CREATE)
                 .unwrap(),
-            id_routes: vec!["/v1/ip-pools/{id}"],
+            id_routes: vec!["/v1/system/ip-pools/{id}"],
         },
         // Create a multicast IP pool range
         SetupReq::Post {

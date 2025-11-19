@@ -7,10 +7,10 @@
 use super::{
     console_api, params,
     views::{
-        self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
+        self, Certificate, FloatingIp, Group, IdentityProvider, Image,
         IpPoolRange, MulticastGroup, PhysicalDisk, Project, Rack, Silo,
-        SiloQuotas, SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
-        Utilization, Vpc, VpcRouter, VpcSubnet,
+        SiloQuotas, SiloUtilization, Sled, Snapshot, SshKey, SystemIpPool,
+        User, UserBuiltin, Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::app::external_endpoints::authority_for_request;
@@ -527,7 +527,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -545,9 +545,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .silo_ip_pool_list(&opctx, &silo_lookup, &paginated_by)
                 .await?
                 .iter()
-                .map(|(pool, silo_link)| views::SiloIpPool {
+                .map(|(pool, silo_link)| views::IpPool {
                     identity: pool.identity(),
                     is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
                 })
                 .collect();
 
@@ -1623,10 +1624,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     // IP Pools
 
-    async fn project_ip_pool_list(
+    async fn ip_pool_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
+    ) -> Result<HttpResponseOk<ResultsPage<views::IpPool>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -1640,9 +1641,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .current_silo_ip_pool_list(&opctx, &paginated_by)
                 .await?
                 .into_iter()
-                .map(|(pool, silo_link)| views::SiloIpPool {
+                .map(|(pool, silo_link)| views::IpPool {
                     identity: pool.identity(),
                     is_default: silo_link.is_default,
+                    ip_version: pool.ip_version.into(),
                 })
                 .collect();
             Ok(HttpResponseOk(ScanByNameOrId::results_page(
@@ -1650,82 +1652,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 pools,
                 &marker_for_name_or_id,
             )?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn project_ip_pool_view(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::IpPoolPath>,
-    ) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let pool_selector = path_params.into_inner().pool;
-            let (.., pool, silo_link) =
-                nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
-            Ok(HttpResponseOk(views::SiloIpPool {
-                identity: pool.identity(),
-                is_default: silo_link.is_default,
-            }))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn ip_pool_list(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let query = query_params.into_inner();
-            let pag_params = data_page_params_for(&rqctx, &query)?;
-            let scan_params = ScanByNameOrId::from_query(&query)?;
-            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let pools = nexus
-                .ip_pools_list(&opctx, &paginated_by)
-                .await?
-                .into_iter()
-                .map(IpPool::from)
-                .collect();
-            Ok(HttpResponseOk(ScanByNameOrId::results_page(
-                &query,
-                pools,
-                &marker_for_name_or_id,
-            )?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn ip_pool_create(
-        rqctx: RequestContext<ApiContext>,
-        pool_params: TypedBody<params::IpPoolCreate>,
-    ) -> Result<HttpResponseCreated<views::IpPool>, HttpError> {
-        let apictx = rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let pool_params = pool_params.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
-            Ok(HttpResponseCreated(pool.into()))
         };
         apictx
             .context
@@ -1744,11 +1670,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
             let pool_selector = path_params.into_inner().pool;
-            // We do not prevent the service pool from being fetched by name or ID
-            // like we do for update, delete, associate.
-            let (.., pool) =
-                nexus.ip_pool_lookup(&opctx, &pool_selector)?.fetch().await?;
-            Ok(HttpResponseOk(pool.into()))
+            let (.., pool, silo_link) =
+                nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
+            Ok(HttpResponseOk(views::IpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+                ip_version: pool.ip_version.into(),
+            }))
         };
         apictx
             .context
@@ -1757,7 +1685,80 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_delete(
+    async fn system_ip_pool_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<SystemIpPool>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let pools = nexus
+                .ip_pools_list(&opctx, &paginated_by)
+                .await?
+                .into_iter()
+                .map(SystemIpPool::from)
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                pools,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_ip_pool_create(
+        rqctx: RequestContext<ApiContext>,
+        pool_params: TypedBody<params::IpPoolCreate>,
+    ) -> Result<HttpResponseCreated<views::SystemIpPool>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let pool_params = pool_params.into_inner();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let pool = nexus.ip_pool_create(&opctx, &pool_params).await?;
+            Ok(HttpResponseCreated(SystemIpPool::from(pool)))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_ip_pool_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::IpPoolPath>,
+    ) -> Result<HttpResponseOk<views::SystemIpPool>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let pool_selector = path_params.into_inner().pool;
+            let (.., pool) =
+                nexus.ip_pool_lookup(&opctx, &pool_selector).fetch().await?;
+            Ok(HttpResponseOk(SystemIpPool::from(pool)))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn system_ip_pool_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
@@ -1767,7 +1768,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool);
             nexus.ip_pool_delete(&opctx, &pool_lookup).await?;
             Ok(HttpResponseDeleted())
         };
@@ -1778,11 +1779,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_update(
+    async fn system_ip_pool_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
         updates: TypedBody<params::IpPoolUpdate>,
-    ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    ) -> Result<HttpResponseOk<views::SystemIpPool>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
@@ -1790,7 +1791,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let updates = updates.into_inner();
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool);
             let pool =
                 nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
             Ok(HttpResponseOk(pool.into()))
@@ -1802,7 +1803,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_utilization_view(
+    async fn system_ip_pool_utilization_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
     ) -> Result<HttpResponseOk<views::IpPoolUtilization>, HttpError> {
@@ -1814,7 +1815,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let pool_selector = path_params.into_inner().pool;
             // We do not prevent the service pool from being fetched by name or ID
             // like we do for update, delete, associate.
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector);
             let utilization =
                 nexus.ip_pool_utilization_view(&opctx, &pool_lookup).await?;
             Ok(HttpResponseOk(utilization.into()))
@@ -1826,7 +1827,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_silo_list(
+    async fn system_ip_pool_silo_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
         // paginating by resource_id because they're unique per pool. most robust
@@ -1852,7 +1853,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let pag_params = data_page_params_for(&rqctx, &query)?;
 
             let path = path_params.into_inner();
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool);
 
             let assocs = nexus
                 .ip_pool_silo_list(&opctx, &pool_lookup, &pag_params)
@@ -1874,7 +1875,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_silo_link(
+    async fn system_ip_pool_silo_link(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
         resource_assoc: TypedBody<params::IpPoolLinkSilo>,
@@ -1886,7 +1887,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let resource_assoc = resource_assoc.into_inner();
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool);
             let assoc = nexus
                 .ip_pool_link_silo(&opctx, &pool_lookup, &resource_assoc)
                 .await?;
@@ -1899,7 +1900,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_silo_unlink(
+    async fn system_ip_pool_silo_unlink(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolSiloPath>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -1909,7 +1910,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool);
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             nexus
                 .ip_pool_unlink_silo(&opctx, &pool_lookup, &silo_lookup)
@@ -1923,7 +1924,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_silo_update(
+    async fn system_ip_pool_silo_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolSiloPath>,
         update: TypedBody<params::IpPoolSiloUpdate>,
@@ -1935,7 +1936,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let update = update.into_inner();
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool);
             let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
             let assoc = nexus
                 .ip_pool_silo_update(
@@ -1954,16 +1955,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_service_view(
-        rqctx: RequestContext<ApiContext>,
-    ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+    async fn system_ip_pool_reserve(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::IpPoolPath>,
+        body: TypedBody<params::IpPoolReservationUpdate>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
         let handler = async {
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let pool = nexus.ip_pool_service_fetch(&opctx).await?;
-            Ok(HttpResponseOk(IpPool::from(pool)))
+            let pool = path_params.into_inner().pool;
+            let reservation_type = body.into_inner().reservation_type;
+            nexus
+                .ip_pool_reserve(&opctx, &pool, reservation_type.into())
+                .await
+                .map(|_| HttpResponseUpdatedNoContent())
+                .map_err(HttpError::from)
         };
         apictx
             .context
@@ -1993,7 +2001,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 direction: PaginationOrder::Ascending,
                 marker,
             };
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool);
             let ranges = nexus
                 .ip_pool_list_ranges(&opctx, &pool_lookup, &pag_params)
                 .await?
@@ -2015,7 +2023,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_range_add(
+    async fn system_ip_pool_range_add(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
         range_params: TypedBody<shared::IpRange>,
@@ -2027,7 +2035,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let range = range_params.into_inner();
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool);
             let out =
                 nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
             Ok(HttpResponseCreated(out.try_into()?))
@@ -2039,7 +2047,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn ip_pool_range_remove(
+    async fn system_ip_pool_range_remove(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
         range_params: TypedBody<shared::IpRange>,
@@ -2051,88 +2059,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let range = range_params.into_inner();
-            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+            let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool);
             nexus.ip_pool_delete_range(&opctx, &pool_lookup, &range).await?;
-            Ok(HttpResponseUpdatedNoContent())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn ip_pool_service_range_list(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<IpPoolRangePaginationParams>,
-    ) -> Result<HttpResponseOk<ResultsPage<IpPoolRange>>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let query = query_params.into_inner();
-            let marker = match query.page {
-                WhichPage::First(_) => None,
-                WhichPage::Next(ref addr) => Some(addr),
-            };
-            let pag_params = DataPageParams {
-                limit: rqctx.page_limit(&query)?,
-                direction: PaginationOrder::Ascending,
-                marker,
-            };
-            let ranges = nexus
-                .ip_pool_service_list_ranges(&opctx, &pag_params)
-                .await?
-                .into_iter()
-                .map(|range| range.try_into())
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(HttpResponseOk(ResultsPage::new(
-                ranges,
-                &EmptyScanParams {},
-                |range: &IpPoolRange, _| {
-                    IpNetwork::from(range.range.first_address())
-                },
-            )?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn ip_pool_service_range_add(
-        rqctx: RequestContext<ApiContext>,
-        range_params: TypedBody<shared::IpRange>,
-    ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
-        let apictx = &rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let range = range_params.into_inner();
-            let out = nexus.ip_pool_service_add_range(&opctx, &range).await?;
-            Ok(HttpResponseCreated(out.try_into()?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn ip_pool_service_range_remove(
-        rqctx: RequestContext<ApiContext>,
-        range_params: TypedBody<shared::IpRange>,
-    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let apictx = &rqctx.context();
-        let nexus = &apictx.context.nexus;
-        let range = range_params.into_inner();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            nexus.ip_pool_service_delete_range(&opctx, &range).await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx

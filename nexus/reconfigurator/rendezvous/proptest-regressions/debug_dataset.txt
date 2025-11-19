@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 703bd7e17f7c4601cde5ae0bcccb28c53c78d92ed0046987e3e94387731281f1 # shrinks to input = _ProptestReconciliationArgs { prep: {} }
+cc 51285fc9f1153a6ad6b666a95e8050a4d1f61eda1a58ccdd4977f5eade6c7f88 # shrinks to prep = []

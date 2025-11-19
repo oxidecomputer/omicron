@@ -324,6 +324,7 @@ mod test {
     use internal_dns_types::names::ServiceName;
     use nexus_db_model::DbMetadataNexusState;
     use nexus_db_model::DnsGroup;
+    use nexus_db_model::IpPoolReservationType;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
     use nexus_db_queries::authz;
@@ -1404,23 +1405,27 @@ mod test {
         opctx: &OpContext,
     ) -> Vec<nexus_db_model::IpPoolRange> {
         let service_pools = datastore
-            .ip_pools_service_lookup_both_versions(&opctx)
+            .ip_pools_list_batched(
+                opctx,
+                IpPoolReservationType::SystemInternal,
+                None,
+            )
             .await
-            .expect("success looking up both versions of the service IP Pools");
-        let mut ranges = datastore
-            .ip_pool_list_ranges_batched(&opctx, &service_pools.ipv4.authz_pool)
-            .await
-            .expect("success listing IPv4 pool ranges");
-        ranges.append(
-            &mut datastore
-                .ip_pool_list_ranges_batched(
-                    &opctx,
-                    &service_pools.ipv6.authz_pool,
-                )
+            .expect("success looking up all service IP Pools");
+        let mut all_ranges = Vec::new();
+        for pool in service_pools {
+            let (authz_pool, ..) = datastore
+                .ip_pool_lookup(opctx, &(pool.id().into()))
+                .fetch_for(authz::Action::ListChildren)
                 .await
-                .expect("success listing IPv6 pool ranges"),
-        );
-        ranges
+                .expect("success looking up authz object for IP Pool");
+            let mut ranges = datastore
+                .ip_pool_list_ranges_batched(opctx, &authz_pool)
+                .await
+                .expect("success listing IP Pool ranges");
+            all_ranges.append(&mut ranges);
+        }
+        all_ranges
     }
 
     // Tests end-to-end DNS behavior:
