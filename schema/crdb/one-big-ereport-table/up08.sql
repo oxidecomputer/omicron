@@ -11,6 +11,5 @@ STORING (
     sled_id,
     sp_type,
     sp_slot,
-    class,
-    report
+    class
 );
