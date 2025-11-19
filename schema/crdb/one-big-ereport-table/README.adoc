@@ -10,5 +10,5 @@ In particular, we:
 . Insert every non-deleted entry from the `sp_ereport` and `host_ereport`
   tables into the new table (`up03.sql`)
 . Create a bunch of indices on the new table (`up04.sql`, `up05.sql`,
-  `up06.sql`, `up07.sql`, `up08.sql`)
-. Drop the old tables (`up09.sql`, `up10.sql`)
+  `up06.sql`, `up07.sql`)
+. Drop the old tables (`up08.sql`, `up09.sql`)
