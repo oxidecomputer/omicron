@@ -105,10 +105,6 @@ impl KeyError {
         Self { id: ObjectId::Collection(id) }
     }
 
-    pub(crate) fn blueprint(id: BlueprintId) -> Self {
-        Self { id: ObjectId::Blueprint(id) }
-    }
-
     pub(crate) fn resolved_collection(id: ResolvedCollectionId) -> Self {
         Self { id: ObjectId::ResolvedCollection(id) }
     }

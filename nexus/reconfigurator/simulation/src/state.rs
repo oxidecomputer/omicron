@@ -237,7 +237,7 @@ impl SimStateBuilder {
             state.external_dns_zone_names.clone(),
             state.silo_names.clone(),
             state.planning_input.active_nexus_zones(),
-            state.target_blueprint.as_ref(),
+            &state.target_blueprint,
             &state.blueprints,
             &mut res,
         );

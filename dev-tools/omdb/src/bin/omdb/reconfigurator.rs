@@ -202,14 +202,7 @@ async fn cmd_reconfigurator_archive(
     //    successfully archived some blueprints before hitting this error. We
     //    attempt to notice this and log a message for the operator in this
     //    case.
-    let target_blueprint_id = saved_state
-        .target_blueprint
-        .context(
-            "system has no current target blueprint: \
-             cannot remove non-target blueprints",
-        )?
-        .target_id;
-
+    let target_blueprint_id = saved_state.target_blueprint.target_id;
     let mut ndeleted = 0;
 
     eprintln!("removing saved, non-target blueprints ...");

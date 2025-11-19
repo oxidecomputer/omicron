@@ -166,7 +166,7 @@ impl SimConfigBuilder {
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
         active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
-        target_blueprint: Option<&BlueprintTarget>,
+        target_blueprint: &BlueprintTarget,
         all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
@@ -301,7 +301,7 @@ impl SimConfigBuilderInner {
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
         active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
-        target_blueprint: Option<&BlueprintTarget>,
+        target_blueprint: &BlueprintTarget,
         all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
@@ -403,12 +403,17 @@ impl SimConfigBuilderInner {
 
 fn determine_active_nexus_generation(
     active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
-    target_blueprint: Option<&BlueprintTarget>,
+    target_blueprint: &BlueprintTarget,
     all_blueprints: &[Blueprint],
 ) -> Result<Generation, String> {
-    let Some(target_blueprint) = target_blueprint else {
-        return Err("no target blueprint set".to_string());
-    };
+    // Real systems always have at least one active Nexus zone, but our
+    // simulated system has some cases where we have none at all. We'll never be
+    // able to find the generation matching an empty set, but because this is a
+    // weird edge case that only applies to simulation, it's also fine to
+    // default to "the initial generation".
+    if active_nexus_zones.is_empty() {
+        return Ok(Generation::new());
+    }
 
     let Some(blueprint) =
         all_blueprints.iter().find(|bp| bp.id == target_blueprint.target_id)
