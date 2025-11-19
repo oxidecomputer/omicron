@@ -14,8 +14,8 @@ use omicron_common::ledger::Ledger;
 use omicron_common::ledger::Ledgerable;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::inventory::v6::OmicronSledConfig as OmicronSledConfigV6;
-use sled_agent_types::inventory::v6::OmicronZoneConfig as OmicronZoneConfigV6;
+use sled_agent_types::inventory::v8::OmicronSledConfig as OmicronSledConfigV8;
+use sled_agent_types::inventory::v8::OmicronZoneConfig as OmicronZoneConfigV8;
 use slog::Logger;
 use slog::error;
 use slog::warn;
@@ -27,7 +27,7 @@ const LEGACY_DISKS_LEDGER_FILENAME: &str = "omicron-physical-disks.json";
 const LEGACY_DATASETS_LEDGER_FILENAME: &str = "omicron-datasets.json";
 const LEGACY_ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 
-/// Convert from version 6 of the sled-configuration to the current, if
+/// Convert from version 8 of the sled-configuration to the current, if
 /// possible. The later version includes dual-stack private IP configuration in
 /// our internal network interface types.
 ///
@@ -39,7 +39,7 @@ const LEGACY_ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 /// we do encounter that. Returning `None` is not correct, since that would
 /// incorrectly indicate that we have no config at all. We _must_ panic and rely
 /// on support correcting this (believed-to-be-impossible) situation.
-pub(super) async fn try_convert_v6_sled_config(
+pub(super) async fn try_convert_v8_sled_config(
     log: &Logger,
     datasets: Vec<Utf8PathBuf>,
 ) -> Option<OmicronSledConfig> {
@@ -47,7 +47,7 @@ pub(super) async fn try_convert_v6_sled_config(
         Ledger::<OmicronSledConfigLocal>::new(log, datasets.clone()).await?;
     let new_config = old.into_inner().0.try_into().unwrap_or_else(|e| {
         panic!(
-            "Failed to convert OmicronSledConfigV6 to the current version: {e}"
+            "Failed to convert OmicronSledConfigV8 to the current version: {e}"
         )
     });
     write_converted_ledger(
@@ -140,7 +140,7 @@ pub(super) async fn convert_legacy_ledgers(
     // again won't change the result.
     let sled_config = OmicronSledConfig::try_from(sled_config)
         .unwrap_or_else(|e| panic!(
-            "Failed to convert OmicronSledConfigV6 to the current version: {e}"
+            "Failed to convert OmicronSledConfigV8 to the current version: {e}"
         ));
 
     // Write the newly-merged config to disk.
@@ -277,8 +277,8 @@ fn merge_old_configs(
     disks: OmicronPhysicalDisksConfig,
     datasets: DatasetsConfig,
     zones: OmicronZonesConfigLocal,
-) -> OmicronSledConfigV6 {
-    OmicronSledConfigV6 {
+) -> OmicronSledConfigV8 {
+    OmicronSledConfigV8 {
         // Take the zone generation as the overall config generation; this is
         // consistent with Reconfigurator's transition from three configs to
         // one.
@@ -317,7 +317,7 @@ impl Ledgerable for OmicronZonesConfigLocal {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 struct OmicronZoneConfigLocal {
-    zone: OmicronZoneConfigV6,
+    zone: OmicronZoneConfigV8,
     #[serde(rename = "root")]
     #[cfg_attr(test, schemars(with = "String"))]
     _root: Utf8PathBuf,
@@ -325,7 +325,7 @@ struct OmicronZoneConfigLocal {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(transparent)]
-struct OmicronSledConfigLocal(OmicronSledConfigV6);
+struct OmicronSledConfigLocal(OmicronSledConfigV8);
 
 impl Ledgerable for OmicronSledConfigLocal {
     fn is_newer_than(&self, other: &Self) -> bool {
@@ -368,8 +368,8 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn can_convert_v6_config_version() {
-        let logctx = dev::test_setup_log("can_convert_v6_config_version");
+    async fn can_convert_v8_config_version() {
+        let logctx = dev::test_setup_log("can_convert_v8_config_version");
         let tempdir = Utf8TempDir::new().expect("created tempdir");
 
         // Copy version 6 into a tempdir.
@@ -385,18 +385,18 @@ pub(super) mod tests {
 
         // Convert, which will rewrite the config as well.
         let converted =
-            try_convert_v6_sled_config(&logctx.log, vec![dst_file.clone()])
+            try_convert_v8_sled_config(&logctx.log, vec![dst_file.clone()])
                 .await
-                .expect("Should have found and converted v6 config");
+                .expect("Should have found and converted v8 config");
 
         // And make sure it matches the new, directly loaded and converted from
         // disk.
-        let new_as_v6: OmicronSledConfigV6 = serde_json::from_str(
+        let new_as_v8: OmicronSledConfigV8 = serde_json::from_str(
             tokio::fs::read_to_string(dst_file).await.unwrap().as_str(),
         )
         .expect("successfully converted config");
-        let new = OmicronSledConfig::try_from(new_as_v6)
-            .expect("successfully converted v6 config");
+        let new = OmicronSledConfig::try_from(new_as_v8)
+            .expect("successfully converted v8 config");
         assert_eq!(new, converted);
         logctx.cleanup_successful();
     }

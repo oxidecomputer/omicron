@@ -30,7 +30,7 @@ use tufaceous_artifact::ArtifactHash;
 
 use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
-use crate::ledger::legacy_configs::try_convert_v6_sled_config;
+use crate::ledger::legacy_configs::try_convert_v8_sled_config;
 
 mod legacy_configs;
 
@@ -646,7 +646,7 @@ async fn load_sled_config(
 
     // If we have no ledgered config, see if we can convert from the previous
     // version of the format.
-    if let Some(config) = try_convert_v6_sled_config(log, paths).await {
+    if let Some(config) = try_convert_v8_sled_config(log, paths).await {
         info!(
             log,
             "Ledger of sled config exists, but it was formatted as \

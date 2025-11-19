@@ -4,8 +4,9 @@
 
 //! Sled-agent types for inventory.
 //!
-//! This is intended to contain old versions of the inventory types. The current
-//! version should be in `nexus-sled-agent-shared`.
+//! This is intended to contain old versions of the inventory types, _which also
+//! need to be public_. If the types don't need to be public, they should go
+//! directly in the `sled-agent-api` crate. The current versions of the types
+//! should be in `nexus-sled-agent-shared`.
 
-pub mod v3;
-pub mod v6;
+pub mod v8;
