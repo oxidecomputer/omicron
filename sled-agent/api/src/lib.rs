@@ -948,7 +948,7 @@ pub trait SledAgentApi {
         versions =
             VERSION_ADD_PROBE_PUT_ENDPOINT..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
-    async fn v6_probes_put(
+    async fn v9_probes_put(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<probes::v1::ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {

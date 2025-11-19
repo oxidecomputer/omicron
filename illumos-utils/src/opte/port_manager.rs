@@ -196,7 +196,7 @@ fn build_opte_ipv4_config(
     floating_ips: &[IpAddr],
     is_ipv4_only: bool,
 ) -> Result<Ipv4Cfg, Error> {
-    let gateway_ip = v4.subnet().first_host().into();
+    let gateway_ip = v4.opte_gateway().into();
     let vpc_subnet = Ipv4Cidr::from(Ipv4Network::from(*v4.subnet()));
     let private_ip = (*v4.ip()).into();
     let external_ips = build_external_ipv4_config(
@@ -215,15 +215,7 @@ fn build_opte_ipv6_config(
     floating_ips: &[IpAddr],
     is_ipv6_only: bool,
 ) -> Result<Ipv6Cfg, Error> {
-    let gateway_ip = v6
-        .subnet()
-        .iter()
-        // The 0th address is the network address, and OPTE's
-        // gateway sits at the next. See
-        // https://rfd.shared.oxide.computer/rfd/0021#network_ip_address_usage.
-        .nth(1)
-        .ok_or_else(|| Error::InvalidPortIpConfig)?
-        .into();
+    let gateway_ip = v6.opte_gateway().into();
     let vpc_subnet = Ipv6Cidr::from(Ipv6Network::from(*v6.subnet()));
     let private_ip = (*v6.ip()).into();
     let external_ips = build_external_ipv6_config(
