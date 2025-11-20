@@ -17,8 +17,11 @@ use anyhow::{Context, anyhow, bail, ensure};
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::inventory::NetworkInterface;
-use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::{
+    NetworkInterfaceKind, PrivateIpConfig,
+};
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
+use oxnet::{Ipv4Net, Ipv6Net};
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
@@ -149,12 +152,33 @@ impl OmicronZoneNic {
                     id to match the zone's id ({zone_id})",
         );
 
+        // TODO-completeness: Support dual-stack NICs for Omicron zones.
+        // See https://github.com/oxidecomputer/omicron/issues/9314.
+        let (ip, subnet) = match &nic.ip_config {
+            PrivateIpConfig::V4(ipv4) => (
+                IpNetwork::V4((*ipv4.ip()).into()),
+                IpNetwork::V4((*ipv4.subnet()).into()),
+            ),
+            PrivateIpConfig::V6(ipv6) => (
+                IpNetwork::V6((*ipv6.ip()).into()),
+                IpNetwork::V6((*ipv6.subnet()).into()),
+            ),
+            PrivateIpConfig::DualStack { .. } => {
+                bail!(
+                    "Found a dual-stack NIC, which isn't yet supported. \
+                    nic_id=\"{}\" zone_id=\"{}\"",
+                    nic.id,
+                    zone_id,
+                );
+            }
+        };
+
         Ok(Self {
             id: nic.id,
             name: Name::from(nic.name.clone()),
-            ip: IpNetwork::from(nic.ip),
+            ip,
             mac: MacAddr::from(nic.mac),
-            subnet: IpNetwork::from(nic.subnet),
+            subnet,
             vni: SqlU32::from(u32::from(nic.vni)),
             is_primary: nic.primary,
             slot: SqlU8::from(nic.slot),
@@ -165,9 +189,26 @@ impl OmicronZoneNic {
         self,
         zone_id: OmicronZoneUuid,
     ) -> anyhow::Result<NetworkInterface> {
+        let ip = match (self.ip.ip(), self.subnet) {
+            (IpAddr::V4(addr), IpNetwork::V4(net)) => {
+                PrivateIpConfig::new_ipv4(addr, Ipv4Net::from(net))?
+            }
+            (IpAddr::V6(addr), IpNetwork::V6(net)) => {
+                PrivateIpConfig::new_ipv6(addr, Ipv6Net::from(net))?
+            }
+            (IpAddr::V4(_), IpNetwork::V6(_))
+            | (IpAddr::V6(_), IpNetwork::V4(_)) => bail!(
+                "OmicronZoneNic has a mix of IPv4 and IPv6 \
+                addresses and subnets! nic_id=\"{}\" ip=\"{}\" \
+                subnet=\"{}\"",
+                self.id,
+                self.ip.ip(),
+                self.subnet,
+            ),
+        };
         Ok(NetworkInterface {
             id: self.id,
-            ip: self.ip.ip(),
+            ip_config: ip,
             kind: NetworkInterfaceKind::Service {
                 id: zone_id.into_untyped_uuid(),
             },
@@ -177,8 +218,6 @@ impl OmicronZoneNic {
             slot: *self.slot,
             vni: omicron_common::api::external::Vni::try_from(*self.vni)
                 .context("parsing VNI")?,
-            subnet: self.subnet.into(),
-            transit_ips: vec![],
         })
     }
 }

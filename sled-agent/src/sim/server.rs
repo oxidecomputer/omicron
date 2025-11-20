@@ -46,6 +46,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus::Certificate;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
@@ -434,8 +435,14 @@ pub async fn run_standalone_server(
     let mut internal_services_ip_pool_ranges = vec![];
     let mut macs = MacAddr::iter_system();
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
-        let ip = nexus_external_addr.ip();
+        let external_ip = nexus_external_addr.ip();
         let id = OmicronZoneUuid::new_v4();
+        let private_ip = NEXUS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+            .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(private_ip, *NEXUS_OPTE_IPV4_SUBNET)
+                .context("creating private IP configuration")?;
 
         zones
             .insert_unique(BlueprintZoneConfig {
@@ -450,23 +457,20 @@ pub async fn run_standalone_server(
                             SocketAddr::V6(a) => a,
                         },
                         lockstep_port: nexus_lockstep_port,
-                        external_ip: from_ipaddr_to_external_floating_ip(ip),
+                        external_ip: from_ipaddr_to_external_floating_ip(
+                            external_ip,
+                        ),
                         nic: nexus_types::inventory::NetworkInterface {
                             id: Uuid::new_v4(),
                             kind: NetworkInterfaceKind::Service {
                                 id: id.into_untyped_uuid(),
                             },
                             name: "nexus".parse().unwrap(),
-                            ip: NEXUS_OPTE_IPV4_SUBNET
-                                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
-                                .unwrap()
-                                .into(),
+                            ip_config,
                             mac: macs.next().unwrap(),
-                            subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
                             vni: Vni::SERVICES_VNI,
                             primary: true,
                             slot: 0,
-                            transit_ips: vec![],
                         },
                         external_tls: false,
                         external_dns_servers: vec![],
@@ -478,7 +482,7 @@ pub async fn run_standalone_server(
             })
             .expect("freshly generated zone IDs are unique");
 
-        internal_services_ip_pool_ranges.push(match ip {
+        internal_services_ip_pool_ranges.push(match external_ip {
             IpAddr::V4(addr) => {
                 IpRange::V4(Ipv4Range { first: addr, last: addr })
             }
@@ -493,6 +497,12 @@ pub async fn run_standalone_server(
     {
         let ip = *external_dns_internal_addr.ip();
         let id = OmicronZoneUuid::new_v4();
+        let private_ip = DNS_OPTE_IPV4_SUBNET
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+            .unwrap();
+        let ip_config =
+            PrivateIpConfig::new_ipv4(private_ip, *DNS_OPTE_IPV4_SUBNET)
+                .context("creating private IP configuration")?;
         let pool_name = ZpoolName::new_external(ZpoolUuid::new_v4());
         zones
             .insert_unique(BlueprintZoneConfig {
@@ -511,16 +521,11 @@ pub async fn run_standalone_server(
                                 id: id.into_untyped_uuid(),
                             },
                             name: "external-dns".parse().unwrap(),
-                            ip: DNS_OPTE_IPV4_SUBNET
-                                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
-                                .unwrap()
-                                .into(),
+                            ip_config,
                             mac: macs.next().unwrap(),
-                            subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
                             vni: Vni::SERVICES_VNI,
                             primary: true,
                             slot: 0,
-                            transit_ips: vec![],
                         },
                     },
                 ),
