@@ -9,26 +9,28 @@ use crate::opte::Handle;
 use crate::opte::Vni;
 use macaddr::MacAddr6;
 use omicron_common::api::external;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
-use oxnet::IpNet;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::sync::Arc;
 
 #[derive(Debug)]
 pub struct PortData {
     /// Name of the port as identified by OPTE
     pub(crate) name: String,
-    /// IP address within the VPC Subnet
-    pub(crate) ip: IpAddr,
+    /// The VPC-private IP configuration for the port.
+    pub(crate) ip: PrivateIpConfig,
     /// VPC-private MAC address
     pub(crate) mac: MacAddr6,
     /// Emulated PCI slot for the guest NIC, passed to Propolis
     pub(crate) slot: u8,
     /// Geneve VNI for the VPC
     pub(crate) vni: Vni,
-    /// Subnet the port belong to within the VPC.
-    pub(crate) subnet: IpNet,
     /// Information about the virtual gateway, aka OPTE
     pub(crate) gateway: Gateway,
 }
@@ -80,8 +82,30 @@ impl Port {
         Self { inner: Arc::new(PortInner(data)) }
     }
 
-    pub fn ip(&self) -> &IpAddr {
-        &self.inner.ip
+    /// Return the VPC-private IPv4 address, if it exists.
+    pub fn ipv4_addr(&self) -> Option<&Ipv4Addr> {
+        self.inner.ip.ipv4_addr()
+    }
+
+    /// Return the VPC-private IPv6 address, if it exists.
+    pub fn ipv6_addr(&self) -> Option<&Ipv6Addr> {
+        self.inner.ip.ipv6_addr()
+    }
+
+    /// Return the VPC-private IPv4 address, if it exits, or the IPv6 address.
+    ///
+    /// One of these always exists.
+    pub fn ipv4_or_ipv6_addr(&self) -> IpAddr {
+        self.inner.ip.ipv4_addr().copied().map(IpAddr::V4).unwrap_or_else(
+            || {
+                self.inner
+                    .ip
+                    .ipv6_addr()
+                    .copied()
+                    .expect("At least one address always exists")
+                    .into()
+            },
+        )
     }
 
     pub fn name(&self) -> &str {
@@ -101,8 +125,14 @@ impl Port {
         &self.inner.vni
     }
 
-    pub fn subnet(&self) -> &IpNet {
-        &self.inner.subnet
+    /// Return the VPC-private IPv4 subnet, if it exists.
+    pub fn ipv4_subnet(&self) -> Option<&Ipv4Net> {
+        self.inner.ip.ipv4_subnet()
+    }
+
+    /// Return the VPC-private IPv6 subnet, if it exists.
+    pub fn ipv6_subnet(&self) -> Option<&Ipv6Net> {
+        self.inner.ip.ipv6_subnet()
     }
 
     pub fn slot(&self) -> u8 {
@@ -115,10 +145,17 @@ impl Port {
         RouterId { vni, kind: RouterKind::System }
     }
 
-    pub fn custom_router_key(&self) -> RouterId {
-        RouterId {
-            kind: RouterKind::Custom(*self.subnet()),
+    pub fn custom_ipv4_router_key(&self) -> Option<RouterId> {
+        self.ipv4_subnet().copied().map(|subnet| RouterId {
+            kind: RouterKind::Custom(subnet.into()),
             ..self.system_router_key()
-        }
+        })
+    }
+
+    pub fn custom_ipv6_router_key(&self) -> Option<RouterId> {
+        self.ipv6_subnet().copied().map(|subnet| RouterId {
+            kind: RouterKind::Custom(subnet.into()),
+            ..self.system_router_key()
+        })
     }
 }

@@ -81,7 +81,7 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig, SledIdentifiers,
+    HostPortConfig, PrivateIpConfig, RackNetworkConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -1306,8 +1306,11 @@ impl ServiceManager {
         })?;
 
         let opte_interface = port.name();
-        let opte_gateway = port.gateway().ip().to_string();
-        let opte_ip = port.ip().to_string();
+
+        // TODO-completeness: This needs to support dual-stack OPTE ports.
+        // See https://github.com/oxidecomputer/omicron/issues/9309.
+        let opte_gateway = port.gateway().ipv4_or_ipv6_addr().to_string();
+        let opte_ip = port.ipv4_or_ipv6_addr().to_string();
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
@@ -1973,8 +1976,16 @@ impl ServiceManager {
                 // We need to tell external_dns to listen on its OPTE port IP
                 // address, which comes from `nic`. Attach the port from its
                 // true external DNS address (`dns_address`).
-                let dns_address =
-                    SocketAddr::new(nic.ip, dns_address.port()).to_string();
+                //
+                // Make sure we take the VPC-private IP address with the same
+                // version as the external address.
+                let private_ip = Self::private_ip_for_external_address(
+                    dns_address.ip(),
+                    &nic.ip_config,
+                    config.zone_type.kind(),
+                )?;
+                let private_dns_address =
+                    SocketAddr::new(private_ip, dns_address.port()).to_string();
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1982,7 +1993,11 @@ impl ServiceManager {
                         "astring",
                         http_address.to_string(),
                     )
-                    .add_property("dns_address", "astring", dns_address);
+                    .add_property(
+                        "dns_address",
+                        "astring",
+                        private_dns_address,
+                    );
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2282,6 +2297,8 @@ impl ServiceManager {
                         lockstep_port,
                         external_tls,
                         external_dns_servers,
+                        external_ip,
+                        nic,
                         ..
                     },
                 id,
@@ -2303,7 +2320,6 @@ impl ServiceManager {
                 // external IP automatically.
                 let opte_interface_setup =
                     Self::opte_interface_set_up_install(&installed_zone)?;
-
                 let port_idx = 0;
                 let port = installed_zone
                     .opte_ports()
@@ -2316,8 +2332,15 @@ impl ServiceManager {
                             },
                         )
                     })?;
-                let opte_ip = port.ip();
                 let opte_iface_name = port.name();
+
+                // Fetch the private IP of the same IP version as the external
+                // IP address.
+                let private_ip = Self::private_ip_for_external_address(
+                    *external_ip,
+                    &nic.ip_config,
+                    config.zone_type.kind(),
+                )?;
 
                 // Nexus takes a separate config file for parameters
                 // which cannot be known at packaging time.
@@ -2330,7 +2353,9 @@ impl ServiceManager {
                     dropshot_external: ConfigDropshotWithTls {
                         tls: *external_tls,
                         dropshot: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(*opte_ip, nexus_port),
+                            bind_address: SocketAddr::new(
+                                private_ip, nexus_port,
+                            ),
                             default_request_body_max_bytes: 1048576,
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
@@ -4083,6 +4108,37 @@ impl ServiceManager {
             exit_rx,
         )
         .await;
+    }
+
+    fn private_ip_for_external_address(
+        external_ip: IpAddr,
+        ip_config: &PrivateIpConfig,
+        kind: ZoneKind,
+    ) -> Result<IpAddr, Error> {
+        let maybe_private_ip = if external_ip.is_ipv6() {
+            ip_config.ipv6_addr().copied().map(IpAddr::V6)
+        } else {
+            ip_config.ipv4_addr().copied().map(IpAddr::V4)
+        };
+        maybe_private_ip.ok_or_else(|| {
+            let external_ip_version =
+                if external_ip.is_ipv6() { "6" } else { "4" };
+            let private_ip_stack = if ip_config.is_ipv4_only() {
+                "IPv4"
+            } else if ip_config.is_ipv6_only() {
+                "IPv6"
+            } else {
+                "dual-stack"
+            };
+            Error::BadServiceRequest {
+                service: kind.report_str().to_string(),
+                message: format!(
+                    "External IP address is IPv{}, but VPC-private \
+                    IP configuration is {}",
+                    external_ip_version, private_ip_stack,
+                ),
+            }
+        })
     }
 }
 

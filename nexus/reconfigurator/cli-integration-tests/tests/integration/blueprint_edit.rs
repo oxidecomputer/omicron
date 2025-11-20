@@ -66,6 +66,7 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         .blueprint_target_get_current_full(&opctx)
         .await
         .expect("failed to read current target blueprint");
+
     let mut disk_test = DiskTest::new(&cptestctx).await;
     disk_test.add_blueprint_disks(&initial_blueprint).await;
 
@@ -170,8 +171,24 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     // Run this reconfigurator-cli invocation.
     write_json(&saved_state1_path, &state1).unwrap();
     let exec = Exec::cmd(path_to_cli()).arg(&script1_path);
-    let (exit_status, _, stderr_text) = run_command(exec);
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // Save the CLI stdout / stderr.
+    //
+    // The CLI intentionally doesn't bail if any of the steps fail. Record the
+    // output in a file in the tempdir, so that we can see any errors we happen
+    // to catch.
+    let stdout_path1 = tmpdir_path.join("reconfigurator-cli-script1.stdout");
+    let stderr_path1 = tmpdir_path.join("reconfigurator-cli-script1.stderr");
+    for (output, path) in
+        [(&stdout_text, &stdout_path1), (&stdout_text, &stderr_path1)]
+    {
+        println!("writing reconfigurator-cli script1 output to {path}");
+        std::fs::write(&path, &output)
+            .with_context(|| format!("write CLI output to {}", path))
+            .unwrap();
+    }
 
     // Load the new file and find the new blueprint name.
     let state2: UnstableReconfiguratorState =
@@ -196,6 +213,18 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
     let exec = Exec::cmd(path_to_cli()).arg(&script2_path);
     let (exit_status, _, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // Save the output again.
+    let stdout_path2 = tmpdir_path.join("reconfigurator-cli-script2.stdout");
+    let stderr_path2 = tmpdir_path.join("reconfigurator-cli-script2.stderr");
+    for (output, path) in
+        [(&stdout_text, &stdout_path2), (&stdout_text, &stderr_path2)]
+    {
+        println!("writing reconfigurator-cli script2 output to {path}");
+        std::fs::write(&path, &output)
+            .with_context(|| format!("write CLI output to {}", path))
+            .unwrap();
+    }
 
     // Load the blueprint we just wrote.
     let new_blueprint2: Blueprint = read_json(&new_blueprint_path).unwrap();
@@ -245,6 +274,10 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         script1_path,
         script2_path,
         new_blueprint_path,
+        stdout_path1,
+        stderr_path1,
+        stdout_path2,
+        stderr_path2,
     ] {
         std::fs::remove_file(&path)
             .with_context(|| format!("remove {}", path))
