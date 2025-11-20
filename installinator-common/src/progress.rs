@@ -9,7 +9,7 @@ use illumos_utils::zpool;
 use omicron_common::disk::M2Slot;
 use schemars::{
     JsonSchema,
-    gen::SchemaGenerator,
+    r#gen::SchemaGenerator,
     schema::{Schema, SchemaObject},
 };
 use serde::{Deserialize, Serialize};
@@ -311,14 +311,15 @@ pub enum ControlPlaneZonesStepId {
     Unknown,
 }
 
-fn path_schema(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+fn path_schema(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(generator).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }
 
-fn path_schema_opt(gen: &mut SchemaGenerator) -> Schema {
-    let mut schema: SchemaObject = <Option<String>>::json_schema(gen).into();
+fn path_schema_opt(generator: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject =
+        <Option<String>>::json_schema(generator).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
 }

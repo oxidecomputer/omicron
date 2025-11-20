@@ -23,7 +23,6 @@ use gateway_client::types::SpIgnition;
 use gateway_types::component::SpType;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
-use nexus_db_model::Ereport;
 use nexus_db_model::Sled;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
@@ -35,6 +34,7 @@ use nexus_db_queries::db::datastore::EreportFilters;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_reconfigurator_preparation::reconfigurator_state_load;
 use nexus_types::deployment::SledFilter;
+use nexus_types::fm::Ereport;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
@@ -60,12 +60,11 @@ use std::future::Future;
 use std::io::Write;
 use std::num::NonZeroU64;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::SeekFrom;
-use tokio_util::task::AbortOnDropHandle;
+use tokio::sync::OnceCell;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -433,8 +432,6 @@ impl SupportBundleCollector {
             request: request.clone(),
             bundle: bundle.clone(),
             transfer_chunk_size: request.transfer_chunk_size,
-            host_ereports_collected: AtomicUsize::new(0),
-            sp_ereports_collected: AtomicUsize::new(0),
         });
 
         let authz_bundle = authz_support_bundle_from_id(bundle.id.into());
@@ -480,8 +477,64 @@ struct BundleCollection {
     request: BundleRequest,
     bundle: SupportBundle,
     transfer_chunk_size: NonZeroU64,
-    host_ereports_collected: AtomicUsize,
-    sp_ereports_collected: AtomicUsize,
+}
+
+// This type describes a single step in the Support Bundle collection.
+//
+// - All steps have access to the "BundleCollection", which includes
+// tools for actually acquiring data.
+// - All steps have access to an output directory where they can store
+// serialized data to a file.
+// - Finally, all steps can emit a "CollectionStepOutput", which can either
+// update the collection report, or generate more steps.
+type CollectionStepFn = Box<
+    dyn for<'b> FnOnce(
+            &'b Arc<BundleCollection>,
+            &'b Utf8Path,
+        )
+            -> BoxFuture<'b, anyhow::Result<CollectionStepOutput>>
+        + Send,
+>;
+
+enum CollectionStepOutput {
+    Ereports(SupportBundleEreportStatus),
+    SavingSpDumps { listed_sps: bool },
+    // NOTE: The distinction between this and "Spawn" is pretty artificial -
+    // it's just to preserve a part of the report which says "we tried to
+    // list in-service sleds".
+    //
+    // If we changed the collection report, this could easily be combined
+    // with the "Spawn" variant.
+    SpawnSleds { extra_steps: Vec<(&'static str, CollectionStepFn)> },
+    Spawn { extra_steps: Vec<(&'static str, CollectionStepFn)> },
+    None,
+}
+
+impl CollectionStepOutput {
+    // Updates the collection report based on the output of a collection step,
+    // and possibly extends the set of all steps to be executed.
+    fn process(
+        self,
+        report: &mut SupportBundleCollectionReport,
+        steps: &mut Vec<(&'static str, CollectionStepFn)>,
+    ) {
+        match self {
+            CollectionStepOutput::Ereports(status) => {
+                report.ereports = Some(status);
+            }
+            CollectionStepOutput::SavingSpDumps { listed_sps } => {
+                report.listed_sps = listed_sps;
+            }
+            CollectionStepOutput::SpawnSleds { extra_steps } => {
+                report.listed_in_service_sleds = true;
+                steps.extend(extra_steps);
+            }
+            CollectionStepOutput::Spawn { extra_steps } => {
+                steps.extend(extra_steps);
+            }
+            CollectionStepOutput::None => (),
+        }
+    }
 }
 
 impl BundleCollection {
@@ -733,37 +786,78 @@ impl BundleCollection {
         }
     }
 
-    // Perform the work of collecting the support bundle into a temporary directory
-    //
-    // - "dir" is a directory where data can be stored.
-    // - "bundle" is metadata about the bundle being collected.
-    //
-    // If a partial bundle can be collected, it should be returned as
-    // an Ok(SupportBundleCollectionReport). Any failures from this function
-    // will prevent the support bundle from being collected altogether.
-    //
-    // NOTE: The background task infrastructure will periodically check to see
-    // if the bundle has been cancelled by a user while it is being collected.
-    // If that happens, this function will be CANCELLED at an await point.
-    //
-    // As a result, it is important that this function be implemented as
-    // cancel-safe.
-    async fn collect_bundle_as_file(
+    async fn run_collect_bundle_steps(
         self: &Arc<Self>,
-        dir: &Utf8TempDir,
-    ) -> anyhow::Result<SupportBundleCollectionReport> {
-        let log = &self.log;
-
-        info!(&log, "Collecting bundle as local file");
+        output: &Utf8TempDir,
+        mut steps: Vec<(&'static str, CollectionStepFn)>,
+    ) -> SupportBundleCollectionReport {
         let mut report =
             SupportBundleCollectionReport::new(self.bundle.id.into());
 
-        tokio::fs::write(
-            dir.path().join("bundle_id.txt"),
-            self.bundle.id.to_string(),
-        )
-        .await?;
+        const MAX_CONCURRENT_STEPS: usize = 16;
+        let mut tasks =
+            ParallelTaskSet::new_with_parallelism(MAX_CONCURRENT_STEPS);
 
+        loop {
+            // Process all the currently-planned steps
+            while let Some((step_name, step)) = steps.pop() {
+                let previous_result = tasks.spawn({
+                    let collection = self.clone();
+                    let dir = output.path().to_path_buf();
+                    async move {
+                        debug!(collection.log, "Running step"; "name" => &step_name);
+                        step(&collection, dir.as_path()).await.inspect_err(|err| {
+                            warn!(
+                                collection.log,
+                                "Step failed";
+                                "name" => &step_name,
+                                InlineErrorChain::new(err.as_ref()),
+                            );
+                        })
+                    }
+                }).await;
+
+                if let Some(Ok(output)) = previous_result {
+                    output.process(&mut report, &mut steps);
+                };
+            }
+
+            // If we've run out of tasks to spawn, join any of the previously
+            // spawned tasks, if any exist.
+            if let Some(previous_result) = tasks.join_next().await {
+                if let Ok(output) = previous_result {
+                    output.process(&mut report, &mut steps);
+                };
+
+                // As soon as any task completes, see if we can spawn more work
+                // immediately. This ensures that the ParallelTaskSet is
+                // saturated as much as it can be.
+                continue;
+            }
+
+            // Executing steps may create additional steps, as follow-up work.
+            //
+            // Only finish if we've exhausted all possible steps and joined all spawned work.
+            if steps.is_empty() {
+                return report;
+            }
+        }
+    }
+
+    async fn collect_bundle_id(
+        &self,
+        dir: &Utf8Path,
+    ) -> anyhow::Result<CollectionStepOutput> {
+        tokio::fs::write(dir.join("bundle_id.txt"), self.bundle.id.to_string())
+            .await?;
+
+        Ok(CollectionStepOutput::None)
+    }
+
+    async fn collect_reconfigurator_state(
+        &self,
+        dir: &Utf8Path,
+    ) -> anyhow::Result<CollectionStepOutput> {
         // Collect reconfigurator state
         const NMAX_BLUEPRINTS: usize = 300;
         match reconfigurator_state_load(
@@ -774,7 +868,7 @@ impl BundleCollection {
         .await
         {
             Ok(state) => {
-                let file_path = dir.path().join("reconfigurator_state.json");
+                let file_path = dir.join("reconfigurator_state.json");
                 let file = std::fs::OpenOptions::new()
                     .create(true)
                     .write(true)
@@ -790,7 +884,7 @@ impl BundleCollection {
                     },
                 )?;
                 info!(
-                    log,
+                    self.log,
                     "Support bundle: collected reconfigurator state";
                     "target_blueprint" => ?state.target_blueprint,
                     "num_blueprints" => state.blueprints.len(),
@@ -799,152 +893,251 @@ impl BundleCollection {
             }
             Err(err) => {
                 warn!(
-                    log,
+                    self.log,
                     "Support bundle: failed to collect reconfigurator state";
                     "err" => ?err,
                 );
             }
-        }
-
-        let ereport_collection = if let Some(ref ereport_filters) =
-            self.request.ereport_query
-        {
-            // If ereports are to be included in the bundle, have someone go do
-            // that in the background while we're gathering up other stuff. Note
-            // that the `JoinHandle`s for these tasks are wrapped in
-            // `AbortOnDropHandle`s for cancellation correctness; this ensures
-            // that if collecting the bundle is cancelled and this future is
-            // dropped, the tasks that we've spawned to collect ereports are
-            // aborted as well.
-            let dir = dir.path().join("ereports");
-            let host = AbortOnDropHandle::new(tokio::spawn(
-                self.clone().collect_host_ereports(
-                    ereport_filters.clone(),
-                    dir.clone(),
-                ),
-            ));
-            let sp = AbortOnDropHandle::new(tokio::spawn(
-                self.clone().collect_sp_ereports(ereport_filters.clone(), dir),
-            ));
-            Some((host, sp))
-        } else {
-            debug!(log, "Support bundle: ereports not requested");
-            None
         };
 
-        let all_sleds = self
-            .datastore
-            .sled_list_all_batched(&self.opctx, SledFilter::InService)
-            .await;
+        Ok(CollectionStepOutput::None)
+    }
 
-        if let Ok(mgs_client) = self.create_mgs_client().await {
-            if let Err(e) = write_sled_info(
-                &self.log,
-                &mgs_client,
-                all_sleds.as_deref().ok(),
-                dir.path(),
-            )
+    async fn get_or_initialize_mgs_client<'a>(
+        &self,
+        mgs_client: &'a OnceCell<Arc<Option<MgsClient>>>,
+    ) -> &'a Arc<Option<MgsClient>> {
+        mgs_client
+            .get_or_init(|| async {
+                Arc::new(self.create_mgs_client().await.ok())
+            })
             .await
-            {
-                error!(log, "Failed to write sled_info.json"; "error" => InlineErrorChain::new(e.as_ref()));
-            }
+    }
 
-            let sp_dumps_dir = dir.path().join("sp_task_dumps");
-            tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(
-                || {
-                    format!(
-                        "Failed to create SP task dump directory {sp_dumps_dir}"
-                    )
-                },
-            )?;
+    async fn get_or_initialize_all_sleds<'a>(
+        &self,
+        all_sleds: &'a OnceCell<Arc<Option<Vec<Sled>>>>,
+    ) -> &'a Arc<Option<Vec<Sled>>> {
+        all_sleds
+            .get_or_init(|| async {
+                Arc::new(
+                    self.datastore
+                        .sled_list_all_batched(
+                            &self.opctx,
+                            SledFilter::InService,
+                        )
+                        .await
+                        .ok(),
+                )
+            })
+            .await
+    }
 
-            if let Err(e) =
-                save_all_sp_dumps(log, &mgs_client, &sp_dumps_dir).await
-            {
-                error!(log, "Failed to capture SP task dumps"; "error" => InlineErrorChain::new(e.as_ref()));
-            } else {
-                report.listed_sps = true;
-            };
-        } else {
-            warn!(log, "No MGS client, skipping SP task dump collection");
-        }
-
-        if let Ok(all_sleds) = all_sleds {
-            report.listed_in_service_sleds = true;
-
-            const MAX_CONCURRENT_SLED_REQUESTS: usize = 16;
-            const FAILURE_MESSAGE: &str =
-                "Failed to fully collect support bundle info from sled";
-            let mut set = ParallelTaskSet::new_with_parallelism(
-                MAX_CONCURRENT_SLED_REQUESTS,
+    async fn collect_sled_cubby_info(
+        &self,
+        all_sleds: &OnceCell<Arc<Option<Vec<Sled>>>>,
+        mgs_client: &OnceCell<Arc<Option<MgsClient>>>,
+        dir: &Utf8Path,
+    ) -> anyhow::Result<CollectionStepOutput> {
+        let Some(mgs_client) =
+            &**self.get_or_initialize_mgs_client(mgs_client).await
+        else {
+            warn!(
+                self.log,
+                "No MGS client, skipping sled cubby info collection"
             );
+            return Ok(CollectionStepOutput::None);
+        };
+        let nexus_sleds = self
+            .get_or_initialize_all_sleds(all_sleds)
+            .await
+            .as_deref()
+            .unwrap_or_default();
 
-            for sled in all_sleds {
-                let prev_result = set
-                    .spawn({
-                        let collection: Arc<BundleCollection> = self.clone();
-                        let dir = dir.path().to_path_buf();
+        write_sled_cubby_info(&self.log, mgs_client, nexus_sleds, dir).await?;
+
+        Ok(CollectionStepOutput::None)
+    }
+
+    async fn spawn_sp_dump_collection(
+        &self,
+        mgs_client: &OnceCell<Arc<Option<MgsClient>>>,
+        dir: &Utf8Path,
+    ) -> anyhow::Result<CollectionStepOutput> {
+        let Some(mgs_client) =
+            &**self.get_or_initialize_mgs_client(mgs_client).await
+        else {
+            warn!(self.log, "No MGS client, skipping SP task dump collection");
+            return Ok(CollectionStepOutput::None);
+        };
+
+        let sp_dumps_dir = dir.join("sp_task_dumps");
+        tokio::fs::create_dir_all(&sp_dumps_dir).await.with_context(|| {
+            format!("Failed to create SP task dump directory {sp_dumps_dir}")
+        })?;
+
+        let mut extra_steps: Vec<(&'static str, CollectionStepFn)> = vec![];
+        for sp in get_available_sps(&mgs_client).await? {
+            extra_steps.push((
+                "SP dump",
+                Box::new({
+                    let mgs_client = mgs_client.clone();
+                    move |collection, dir| {
                         async move {
-                            collection.collect_data_from_sled(&sled, &dir).await
+                            collection
+                                .collect_sp_dump(&mgs_client, sp, dir)
+                                .await
                         }
-                    })
-                    .await;
-                if let Some(Err(err)) = prev_result {
-                    warn!(&self.log, "{FAILURE_MESSAGE}"; "err" => ?err);
-                }
-            }
-            while let Some(result) = set.join_next().await {
-                if let Err(err) = result {
-                    warn!(&self.log, "{FAILURE_MESSAGE}"; "err" => ?err);
-                }
-            }
+                        .boxed()
+                    }
+                }),
+            ));
         }
 
-        if let Some((host, sp)) = ereport_collection {
-            let (host, sp) = tokio::join!(host, sp);
-            const TASK_FAILURE_MSG: &str = "task failed";
-            let n_collected =
-                self.host_ereports_collected.load(Ordering::Acquire);
-            report.host_ereports = match host
-                .map_err(|e| anyhow::anyhow!("{TASK_FAILURE_MSG}: {e}"))
-                .and_then(|x| x)
-            {
-                Ok(_) => SupportBundleEreportStatus::Collected { n_collected },
-                Err(err) => {
-                    warn!(
-                        &self.log,
-                        "Support bundle: host ereport collection failed \
-                         ({n_collected} collected successfully)";
-                        "err" => ?err,
-                    );
-                    SupportBundleEreportStatus::Failed {
-                        n_collected,
-                        error: err.to_string(),
+        Ok(CollectionStepOutput::Spawn { extra_steps })
+    }
+
+    async fn collect_sp_dump(
+        &self,
+        mgs_client: &MgsClient,
+        sp: SpIdentifier,
+        dir: &Utf8Path,
+    ) -> anyhow::Result<CollectionStepOutput> {
+        save_sp_dumps(mgs_client, sp, dir).await.with_context(|| {
+            format!("failed to save SP dump from: {} {}", sp.type_, sp.slot)
+        })?;
+
+        Ok(CollectionStepOutput::SavingSpDumps { listed_sps: true })
+    }
+
+    // Perform the work of collecting the support bundle into a temporary directory
+    //
+    // "dir" is an output directory where data can be stored.
+    //
+    // If a partial bundle can be collected, it should be returned as
+    // an Ok(SupportBundleCollectionReport). Any failures from this function
+    // will prevent the support bundle from being collected altogether.
+    //
+    // NOTE: The background task infrastructure will periodically check to see
+    // if the bundle has been cancelled by a user while it is being collected.
+    // If that happens, this function will be CANCELLED at an await point.
+    //
+    // As a result, it is important that this function be implemented as
+    // cancel-safe.
+    //
+    // The "steps" used within this function - passed to
+    // [`Self::run_collect_bundle_steps`] - are run on a [`ParallelTaskSet`],
+    // which automatically aborts tasks when it is dropped.
+    async fn collect_bundle_as_file(
+        self: &Arc<Self>,
+        dir: &Utf8TempDir,
+    ) -> anyhow::Result<SupportBundleCollectionReport> {
+        let log = &self.log;
+
+        info!(&log, "Collecting bundle as local file");
+
+        // Shared, lazy, fallible initialization for sleds
+        let all_sleds: OnceCell<Arc<Option<Vec<Sled>>>> = OnceCell::new();
+        // Shared, lazy, fallible initialization for MGS client
+        let mgs_client: OnceCell<Arc<Option<MgsClient>>> = OnceCell::new();
+
+        let steps: Vec<(&'static str, CollectionStepFn)> = vec![
+            (
+                "bundle id",
+                Box::new(|collection, dir| {
+                    collection.collect_bundle_id(dir).boxed()
+                }),
+            ),
+            (
+                "reconfigurator state",
+                Box::new(|collection, dir| {
+                    collection.collect_reconfigurator_state(dir).boxed()
+                }),
+            ),
+            (
+                "ereports",
+                Box::new(|collection, dir| {
+                    collection.collect_ereports(dir).boxed()
+                }),
+            ),
+            (
+                "sled cubby info",
+                Box::new({
+                    let all_sleds = all_sleds.clone();
+                    let mgs_client = mgs_client.clone();
+                    move |collection, dir| {
+                        async move {
+                            collection
+                                .collect_sled_cubby_info(
+                                    &all_sleds,
+                                    &mgs_client,
+                                    dir,
+                                )
+                                .await
+                        }
+                        .boxed()
                     }
-                }
-            };
-            let n_collected =
-                self.sp_ereports_collected.load(Ordering::Acquire);
-            report.sp_ereports = match sp
-                .map_err(|e| anyhow::anyhow!("{TASK_FAILURE_MSG}: {e}"))
-                .and_then(|x| x)
-            {
-                Ok(_) => SupportBundleEreportStatus::Collected { n_collected },
-                Err(err) => {
-                    warn!(
-                        &self.log,
-                        "Support bundle: SP ereport collection failed \
-                         ({n_collected} collected successfully)";
-                        "err" => ?err,
-                    );
-                    SupportBundleEreportStatus::Failed {
-                        n_collected,
-                        error: err.to_string(),
+                }),
+            ),
+            (
+                "spawn steps to query all SP dumps",
+                Box::new({
+                    let mgs_client = mgs_client.clone();
+                    move |collection, dir| {
+                        async move {
+                            collection
+                                .spawn_sp_dump_collection(&mgs_client, dir)
+                                .await
+                        }
+                        .boxed()
                     }
-                }
-            };
+                }),
+            ),
+            (
+                "spawn steps to query all sleds",
+                Box::new({
+                    let all_sleds = all_sleds.clone();
+                    move |collection, _| {
+                        async move {
+                            collection.spawn_query_all_sleds(&all_sleds).await
+                        }
+                        .boxed()
+                    }
+                }),
+            ),
+        ];
+
+        Ok(self.run_collect_bundle_steps(dir, steps).await)
+    }
+
+    async fn spawn_query_all_sleds(
+        &self,
+        all_sleds: &OnceCell<Arc<Option<Vec<Sled>>>>,
+    ) -> anyhow::Result<CollectionStepOutput> {
+        let Some(all_sleds) =
+            self.get_or_initialize_all_sleds(all_sleds).await.as_deref()
+        else {
+            warn!(self.log, "Could not read list of sleds");
+            return Ok(CollectionStepOutput::None);
+        };
+
+        let mut extra_steps: Vec<(&'static str, CollectionStepFn)> = vec![];
+        for sled in all_sleds {
+            extra_steps.push((
+                "sled data",
+                Box::new({
+                    let sled = sled.clone();
+                    move |collection, dir| {
+                        async move {
+                            collection.collect_data_from_sled(&sled, dir).await
+                        }
+                        .boxed()
+                    }
+                }),
+            ));
         }
-        Ok(report)
+
+        return Ok(CollectionStepOutput::SpawnSleds { extra_steps });
     }
 
     // Collect data from a sled, storing it into a directory that will
@@ -957,7 +1150,7 @@ impl BundleCollection {
         &self,
         sled: &nexus_db_model::Sled,
         dir: &Utf8Path,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<CollectionStepOutput> {
         let log = &self.log;
         info!(&log, "Collecting bundle info from sled"; "sled" => %sled.id());
         let sled_path = dir
@@ -970,7 +1163,7 @@ impl BundleCollection {
             .await?;
 
         if self.request.skip_sled_info {
-            return Ok(());
+            return Ok(CollectionStepOutput::None);
         }
 
         let Ok(sled_client) = nexus_networking::sled_client(
@@ -986,7 +1179,7 @@ impl BundleCollection {
                 "Could not contact sled",
             )
             .await?;
-            return Ok(());
+            return Ok(CollectionStepOutput::None);
         };
 
         // NB: As new sled-diagnostic commands are added they should
@@ -1091,13 +1284,41 @@ impl BundleCollection {
                 error!(&self.log, "failed to write logs output: {e}");
             }
         }
-        return Ok(());
+        return Ok(CollectionStepOutput::None);
     }
 
-    async fn collect_sp_ereports(
-        self: Arc<Self>,
+    async fn collect_ereports(
+        self: &Arc<Self>,
+        dir: &Utf8Path,
+    ) -> anyhow::Result<CollectionStepOutput> {
+        let Some(ref ereport_filters) = self.request.ereport_query else {
+            debug!(self.log, "Support bundle: ereports not requested");
+            return Ok(CollectionStepOutput::None);
+        };
+        let ereports_dir = dir.join("ereports");
+        let mut status = SupportBundleEreportStatus::default();
+        if let Err(err) = self
+            .save_ereports(ereport_filters.clone(), ereports_dir, &mut status)
+            .await
+        {
+            warn!(
+                &self.log,
+                "Support bundle: ereport collection failed \
+                 ({} collected successfully)",
+                 status.n_collected;
+                InlineErrorChain::new(err.as_ref())
+            );
+            status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
+        };
+
+        Ok(CollectionStepOutput::Ereports(status))
+    }
+
+    async fn save_ereports(
+        self: &Arc<Self>,
         filters: EreportFilters,
         dir: Utf8PathBuf,
+        status: &mut SupportBundleEreportStatus,
     ) -> anyhow::Result<()> {
         let mut paginator = Paginator::new(
             datastore::SQL_BATCH_SIZE,
@@ -1106,74 +1327,46 @@ impl BundleCollection {
         while let Some(p) = paginator.next() {
             let ereports = self
                 .datastore
-                .sp_ereports_fetch_matching(
+                .ereport_fetch_matching(
                     &self.opctx,
                     &filters,
                     &p.current_pagparams(),
                 )
                 .await
                 .map_err(|e| {
-                    e.internal_context("failed to query for SP ereports")
+                    e.internal_context("failed to query for ereports")
                 })?;
             paginator = p.found_batch(&ereports, &|ereport| {
                 (ereport.restart_id.into_untyped_uuid(), ereport.ena)
             });
 
+            let prev_n_collected = status.n_collected;
             let n_ereports = ereports.len();
-            for ereport in ereports {
-                write_ereport(ereport.into(), &dir).await?;
-                self.sp_ereports_collected.fetch_add(1, Ordering::Release);
-            }
-            debug!(self.log, "Support bundle: added {n_ereports} SP ereports");
-        }
+            status.n_found += n_ereports;
 
-        info!(
-            self.log,
-            "Support bundle: collected {} total SP ereports",
-            self.sp_ereports_collected.load(Ordering::Relaxed)
-        );
-        Ok(())
-    }
-
-    async fn collect_host_ereports(
-        self: Arc<Self>,
-        filters: EreportFilters,
-        dir: Utf8PathBuf,
-    ) -> anyhow::Result<()> {
-        let mut paginator = Paginator::new(
-            datastore::SQL_BATCH_SIZE,
-            dropshot::PaginationOrder::Ascending,
-        );
-        while let Some(p) = paginator.next() {
-            let ereports = self
-                .datastore
-                .host_ereports_fetch_matching(
-                    &self.opctx,
-                    &filters,
-                    &p.current_pagparams(),
-                )
-                .await
-                .map_err(|e| {
-                    e.internal_context("failed to query for host OS ereports")
-                })?;
-            paginator = p.found_batch(&ereports, &|ereport| {
-                (ereport.restart_id.into_untyped_uuid(), ereport.ena)
-            });
-            let n_ereports = ereports.len();
             for ereport in ereports {
-                write_ereport(ereport.into(), &dir).await?;
-                self.host_ereports_collected.fetch_add(1, Ordering::Release);
+                match ereport.try_into() {
+                    Ok(ereport) => {
+                        write_ereport(ereport, &dir).await?;
+                        status.n_collected += 1;
+                    }
+                    Err(err) => {
+                        warn!(&self.log, "invalid ereport"; "error" => %err);
+                        status.errors.push(err.to_string());
+                    }
+                }
             }
             debug!(
                 self.log,
-                "Support bundle: added {n_ereports} host OS ereports"
+                "Support bundle: added {} ereports ({} found)",
+                status.n_collected - prev_n_collected,
+                n_ereports
             );
         }
 
         info!(
             self.log,
-            "Support bundle: collected {} total host ereports",
-            self.host_ereports_collected.load(Ordering::Relaxed)
+            "Support bundle: collected {} total ereports", status.n_collected
         );
         Ok(())
     }
@@ -1253,7 +1446,7 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
     // metadata --- we must check that it doesn't contain any characters
     // unsuitable for use in a filesystem path.
     let pn = ereport
-        .metadata
+        .data
         .part_number
         .as_deref()
         // If the part or serial numbers contain any unsavoury characters, it
@@ -1264,24 +1457,25 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_part");
     let sn = ereport
-        .metadata
+        .data
         .serial_number
         .as_deref()
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_serial");
+    let id = &ereport.data.id;
 
     let dir = dir
         .join(format!("{pn}-{sn}"))
         // N.B. that we call `into_untyped_uuid()` here, as the `Display`
         // implementation for a typed UUID appends " (ereporter_restart)", which
         // we don't want.
-        .join(ereport.id.restart_id.into_untyped_uuid().to_string());
+        .join(id.restart_id.into_untyped_uuid().to_string());
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("failed to create directory '{dir}'"))?;
-    let file_path = dir.join(format!("{}.json", ereport.id.ena));
+    let file_path = dir.join(format!("{}.json", id.ena));
     let json = serde_json::to_vec(&ereport).with_context(|| {
-        format!("failed to serialize ereport {pn}:{sn}/{}", ereport.id)
+        format!("failed to serialize ereport {pn}:{sn}/{id}")
     })?;
     tokio::fs::write(&file_path, json)
         .await
@@ -1486,40 +1680,6 @@ where
     Ok(())
 }
 
-/// Collect task dumps from all SPs via MGS and save them to a directory.
-async fn save_all_sp_dumps(
-    log: &slog::Logger,
-    mgs_client: &MgsClient,
-    sp_dumps_dir: &Utf8Path,
-) -> anyhow::Result<()> {
-    let available_sps = get_available_sps(&mgs_client).await?;
-
-    let mut tasks = ParallelTaskSet::new();
-    for sp in available_sps {
-        let mgs_client = mgs_client.clone();
-        let sp_dumps_dir = sp_dumps_dir.to_owned();
-
-        tasks
-            .spawn(async move {
-                save_sp_dumps(mgs_client, sp, sp_dumps_dir)
-                    .await
-                    .with_context(|| format!("SP {} {}", sp.type_, sp.slot))
-            })
-            .await;
-    }
-    for result in tasks.join_all().await {
-        if let Err(e) = result {
-            error!(
-                log,
-                "failed to capture task dumps";
-                "error" => InlineErrorChain::new(e.as_ref())
-            );
-        }
-    }
-
-    Ok(())
-}
-
 /// Use MGS ignition info to find active SPs.
 async fn get_available_sps(
     mgs_client: &MgsClient,
@@ -1545,9 +1705,9 @@ async fn get_available_sps(
 
 /// Fetch and save task dumps from a single SP.
 async fn save_sp_dumps(
-    mgs_client: MgsClient,
+    mgs_client: &MgsClient,
     sp: SpIdentifier,
-    sp_dumps_dir: Utf8PathBuf,
+    sp_dumps_dir: &Utf8Path,
 ) -> anyhow::Result<()> {
     let dump_count = mgs_client
         .sp_task_dump_count(&sp.type_, sp.slot)
@@ -1556,7 +1716,9 @@ async fn save_sp_dumps(
         .into_inner();
 
     let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.type_, sp.slot));
-    tokio::fs::create_dir_all(&output_dir).await?;
+    tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
+        format!("Failed to create output directory {output_dir}")
+    })?;
 
     for i in 0..dump_count {
         let task_dump = mgs_client
@@ -1578,10 +1740,10 @@ async fn save_sp_dumps(
 
 /// Write a file with a JSON mapping of sled serial numbers to cubby and UUIDs for easier
 /// identification of sleds present in a bundle.
-async fn write_sled_info(
+async fn write_sled_cubby_info(
     log: &slog::Logger,
     mgs_client: &MgsClient,
-    nexus_sleds: Option<&[Sled]>,
+    nexus_sleds: &[Sled],
     dir: &Utf8Path,
 ) -> anyhow::Result<()> {
     #[derive(Serialize)]
@@ -1596,7 +1758,6 @@ async fn write_sled_info(
 
     // We can still get a useful mapping of cubby to serial using just the data from MGS.
     let mut nexus_map: BTreeMap<_, _> = nexus_sleds
-        .unwrap_or_default()
         .into_iter()
         .map(|sled| (sled.serial_number(), sled))
         .collect();
@@ -1707,6 +1868,8 @@ mod test {
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
+    use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
@@ -1857,48 +2020,34 @@ mod test {
     }
 
     async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
-        use crate::db;
-
         const SP_SERIAL: &str = "BRM42000069";
         const HOST_SERIAL: &str = "BRM66600042";
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.sp_ereports_insert(&opctx, db::model::SpType::Sled, 8, vec![
-            db::model::SpEreport {
-                restart_id: sp_restart_id.into(),
-                ena: ereport_types::Ena(1).into(),
+        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: 8}, vec![
+            EreportData {
+                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
-                time_deleted: None,
-                collector_id: OmicronZoneUuid::new_v4().into(),
-                sp_type: db::model::SpType::Sled,
-                sp_slot: 8.into(),
+                collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello world": true})
             },
-            db::model::SpEreport {
-                restart_id: sp_restart_id.into(),
-                ena: ereport_types::Ena(2).into(),
+            EreportData {
+                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(2) },
                 time_collected: chrono::Utc::now(),
-                time_deleted: None,
-                collector_id: OmicronZoneUuid::new_v4().into(),
-                sp_type: db::model::SpType::Sled,
-                sp_slot: 8.into(),
+                collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.something.blah".to_string()),
                 report: serde_json::json!({"system_working": "seems to be",})
             },
-            db::model::SpEreport {
-                restart_id: EreporterRestartUuid::new_v4().into(),
-                ena: ereport_types::Ena(1).into(),
+            EreportData {
+                id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
-                time_deleted: None,
-                collector_id: OmicronZoneUuid::new_v4().into(),
-                sp_type: db::model::SpType::Sled,
-                sp_slot: 8.into(),
+                collector_id: OmicronZoneUuid::new_v4(),
                 // Let's do a silly one! No VPD, to make sure that's also
                 // handled correctly.
                 part_number: None,
@@ -1911,18 +2060,16 @@ mod test {
         // host-OS and SP ereports are different for when we make assertions
         // about the bundle report.
         datastore
-            .sp_ereports_insert(
+            .ereports_insert(
                 &opctx,
-                db::model::SpType::Switch,
-                1,
-                vec![db::model::SpEreport {
-                    restart_id: EreporterRestartUuid::new_v4().into(),
-                    ena: ereport_types::Ena(1).into(),
+                Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
+                vec![EreportData {
+                    id: EreportId {
+                        restart_id: EreporterRestartUuid::new_v4(),
+                        ena: ereport_types::Ena(1),
+                    },
                     time_collected: chrono::Utc::now(),
-                    time_deleted: None,
-                    collector_id: OmicronZoneUuid::new_v4().into(),
-                    sp_type: db::model::SpType::Switch,
-                    sp_slot: 1.into(),
+                    collector_id: OmicronZoneUuid::new_v4(),
                     part_number: Some("9130000006".to_string()),
                     serial_number: Some("BRM41000555".to_string()),
                     class: Some("ereport.fake.whatever".to_string()),
@@ -1932,33 +2079,32 @@ mod test {
             .await
             .expect("failed to insert another fake SP ereport");
         // And some host OS ones...
-        let sled_id = SledUuid::new_v4();
-        let restart_id = EreporterRestartUuid::new_v4().into();
+        let restart_id = EreporterRestartUuid::new_v4();
         datastore
-            .host_ereports_insert(
+            .ereports_insert(
                 &opctx,
-                sled_id,
+                Reporter::HostOs { sled: SledUuid::new_v4() },
                 vec![
-                    db::model::HostEreport {
-                        restart_id,
-                        ena: ereport_types::Ena(1).into(),
+                    EreportData {
+                        id: EreportId {
+                            restart_id,
+                            ena: ereport_types::Ena(1),
+                        },
                         time_collected: chrono::Utc::now(),
-                        time_deleted: None,
-                        collector_id: OmicronZoneUuid::new_v4().into(),
-                        sled_id: sled_id.into(),
-                        sled_serial: HOST_SERIAL.to_string(),
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever".to_string()),
                         report: serde_json::json!({"hello_world": true}),
                     },
-                    db::model::HostEreport {
-                        restart_id,
-                        ena: ereport_types::Ena(2).into(),
+                    EreportData {
+                        id: EreportId {
+                            restart_id,
+                            ena: ereport_types::Ena(2),
+                        },
                         time_collected: chrono::Utc::now(),
-                        time_deleted: None,
-                        collector_id: OmicronZoneUuid::new_v4().into(),
-                        sled_id: sled_id.into(),
-                        sled_serial: HOST_SERIAL.to_string(),
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever.thingy".to_string()),
                         report: serde_json::json!({"goodbye_world": false}),
@@ -1967,21 +2113,16 @@ mod test {
             )
             .await
             .expect("failed to insert fake host OS ereports");
-        // And another one with the same serial but different restart/sled IDs
-        let sled_id = SledUuid::new_v4();
         datastore
-            .host_ereports_insert(
+            .ereports_insert(
                 &opctx,
-                sled_id,
+                Reporter::HostOs { sled: SledUuid::new_v4() },
                 vec![
-                    db::model::HostEreport {
-                        restart_id: EreporterRestartUuid::new_v4().into(),
-                        ena: ereport_types::Ena(1).into(),
+                    EreportData {
+                        id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
                         time_collected: chrono::Utc::now(),
-                        time_deleted: None,
-                        collector_id: OmicronZoneUuid::new_v4().into(),
-                        sled_id: sled_id.into(),
-                        sled_serial: HOST_SERIAL.to_string(),
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.something.hostos_related".to_string()),
                         report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
@@ -2137,12 +2278,12 @@ mod test {
         assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
         assert_eq!(
-            report.host_ereports,
-            SupportBundleEreportStatus::Collected { n_collected: 3 }
-        );
-        assert_eq!(
-            report.sp_ereports,
-            SupportBundleEreportStatus::Collected { n_collected: 4 }
+            report.ereports,
+            Some(SupportBundleEreportStatus {
+                n_collected: 7,
+                n_found: 7,
+                errors: Vec::new()
+            })
         );
 
         let observed_bundle = datastore

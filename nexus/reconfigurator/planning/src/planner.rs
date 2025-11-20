@@ -207,7 +207,7 @@ impl<'a> Planner<'a> {
         let zone_safety_checks = ZoneSafetyChecks::new(
             &self.blueprint,
             &self.inventory,
-            self.input.internal_dns_version(),
+            &self.input,
         );
 
         let mut noop_info =
@@ -1409,10 +1409,10 @@ impl<'a> Planner<'a> {
                 // If the image matches exactly, use it.
                 same_image_nexus_generation = Some(nexus.nexus_generation);
                 break;
-            } else if let Some(gen) = highest_seen_generation {
+            } else if let Some(generation) = highest_seen_generation {
                 // Otherwise, use the generation number if it's the highest
                 // we've seen
-                if nexus.nexus_generation > gen {
+                if nexus.nexus_generation > generation {
                     highest_seen_generation = Some(nexus.nexus_generation);
                 }
             } else {
@@ -1423,15 +1423,15 @@ impl<'a> Planner<'a> {
         }
 
         let determined_generation = match same_image_nexus_generation {
-            Some(gen) => Some(gen),
-            None => highest_seen_generation.map(|gen| gen.next()),
+            Some(generation) => Some(generation),
+            None => highest_seen_generation.map(|r#gen| r#gen.next()),
         };
 
-        let Some(gen) = determined_generation else {
+        let Some(r#gen) = determined_generation else {
             return Err(Error::NoNexusZonesInParentBlueprint);
         };
 
-        Ok(gen)
+        Ok(r#gen)
     }
 
     /// Update at most one MGS-managed device (SP, RoT, etc.), if any are out of
@@ -1835,7 +1835,9 @@ impl<'a> Planner<'a> {
 
         // We use the list of in-service sleds here -- we don't want to alter
         // expunged or decommissioned sleds.
-        for sled_id in self.input.all_sled_ids(SledFilter::InService) {
+        for (sled_id, sled_details) in
+            self.input.all_sleds(SledFilter::InService)
+        {
             let log = log.new(o!("sled_id" => sled_id.to_string()));
             let Some(inv_sled) = self.inventory.sled_agents.get(&sled_id)
             else {
@@ -1844,6 +1846,7 @@ impl<'a> Planner<'a> {
             };
             let action = self.blueprint.sled_ensure_mupdate_override(
                 sled_id,
+                &sled_details.baseboard_id,
                 inv_sled
                     .zone_image_resolver
                     .mupdate_override
@@ -2607,6 +2610,7 @@ pub(crate) mod test {
     use omicron_common::api::external::Vni;
     use omicron_common::api::internal::shared::NetworkInterface;
     use omicron_common::api::internal::shared::NetworkInterfaceKind;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskIdentity;
@@ -2620,6 +2624,7 @@ pub(crate) mod test {
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use oxnet::Ipv6Net;
     use semver::Version;
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeMap;
@@ -2871,7 +2876,7 @@ pub(crate) mod test {
         );
 
         assert_eq!(zones_diff.added.len(), 10);
-        for zone in zones_diff.added.values() {
+        for zone in &zones_diff.added {
             if zone.kind() != ZoneKind::Crucible {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             }
@@ -2979,7 +2984,7 @@ pub(crate) mod test {
             .zones
             .added;
         assert_eq!(zones_added.len(), input.target_nexus_zone_count() - 1);
-        for (_, zone) in zones_added {
+        for zone in zones_added {
             if zone.kind() != ZoneKind::Nexus {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
             }
@@ -3068,7 +3073,7 @@ pub(crate) mod test {
                     panic!("unexpected number of zones added to {sled_id}: {n}")
                 }
             }
-            for (_, zone) in zones_added {
+            for zone in zones_added {
                 if zone.kind() != ZoneKind::Nexus {
                     panic!("unexpectedly added a non-Nexus zone: {zone:?}");
                 }
@@ -3215,7 +3220,7 @@ pub(crate) mod test {
                     panic!("unexpected number of zones added to {sled_id}: {n}")
                 }
             }
-            for (_, zone) in zones_added {
+            for zone in zones_added {
                 assert_eq!(
                     zone.kind(),
                     ZoneKind::InternalDns,
@@ -4058,7 +4063,7 @@ pub(crate) mod test {
         ]);
         let mut modified_sled_configs = Vec::new();
         for modified_sled in summary.diff.sleds.modified_values_diff() {
-            for modified in modified_sled.datasets.modified_values_diff() {
+            for modified in modified_sled.datasets.modified_diff() {
                 assert_eq!(
                     *modified.disposition.before,
                     BlueprintDatasetDisposition::InService
@@ -4084,10 +4089,8 @@ pub(crate) mod test {
         let modified_sled_config = modified_sled_configs.pop().unwrap();
         assert!(modified_sled_config.zones.added.is_empty());
         assert!(modified_sled_config.zones.removed.is_empty());
-        let mut modified_zones = modified_sled_config
-            .zones
-            .modified_values_diff()
-            .collect::<Vec<_>>();
+        let mut modified_zones =
+            modified_sled_config.zones.modified_diff().collect::<Vec<_>>();
         assert_eq!(modified_zones.len(), 1);
         let modified_zone = modified_zones.pop().unwrap();
         assert!(
@@ -4216,16 +4219,16 @@ pub(crate) mod test {
         for sled in summary.diff.sleds.modified_values_diff() {
             let expected_generation =
                 sled.sled_agent_generation.diff_pair().before.next();
-            for (_, z) in sled.zones.modified() {
+            for z in sled.zones.modified() {
                 assert_eq!(
-                    z.after.disposition,
+                    z.after().disposition,
                     BlueprintZoneDisposition::Expunged {
                         as_of_generation: expected_generation,
                         ready_for_cleanup: false,
                     },
                     "Should have expunged this zone"
                 );
-                zones_expunged.insert(z.after.id);
+                zones_expunged.insert(z.after().id);
             }
         }
         assert_eq!(zones_on_pool, zones_expunged);
@@ -4239,7 +4242,7 @@ pub(crate) mod test {
         assert_eq!(zone_kinds_on_pool.remove(&ZoneKind::InternalDns), Some(1));
         let mut zone_kinds_added = BTreeMap::new();
         for sled in summary.diff.sleds.modified_values_diff() {
-            for z in sled.zones.added.values() {
+            for z in &sled.zones.added {
                 *zone_kinds_added.entry(z.zone_type.kind()).or_default() +=
                     1_usize;
             }
@@ -4436,7 +4439,7 @@ pub(crate) mod test {
             let zones_on_modified_sled = &modified_sled.diff_pair().zones;
             assert!(zones_on_modified_sled.removed.is_empty());
             let zones = &zones_on_modified_sled.added;
-            for (_, zone) in zones {
+            for zone in zones {
                 if ZoneKind::Nexus != zone.kind() {
                     panic!("unexpectedly added a non-Nexus zone: {zone:?}");
                 };
@@ -4481,7 +4484,7 @@ pub(crate) mod test {
             .unwrap()
             .zones;
 
-        zones.retain(|zone| {
+        zones.retain(|mut zone| {
             if let BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..
@@ -4580,7 +4583,7 @@ pub(crate) mod test {
             "for {desc}, generation should have been bumped"
         );
 
-        for modified_zone in modified_sled.zones.modified_values_diff() {
+        for modified_zone in modified_sled.zones.modified_diff() {
             assert_eq!(
                 *modified_zone.disposition.after,
                 BlueprintZoneDisposition::Expunged {
@@ -5933,15 +5936,12 @@ pub(crate) mod test {
                 // For all the zones that are in bp2_config but not
                 // bp2_sled_config (i.e., zones that should have been shut
                 // down), insert an error result in the reconciliation.
-                for zone_id in bp2_config.zones.keys() {
-                    if !reconciliation.zones.contains_key(zone_id) {
-                        reconciliation.zones.insert(
-                            *zone_id,
-                            ConfigReconcilerInventoryResult::Err {
-                                message: "failed to shut down".to_string(),
-                            },
-                        );
-                    }
+                for zone in &bp2_config.zones {
+                    reconciliation.zones.entry(zone.id).or_insert_with(|| {
+                        ConfigReconcilerInventoryResult::Err {
+                            message: "failed to shut down".to_string(),
+                        }
+                    });
                 }
                 collection
                     .sled_agents
@@ -6149,7 +6149,7 @@ pub(crate) mod test {
         let mut added_count = 0;
         for sled_cfg in summary.diff.sleds.modified_values_diff() {
             added_count += sled_cfg.zones.added.len();
-            for z in sled_cfg.zones.added.values() {
+            for z in &sled_cfg.zones.added {
                 match &z.zone_type {
                     BlueprintZoneType::InternalDns(internal_dns) => {
                         let BlueprintZoneType::InternalDns(InternalDns {
@@ -6480,7 +6480,7 @@ pub(crate) mod test {
                 for sled in summary.diff.sleds.modified_values_diff() {
                     assert!(sled.zones.removed.is_empty());
 
-                    for modified_zone in sled.zones.modified_values_diff() {
+                    for modified_zone in sled.zones.modified_diff() {
                         assert!(matches!(
                             *modified_zone.zone_type.before,
                             BlueprintZoneType::CruciblePantry(_)
@@ -6523,7 +6523,7 @@ pub(crate) mod test {
                         }
                     }
 
-                    for (_, zone) in &sled.zones.added {
+                    for zone in &sled.zones.added {
                         match zone.zone_type {
                             BlueprintZoneType::CruciblePantry(_) => {
                                 assert_eq!(zone.image_source, image_source);
@@ -6576,7 +6576,7 @@ pub(crate) mod test {
             for sled in summary.diff.sleds.modified_values_diff() {
                 assert!(sled.zones.removed.is_empty());
                 assert_eq!(sled.zones.added.len(), 1);
-                let added = sled.zones.added.values().next().unwrap();
+                let added = sled.zones.added.first().unwrap();
                 let BlueprintZoneType::Nexus(nexus_zone) = &added.zone_type
                 else {
                     panic!("Unexpected zone type: {:?}", added.zone_type);
@@ -6666,7 +6666,7 @@ pub(crate) mod test {
                 for sled in summary.diff.sleds.modified_values_diff() {
                     assert!(sled.zones.added.is_empty());
                     assert!(sled.zones.removed.is_empty());
-                    for modified_zone in sled.zones.modified_values_diff() {
+                    for modified_zone in sled.zones.modified_diff() {
                         // We're only modifying Nexus zones on the old image
                         assert!(matches!(
                             *modified_zone.zone_type.before,
@@ -7106,6 +7106,11 @@ pub(crate) mod test {
                 ) => address,
                 _ => panic!("should be internal NTP?"),
             };
+            let ip_config = PrivateIpConfig::new_ipv6(
+                Ipv6Addr::LOCALHOST,
+                Ipv6Net::new(Ipv6Addr::LOCALHOST, 64).unwrap(),
+            )
+            .unwrap();
 
             // The contents here are all lies, but it's just stored
             // as plain-old-data for the purposes of this test, so
@@ -7122,17 +7127,11 @@ pub(crate) mod test {
                             id: Uuid::new_v4(),
                         },
                         name: "ntp-0".parse().unwrap(),
-                        ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                        ip_config,
                         mac: MacAddr::random_system(),
-                        subnet: oxnet::IpNet::new(
-                            IpAddr::V6(Ipv6Addr::LOCALHOST),
-                            8,
-                        )
-                        .unwrap(),
                         vni: Vni::SERVICES_VNI,
                         primary: true,
                         slot: 0,
-                        transit_ips: vec![],
                     },
                     external_ip: OmicronZoneExternalSnatIp {
                         id: ExternalIpUuid::new_v4(),

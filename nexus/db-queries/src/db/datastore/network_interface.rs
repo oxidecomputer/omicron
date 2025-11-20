@@ -17,6 +17,7 @@ use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
 use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
+use crate::db::model::SqlU8;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
 use crate::db::queries::network_interface;
@@ -42,6 +43,11 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::internal::shared::PrivateIpConfig;
+use omicron_common::api::internal::shared::PrivateIpv4Config;
+use omicron_common::api::internal::shared::PrivateIpv6Config;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -60,19 +66,19 @@ struct NicInfo {
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::ip)]
     ipv4: Option<Ipv4Addr>,
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::ipv6)]
-    _ipv6: Option<Ipv6Addr>,
+    ipv6: Option<Ipv6Addr>,
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::mac)]
     mac: db::model::MacAddr,
     #[diesel(select_expression = nexus_db_schema::schema::vpc_subnet::ipv4_block)]
     ipv4_block: db::model::Ipv4Net,
     #[diesel(select_expression = nexus_db_schema::schema::vpc_subnet::ipv6_block)]
-    _ipv6_block: db::model::Ipv6Net,
+    ipv6_block: db::model::Ipv6Net,
     #[diesel(select_expression = nexus_db_schema::schema::vpc::vni)]
     vni: db::model::Vni,
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::is_primary)]
     primary: bool,
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::slot)]
-    slot: i16,
+    slot: SqlU8,
     #[diesel(select_expression = nexus_db_schema::schema::network_interface::transit_ips)]
     transit_ips: Vec<ipnetwork::IpNetwork>,
 }
@@ -88,21 +94,78 @@ impl TryFrom<NicInfo>
         omicron_common::api::internal::shared::NetworkInterface,
         Self::Error,
     > {
-        // TODO-completeness: Support IPv6 and dual-stack NICs in the Nexus <->
-        // sled-agent API. That includes the IPs themselves and the VPC Subnets.
-        //
-        // See https://github.com/oxidecomputer/omicron/issues/9246.
-        //
-        // This whole method can become the infallible `From` again when that's
-        // resolved.
-        let Some(ipv4) = nic.ipv4 else {
-            return Err(Error::internal_error(&format!(
-                "Found internal NIC without an IPv4 address: \
-                nic_id=\"{}\", parent_id=\"{}\"",
-                nic.id, nic.parent_id,
-            )));
+        let ip = match (nic.ipv4, nic.ipv6) {
+            (None, None) => {
+                return Err(Error::internal_error(
+                    "Found NIC with no VPC-private IP addresses at all",
+                ));
+            }
+            (Some(ipv4), None) => {
+                let transit_ips = nic
+                    .transit_ips
+                    .iter()
+                    .map(|net| {
+                        let ipnetwork::IpNetwork::V4(net) = net else {
+                            return Err(Error::internal_error(
+                                "Found NIC with IPv4 address only, but \
+                                which has IPv6 transit IPs",
+                            ));
+                        };
+                        Ok(Ipv4Net::from(*net))
+                    })
+                    .collect::<Result<_, _>>()?;
+                PrivateIpConfig::V4(PrivateIpv4Config::new_with_transit_ips(
+                    *ipv4,
+                    *nic.ipv4_block,
+                    transit_ips,
+                )?)
+            }
+            (None, Some(ipv6)) => {
+                let transit_ips = nic
+                    .transit_ips
+                    .iter()
+                    .map(|net| {
+                        let ipnetwork::IpNetwork::V6(net) = net else {
+                            return Err(Error::internal_error(
+                                "Found NIC with IPv6 address only, but \
+                                which has IPv4 transit IPs",
+                            ));
+                        };
+                        Ok(Ipv6Net::from(*net))
+                    })
+                    .collect::<Result<_, _>>()?;
+                PrivateIpConfig::V6(PrivateIpv6Config::new_with_transit_ips(
+                    *ipv6,
+                    *nic.ipv6_block,
+                    transit_ips,
+                )?)
+            }
+            (Some(ipv4), Some(ipv6)) => {
+                let mut ipv4_transit_ips = Vec::new();
+                let mut ipv6_transit_ips = Vec::new();
+                for net in nic.transit_ips.iter() {
+                    match net {
+                        ipnetwork::IpNetwork::V4(net) => {
+                            ipv4_transit_ips.push(Ipv4Net::from(*net))
+                        }
+                        ipnetwork::IpNetwork::V6(net) => {
+                            ipv6_transit_ips.push(Ipv6Net::from(*net))
+                        }
+                    }
+                }
+                let v4 = PrivateIpv4Config::new_with_transit_ips(
+                    *ipv4,
+                    *nic.ipv4_block,
+                    ipv4_transit_ips,
+                )?;
+                let v6 = PrivateIpv6Config::new_with_transit_ips(
+                    *ipv6,
+                    *nic.ipv6_block,
+                    ipv6_transit_ips,
+                )?;
+                PrivateIpConfig::DualStack { v4, v6 }
+            }
         };
-        let ip_subnet = oxnet::IpNet::V4(nic.ipv4_block.0);
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
                 omicron_common::api::internal::shared::NetworkInterfaceKind::Instance{ id: nic.parent_id }
@@ -118,13 +181,11 @@ impl TryFrom<NicInfo>
             id: nic.id,
             kind,
             name: nic.name.into(),
-            ip: ipv4.into(),
+            ip_config: ip,
             mac: nic.mac.0,
-            subnet: ip_subnet,
             vni: nic.vni.0,
             primary: nic.primary,
             slot: u8::try_from(nic.slot).unwrap(),
-            transit_ips: nic.transit_ips.iter().map(|v| (*v).into()).collect(),
         })
     }
 }

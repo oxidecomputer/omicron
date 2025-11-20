@@ -2612,8 +2612,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 listed_in_service_sleds,
                 listed_sps,
                 activated_in_db_ok,
-                sp_ereports,
-                host_ereports,
+                ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
@@ -2627,26 +2626,35 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
-                print_ereport_status("SP", &sp_ereports);
-                print_ereport_status("Host OS", &host_ereports);
-            }
-        }
-    }
-
-    fn print_ereport_status(which: &str, status: &SupportBundleEreportStatus) {
-        match status {
-            SupportBundleEreportStatus::NotRequested => {
-                println!("      {which} ereport collection was not requested");
-            }
-            SupportBundleEreportStatus::Failed { error, n_collected } => {
-                println!("      {which} ereport collection failed:");
-                println!(
-                    "        ereports collected successfully: {n_collected}"
-                );
-                println!("        error: {error}");
-            }
-            SupportBundleEreportStatus::Collected { n_collected } => {
-                println!("      {which} ereports collected: {n_collected}");
+                match ereports {
+                    None => {
+                        println!("      ereport collection was not requested");
+                    }
+                    Some(SupportBundleEreportStatus {
+                        errors,
+                        n_collected,
+                        n_found,
+                    }) if !errors.is_empty() => {
+                        println!("      ereport collection failed:");
+                        println!(
+                            "        total matching ereports found: {n_found}"
+                        );
+                        println!(
+                            "        ereports collected successfully: {n_collected}"
+                        );
+                        println!("        errors:");
+                        for error in errors {
+                            println!("          {error}");
+                        }
+                    }
+                    Some(SupportBundleEreportStatus {
+                        n_collected, ..
+                    }) => {
+                        // If ereport collection succeeded, n_found should be
+                        // equal to n_collected.
+                        println!("      ereports collected: {n_collected}");
+                    }
+                }
             }
         }
     }
@@ -4436,7 +4444,9 @@ async fn support_bundle_download_range(
     client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     range: (u64, u64),
-) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+) -> anyhow::Result<
+    impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<>,
+> {
     let range = format!("bytes={}-{}", range.0, range.1);
     Ok(client
         .support_bundle_download(id.as_untyped_uuid(), Some(&range))
@@ -4500,13 +4510,18 @@ async fn cmd_nexus_support_bundles_download(
     let stream =
         support_bundle_download_ranges(client, args.id, start, total_length);
 
+    let mut open_opts = OpenOptions::new();
+    open_opts.create(true);
+
     let sink: Box<dyn std::io::Write> = match &args.output {
         Some(path) => Box::new(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .truncate(!args.resume)
-                .open(path)?,
+            if args.resume {
+                open_opts.append(true)
+            } else {
+                open_opts.write(true).truncate(true)
+            }
+            .open(path)
+            .with_context(|| format!("failed to create {path}"))?,
         ),
         None => Box::new(std::io::stdout()),
     };

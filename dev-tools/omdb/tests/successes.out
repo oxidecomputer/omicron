@@ -89,9 +89,9 @@ EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL                                    IP           ROLE      POLICY      STATE   ID                                   
- sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -102,9 +102,9 @@ EXECUTING COMMAND: omdb ["db", "sleds", "-F", "discretionary"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
- SERIAL                                    IP           ROLE      POLICY      STATE   ID                                   
- sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
- sim-..........<REDACTED_UUID>...........  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SERIAL       IP           ROLE      POLICY      STATE   ID                                   
+ SimGimlet01  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
+ SimGimlet00  [::1]:REDACTED_PORT  scrimlet  in service  active  ..........<REDACTED_UUID>........... 
 ---------------------------------------------
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
@@ -369,6 +369,11 @@ task: "lookup_region_port"
 
 task: "metrics_producer_gc"
     unregisters Oximeter metrics producers that have not renewed their lease
+
+
+task: "multicast_reconciler"
+    reconciles multicast group and member state with dendrite switch
+    configuration
 
 
 task: "nat_garbage_collector"
@@ -704,6 +709,12 @@ task: "metrics_producer_gc"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
 
+task: "multicast_reconciler"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "multicast_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "errors": Array [], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
+
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -876,6 +887,7 @@ task: "tuf_repo_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    status: enabled
     configuration:
         nkeep_recent_releases: 3
         nkeep_recent_uploads:  3
@@ -1265,6 +1277,12 @@ task: "metrics_producer_gc"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
 
+task: "multicast_reconciler"
+  configured period: every <REDACTED_DURATION>m
+  last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "multicast_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "errors": Array [], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
+
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
@@ -1437,6 +1455,7 @@ task: "tuf_repo_pruner"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    status: enabled
     configuration:
         nkeep_recent_releases: 3
         nkeep_recent_uploads:  3
@@ -1533,7 +1552,10 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>...........
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   ::/64
 
     host phase 2 contents:
     ------------------------
@@ -1572,7 +1594,10 @@ parent:    <none>
 
 
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>...........
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   ::/64
 
     host phase 2 contents:
     ------------------------
@@ -1657,7 +1682,10 @@ stdout:
 blueprint  ......<REDACTED_BLUEPRINT_ID>.......
 parent:    <none>
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>...........
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   ::/64
 
     host phase 2 contents:
     ------------------------
@@ -1696,7 +1724,10 @@ parent:    <none>
 
 
 
-  sled: ..........<REDACTED_UUID>........... (active, config generation 2)
+  sled: ..........<REDACTED_UUID>...........
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   ::/64
 
     host phase 2 contents:
     ------------------------
@@ -1816,6 +1847,7 @@ stdout:
 Reconfigurator config:
     version: 1
     modified time: <REDACTED_TIMESTAMP>
+    tuf repo pruner enabled: true
     planner enabled: false
     planner config:
         add zones with mupdate override:   false
@@ -1848,30 +1880,30 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 Installed RoT Bootloader Software
-BASEBOARD_ID                                        STAGE0_VERSION STAGE0_NEXT_VERSION 
-FAKE_SIM_SIDECAR:SimSidecar0                        unknown        unknown             
-FAKE_SIM_SIDECAR:SimSidecar1                        unknown        unknown             
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown        unknown             
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown        unknown             
+BASEBOARD_ID                 STAGE0_VERSION STAGE0_NEXT_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0 unknown        unknown             
+FAKE_SIM_SIDECAR:SimSidecar1 unknown        unknown             
+i86pc:SimGimlet00            unknown        unknown             
+i86pc:SimGimlet01            unknown        unknown             
 
 Installed RoT Software
-BASEBOARD_ID                                        SLOT_A_VERSION   SLOT_B_VERSION                
-FAKE_SIM_SIDECAR:SimSidecar0                        unknown (active) unknown                       
-FAKE_SIM_SIDECAR:SimSidecar1                        unknown (active) unknown                       
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown          unknown (ACTIVE SLOT UNKNOWN) 
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown          unknown (ACTIVE SLOT UNKNOWN) 
+BASEBOARD_ID                 SLOT_A_VERSION   SLOT_B_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0 unknown (active) unknown        
+FAKE_SIM_SIDECAR:SimSidecar1 unknown (active) unknown        
+i86pc:SimGimlet00            unknown (active) unknown        
+i86pc:SimGimlet01            unknown (active) unknown        
 
 Installed SP Software
-BASEBOARD_ID                                        SLOT0_VERSION SLOT1_VERSION 
-FAKE_SIM_SIDECAR:SimSidecar0                        unknown       unknown       
-FAKE_SIM_SIDECAR:SimSidecar1                        unknown       unknown       
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown       unknown       
-sim-gimlet:sim-..........<REDACTED_UUID>........... unknown       unknown       
+BASEBOARD_ID                 SLOT0_VERSION SLOT1_VERSION 
+FAKE_SIM_SIDECAR:SimSidecar0 unknown       unknown       
+FAKE_SIM_SIDECAR:SimSidecar1 unknown       unknown       
+i86pc:SimGimlet00            unknown       unknown       
+i86pc:SimGimlet01            unknown       unknown       
 
 Installed Host Phase 1 Software
-BASEBOARD_ID                                        SLED_ID                              SLOT_A_VERSION SLOT_B_VERSION                
-sim-gimlet:sim-..........<REDACTED_UUID>........... ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
-sim-gimlet:sim-..........<REDACTED_UUID>........... ..........<REDACTED_UUID>........... unknown        unknown (ACTIVE SLOT UNKNOWN) 
+BASEBOARD_ID      SLED_ID                              SLOT_A_VERSION   SLOT_B_VERSION 
+i86pc:SimGimlet00 ..........<REDACTED_UUID>........... unknown (active) unknown        
+i86pc:SimGimlet01 ..........<REDACTED_UUID>........... unknown (active) unknown        
 
 Installed Host Phase 2 Software
 SLED_ID                              SLOT_A_VERSION      SLOT_B_VERSION 
@@ -1896,7 +1928,8 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 2:
-*   planner enabled:   false -> true
+    tuf repo pruner enabled:   true (unchanged)
+*   planner enabled:::::::::   false -> true
     planner config:
         add zones with mupdate override:   false (unchanged)
 ---------------------------------------------
@@ -1908,7 +1941,8 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 reconfigurator config updated to version 3:
-    planner enabled:   true (unchanged)
+    tuf repo pruner enabled:   true (unchanged)
+    planner enabled:::::::::   true (unchanged)
     planner config:
     *   add zones with mupdate override:   false -> true
 ---------------------------------------------
@@ -1922,6 +1956,7 @@ stdout:
 Reconfigurator config:
     version: 3
     modified time: <REDACTED_TIMESTAMP>
+    tuf repo pruner enabled: true
     planner enabled: true
     planner config:
         add zones with mupdate override:   true
