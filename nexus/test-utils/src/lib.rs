@@ -1171,14 +1171,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         )
         .await;
 
-        let external_server_addr =
-            server.get_http_server_external_address().await;
+        let external_server_addr = server.get_http_server_external_address();
         let techport_external_server_addr =
-            server.get_http_server_techport_address().await;
-        let internal_server_addr =
-            server.get_http_server_internal_address().await;
-        let lockstep_server_addr =
-            server.get_http_server_lockstep_address().await;
+            server.get_http_server_techport_address();
+        let internal_server_addr = server.get_http_server_internal_address();
+        let lockstep_server_addr = server.get_http_server_lockstep_address();
         let testctx_external = ClientTestContext::new(
             external_server_addr,
             self.logctx

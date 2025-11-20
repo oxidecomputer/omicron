@@ -30,7 +30,7 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
     let nexus_lockstep_url = format!(
         "http://{}",
-        cptestctx.server.get_http_server_lockstep_address().await
+        cptestctx.server.get_http_server_lockstep_address(),
     );
     let nexus_client =
         nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
