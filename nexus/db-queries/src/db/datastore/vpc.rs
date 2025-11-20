@@ -3313,10 +3313,7 @@ mod tests {
         };
 
         // Create an initial, empty blueprint, and make it the target.
-        let bp0 = BlueprintBuilder::build_empty_with_sleds(
-            sled_ids.iter().copied(),
-            "test",
-        );
+        let bp0 = BlueprintBuilder::build_empty("test");
         bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
 
         // Our blueprint doesn't describe any services, so we shouldn't find any

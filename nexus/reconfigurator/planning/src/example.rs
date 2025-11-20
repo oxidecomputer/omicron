@@ -535,9 +535,8 @@ impl ExampleSystemBuilder {
 
         let base_input = input_builder.clone().build();
 
-        // Start with an empty blueprint containing only our sleds, no zones.
-        let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
-            base_input.all_sled_ids(SledFilter::Commissioned),
+        // Start with an empty blueprint.
+        let initial_blueprint = BlueprintBuilder::build_empty_seeded(
             "test suite",
             rng.blueprint1_rng,
         );

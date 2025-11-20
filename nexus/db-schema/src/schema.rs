@@ -2720,39 +2720,23 @@ allow_tables_to_appear_in_same_query!(
 joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
 
 table! {
-    sp_ereport (restart_id, ena) {
+    ereport (restart_id, ena) {
         restart_id -> Uuid,
         ena -> Int8,
         time_deleted -> Nullable<Timestamptz>,
         time_collected -> Timestamptz,
         collector_id -> Uuid,
-
-        sp_type -> crate::enums::SpTypeEnum,
-        sp_slot -> Int4,
 
         part_number -> Nullable<Text>,
         serial_number -> Nullable<Text>,
+
         class -> Nullable<Text>,
-
-        report -> Jsonb,
-    }
-}
-
-table! {
-    host_ereport (restart_id, ena) {
-        restart_id -> Uuid,
-        ena -> Int8,
-        time_deleted -> Nullable<Timestamptz>,
-        time_collected -> Timestamptz,
-        collector_id -> Uuid,
-
-        sled_id -> Uuid,
-        sled_serial -> Text,
-        class -> Nullable<Text>,
-
         report -> Jsonb,
 
-        part_number -> Nullable<Text>,
+        reporter -> crate::enums::EreporterTypeEnum,
+        sp_type -> Nullable<crate::enums::SpTypeEnum>,
+        sp_slot -> Nullable<Int4>,
+        sled_id -> Nullable<Uuid>,
     }
 }
 

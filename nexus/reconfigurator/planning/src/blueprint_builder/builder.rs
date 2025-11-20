@@ -33,7 +33,6 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -486,9 +485,8 @@ struct OximeterReadPolicy {
 ///
 /// 1. Build one directly. This would generally only be used once in the
 ///    lifetime of a rack, to assemble the first blueprint during rack setup.
-///    It is also common in tests. To start with a blueprint that contains an
-///    empty zone config for some number of sleds, use
-///    [`BlueprintBuilder::build_empty_with_sleds`].
+///    It is also common in tests. To start with an empty initial blueprint,
+///    use [`BlueprintBuilder::build_empty`].
 ///
 /// 2. Build one _from_ another blueprint, called the "parent", making changes
 ///    as desired.  Use [`BlueprintBuilder::new_based_on`] for this.  Once the
@@ -530,55 +528,19 @@ pub struct BlueprintBuilder<'a> {
 }
 
 impl<'a> BlueprintBuilder<'a> {
-    /// Directly construct a `Blueprint` that contains an empty zone config for
-    /// the given sleds.
-    pub fn build_empty_with_sleds(
-        sled_ids: impl Iterator<Item = SledUuid>,
-        creator: &str,
-    ) -> Blueprint {
-        Self::build_empty_with_sleds_impl(
-            sled_ids,
-            creator,
-            PlannerRng::from_entropy(),
-        )
+    /// Directly construct an empty blueprint: no sleds; default values for all
+    /// other fields.
+    pub fn build_empty(creator: &str) -> Blueprint {
+        Self::build_empty_seeded(creator, PlannerRng::from_entropy())
     }
 
-    /// A version of [`Self::build_empty_with_sleds`] that allows the
+    /// A version of [`Self::build_empty`] that allows the
     /// blueprint ID to be generated from a deterministic RNG.
-    pub fn build_empty_with_sleds_seeded(
-        sled_ids: impl Iterator<Item = SledUuid>,
-        creator: &str,
-        rng: PlannerRng,
-    ) -> Blueprint {
-        Self::build_empty_with_sleds_impl(sled_ids, creator, rng)
-    }
-
-    fn build_empty_with_sleds_impl(
-        sled_ids: impl Iterator<Item = SledUuid>,
-        creator: &str,
-        mut rng: PlannerRng,
-    ) -> Blueprint {
-        let sleds = sled_ids
-            .map(|sled_id| {
-                let config = BlueprintSledConfig {
-                    state: SledState::Active,
-                    sled_agent_generation: Generation::new(),
-                    disks: IdOrdMap::default(),
-                    datasets: IdOrdMap::default(),
-                    zones: IdOrdMap::default(),
-                    remove_mupdate_override: None,
-                    host_phase_2:
-                        BlueprintHostPhase2DesiredSlots::current_contents(),
-                };
-                (sled_id, config)
-            })
-            .collect::<BTreeMap<_, _>>();
-        let num_sleds = sleds.len();
-
+    pub fn build_empty_seeded(creator: &str, mut rng: PlannerRng) -> Blueprint {
         let id = rng.next_blueprint();
         Blueprint {
             id,
-            sleds,
+            sleds: BTreeMap::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
@@ -593,7 +555,7 @@ impl<'a> BlueprintBuilder<'a> {
             oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
-            comment: format!("starting blueprint with {num_sleds} empty sleds"),
+            comment: "starting blueprint (empty)".to_string(),
             // The only reason to create empty blueprints is tests. If that
             // changes (e.g., if RSS starts using this builder to generate its
             // blueprints), we could take a `source` argument instead.
@@ -606,7 +568,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn new_based_on(
         log: &Logger,
         parent_blueprint: &'a Blueprint,
-        input: &'a PlanningInput,
+        input: &PlanningInput,
         creator: &str,
         mut rng: PlannerRng,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
@@ -1801,29 +1763,143 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_add_zone(sled_id, zone)
     }
 
+    // The upstream NTP/DNS servers and domain _should_ come from Nexus and be
+    // modifiable by the operator, but currently can only be set at RSS. We can
+    // only promote a new boundary NTP zone by copying these settings from an
+    // existing one.
+    fn infer_boundary_ntp_config_from_parent_blueprint(
+        &self,
+    ) -> Result<BoundaryNtpConfig, Error> {
+        self.parent_blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .find_map(|(_, z)| match &z.zone_type {
+                BlueprintZoneType::BoundaryNtp(zone_config) => {
+                    Some(BoundaryNtpConfig {
+                        ntp_servers: zone_config.ntp_servers.clone(),
+                        dns_servers: zone_config.dns_servers.clone(),
+                        domain: zone_config.domain.clone(),
+                    })
+                }
+                _ => None,
+            })
+            .ok_or(Error::NoBoundaryNtpZonesInParentBlueprint)
+    }
+
+    /// Add a new boundary NTP server to a sled.
+    ///
+    /// This is unusual: typically during planning we promote internal NTP
+    /// servers to boundary NTP servers via
+    /// `sled_promote_internal_ntp_to_boundary_ntp()`, because adding a new
+    /// boundary NTP zone to a sled is only valid if the sled doesn't currently
+    /// have any NTP zone at all. Only tests and possibly RSS can really make
+    /// use of this.
+    pub fn sled_add_zone_boundary_ntp(
+        &mut self,
+        sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
+        external_ip: ExternalSnatNetworkingChoice,
+    ) -> Result<(), Error> {
+        let BoundaryNtpConfig { ntp_servers, dns_servers, domain } =
+            self.infer_boundary_ntp_config_from_parent_blueprint()?;
+        self.sled_add_zone_boundary_ntp_with_config(
+            sled_id,
+            ntp_servers,
+            dns_servers,
+            domain,
+            image_source,
+            external_ip,
+        )
+    }
+
+    /// Add a new boundary NTP server to a sled.
+    ///
+    /// This is unusual: typically during planning we promote internal NTP
+    /// servers to boundary NTP servers via
+    /// `sled_promote_internal_ntp_to_boundary_ntp()`, because adding a new
+    /// boundary NTP zone to a sled is only valid if the sled doesn't currently
+    /// have any NTP zone at all. Only tests and possibly RSS can really make
+    /// use of this.
+    pub fn sled_add_zone_boundary_ntp_with_config(
+        &mut self,
+        sled_id: SledUuid,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+        image_source: BlueprintZoneImageSource,
+        external_ip: ExternalSnatNetworkingChoice,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to promote NTP zone on unknown sled {sled_id}"
+            ))
+        })?;
+
+        // Ensure we have no other in-service NTP zones.
+        if let Some(in_service_ntp_zone) = editor
+            .zones(BlueprintZoneDisposition::is_in_service)
+            .find(|zone| zone.zone_type.is_ntp())
+        {
+            return Err(Error::Planner(anyhow!(
+                "attempted to add boundary NTP zone to sled {sled_id} which \
+                 already has an in-service NTP zone: {in_service_ntp_zone:?}"
+            )));
+        }
+
+        // Add the new boundary NTP zone.
+        let new_zone_id = self.rng.sled_rng(sled_id).next_zone();
+        let ExternalSnatNetworkingChoice { snat_cfg, nic_ip_config, nic_mac } =
+            external_ip;
+        let external_ip = OmicronZoneExternalSnatIp {
+            id: self.rng.sled_rng(sled_id).next_external_ip(),
+            snat_cfg,
+        };
+        let nic = NetworkInterface {
+            id: self.rng.sled_rng(sled_id).next_network_interface(),
+            kind: NetworkInterfaceKind::Service {
+                id: new_zone_id.into_untyped_uuid(),
+            },
+            name: format!("ntp-{new_zone_id}").parse().unwrap(),
+            ip_config: nic_ip_config,
+            mac: nic_mac,
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+        };
+
+        let underlay_ip = self.sled_alloc_ip(sled_id)?;
+        let port = omicron_common::address::NTP_PORT;
+        let zone_type =
+            BlueprintZoneType::BoundaryNtp(blueprint_zone_type::BoundaryNtp {
+                address: SocketAddrV6::new(underlay_ip, port, 0, 0),
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                external_ip,
+            });
+        let filesystem_pool =
+            self.sled_select_zpool(sled_id, zone_type.kind())?;
+
+        self.sled_add_zone(
+            sled_id,
+            BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: new_zone_id,
+                filesystem_pool,
+                zone_type,
+                image_source,
+            },
+        )
+    }
+
     pub fn sled_promote_internal_ntp_to_boundary_ntp(
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
         external_ip: ExternalSnatNetworkingChoice,
     ) -> Result<(), Error> {
-        // The upstream NTP/DNS servers and domain _should_ come from Nexus and
-        // be modifiable by the operator, but currently can only be set at RSS.
-        // We can only promote a new boundary NTP zone by copying these settings
-        // from an existing one.
-        let (ntp_servers, dns_servers, domain) = self
-            .parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .find_map(|(_, z)| match &z.zone_type {
-                BlueprintZoneType::BoundaryNtp(zone_config) => Some((
-                    zone_config.ntp_servers.clone(),
-                    zone_config.dns_servers.clone(),
-                    zone_config.domain.clone(),
-                )),
-                _ => None,
-            })
-            .ok_or(Error::NoBoundaryNtpZonesInParentBlueprint)?;
-
+        let BoundaryNtpConfig { ntp_servers, dns_servers, domain } =
+            self.infer_boundary_ntp_config_from_parent_blueprint()?;
         self.sled_promote_internal_ntp_to_boundary_ntp_with_config(
             sled_id,
             ntp_servers,
@@ -1883,49 +1959,13 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
 
         // Add the new boundary NTP zone.
-        let new_zone_id = self.rng.sled_rng(sled_id).next_zone();
-        let ExternalSnatNetworkingChoice { snat_cfg, nic_ip_config, nic_mac } =
-            external_ip;
-        let external_ip = OmicronZoneExternalSnatIp {
-            id: self.rng.sled_rng(sled_id).next_external_ip(),
-            snat_cfg,
-        };
-        let nic = NetworkInterface {
-            id: self.rng.sled_rng(sled_id).next_network_interface(),
-            kind: NetworkInterfaceKind::Service {
-                id: new_zone_id.into_untyped_uuid(),
-            },
-            name: format!("ntp-{new_zone_id}").parse().unwrap(),
-            ip_config: nic_ip_config,
-            mac: nic_mac,
-            vni: Vni::SERVICES_VNI,
-            primary: true,
-            slot: 0,
-        };
-
-        let underlay_ip = self.sled_alloc_ip(sled_id)?;
-        let port = omicron_common::address::NTP_PORT;
-        let zone_type =
-            BlueprintZoneType::BoundaryNtp(blueprint_zone_type::BoundaryNtp {
-                address: SocketAddrV6::new(underlay_ip, port, 0, 0),
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic,
-                external_ip,
-            });
-        let filesystem_pool =
-            self.sled_select_zpool(sled_id, zone_type.kind())?;
-
-        self.sled_add_zone(
+        self.sled_add_zone_boundary_ntp_with_config(
             sled_id,
-            BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: new_zone_id,
-                filesystem_pool,
-                zone_type,
-                image_source,
-            },
+            ntp_servers,
+            dns_servers,
+            domain,
+            image_source,
+            external_ip,
         )
     }
 
@@ -2522,6 +2562,12 @@ impl fmt::Display for BpMupdateOverrideNotClearedReason {
             }
         }
     }
+}
+
+struct BoundaryNtpConfig {
+    ntp_servers: Vec<String>,
+    dns_servers: Vec<IpAddr>,
+    domain: Option<String>,
 }
 
 #[cfg(test)]
