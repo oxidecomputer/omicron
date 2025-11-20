@@ -33,7 +33,7 @@ use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
 use nexus_db_schema::schema::fm_case::dsl as case_dsl;
-use nexus_db_schema::schema::fm_case_impacts_sp_slot::dsl as impacted_sp_dsl;
+use nexus_db_schema::schema::fm_case_impacts_location::dsl as impacted_location_dsl;
 use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
@@ -228,7 +228,7 @@ impl DataStore {
                             comment: case.comment,
                             ereports,
                             alerts_requested,
-                            impacted_sp_slots: Default::default(), // TODO
+                            impacted_locations: Default::default(), // TODO
                         })
                         .expect("case UUIDs should be unique");
                 }
@@ -396,7 +396,7 @@ impl DataStore {
                 metadata,
                 ereports,
                 alerts_requested,
-                impacted_sp_slots,
+                impacted_locations,
             } = model::fm::Case::from_sitrep(sitrep_id, case);
 
             if !ereports.is_empty() {
@@ -427,18 +427,20 @@ impl DataStore {
                     })?;
             }
 
-            if !impacted_sp_slots.is_empty() {
-                diesel::insert_into(impacted_sp_dsl::fm_case_impacts_sp_slot)
-                    .values(impacted_sp_slots)
-                    .execute_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                            .internal_context(format!(
-                                "failed to insert impacted SP slots for case {}",
-                                metadata.id
-                            ))
-                    })?;
+            if !impacted_locations.is_empty() {
+                diesel::insert_into(
+                    impacted_location_dsl::fm_case_impacts_location,
+                )
+                .values(impacted_locations)
+                .execute_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(format!(
+                            "failed to insert impacted locations for case {}",
+                            metadata.id
+                        ))
+                })?;
             }
 
             cases.push(metadata);

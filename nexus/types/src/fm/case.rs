@@ -26,7 +26,7 @@ pub struct Case {
 
     pub ereports: IdOrdMap<CaseEreport>,
     pub alerts_requested: IdOrdMap<AlertRequest>,
-    pub impacted_sp_slots: IdOrdMap<ImpactedSpSlot>,
+    pub impacted_locations: IdOrdMap<ImpactedLocation>,
 
     pub comment: String,
 }
@@ -77,14 +77,14 @@ impl IdOrdItem for CaseEreport {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-pub struct ImpactedSpSlot {
+pub struct ImpactedLocation {
     pub sp_type: SpType,
     pub slot: u16,
     pub created_sitrep_id: SitrepUuid,
     pub comment: String,
 }
 
-impl IdOrdItem for ImpactedSpSlot {
+impl IdOrdItem for ImpactedLocation {
     type Key<'a> = (SpType, u16);
     fn key(&self) -> Self::Key<'_> {
         (self.sp_type, self.slot)
@@ -115,7 +115,7 @@ impl fmt::Display for DisplayCase<'_> {
                     de,
                     ereports,
                     alerts_requested,
-                    impacted_sp_slots,
+                    impacted_locations,
                     comment,
                 },
             indent,
@@ -192,11 +192,15 @@ impl fmt::Display for DisplayCase<'_> {
             }
         }
 
-        if !impacted_sp_slots.is_empty() {
-            writeln!(f, "\n{:>indent$}SP slots impacted:\n", "")?;
+        if !impacted_locations.is_empty() {
+            writeln!(f, "\n{:>indent$}locations impacted:\n", "")?;
             let indent = indent + LIST_INDENT;
-            for ImpactedSpSlot { sp_type, slot, created_sitrep_id, comment } in
-                impacted_sp_slots
+            for ImpactedLocation {
+                sp_type,
+                slot,
+                created_sitrep_id,
+                comment,
+            } in impacted_locations
             {
                 writeln!(f, "{BULLET:>indent$}{sp_type:<6} {slot}")?;
                 writeln!(
@@ -323,7 +327,7 @@ mod tests {
         alerts_requested.insert_unique(alert2).unwrap();
 
         let mut impacted_sp_slots = IdOrdMap::new();
-        let slot2 = ImpactedSpSlot {
+        let slot2 = ImpactedLocation {
             sp_type: SpType::Power,
             slot: 0,
             created_sitrep_id,
@@ -341,7 +345,7 @@ mod tests {
             de: DiagnosisEngineKind::PowerShelf,
             ereports,
             alerts_requested,
-            impacted_sp_slots,
+            impacted_locations: impacted_sp_slots,
             comment: "Power shelf rectifier added and removed here :-)"
                 .to_string(),
         };

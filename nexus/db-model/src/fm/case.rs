@@ -12,7 +12,7 @@ use crate::SpType;
 use crate::ereport;
 use chrono::{DateTime, Utc};
 use nexus_db_schema::schema::{
-    fm_case, fm_case_impacts_sp_slot, fm_ereport_in_case,
+    fm_case, fm_case_impacts_location, fm_ereport_in_case,
 };
 use nexus_types::fm;
 use omicron_uuid_kinds::{
@@ -47,8 +47,8 @@ pub struct CaseEreport {
 }
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable)]
-#[diesel(table_name = fm_case_impacts_sp_slot)]
-pub struct CaseImpactsSp {
+#[diesel(table_name = fm_case_impacts_location)]
+pub struct CaseImpactsLocation {
     pub sitrep_id: DbTypedUuid<SitrepKind>,
     pub case_id: DbTypedUuid<CaseKind>,
     pub sp_type: SpType,
@@ -61,7 +61,7 @@ pub struct CaseImpactsSp {
 pub struct Case {
     pub metadata: CaseMetadata,
     pub ereports: Vec<CaseEreport>,
-    pub impacted_sp_slots: Vec<CaseImpactsSp>,
+    pub impacted_locations: Vec<CaseImpactsLocation>,
     pub alerts_requested: Vec<AlertRequest>,
 }
 
@@ -91,16 +91,16 @@ impl Case {
                 },
             )
             .collect();
-        let impacted_sp_slots = case
-            .impacted_sp_slots
+        let impacted_locations = case
+            .impacted_locations
             .into_iter()
             .map(
-                |fm::case::ImpactedSpSlot {
+                |fm::case::ImpactedLocation {
                      sp_type,
                      slot,
                      comment,
                      created_sitrep_id,
-                 }| CaseImpactsSp {
+                 }| CaseImpactsLocation {
                     sitrep_id,
                     case_id,
                     sp_type: sp_type.into(),
@@ -142,7 +142,7 @@ impl Case {
                 comment: case.comment,
             },
             ereports,
-            impacted_sp_slots,
+            impacted_locations,
             alerts_requested,
         }
     }

@@ -6900,7 +6900,7 @@ CREATE INDEX IF NOT EXISTS
     lookup_ereports_assigned_to_fm_case
 ON omicron.public.fm_ereport_in_case (sitrep_id, case_id);
 
-CREATE TABLE IF NOT EXISTS omicron.public.fm_case_impacts_sp_slot (
+CREATE TABLE IF NOT EXISTS omicron.public.fm_case_impacts_location (
     sitrep_id UUID NOT NULL,
     case_id UUID NOT NULL,
     -- location of this device according to MGS

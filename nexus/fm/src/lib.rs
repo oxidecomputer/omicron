@@ -14,7 +14,7 @@ use slog::Logger;
 pub mod alert;
 pub mod case;
 pub use case::CaseBuilder;
-pub mod de;
+pub mod diagnosis;
 pub mod ereport_analysis;
 
 #[derive(Debug)]
