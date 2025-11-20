@@ -8,6 +8,7 @@ use crate::app::sagas;
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::DiskTypeLocalStorage;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -226,7 +227,7 @@ impl super::Nexus {
                 }
             }
 
-            params::DiskCreate::LocalStorage { .. } => {
+            params::DiskCreate::LocalStorage { size, .. } => {
                 // If a user requests some outlandish number of TB for local
                 // storage, and there isn't a sled allocation that can fulfill
                 // this, instance create will work but instance start (which
@@ -253,6 +254,22 @@ impl super::Nexus {
                 // TODO consult the latest inventory collection if it isn't too
                 // expensive, and reject local storage disk requests that are
                 // too large to be served by any sled.
+
+                // Test that the disk create saga can create the
+                // DiskTypeLocalStorage record. This won't be the record
+                // actually used by the created disk, but validation here can be
+                // returned to a user with a non-500 error, and validation
+                // failure in a saga will only show up as a 500.
+
+                if let Err(e) = DiskTypeLocalStorage::new(Uuid::new_v4(), *size)
+                {
+                    return Err(Error::invalid_value(
+                        "size",
+                        format!(
+                            "error computing required dataset overhead: {e}"
+                        ),
+                    ));
+                }
             }
         }
 
