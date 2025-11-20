@@ -17,7 +17,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 progenitor::generate_api!(
-    spec = "../../openapi/nexus.json",
+    spec = "../../openapi/nexus/nexus-latest.json",
     interface = Builder,
     tags = Separate,
 );

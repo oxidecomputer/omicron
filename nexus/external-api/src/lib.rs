@@ -14,7 +14,7 @@ use dropshot::{
     Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
     WebsocketChannelResult, WebsocketConnection,
 };
-use dropshot_api_manager_types::ValidationContext;
+use dropshot_api_manager_types::{ValidationContext, api_versions};
 use http::Response;
 use ipnetwork::IpNetwork;
 use nexus_types::{
@@ -33,7 +33,44 @@ use omicron_common::api::external::{
 };
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20251208.0.0";
+api_versions!([
+    // API versions are in the format YYYYMMDDNN.0.0, defined below as
+    // YYYYMMDDNN. Here, NN is a two-digit number starting at 00 for a
+    // particular date.
+    //
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- Take today's date in YYYYMMDD format, e.g. 20251112.
+    // |  Find the smallest NN that isn't already defined in the list below. In
+    // |  most cases, that is 00, but if 00 is already taken, use 01, 02, etc.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // |
+    // |  If there's a merge conflict, update the version number to the current
+    // |  date. Otherwise, it is okay to leave the version number unchanged even
+    // |  if you land your change on a different day from the one you make it on.
+    // |
+    // |  Ensure that version numbers are sorted in descending order. (This macro
+    // |  will panic at runtime if they're not in descending order.) The newest
+    // |  date-based version should be at the top of the list.
+    // v
+    // (next_yyyymmddnn, IDENT),
+    (2025112000, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2025120100, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;
@@ -4366,32 +4403,31 @@ pub trait NexusExternalApi {
 
 /// Perform extra validations on the OpenAPI spec.
 pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
-    if spec.openapi != "3.0.3" {
-        cx.report_error(anyhow!(
-            "Expected OpenAPI version to be 3.0.3, found {}",
-            spec.openapi,
-        ));
-    }
-    if spec.info.title != "Oxide Region API" {
-        cx.report_error(anyhow!(
-            "Expected OpenAPI version to be 'Oxide Region API', found '{}'",
-            spec.info.title,
-        ));
-    }
-    if spec.info.version != API_VERSION {
-        cx.report_error(anyhow!(
-            "Expected OpenAPI version to be '{}', found '{}'",
-            API_VERSION,
-            spec.info.version,
-        ));
-    }
+    let is_blessed = cx
+        .is_blessed()
+        .expect("this is a versioned API so is_blessed should always be Some");
 
-    // Spot check a couple of items.
-    if spec.paths.paths.is_empty() {
-        cx.report_error(anyhow!("Expected at least one path in the spec"));
-    }
-    if spec.paths.paths.get("/v1/projects").is_none() {
-        cx.report_error(anyhow!("Expected a path for /v1/projects"));
+    if !is_blessed {
+        if spec.openapi != "3.0.3" {
+            cx.report_error(anyhow!(
+                "Expected OpenAPI version to be 3.0.3, found {}",
+                spec.openapi,
+            ));
+        }
+        if spec.info.title != "Oxide Region API" {
+            cx.report_error(anyhow!(
+                "Expected OpenAPI version to be 'Oxide Region API', found '{}'",
+                spec.info.title,
+            ));
+        }
+
+        // Spot check a couple of items.
+        if spec.paths.paths.is_empty() {
+            cx.report_error(anyhow!("Expected at least one path in the spec"));
+        }
+        if spec.paths.paths.get("/v1/projects").is_none() {
+            cx.report_error(anyhow!("Expected a path for /v1/projects"));
+        }
     }
 
     // Construct a string that helps us identify the organization of tags and
@@ -4417,10 +4453,12 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
         // Every non-hidden endpoint must have a summary
         if op.tags.contains(&"console-auth".to_string()) && op.summary.is_none()
         {
-            cx.report_error(anyhow!(
-                "operation '{}' is missing a summary doc comment",
-                op.operation_id.as_ref().unwrap()
-            ));
+            if !is_blessed {
+                cx.report_error(anyhow!(
+                    "operation '{}' is missing a summary doc comment",
+                    op.operation_id.as_ref().unwrap()
+                ));
+            }
             // This error does not prevent `ops_by_tag` from being populated
             // correctly, so we can continue.
         }
@@ -4435,7 +4473,9 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
             ));
     }
 
-    if ops_by_tag_valid {
+    // nexus_tags.txt is unversioned, so only write it out for the latest
+    // version.
+    if cx.is_latest() && ops_by_tag_valid {
         let mut tags = String::new();
         for (tag, mut ops) in ops_by_tag {
             ops.sort();

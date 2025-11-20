@@ -7,10 +7,12 @@ use camino::Utf8Path;
 use camino_tempfile::{Builder, Utf8TempPath};
 use chrono::{DateTime, Duration, Timelike, Utc};
 use dropshot::ResultsPage;
+use dropshot::test_util::ClientTestContext;
 use http::{Method, StatusCode};
 use nexus_db_model::SemverVersion;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pub_test_utils::helpers::insert_test_tuf_repo;
+use nexus_test_interface::NexusServer;
 use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::background::run_tuf_artifact_replication_step;
 use nexus_test_utils::background::wait_tuf_artifact_replication_step;
@@ -1036,4 +1038,32 @@ async fn test_repo_list() -> Result<()> {
 
     cptestctx.teardown().await;
     Ok(())
+}
+
+/// Test that a request without an API version header still succeeds.
+///
+/// Unlike internal APIs, we don't control all clients for our external API, so
+/// we make the api-version header optional. This test ensures that a request
+/// without the header succeeds.
+#[nexus_test]
+async fn test_request_without_api_version(cptestctx: &ControlPlaneTestContext) {
+    // We can't use cptestctx.external_client directly since it always sets the
+    // header. Instead, construct a NexusRequest by hand.
+    let server_addr = cptestctx.server.get_http_server_external_address().await;
+    let test_cx =
+        ClientTestContext::new(server_addr, cptestctx.logctx.log.clone());
+    let req_builder = RequestBuilder::new(
+        &test_cx,
+        http::Method::GET,
+        "/v1/system/update/status",
+    );
+    assert_eq!(
+        req_builder.headers().get(&omicron_common::api::VERSION_HEADER),
+        None,
+        "api-version header is not set"
+    );
+    let req =
+        NexusRequest::new(req_builder).authn_as(AuthnMode::PrivilegedUser);
+    let status: views::UpdateStatus = req.execute_and_parse_unwrap().await;
+    assert_eq!(status.target_release.0, None);
 }
