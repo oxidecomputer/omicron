@@ -1715,6 +1715,10 @@ async fn save_sp_dumps(
         .context("failed to get task dump count from SP")?
         .into_inner();
 
+    if dump_count == 0 {
+        return Ok(());
+    }
+
     let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.type_, sp.slot));
     tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
         format!("Failed to create output directory {output_dir}")
