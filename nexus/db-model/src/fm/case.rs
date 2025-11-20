@@ -147,3 +147,22 @@ impl Case {
         }
     }
 }
+
+impl From<CaseImpactsLocation> for fm::case::ImpactedLocation {
+    fn from(loc: CaseImpactsLocation) -> Self {
+        let CaseImpactsLocation {
+            sitrep_id: _,
+            case_id: _,
+            sp_type,
+            sp_slot,
+            created_sitrep_id,
+            comment,
+        } = loc;
+        fm::case::ImpactedLocation {
+            sp_type: sp_type.into(),
+            slot: sp_slot.0.into(),
+            created_sitrep_id: created_sitrep_id.into(),
+            comment,
+        }
+    }
+}
