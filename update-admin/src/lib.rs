@@ -31,7 +31,7 @@ pub async fn start_server(server_config: Config) -> Result<Server, StartError> {
     let (drain, registration) = slog_dtrace::with_drain(
         server_config
             .log
-            .to_logger("ntp-admin")
+            .to_logger("update-admin")
             .map_err(StartError::InitializeLogger)?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
