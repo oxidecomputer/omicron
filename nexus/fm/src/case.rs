@@ -36,14 +36,15 @@ impl AllCases {
     ) -> (Self, ImpactLists) {
         // Copy forward any open cases from the parent sitrep.
         // If a case was closed in the parent sitrep, skip it.
-        let mut cases_by_sp: HashMap<_, HashSet<CaseUuid>> = HashMap::new();
+        let mut cases_by_location: HashMap<_, HashSet<CaseUuid>> =
+            HashMap::new();
         let cases: IdOrdMap<_> = parent_sitrep
             .iter()
             .flat_map(|s| s.open_cases())
             .map(|case| {
-                for sp in &case.impacted_sp_slots {
-                    cases_by_sp
-                        .entry((sp.sp_type, sp.slot))
+                for location in &case.impacted_locations {
+                    cases_by_location
+                        .entry((location.sp_type, location.slot))
                         .or_default()
                         .insert(case.id.clone());
                 }
@@ -52,7 +53,7 @@ impl AllCases {
             .collect();
 
         let cases = Self { log, sitrep_id, cases };
-        let impact_lists = ImpactLists { cases_by_sp };
+        let impact_lists = ImpactLists { cases_by_sp: cases_by_location };
         (cases, impact_lists)
     }
 
@@ -77,7 +78,7 @@ impl AllCases {
                     comment: String::new(),
                     ereports: Default::default(),
                     alerts_requested: Default::default(),
-                    impacted_sp_slots: Default::default(),
+                    impacted_locations: Default::default(),
                 };
                 entry.insert(CaseBuilder::new(&self.log, sitrep_id, case))
             }
@@ -181,15 +182,17 @@ impl CaseBuilder {
         }
     }
 
-    pub fn impacts_sp(
+    pub fn impacts_location(
         &mut self,
         impact_lists: &mut ImpactLists,
         sp_type: SpType,
         slot: u16,
         comment: impl ToString,
     ) -> anyhow::Result<()> {
-        if self.impacted_sp_slots.contains_key(&(sp_type, slot)) {
-            return Err(anyhow::anyhow!("case already impacts this SP"));
+        if self.impacted_locations.contains_key(&(sp_type, slot)) {
+            return Err(anyhow::anyhow!(
+                "case already impacts this location ({sp_type} {slot})"
+            ));
         }
 
         impact_lists
@@ -201,14 +204,14 @@ impl CaseBuilder {
         let comment = comment.to_string();
         slog::info!(
             &self.log,
-            "case impacts SP";
+            "case impacts location";
             "sp_type" => %sp_type,
             "slot" => %slot,
             "comment" => %comment,
         );
         let created_sitrep_id = self.sitrep_id;
-        self.impacted_sp_slots
-            .insert_unique(fm::case::ImpactedSpSlot {
+        self.impacted_locations
+            .insert_unique(fm::case::ImpactedLocation {
                 sp_type,
                 slot,
                 created_sitrep_id,
@@ -216,7 +219,7 @@ impl CaseBuilder {
             })
             .expect(
                 "we just checked that there wasn't already an entry for this \
-               SP slot",
+                 location",
             );
 
         Ok(())

@@ -12,7 +12,7 @@ use crate::ereport_analysis;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::Ereport;
 use nexus_types::fm::case::CaseEreport;
-use nexus_types::fm::case::ImpactedSpSlot;
+use nexus_types::fm::case::ImpactedLocation;
 use nexus_types::fm::ereport;
 use nexus_types::inventory::SpType;
 use omicron_uuid_kinds::CaseUuid;
@@ -67,8 +67,8 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
         );
 
         // ooh, a case we alerady opened! let's figure out what its deal is...
-        for &ImpactedSpSlot { sp_type, slot, ref comment, .. } in
-            &case.impacted_sp_slots
+        for &ImpactedLocation { sp_type, slot, ref comment, .. } in
+            &case.impacted_locations
         {
             // skip non-PSC impacts
             if sp_type != SpType::Power {
@@ -215,7 +215,7 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
                 case.request_alert(&alert::power_shelf::PsuInserted::V0 {
                     psc_psu,
                 })?;
-                case.impacts_sp(
+                case.impacts_location(
                     &mut sitrep.impact_lists,
                     SpType::Power,
                     slot,
@@ -232,7 +232,7 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
                 let mut case =
                     sitrep.cases.open_case(DiagnosisEngineKind::PowerShelf)?;
                 case.add_ereport(ereport, "PSU removed ereport");
-                case.impacts_sp(
+                case.impacts_location(
                     &mut sitrep.impact_lists,
                     SpType::Power,
                     slot,
@@ -271,14 +271,13 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
         &mut self,
         _sitrep: &mut SitrepBuilder<'_>,
     ) -> anyhow::Result<()> {
-        
         // TODO:
-        // 
+        //
         // - scan all of our tracked cases (newly opened and inherited from
         //   the parent sitrep)
         // - debouncing
         // - determine whether undiagnosed cases can now be diagnosed
-        // - determine whether those cases have been resolved (looking at 
+        // - determine whether those cases have been resolved (looking at
         //   any newly-added ereports, and inventory data/health endpoint
         //   observations)
         // - determine what Active Problems should be requested, updated,
