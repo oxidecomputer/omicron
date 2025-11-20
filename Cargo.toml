@@ -146,6 +146,9 @@ members = [
     "trust-quorum/test-utils",
     "trust-quorum/tqdb",
     "typed-rng",
+    "update-admin",
+    "update-admin/api",
+    "update-admin/types",
     "update-common",
     "update-engine",
     "uuid-kinds",
@@ -308,6 +311,9 @@ default-members = [
     "trust-quorum/tqdb",
     "test-utils",
     "typed-rng",
+    "update-admin",
+    "update-admin/api",
+    "update-admin/types",
     "update-common",
     "update-engine",
     "uuid-kinds",
@@ -594,6 +600,7 @@ omicron-repl-utils = { path = "dev-tools/repl-utils" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
+omicron-update-admin = { path = "update-admin" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
@@ -774,6 +781,8 @@ tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
 unicode-width = "0.1.13"
+update-admin-api = { path = "update-admin/api" }
+update-admin-types = { path = "update-admin/types" }
 update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 url = "2.5.4"

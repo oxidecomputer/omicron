@@ -26,6 +26,7 @@ use oximeter_api::*;
 use repo_depot_api::*;
 use serde::{Deserialize, Serialize};
 use sled_agent_api::*;
+use update_admin_api::*;
 use wicketd_api::*;
 
 fn environment() -> anyhow::Result<Environment> {
@@ -308,6 +309,21 @@ fn all_apis() -> anyhow::Result<ManagedApis> {
             },
             api_description: wicketd_api_mod::stub_api_description,
             ident: "wicketd",
+            extra_validation: None,
+        },
+        ManagedApiConfig {
+            title: "Update Admin API",
+            versions: Versions::new_versioned(
+                update_admin_api::supported_versions(),
+            ),
+            metadata: ManagedApiMetadata {
+                description: Some("API for update related tasks"),
+                contact_url: Some("https://oxide.computer"),
+                contact_email: Some("api@oxide.computer"),
+                extra: to_value(ApiBoundary::Internal),
+            },
+            api_description: update_admin_api_mod::stub_api_description,
+            ident: "update-admin",
             extra_validation: None,
         },
     ];

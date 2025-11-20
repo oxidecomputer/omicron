@@ -1,0 +1,20 @@
+[package]
+name = "update-admin-api"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+dropshot.workspace = true
+dropshot-api-manager-types.workspace = true
+http.workspace = true
+update-admin-types.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true

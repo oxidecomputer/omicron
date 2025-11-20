@@ -1,0 +1,50 @@
+[package]
+name = "omicron-update-admin"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+chrono.workspace = true
+clap.workspace = true
+dropshot.workspace = true
+http.workspace = true
+update-admin-api.workspace = true
+update-admin-types.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
+reqwest.workspace = true
+schemars.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-dtrace.workspace = true
+slog-error-chain.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+toml.workspace = true
+
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+nexus-test-utils.workspace = true
+omicron-test-utils.workspace = true
+openapi-lint.workspace = true
+openapiv3.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+subprocess.workspace = true
+test-strategy.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true

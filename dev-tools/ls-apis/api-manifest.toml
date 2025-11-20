@@ -78,6 +78,7 @@ packages = [
     "omicron-gateway",
     "tfportd",
     "wicketd",
+    # TODO-K: update-admin should live in the switch zone. Should I add it here?
 ]
 
 # Installinator gets packaged into its own host OS image.
