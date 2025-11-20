@@ -40,9 +40,13 @@ api_versions!([
     //
     // WHEN CHANGING THE API (part 1 of 2):
     //
-    // +- Take today's date in YYYYMMDD format, e.g. 20251112.
-    // |  Find the smallest NN that isn't already defined in the list below. In
-    // |  most cases, that is 00, but if 00 is already taken, use 01, 02, etc.
+    // +- First, determine the next API version number to use.
+    // |
+    // |  * On the main branch: Take today's date in YYYYMMDD format, e.g. 20251112.
+    // |    Find the smallest NN that isn't already defined in the list below. In
+    // |    most cases, that is 00, but if 00 is already taken, use 01, 02, etc.
+    // |
+    // |  * On a release branch, don't alter the date. Instead, always bump the NN.
     // |
     // |  Duplicate this line, uncomment the *second* copy, update that copy for
     // |  your new API version, and leave the first copy commented out as an
@@ -78,7 +82,7 @@ const DISK_BULK_WRITE_MAX_BYTES: usize = 8 * MIB;
 // Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
 // continue growing.
 const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
-
+'''
 // API ENDPOINT FUNCTION NAMING CONVENTIONS
 //
 // Generally, HTTP resources are grouped within some collection. For a
