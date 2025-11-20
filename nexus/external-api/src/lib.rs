@@ -82,7 +82,7 @@ const DISK_BULK_WRITE_MAX_BYTES: usize = 8 * MIB;
 // Full release repositories are currently (Dec 2024) 1.8 GiB and are likely to
 // continue growing.
 const PUT_UPDATE_REPOSITORY_MAX_BYTES: usize = 4 * GIB;
-'''
+
 // API ENDPOINT FUNCTION NAMING CONVENTIONS
 //
 // Generally, HTTP resources are grouped within some collection. For a
