@@ -102,16 +102,20 @@ pub mod inventory {
     pub use crate::v1::inventory::SledCpuFamily;
     pub use crate::v1::inventory::SledRole;
     pub use crate::v1::inventory::ZoneArtifactInventory;
-    pub use crate::v1::inventory::ZoneImageResolverInventory;
     pub use crate::v1::inventory::ZoneKind;
 
-    pub use crate::v11::inventory::ConfigReconcilerInventory;
-    pub use crate::v11::inventory::ConfigReconcilerInventoryStatus;
-    pub use crate::v11::inventory::Inventory;
-    pub use crate::v11::inventory::OmicronSledConfig;
     pub use crate::v11::inventory::OmicronZoneConfig;
     pub use crate::v11::inventory::OmicronZoneType;
     pub use crate::v11::inventory::OmicronZonesConfig;
+
+    pub use crate::v12::inventory::ConfigReconcilerInventory;
+    pub use crate::v12::inventory::ConfigReconcilerInventoryStatus;
+    pub use crate::v12::inventory::Inventory;
+    pub use crate::v12::inventory::OmicronMeasurementSetDesiredContents;
+    pub use crate::v12::inventory::OmicronMeasurements;
+    pub use crate::v12::inventory::OmicronSledConfig;
+    pub use crate::v12::inventory::ReconciledSingleMeasurement;
+    pub use crate::v12::inventory::ZoneImageResolverInventory;
 
     pub use crate::impls::inventory::ManifestBootInventoryDisplay;
     pub use crate::impls::inventory::ManifestInventoryDisplay;

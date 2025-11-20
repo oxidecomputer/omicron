@@ -19,7 +19,7 @@ use omicron_common::api::internal::{
         SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
     },
 };
-use sled_agent_types_versions::{latest, v1, v4, v6, v7, v9, v10};
+use sled_agent_types_versions::{latest, v1, v4, v6, v7, v9, v10, v11};
 use sled_diagnostics::SledDiagnosticsQueryOutput;
 
 api_versions!([
@@ -34,6 +34,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (12, MEASUREMENTS),
     (11, ADD_DUAL_STACK_EXTERNAL_IP_CONFIG),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
     (9, DELEGATE_ZVOL_TO_PROPOLIS),
@@ -331,7 +332,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..
+        versions = VERSION_MEASUREMENTS..,
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
@@ -343,7 +344,7 @@ pub trait SledAgentApi {
         method = PUT,
         path = "/omicron-config",
         versions =
-            VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG,
+            VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..VERSION_MEASUREMENTS,
     }]
     async fn omicron_config_put_v10(
         rqctx: RequestContext<Self::Context>,
@@ -723,11 +724,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..,
+        versions = VERSION_MEASUREMENTS..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<latest::inventory::Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions =
+            VERSION_ADD_DUAL_STACK_EXTERNAL_IP_CONFIG..VERSION_MEASUREMENTS,
+    }]
+    async fn inventory_v11(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v11::inventory::Inventory>, HttpError> {
+        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {

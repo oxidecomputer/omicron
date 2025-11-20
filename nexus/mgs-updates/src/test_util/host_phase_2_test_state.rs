@@ -177,6 +177,7 @@ impl HostPhase2SledAgentContext {
 struct HostPhase2SledAgentImpl;
 
 mod api_impl {
+
     use super::HostPhase2SledAgentContext;
     use super::HostPhase2SledAgentImpl;
     use camino::Utf8PathBuf;
@@ -245,6 +246,7 @@ mod api_impl {
     use sled_agent_types::inventory::Inventory;
     use sled_agent_types::inventory::ManifestInventory;
     use sled_agent_types::inventory::MupdateOverrideInventory;
+    use sled_agent_types::inventory::OmicronMeasurements;
     use sled_agent_types::inventory::OmicronSledConfig;
     use sled_agent_types::inventory::SledCpuFamily;
     use sled_agent_types::inventory::SledRole;
@@ -339,6 +341,7 @@ mod api_impl {
                     slot_a: HostPhase2DesiredContents::CurrentContents,
                     slot_b: HostPhase2DesiredContents::CurrentContents,
                 },
+                measurements: OmicronMeasurements::measurements_defaults(),
             };
 
             Ok(HttpResponseOk(Inventory {
@@ -364,11 +367,20 @@ mod api_impl {
                     datasets: BTreeMap::new(),
                     orphaned_datasets: IdOrdMap::new(),
                     zones: BTreeMap::new(),
+                    measurements: IdOrdMap::new(),
                     remove_mupdate_override: None,
                     boot_partitions,
                 }),
                 zone_image_resolver: ZoneImageResolverInventory {
                     zone_manifest: ManifestInventory {
+                        boot_disk_path: Utf8PathBuf::new(),
+                        boot_inventory: Err(
+                            "not implemented by HostPhase2SledAgentImpl"
+                                .to_string(),
+                        ),
+                        non_boot_status: IdOrdMap::new(),
+                    },
+                    measurement_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"
