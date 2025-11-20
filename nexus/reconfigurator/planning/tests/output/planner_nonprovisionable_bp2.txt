@@ -1,7 +1,10 @@
 blueprint  9f71f5d3-a272-4382-9154-6ea2e171a6c6
 parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
 
-  sled: 2d1cb4f2-cf44-40fc-b118-85036eb732a9 (active, config generation 2)
+  sled: 2d1cb4f2-cf44-40fc-b118-85036eb732a9
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   fd00:1122:3344:105::/64
 
     host phase 2 contents:
     ------------------------
@@ -112,7 +115,10 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
 
 
 
-  sled: 48d95fef-bc9f-4f50-9a53-1e075836291d (decommissioned, config generation 3)
+  sled: 48d95fef-bc9f-4f50-9a53-1e075836291d
+    state:::::::::::::   decommissioned
+    config generation:   3
+    subnet::::::::::::   fd00:1122:3344:103::/64
 
     host phase 2 contents:
     ------------------------
@@ -220,7 +226,10 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
 
 
 
-  sled: 68d24ac5-f341-49ea-a92a-0381b52ab387 (decommissioned, config generation 2)
+  sled: 68d24ac5-f341-49ea-a92a-0381b52ab387
+    state:::::::::::::   decommissioned
+    config generation:   2
+    subnet::::::::::::   fd00:1122:3344:102::/64
 
     host phase 2 contents:
     ------------------------
@@ -328,7 +337,10 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
 
 
 
-  sled: 75bc286f-2b4b-482c-9431-59272af529da (active, config generation 3)
+  sled: 75bc286f-2b4b-482c-9431-59272af529da
+    state:::::::::::::   active
+    config generation:   3
+    subnet::::::::::::   fd00:1122:3344:104::/64
 
     host phase 2 contents:
     ------------------------
@@ -437,7 +449,10 @@ parent:    4d4e6c38-cd95-4c4e-8f45-6af4d686964b
 
 
 
-  sled: affab35f-600a-4109-8ea0-34a067a4e0bc (active, config generation 3)
+  sled: affab35f-600a-4109-8ea0-34a067a4e0bc
+    state:::::::::::::   active
+    config generation:   3
+    subnet::::::::::::   fd00:1122:3344:101::/64
 
     host phase 2 contents:
     ------------------------

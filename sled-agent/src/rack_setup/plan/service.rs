@@ -37,8 +37,8 @@ use omicron_common::address::{
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
-    NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
-    SourceNatConfigError,
+    NetworkInterface, NetworkInterfaceKind, PrivateIpConfig,
+    PrivateIpConfigError, SourceNatConfig, SourceNatConfigError,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
@@ -102,6 +102,9 @@ pub enum PlanError {
 
     #[error("Unexpected dataset kind: {0}")]
     UnexpectedDataset(String),
+
+    #[error("invalid private IP configuration")]
+    InvalidPrivateIpConfig(#[from] PrivateIpConfigError),
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
@@ -171,6 +174,7 @@ impl SledConfig {
 pub(crate) struct PlannedSledDescription {
     pub(crate) underlay_address: SocketAddrV6,
     pub(crate) sled_id: SledUuid,
+    pub(crate) subnet: Ipv6Subnet<SLED_PREFIX>,
     pub(crate) config: SledConfig,
 }
 
@@ -812,6 +816,7 @@ impl Plan {
             .map(|sled_info| PlannedSledDescription {
                 underlay_address: sled_info.sled_address,
                 sled_id: sled_info.sled_id,
+                subnet: sled_info.subnet,
                 config: sled_info.request,
             })
             .collect();
@@ -910,6 +915,7 @@ impl Plan {
                 sled_description.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    subnet: sled_description.subnet,
                     sled_agent_generation: sled_agent_config_generation,
                     disks: sled_config.disks.clone(),
                     datasets,
@@ -1164,15 +1170,17 @@ impl ServicePortBuilder {
         };
         let external_ip = self.external_dns_ips.next()?;
 
-        let (ip, subnet) = match external_ip {
-            IpAddr::V4(_) => (
-                self.dns_v4_ips.next().unwrap().into(),
-                (*DNS_OPTE_IPV4_SUBNET).into(),
-            ),
-            IpAddr::V6(_) => (
-                self.dns_v6_ips.next().unwrap().into(),
-                (*DNS_OPTE_IPV6_SUBNET).into(),
-            ),
+        let ip_config = match external_ip {
+            IpAddr::V4(_) => PrivateIpConfig::new_ipv4(
+                self.dns_v4_ips.next().unwrap(),
+                *DNS_OPTE_IPV4_SUBNET,
+            )
+            .ok()?,
+            IpAddr::V6(_) => PrivateIpConfig::new_ipv6(
+                self.dns_v6_ips.next().unwrap(),
+                *DNS_OPTE_IPV6_SUBNET,
+            )
+            .ok()?,
         };
 
         let nic = NetworkInterface {
@@ -1182,13 +1190,11 @@ impl ServicePortBuilder {
                 id: svc_id.into_untyped_uuid(),
             },
             name: format!("external-dns-{svc_id}").parse().unwrap(),
-            ip,
+            ip_config,
             mac: self.random_mac(),
-            subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         Some((nic, external_ip))
@@ -1205,15 +1211,15 @@ impl ServicePortBuilder {
             .next_internal_service_ip()
             .ok_or_else(|| PlanError::ServiceIp("Nexus"))?;
 
-        let (ip, subnet) = match external_ip {
-            IpAddr::V4(_) => (
-                self.nexus_v4_ips.next().unwrap().into(),
-                (*NEXUS_OPTE_IPV4_SUBNET).into(),
-            ),
-            IpAddr::V6(_) => (
-                self.nexus_v6_ips.next().unwrap().into(),
-                (*NEXUS_OPTE_IPV6_SUBNET).into(),
-            ),
+        let ip_config = match external_ip {
+            IpAddr::V4(_) => PrivateIpConfig::new_ipv4(
+                self.nexus_v4_ips.next().unwrap(),
+                *NEXUS_OPTE_IPV4_SUBNET,
+            )?,
+            IpAddr::V6(_) => PrivateIpConfig::new_ipv6(
+                self.nexus_v6_ips.next().unwrap(),
+                *NEXUS_OPTE_IPV6_SUBNET,
+            )?,
         };
 
         let nic = NetworkInterface {
@@ -1223,13 +1229,11 @@ impl ServicePortBuilder {
                 id: svc_id.into_untyped_uuid(),
             },
             name: format!("nexus-{svc_id}").parse().unwrap(),
-            ip,
+            ip_config,
             mac: self.random_mac(),
-            subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         Ok((nic, external_ip))
@@ -1265,15 +1269,15 @@ impl ServicePortBuilder {
                 }
             };
 
-        let (ip, subnet) = match snat_ip {
-            IpAddr::V4(_) => (
-                self.ntp_v4_ips.next().unwrap().into(),
-                (*NTP_OPTE_IPV4_SUBNET).into(),
-            ),
-            IpAddr::V6(_) => (
-                self.ntp_v6_ips.next().unwrap().into(),
-                (*NTP_OPTE_IPV6_SUBNET).into(),
-            ),
+        let ip_config = match snat_ip {
+            IpAddr::V4(_) => PrivateIpConfig::new_ipv4(
+                self.ntp_v4_ips.next().unwrap(),
+                *NTP_OPTE_IPV4_SUBNET,
+            )?,
+            IpAddr::V6(_) => PrivateIpConfig::new_ipv6(
+                self.ntp_v6_ips.next().unwrap(),
+                *NTP_OPTE_IPV6_SUBNET,
+            )?,
         };
 
         let nic = NetworkInterface {
@@ -1283,13 +1287,11 @@ impl ServicePortBuilder {
                 id: svc_id.into_untyped_uuid(),
             },
             name: format!("ntp-{svc_id}").parse().unwrap(),
-            ip,
+            ip_config,
             mac: self.random_mac(),
-            subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         Ok((nic, snat_cfg))

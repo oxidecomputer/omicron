@@ -2044,6 +2044,8 @@ table! {
 
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
+
+        subnet -> Inet,
     }
 }
 

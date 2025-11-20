@@ -993,7 +993,9 @@ impl fmt::Display for ApiMissingConsumersDisplay<'_> {
                 .unwrap_or_else(|| {
                     panic!(
                         "consumer {} doesn't have an associated \
-                         deployment unit (this is checked at load time)",
+                         deployment unit (this is checked at load time, so \
+                         if you're seeing this message, there's a bug in that \
+                         check)",
                         consumer.name
                     );
                 });

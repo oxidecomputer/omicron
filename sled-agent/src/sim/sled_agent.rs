@@ -360,13 +360,21 @@ impl SledAgent {
 
         let mut routes = self.vpc_routes.lock().unwrap();
         for nic in &local_config.nics {
-            let my_routers = [
-                RouterId { vni: nic.vni, kind: RouterKind::System },
-                RouterId { vni: nic.vni, kind: RouterKind::Custom(nic.subnet) },
-            ];
-
-            for router in my_routers {
-                routes.entry(router).or_default();
+            let kinds = std::iter::once(RouterKind::System)
+                .chain(
+                    nic.ip_config
+                        .ipv4_subnet()
+                        .copied()
+                        .map(|subnet| RouterKind::Custom(subnet.into())),
+                )
+                .chain(
+                    nic.ip_config
+                        .ipv6_subnet()
+                        .copied()
+                        .map(|subnet| RouterKind::Custom(subnet.into())),
+                );
+            for kind in kinds {
+                routes.entry(RouterId { vni: nic.vni, kind }).or_default();
             }
         }
 

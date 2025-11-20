@@ -4,12 +4,13 @@
 
 //! Sled agent types that changed from version 8 to version 9
 
+use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
+use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::NetworkInterface;
-use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -17,6 +18,8 @@ use serde::Serialize;
 use sled_agent_types::instance::InstanceMetadata;
 use sled_agent_types::instance::InstanceMulticastMembership;
 use sled_agent_types::instance::VmmSpec;
+use sled_agent_types::inventory::v9;
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -67,13 +70,9 @@ pub struct InstanceSledLocalConfig {
     pub dhcp_config: DhcpConfig,
 }
 
-impl From<InstanceEnsureBody>
-    for sled_agent_types::instance::InstanceEnsureBody
-{
-    fn from(
-        v8: InstanceEnsureBody,
-    ) -> sled_agent_types::instance::InstanceEnsureBody {
-        sled_agent_types::instance::InstanceEnsureBody {
+impl From<InstanceEnsureBody> for v9::InstanceEnsureBody {
+    fn from(v8: InstanceEnsureBody) -> Self {
+        Self {
             vmm_spec: v8.vmm_spec,
             local_config: v8.local_config.into(),
             vmm_runtime: v8.vmm_runtime,
@@ -85,22 +84,48 @@ impl From<InstanceEnsureBody>
     }
 }
 
-impl From<InstanceSledLocalConfig>
-    for sled_agent_types::instance::InstanceSledLocalConfig
-{
-    fn from(
-        v8: InstanceSledLocalConfig,
-    ) -> sled_agent_types::instance::InstanceSledLocalConfig {
-        sled_agent_types::instance::InstanceSledLocalConfig {
+impl From<InstanceSledLocalConfig> for v9::InstanceSledLocalConfig {
+    fn from(v8: InstanceSledLocalConfig) -> Self {
+        let firewall_rules =
+            v8.firewall_rules.into_iter().map(Into::into).collect();
+        Self {
             hostname: v8.hostname,
             nics: v8.nics,
             source_nat: v8.source_nat,
             ephemeral_ip: v8.ephemeral_ip,
             floating_ips: v8.floating_ips,
             multicast_groups: v8.multicast_groups,
-            firewall_rules: v8.firewall_rules,
+            firewall_rules,
             dhcp_config: v8.dhcp_config,
             delegated_zvols: vec![],
+        }
+    }
+}
+
+/// VPC firewall rule after object name resolution has been performed by Nexus
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ResolvedVpcFirewallRule {
+    pub status: external::VpcFirewallRuleStatus,
+    pub direction: external::VpcFirewallRuleDirection,
+    pub targets: Vec<NetworkInterface>,
+    pub filter_hosts: Option<HashSet<HostIdentifier>>,
+    pub filter_ports: Option<Vec<external::L4PortRange>>,
+    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
+    pub action: external::VpcFirewallRuleAction,
+    pub priority: external::VpcFirewallRulePriority,
+}
+
+impl From<ResolvedVpcFirewallRule> for v9::ResolvedVpcFirewallRule {
+    fn from(v8: ResolvedVpcFirewallRule) -> Self {
+        Self {
+            status: v8.status,
+            direction: v8.direction,
+            targets: v8.targets,
+            filter_hosts: v8.filter_hosts,
+            filter_ports: v8.filter_ports,
+            filter_protocols: v8.filter_protocols,
+            action: v8.action,
+            priority: v8.priority,
         }
     }
 }

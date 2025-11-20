@@ -69,14 +69,13 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::UserId;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use slog_error_chain::InlineErrorChain;
-use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
@@ -551,18 +550,24 @@ impl DataStore {
         let zone_type = &zone_config.zone_type;
         let zone_report_str = zone_type.kind().report_str();
 
-        // Extract an IPv4 address from the `shared::NetworkInterface` object.
-        //
-        // TODO-completeness: Handle IPv6 interface addresses. See
-        // https://github.com/oxidecomputer/omicron/issues/9246.
-        let extract_ipv4 = |nic: &NetworkInterface| -> Result<Ipv4Addr, Error> {
-            let IpAddr::V4(ipv4) = nic.ip else {
-                return Err(Error::invalid_request(
-                    "IPv6 addresses are not yet supported",
-                ));
+        // TODO-completeness: Support dual-stack NICs for services. See
+        // https://github.com/oxidecomputer/omicron/issues/9313.
+        let extract_ip_config =
+            |nic: &NetworkInterface| -> Result<IpConfig, Error> {
+                match &nic.ip_config {
+                    PrivateIpConfig::V4(ipv4) => {
+                        Ok(IpConfig::from_ipv4(*ipv4.ip()))
+                    }
+                    PrivateIpConfig::V6(ipv6) => {
+                        Ok(IpConfig::from_ipv6(*ipv6.ip()))
+                    }
+                    PrivateIpConfig::DualStack { .. } => {
+                        Err(Error::invalid_request(
+                            "Dual-stack service NICs are not yet supported",
+                        ))
+                    }
+                }
             };
-            Ok(ipv4)
-        };
 
         let service_ip_nic = match zone_type {
             BlueprintZoneType::ExternalDns(
@@ -570,7 +575,8 @@ impl DataStore {
             ) => {
                 let external_ip =
                     OmicronZoneExternalIp::Floating(dns_address.into_ip());
-                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
+                let ip_config =
+                    extract_ip_config(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -582,7 +588,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    IpConfig::from_ipv4(ip),
+                    ip_config,
                     nic.mac,
                     nic.slot,
                 )
@@ -595,7 +601,8 @@ impl DataStore {
                 ..
             }) => {
                 let external_ip = OmicronZoneExternalIp::Floating(*external_ip);
-                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
+                let ip_config =
+                    extract_ip_config(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -607,7 +614,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    IpConfig::from_ipv4(ip),
+                    ip_config,
                     nic.mac,
                     nic.slot,
                 )
@@ -618,7 +625,8 @@ impl DataStore {
                 blueprint_zone_type::BoundaryNtp { external_ip, nic, .. },
             ) => {
                 let external_ip = OmicronZoneExternalIp::Snat(*external_ip);
-                let ip = extract_ipv4(nic).map_err(RackInitError::AddingNic)?;
+                let ip_config =
+                    extract_ip_config(nic).map_err(RackInitError::AddingNic)?;
                 let db_nic = IncompleteNetworkInterface::new_service(
                     nic.id,
                     zone_config.id.into_untyped_uuid(),
@@ -630,7 +638,7 @@ impl DataStore {
                             zone_report_str
                         ),
                     },
-                    IpConfig::from_ipv4(ip),
+                    ip_config,
                     nic.mac,
                     nic.slot,
                 )
@@ -1092,7 +1100,6 @@ mod test {
     use omicron_uuid_kinds::BlueprintUuid;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::SledUuid;
-    use oxnet::IpNet;
     use slog::Logger;
     use std::collections::{BTreeMap, HashMap};
     use std::net::Ipv6Addr;
@@ -1949,28 +1956,8 @@ mod test {
                     ..Default::default()
                 },
             )
-            .await;
-
-        // IPv6 addresses aren't fully supported right now. See
-        // https://github.com/oxidecomputer/omicron/issues/1716. When that is
-        // fully-addressed, this will start to fail and we can remove this
-        // block to restore the previous test coverage.
-        let Err(Error::InvalidRequest { message }) = &rack else {
-            panic!(
-                "Expected an error initializing a rack with an IPv6 address, \
-                until they are fully-supported. Found {rack:#?}"
-            );
-        };
-        assert_eq!(
-            message.external_message(),
-            "IPv6 addresses are not yet supported"
-        );
-        let Ok(rack) = rack else {
-            db.terminate().await;
-            logctx.cleanup_successful();
-            return;
-        };
-
+            .await
+            .expect("an initialized rack");
         assert_eq!(rack.id(), rack_id());
         assert!(rack.initialized);
 
@@ -2097,6 +2084,9 @@ mod test {
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let nexus_pip_config =
+            PrivateIpConfig::new_ipv4(nexus_pip, *NEXUS_OPTE_IPV4_SUBNET)
+                .unwrap();
         let mut macs = MacAddr::iter_system();
         builder
             .sled_add_zone_nexus_with_config(
@@ -2106,8 +2096,7 @@ mod test {
                 BlueprintZoneImageSource::InstallDataset,
                 ExternalNetworkingChoice {
                     external_ip: nexus_ip,
-                    nic_ip: nexus_pip.into(),
-                    nic_subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
+                    nic_ip_config: nexus_pip_config,
                     nic_mac: macs.next().unwrap(),
                 },
                 *Generation::new(),
@@ -2179,7 +2168,7 @@ mod test {
                     false,
                     Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
-                    nexus_external_ip,
+                    nexus_external_ip.clone(),
                     *Generation::new(),
                 )
                 .expect("added Nexus");
