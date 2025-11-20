@@ -114,11 +114,11 @@ impl RunAllArgs {
         println!("omicron-dev: nexus external API:     {:?}", addr);
         println!(
             "omicron-dev: nexus internal API:     {:?}",
-            cptestctx.server.get_http_server_internal_address().await,
+            cptestctx.server.get_http_server_internal_address(),
         );
         println!(
             "omicron-dev: nexus lockstep API:     {:?}",
-            cptestctx.server.get_http_server_lockstep_address().await,
+            cptestctx.server.get_http_server_lockstep_address(),
         );
         println!(
             "omicron-dev: cockroachdb pid:        {}",
