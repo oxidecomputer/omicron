@@ -40,8 +40,8 @@ use nexus_types::deployment::{
 };
 use nexus_types::inventory::NetworkInterfaceKind;
 use omicron_common::FileKv;
-use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::address::{DNS_OPTE_IPV4_SUBNET, Ipv6Subnet};
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
@@ -595,6 +595,7 @@ pub async fn run_standalone_server(
         all_sleds.insert_overwrite(PlannedSledDescription {
             underlay_address,
             sled_id: config.id,
+            subnet: Ipv6Subnet::new(*underlay_address.ip()),
             config: SledConfig {
                 disks: omicron_physical_disks_config
                     .disks

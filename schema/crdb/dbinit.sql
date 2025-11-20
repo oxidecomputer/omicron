@@ -4791,6 +4791,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     host_phase_2_desired_slot_a STRING(64),
     host_phase_2_desired_slot_b STRING(64),
 
+    -- the sled's /64 subnet on the underlay address
+    subnet INET NOT NULL,
+
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
@@ -7358,7 +7361,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '210.0.0', NULL)
+    (TRUE, NOW(), NOW(), '211.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

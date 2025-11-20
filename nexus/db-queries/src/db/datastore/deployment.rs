@@ -41,6 +41,7 @@ use diesel::sql_types;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
 use iddqd::IdOrdMap;
+use ipnetwork::Ipv6Network;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -262,6 +263,7 @@ impl DataStore {
                     .slot_b
                     .artifact_hash()
                     .map(ArtifactHash),
+                subnet: Ipv6Network::from(sled.subnet).into(),
             })
             .collect::<Vec<_>>();
 
@@ -793,8 +795,14 @@ impl DataStore {
                 paginator = p.found_batch(&batch, &|(s, _, _)| s.sled_id);
 
                 for (s, slot_a_version, slot_b_version) in batch {
+                    let subnet = s.subnet().map_err(|e| {
+                        Error::internal_error(
+                            &InlineErrorChain::new(&*e).to_string(),
+                        )
+                    })?;
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
+                        subnet,
                         sled_agent_generation: *s.sled_agent_generation,
                         disks: IdOrdMap::new(),
                         datasets: IdOrdMap::new(),

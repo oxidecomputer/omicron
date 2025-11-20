@@ -706,6 +706,7 @@ mod test {
                 sa.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    subnet: Ipv6Subnet::new(*sa.sled_agent_address.ip()),
                     sled_agent_generation: ledgered_sled_config.generation,
                     disks: IdOrdMap::new(),
                     datasets: IdOrdMap::new(),

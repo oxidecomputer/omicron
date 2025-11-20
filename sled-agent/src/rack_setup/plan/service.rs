@@ -174,6 +174,7 @@ impl SledConfig {
 pub(crate) struct PlannedSledDescription {
     pub(crate) underlay_address: SocketAddrV6,
     pub(crate) sled_id: SledUuid,
+    pub(crate) subnet: Ipv6Subnet<SLED_PREFIX>,
     pub(crate) config: SledConfig,
 }
 
@@ -815,6 +816,7 @@ impl Plan {
             .map(|sled_info| PlannedSledDescription {
                 underlay_address: sled_info.sled_address,
                 sled_id: sled_info.sled_id,
+                subnet: sled_info.subnet,
                 config: sled_info.request,
             })
             .collect();
@@ -913,6 +915,7 @@ impl Plan {
                 sled_description.sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    subnet: sled_description.subnet,
                     sled_agent_generation: sled_agent_config_generation,
                     disks: sled_config.disks.clone(),
                     datasets,
