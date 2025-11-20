@@ -3149,6 +3149,7 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::planner::Planner;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -3447,6 +3448,14 @@ mod tests {
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
+
+        // We made changes to the planning input we want to be reflected in the
+        // new blueprint; reuse the `Planner`'s method for replicating those
+        // changes.
+        Planner::update_builder_from_planning_input(
+            &mut builder,
+            &planning_input,
+        );
 
         // Ensure disks on our sled
         assert_eq!(
