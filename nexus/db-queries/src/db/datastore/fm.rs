@@ -172,20 +172,18 @@ impl DataStore {
                 for case in batch {
                     // TODO(eliza): consider using a `ParallelTaskSet` to fetch the
                     // cases in parallel here.
-                    let (ereport_assignments, alerts_requested) =
-                        self.fm_case_read_on_conn(&case, conn).await?;
+                    let case = self.fm_case_read_on_conn(case, conn).await?;
 
                     // Fetch ereports assigned to this case.
-                    let mut ereports = iddqd::IdOrdMap::with_capacity(
-                        ereport_assignments.len(),
-                    );
+                    let mut ereports =
+                        iddqd::IdOrdMap::with_capacity(case.ereports.len());
                     for model::fm::CaseEreport {
                         restart_id,
                         ena: DbEna(ena),
                         comment,
                         assigned_sitrep_id,
                         ..
-                    } in ereport_assignments
+                    } in case.ereports
                     {
                         let ereport_id = fm::EreportId {
                             restart_id: restart_id.into(),
@@ -200,7 +198,7 @@ impl DataStore {
                                     .await
                                     .map_err(|e| e.internal_context(format!(
                                         "failed to fetch ereport {ereport_id} for case {}",
-                                        case.id,
+                                        case.metadata.id,
                                     )))?
                                     .try_into()?;
                                 entry.insert(Arc::new(ereport)).clone()
@@ -215,20 +213,48 @@ impl DataStore {
                             .unwrap();
                     }
 
+                    let alerts_requested = case
+                        .alerts_requested
+                        .into_iter()
+                        .map(|alert| {
+                            let id = alert.id.into_untyped_uuid(); // Grab this so it can be added to an error.
+                            fm::AlertRequest::try_from(alert).map_err(|e| {
+                                e.internal_context(format!(
+                                    "invalid alert {id} for case {}",
+                                    case.metadata.id
+                                ))
+                            })
+                        })
+                        .collect::<Result<_, _>>()?;
+
+                    let impacted_locations = case
+                        .impacted_locations
+                        .into_iter()
+                        .map(Into::into)
+                        .collect();
+
+                    let model::fm::CaseMetadata {
+                        id,
+                        sitrep_id: _,
+                        created_sitrep_id,
+                        time_created,
+                        time_closed,
+                        closed_sitrep_id,
+                        comment,
+                        de,
+                    } = case.metadata;
                     cases
                         .insert_unique(fm::Case {
-                            id: case.id.into(),
-                            created_sitrep_id: case.created_sitrep_id.into(),
-                            time_created: case.time_created.into(),
-                            time_closed: case.time_closed.map(Into::into),
-                            closed_sitrep_id: case
-                                .closed_sitrep_id
-                                .map(Into::into),
-                            de: case.de.into(),
-                            comment: case.comment,
+                            id: id.into(),
+                            created_sitrep_id: created_sitrep_id.into(),
+                            time_created: time_created.into(),
+                            time_closed: time_closed.map(Into::into),
+                            closed_sitrep_id: closed_sitrep_id.map(Into::into),
+                            de: de.into(),
+                            comment,
                             ereports,
                             alerts_requested,
-                            impacted_locations: Default::default(), // TODO
+                            impacted_locations,
                         })
                         .expect("case UUIDs should be unique");
                 }
@@ -256,12 +282,9 @@ impl DataStore {
 
     async fn fm_case_read_on_conn(
         &self,
-        case: &model::fm::CaseMetadata,
+        case: model::fm::CaseMetadata,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<
-        (Vec<model::fm::CaseEreport>, iddqd::IdOrdMap<fm::AlertRequest>),
-        Error,
-    > {
+    ) -> Result<model::fm::Case, Error> {
         // Read ereports assigned to this case.
         let ereports = {
             let mut ereports = Vec::new();
@@ -296,7 +319,7 @@ impl DataStore {
 
         // Read alerts requested for this case.
         let alerts_requested = {
-            let mut alerts = iddqd::IdOrdMap::new();
+            let mut alerts = Vec::new();
             let mut paginator =
                 Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
             while let Some(p) = paginator.next() {
@@ -319,17 +342,53 @@ impl DataStore {
                 })?;
 
                 paginator = p.found_batch(&batch, &|req| req.id);
-                for alert in batch {
-                    alerts
-                        .insert_unique(alert.try_into()?)
-                        .expect("alert UUIDs should be unique");
-                }
+                alerts.extend(batch);
             }
 
             alerts
         };
 
-        Ok((ereports, alerts_requested))
+        // Read impacted locations
+        let impacted_locations = {
+            let mut locations = Vec::new();
+            let mut paginator =
+                Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    impacted_location_dsl::fm_case_impacts_location,
+                    (
+                        impacted_location_dsl::sp_type,
+                        impacted_location_dsl::sp_slot,
+                    ),
+                    &p.current_pagparams(),
+                )
+                .filter(impacted_location_dsl::case_id.eq(case.id))
+                .filter(impacted_location_dsl::sitrep_id.eq(case.sitrep_id))
+                .select(model::fm::CaseImpactsLocation::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(format!(
+                            "failed to list impacted locations for case {}",
+                            case.id
+                        ))
+                })?;
+
+                paginator =
+                    p.found_batch(&batch, &|loc| (loc.sp_type, loc.sp_slot));
+                locations.extend(batch);
+            }
+
+            locations
+        };
+
+        Ok(model::fm::Case {
+            metadata: case,
+            alerts_requested,
+            ereports,
+            impacted_locations,
+        })
     }
 
     /// Insert the provided [`Sitrep`] into the database, and attempt to mark it
@@ -797,6 +856,7 @@ impl DataStore {
             .map(|id| id.into_untyped_uuid())
             .collect::<Vec<_>>();
 
+        // Delete case ereport assignments
         let case_ereports_deleted = diesel::delete(
             case_ereport_dsl::fm_ereport_in_case
                 .filter(case_ereport_dsl::sitrep_id.eq_any(ids.clone())),
@@ -819,6 +879,11 @@ impl DataStore {
             public_error_from_diesel(e, ErrorHandler::Server)
                 .internal_context("failed to delete alert requests")
         })?;
+
+        // Delete case impacts.
+        let case_impacted_locations_deleted = diesel::delete(impacted_location_dsl::fm_case_impacts_location.filter(impacted_location_dsl::sitrep_id.eq_any(ids.clone())).execute_async(&*conn).await.map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server).internal_context("failed to delete case location impact lists")
+        })
 
         // Delete case metadata records.
         let cases_deleted = diesel::delete(
@@ -850,12 +915,13 @@ impl DataStore {
 
         slog::debug!(
             &opctx.log,
-            "deleted {sitreps_deleted} sitreps";
+            "deleted {sitreps_deleted} of {} sitreps sitreps", ids.len();
             "ids" => ?ids,
             "sitreps_deleted" => sitreps_deleted,
             "cases_deleted" => cases_deleted,
             "alert_requests_deleted" => alert_requests_deleted,
             "case_ereports_deleted" => case_ereports_deleted,
+            "case_impacted_locations_deleted" => case_impacted_locations_deleted,
         );
 
         Ok(sitreps_deleted)

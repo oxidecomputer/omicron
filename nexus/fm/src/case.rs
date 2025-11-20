@@ -46,7 +46,7 @@ impl AllCases {
                     cases_by_location
                         .entry((location.sp_type, location.slot))
                         .or_default()
-                        .insert(case.id.clone());
+                        .insert(case.id);
                 }
                 CaseBuilder::new(&log, sitrep_id, case.clone())
             })
