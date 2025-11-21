@@ -43,6 +43,7 @@ define_enums! {
     DnsGroupEnum => "dns_group",
     DownstairsClientStopRequestReasonEnum => "downstairs_client_stop_request_reason_type",
     DownstairsClientStoppedReasonEnum => "downstairs_client_stopped_reason_type",
+    EreporterTypeEnum => "ereporter_type",
     FailureDomainEnum => "failure_domain",
     HwM2SlotEnum => "hw_m2_slot",
     HwPowerStateEnum => "hw_power_state",

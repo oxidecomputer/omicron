@@ -749,6 +749,24 @@ impl ExampleSystemBuilder {
                     input_builder
                         .add_omicron_zone_external_ip(service_id, external_ip)
                         .expect("failed to add Omicron zone external IP");
+                    // TODO-completess: Support dual-stack Omicron zone NICs.
+                    // See https://github.com/oxidecomputer/omicron/issues/9314
+                    assert!(
+                        !nic.ip_config.is_dual_stack(),
+                        "Dual-stack OmicronZoneNics are not yet supported"
+                    );
+                    let ip = nic
+                        .ip_config
+                        .ipv4_addr()
+                        .copied()
+                        .map(IpAddr::V4)
+                        .unwrap_or_else(|| {
+                            nic.ip_config
+                                .ipv6_addr()
+                                .copied()
+                                .map(IpAddr::V6)
+                                .expect("must have at least one IP address")
+                        });
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,
@@ -756,7 +774,7 @@ impl ExampleSystemBuilder {
                                 // TODO-cleanup use `TypedUuid` everywhere
                                 id: VnicUuid::from_untyped_uuid(nic.id),
                                 mac: nic.mac,
-                                ip: nic.ip,
+                                ip,
                                 slot: nic.slot,
                                 primary: nic.primary,
                             },

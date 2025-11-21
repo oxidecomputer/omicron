@@ -836,7 +836,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub(crate) async fn get_external_server_address(
+    pub(crate) fn get_external_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.external_server
@@ -846,7 +846,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub(crate) async fn get_techport_server_address(
+    pub(crate) fn get_techport_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.techport_external_server
@@ -856,7 +856,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub(crate) async fn get_internal_server_address(
+    pub(crate) fn get_internal_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.internal_server
@@ -866,7 +866,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub(crate) async fn get_lockstep_server_address(
+    pub(crate) fn get_lockstep_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.lockstep_server

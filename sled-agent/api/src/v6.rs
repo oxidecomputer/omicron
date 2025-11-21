@@ -6,22 +6,23 @@
 //!
 //! Version 6 types (before multicast support was added in version 7).
 
-use std::net::{IpAddr, SocketAddr};
-
-use omicron_common::api::{
-    external::Hostname,
-    internal::{
-        nexus::VmmRuntimeState,
-        shared::{
-            DhcpConfig, NetworkInterface, ResolvedVpcFirewallRule,
-            SourceNatConfig,
-        },
-    },
-};
+use crate::v8;
+use omicron_common::api::external;
+use omicron_common::api::external::Hostname;
+use omicron_common::api::internal::nexus::HostIdentifier;
+use omicron_common::api::internal::nexus::VmmRuntimeState;
+use omicron_common::api::internal::shared::DhcpConfig;
+use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_uuid_kinds::InstanceUuid;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use sled_agent_types::instance::{InstanceMetadata, VmmSpec};
+use serde::Deserialize;
+use serde::Serialize;
+use sled_agent_types::instance::InstanceMetadata;
+use sled_agent_types::instance::VmmSpec;
+use std::collections::HashSet;
+use std::net::IpAddr;
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
@@ -69,9 +70,7 @@ pub struct InstanceSledLocalConfig {
     pub dhcp_config: DhcpConfig,
 }
 
-impl From<InstanceSledLocalConfig>
-    for sled_agent_types::instance::InstanceSledLocalConfig
-{
+impl From<InstanceSledLocalConfig> for v8::InstanceSledLocalConfig {
     fn from(v6: InstanceSledLocalConfig) -> Self {
         let InstanceSledLocalConfig {
             hostname,
@@ -82,6 +81,8 @@ impl From<InstanceSledLocalConfig>
             firewall_rules,
             dhcp_config,
         } = v6;
+        let firewall_rules =
+            firewall_rules.into_iter().map(Into::into).collect();
 
         Self {
             hostname,
@@ -96,9 +97,7 @@ impl From<InstanceSledLocalConfig>
     }
 }
 
-impl From<InstanceEnsureBody>
-    for sled_agent_types::instance::InstanceEnsureBody
-{
+impl From<InstanceEnsureBody> for v8::InstanceEnsureBody {
     fn from(v6: InstanceEnsureBody) -> Self {
         let InstanceEnsureBody {
             vmm_spec,
@@ -118,6 +117,44 @@ impl From<InstanceEnsureBody>
             migration_id,
             propolis_addr,
             metadata,
+        }
+    }
+}
+
+/// VPC firewall rule after object name resolution has been performed by Nexus
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct ResolvedVpcFirewallRule {
+    pub status: external::VpcFirewallRuleStatus,
+    pub direction: external::VpcFirewallRuleDirection,
+    pub targets: Vec<NetworkInterface>,
+    pub filter_hosts: Option<HashSet<HostIdentifier>>,
+    pub filter_ports: Option<Vec<external::L4PortRange>>,
+    pub filter_protocols: Option<Vec<external::VpcFirewallRuleProtocol>>,
+    pub action: external::VpcFirewallRuleAction,
+    pub priority: external::VpcFirewallRulePriority,
+}
+
+impl From<ResolvedVpcFirewallRule> for v8::ResolvedVpcFirewallRule {
+    fn from(v6: ResolvedVpcFirewallRule) -> Self {
+        let ResolvedVpcFirewallRule {
+            status,
+            direction,
+            targets,
+            filter_hosts,
+            filter_ports,
+            filter_protocols,
+            action,
+            priority,
+        } = v6;
+        Self {
+            status,
+            direction,
+            targets,
+            filter_hosts,
+            filter_ports,
+            filter_protocols,
+            action,
+            priority,
         }
     }
 }

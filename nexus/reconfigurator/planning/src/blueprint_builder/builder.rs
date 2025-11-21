@@ -1340,23 +1340,17 @@ impl<'a> BlueprintBuilder<'a> {
         external_ip: ExternalNetworkingChoice,
     ) -> Result<(), Error> {
         let id = self.rng.sled_rng(sled_id).next_zone();
-        let ExternalNetworkingChoice {
-            external_ip,
-            nic_ip,
-            nic_subnet,
-            nic_mac,
-        } = external_ip;
+        let ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac } =
+            external_ip;
         let nic = NetworkInterface {
             id: self.rng.sled_rng(sled_id).next_network_interface(),
             kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
             name: format!("external-dns-{id}").parse().unwrap(),
-            ip: nic_ip,
+            ip_config: nic_ip_config,
             mac: nic_mac,
-            subnet: nic_subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         let underlay_address = self.sled_alloc_ip(sled_id)?;
@@ -1543,12 +1537,8 @@ impl<'a> BlueprintBuilder<'a> {
         nexus_generation: Generation,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
-        let ExternalNetworkingChoice {
-            external_ip,
-            nic_ip,
-            nic_subnet,
-            nic_mac,
-        } = external_ip;
+        let ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac } =
+            external_ip;
         let external_ip = OmicronZoneExternalFloatingIp {
             id: self.rng.sled_rng(sled_id).next_external_ip(),
             ip: external_ip,
@@ -1560,13 +1550,11 @@ impl<'a> BlueprintBuilder<'a> {
                 id: nexus_id.into_untyped_uuid(),
             },
             name: format!("nexus-{nexus_id}").parse().unwrap(),
-            ip: nic_ip,
+            ip_config: nic_ip_config,
             mac: nic_mac,
-            subnet: nic_subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         let ip = self.sled_alloc_ip(sled_id)?;
@@ -1849,12 +1837,8 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Add the new boundary NTP zone.
         let new_zone_id = self.rng.sled_rng(sled_id).next_zone();
-        let ExternalSnatNetworkingChoice {
-            snat_cfg,
-            nic_ip,
-            nic_subnet,
-            nic_mac,
-        } = external_ip;
+        let ExternalSnatNetworkingChoice { snat_cfg, nic_ip_config, nic_mac } =
+            external_ip;
         let external_ip = OmicronZoneExternalSnatIp {
             id: self.rng.sled_rng(sled_id).next_external_ip(),
             snat_cfg,
@@ -1865,13 +1849,11 @@ impl<'a> BlueprintBuilder<'a> {
                 id: new_zone_id.into_untyped_uuid(),
             },
             name: format!("ntp-{new_zone_id}").parse().unwrap(),
-            ip: nic_ip,
+            ip_config: nic_ip_config,
             mac: nic_mac,
-            subnet: nic_subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         let underlay_ip = self.sled_alloc_ip(sled_id)?;

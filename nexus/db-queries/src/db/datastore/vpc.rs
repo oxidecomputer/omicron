@@ -3294,9 +3294,10 @@ mod tests {
                 .zone_type
                 .external_networking()
                 .expect("external networking for zone type");
-            let IpAddr::V4(ip) = nic.ip else {
-                panic!("Expected an IPv4 address for this NIC");
-            };
+            let ip = nic
+                .ip_config
+                .ipv4_addr()
+                .expect("an IPv4 address for this NIC");
             IncompleteNetworkInterface::new_service(
                 nic.id,
                 zone_config.id.into_untyped_uuid(),
@@ -3305,7 +3306,7 @@ mod tests {
                     name: nic.name.clone(),
                     description: nic.name.to_string(),
                 },
-                IpConfig::from_ipv4(ip),
+                IpConfig::from_ipv4(*ip),
                 nic.mac,
                 nic.slot,
             )
