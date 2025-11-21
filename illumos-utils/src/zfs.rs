@@ -1157,7 +1157,7 @@ impl Zfs {
 
         // We ensure that the currently running process has the ability to
         // act on the underlying mountpoint.
-        if !zoned {
+        if wants_mounting {
             let mut command = Command::new(PFEXEC);
             let user = whoami::username();
             let mount = format!("{mountpoint}");
