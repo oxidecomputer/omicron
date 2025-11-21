@@ -1,0 +1,361 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use crate::fm::AlertRequest;
+use crate::fm::DiagnosisEngineKind;
+use crate::fm::Ereport;
+use crate::inventory::SpType;
+use chrono::{DateTime, Utc};
+use iddqd::{IdOrdItem, IdOrdMap};
+use omicron_uuid_kinds::{CaseUuid, SitrepUuid};
+use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::sync::Arc;
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct Case {
+    pub id: CaseUuid,
+    pub created_sitrep_id: SitrepUuid,
+    pub time_created: DateTime<Utc>,
+
+    pub closed_sitrep_id: Option<SitrepUuid>,
+    pub time_closed: Option<DateTime<Utc>>,
+
+    pub de: DiagnosisEngineKind,
+
+    pub ereports: IdOrdMap<CaseEreport>,
+    pub alerts_requested: IdOrdMap<AlertRequest>,
+    pub impacted_locations: IdOrdMap<ImpactedLocation>,
+
+    pub comment: String,
+}
+
+impl Case {
+    pub fn is_open(&self) -> bool {
+        self.time_closed.is_none()
+    }
+
+    pub fn display_indented(
+        &self,
+        indent: usize,
+        sitrep_id: Option<SitrepUuid>,
+    ) -> impl fmt::Display + '_ {
+        DisplayCase { case: self, indent, sitrep_id }
+    }
+}
+
+impl fmt::Display for Case {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.display_indented(0, None).fmt(f)
+    }
+}
+
+impl IdOrdItem for Case {
+    type Key<'a> = &'a CaseUuid;
+    fn key(&self) -> Self::Key<'_> {
+        &self.id
+    }
+
+    iddqd::id_upcast!();
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct CaseEreport {
+    pub ereport: Arc<Ereport>,
+    pub assigned_sitrep_id: SitrepUuid,
+    pub comment: String,
+}
+
+impl IdOrdItem for CaseEreport {
+    type Key<'a> = <Arc<Ereport> as IdOrdItem>::Key<'a>;
+    fn key(&self) -> Self::Key<'_> {
+        self.ereport.key()
+    }
+
+    iddqd::id_upcast!();
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct ImpactedLocation {
+    pub sp_type: SpType,
+    pub slot: u16,
+    pub created_sitrep_id: SitrepUuid,
+    pub comment: String,
+}
+
+impl IdOrdItem for ImpactedLocation {
+    type Key<'a> = (SpType, u16);
+    fn key(&self) -> Self::Key<'_> {
+        (self.sp_type, self.slot)
+    }
+
+    iddqd::id_upcast!();
+}
+
+struct DisplayCase<'a> {
+    case: &'a Case,
+    indent: usize,
+    sitrep_id: Option<SitrepUuid>,
+}
+
+impl fmt::Display for DisplayCase<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const BULLET: &str = "* ";
+        const LIST_INDENT: usize = 4;
+
+        let &Self {
+            case:
+                Case {
+                    id,
+                    created_sitrep_id,
+                    time_created,
+                    closed_sitrep_id,
+                    time_closed,
+                    de,
+                    ereports,
+                    alerts_requested,
+                    impacted_locations,
+                    comment,
+                },
+            indent,
+            sitrep_id,
+        } = self;
+
+        let this_sitrep = move |s| {
+            if Some(s) == sitrep_id { " <-- this sitrep" } else { "" }
+        };
+
+        writeln!(
+            f,
+            "{:>indent$}case {id}",
+            if indent > 0 { BULLET } else { "" }
+        )?;
+        writeln!(
+            f,
+            "{:>indent$}-----------------------------------------",
+            ""
+        )?;
+        writeln!(f, "{:>indent$}diagnosis engine: {de}", "")?;
+        writeln!(
+            f,
+            "{:>indent$}created in sitrep: {created_sitrep_id}{}",
+            "",
+            this_sitrep(*created_sitrep_id)
+        )?;
+        writeln!(f, "{:>indent$}  at: {time_created}", "")?;
+        if let Some(closed_id) = closed_sitrep_id {
+            writeln!(
+                f,
+                "{:>indent$}closed in sitrep: {closed_id}{}",
+                "",
+                this_sitrep(*closed_id)
+            )?;
+            if let Some(time_closed) = time_closed {
+                writeln!(f, "{:>indent$}  at: {time_closed}", "")?;
+            } else {
+                writeln!(f, "{:>indent$}  at: <MISSING TIME CLOSED>", "")?;
+            }
+        }
+
+        writeln!(f, "\n{:>indent$}comment: {comment}", "")?;
+
+        if !ereports.is_empty() {
+            writeln!(f, "\n{:>indent$}ereports:\n", "")?;
+            let indent = indent + LIST_INDENT;
+            for CaseEreport { ereport, assigned_sitrep_id, comment } in ereports
+            {
+                let pn =
+                    ereport.part_number.as_deref().unwrap_or("<UNKNOWN PART>");
+                let sn = ereport
+                    .serial_number
+                    .as_deref()
+                    .unwrap_or("<UNKNOWN SERIAL>");
+                writeln!(f, "{BULLET:>indent$}ereport {}", ereport.id())?;
+                writeln!(
+                    f,
+                    "{:>indent$}class: {}",
+                    "",
+                    ereport.class.as_deref().unwrap_or("<NONE>")
+                )?;
+                writeln!(f, "{:>indent$}reported by:", "")?;
+
+                writeln!(f, "{:>indent$}  location: {}", "", ereport.reporter)?;
+                writeln!(f, "{:>indent$}  identity: {pn}:{sn}", "")?;
+                writeln!(
+                    f,
+                    "{:>indent$}added in sitrep: {assigned_sitrep_id}{}",
+                    "",
+                    this_sitrep(*assigned_sitrep_id)
+                )?;
+                writeln!(f, "{:>indent$}comment: {comment}\n", "")?;
+            }
+        }
+
+        if !impacted_locations.is_empty() {
+            writeln!(f, "\n{:>indent$}locations impacted:\n", "")?;
+            let indent = indent + LIST_INDENT;
+            for ImpactedLocation {
+                sp_type,
+                slot,
+                created_sitrep_id,
+                comment,
+            } in impacted_locations
+            {
+                writeln!(f, "{BULLET:>indent$}{sp_type:<6} {slot}")?;
+                writeln!(
+                    f,
+                    "{:>indent$}added in sitrep: {created_sitrep_id}{}",
+                    "",
+                    this_sitrep(*created_sitrep_id)
+                )?;
+                writeln!(f, "{:>indent$}comment: {comment}\n", "")?;
+            }
+        }
+
+        if !alerts_requested.is_empty() {
+            writeln!(f, "{:>indent$}alerts requested:\n", "")?;
+            let indent = indent + LIST_INDENT;
+            for AlertRequest { id, class, requested_sitrep_id, .. } in
+                alerts_requested
+            {
+                writeln!(f, "{BULLET:>indent$}alert {id}")?;
+                writeln!(f, "{:>indent$}class: {class:?}", "")?;
+                writeln!(
+                    f,
+                    "{:>indent$}requested in sitrep: {requested_sitrep_id}{}\n",
+                    "",
+                    this_sitrep(*requested_sitrep_id)
+                )?;
+            }
+        }
+
+        writeln!(f)?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fm::{AlertClass, AlertRequest, DiagnosisEngineKind};
+    use chrono::Utc;
+    use ereport_types::{Ena, EreportId};
+    use omicron_uuid_kinds::{
+        AlertUuid, CaseUuid, EreporterRestartUuid, OmicronZoneUuid, SitrepUuid,
+    };
+    use std::sync::Arc;
+
+    #[test]
+    fn test_case_display() {
+        // Create UUIDs for the case
+        let case_id = CaseUuid::new_v4();
+        let created_sitrep_id = SitrepUuid::new_v4();
+        let closed_sitrep_id = SitrepUuid::new_v4();
+        let time_created = Utc::now();
+        let time_closed = Utc::now();
+
+        // Create some ereports
+        let mut ereports = IdOrdMap::new();
+
+        let ereport1 = CaseEreport {
+            ereport: Arc::new(Ereport {
+                data: crate::fm::ereport::EreportData {
+                    id: EreportId {
+                        restart_id: EreporterRestartUuid::new_v4(),
+                        ena: Ena::from(2u64),
+                    },
+                    time_collected: time_created,
+                    collector_id: OmicronZoneUuid::new_v4(),
+                    serial_number: Some("BRM6900420".to_string()),
+                    part_number: Some("913-0000037".to_string()),
+                    class: Some("hw.pwr.remove.psu".to_string()),
+                    report: serde_json::json!({}),
+                },
+                reporter: crate::fm::ereport::Reporter::Sp {
+                    sp_type: SpType::Power,
+                    slot: 0,
+                },
+            }),
+            assigned_sitrep_id: created_sitrep_id,
+            comment: "PSU removed".to_string(),
+        };
+        ereports.insert_unique(ereport1).unwrap();
+
+        let ereport2 = CaseEreport {
+            ereport: Arc::new(Ereport {
+                data: crate::fm::ereport::EreportData {
+                    id: EreportId {
+                        restart_id: EreporterRestartUuid::new_v4(),
+                        ena: Ena::from(3u64),
+                    },
+                    time_collected: time_created,
+                    collector_id: OmicronZoneUuid::new_v4(),
+                    serial_number: Some("BRM6900420".to_string()),
+                    part_number: Some("913-0000037".to_string()),
+                    class: Some("hw.pwr.insert.psu".to_string()),
+                    report: serde_json::json!({"link": "eth0", "status": "down"}),
+                },
+                reporter: crate::fm::ereport::Reporter::Sp {
+                    sp_type: SpType::Power,
+                    slot: 0,
+                },
+            }),
+            assigned_sitrep_id: closed_sitrep_id,
+            comment: "PSU inserted, closing this case".to_string(),
+        };
+        ereports.insert_unique(ereport2).unwrap();
+
+        // Create some alerts
+        let mut alerts_requested = IdOrdMap::new();
+
+        let alert1 = AlertRequest {
+            id: AlertUuid::new_v4(),
+            class: AlertClass::PsuRemoved,
+            payload: serde_json::json!({}),
+            requested_sitrep_id: created_sitrep_id,
+        };
+        alerts_requested.insert_unique(alert1).unwrap();
+
+        let alert2 = AlertRequest {
+            id: AlertUuid::new_v4(),
+            class: AlertClass::PsuInserted,
+            payload: serde_json::json!({}),
+            requested_sitrep_id: closed_sitrep_id,
+        };
+        alerts_requested.insert_unique(alert2).unwrap();
+
+        let mut impacted_sp_slots = IdOrdMap::new();
+        let slot2 = ImpactedLocation {
+            sp_type: SpType::Power,
+            slot: 0,
+            created_sitrep_id,
+            comment: "Power shelf 0 reduced redundancy".to_string(),
+        };
+        impacted_sp_slots.insert_unique(slot2).unwrap();
+
+        // Create the case
+        let case = Case {
+            id: case_id,
+            created_sitrep_id,
+            time_created,
+            closed_sitrep_id: Some(closed_sitrep_id),
+            time_closed: Some(time_closed),
+            de: DiagnosisEngineKind::PowerShelf,
+            ereports,
+            alerts_requested,
+            impacted_locations: impacted_sp_slots,
+            comment: "Power shelf rectifier added and removed here :-)"
+                .to_string(),
+        };
+
+        eprintln!("example case display:");
+        eprintln!("=====================\n");
+        eprintln!("{case}");
+
+        eprintln!("example case display (indented by 4):");
+        eprintln!("======================================\n");
+        eprintln!("{}", case.display_indented(4, Some(closed_sitrep_id)));
+    }
+}
