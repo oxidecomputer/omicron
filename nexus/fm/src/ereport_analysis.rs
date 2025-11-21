@@ -13,6 +13,29 @@ pub(crate) struct HubrisMetadata {
     pub hubris_uptime_ms: u64,
     // Added by MGS
     pub ereport_message_version: u8,
+
+    #[serde(rename = "v")]
+    pub version: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+pub(crate) struct Baseboard {
+    #[serde(rename = "baseboard_part_number")]
+    pub part_number: String,
+    #[serde(rename = "baseboard_rev")]
+    pub rev: u32,
+    #[serde(rename = "serial_number")]
+    pub serial_number: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+pub(crate) struct ParsedEreport<D> {
+    #[serde(flatten)]
+    pub hubris_metadata: Option<HubrisMetadata>,
+    #[serde(flatten)]
+    pub baseboard: Option<Baseboard>,
+    #[serde(flatten)]
+    pub report: D,
 }
 
 #[cfg(test)]
@@ -103,6 +126,7 @@ pub(crate) mod test {
             hubris_task_name: "sequencer".to_string(),
             hubris_uptime_ms: 0,
             ereport_message_version: 0,
+            version: Some(0),
         };
         let ereports = [
             (PSU_REMOVE_JSON, 1197337481),
