@@ -320,6 +320,9 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(format!(
+                                "{disk_id} missing disk_type_crucible record"
+                            ))
                     })?;
 
                 Disk::Crucible(CrucibleDisk { disk, disk_type_crucible })
@@ -335,6 +338,10 @@ impl DataStore {
                     .await
                     .map_err(|e| {
                         public_error_from_diesel(e, ErrorHandler::Server)
+                            .internal_context(format!(
+                                "{disk_id} missing disk_type_local_storage \
+                                record"
+                            ))
                     })?;
 
                 let local_storage_dataset_allocation = if let Some(
@@ -345,19 +352,20 @@ impl DataStore {
                 {
                     use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
 
-                    Some(
-                        dsl::local_storage_dataset_allocation
-                            .filter(dsl::id.eq(to_db_typed_uuid(allocation_id)))
-                            .select(LocalStorageDatasetAllocation::as_select())
-                            .first_async(&*conn)
-                            .await
-                            .map_err(|e| {
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            })?,
-                    )
+                    let allocation = dsl::local_storage_dataset_allocation
+                        .filter(dsl::id.eq(to_db_typed_uuid(allocation_id)))
+                        .select(LocalStorageDatasetAllocation::as_select())
+                        .first_async(&*conn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                                .internal_context(format!(
+                                    "local storage disk {disk_id} missing \
+                                    allocation {allocation_id}"
+                                ))
+                        })?;
+
+                    Some(allocation)
                 } else {
                     None
                 };
@@ -483,23 +491,24 @@ impl DataStore {
                     {
                         use nexus_db_schema::schema::local_storage_dataset_allocation::dsl;
 
-                        Some(
-                            dsl::local_storage_dataset_allocation
-                                .filter(
-                                    dsl::id.eq(to_db_typed_uuid(allocation_id)),
+                        let allocation = dsl::local_storage_dataset_allocation
+                            .filter(dsl::id.eq(to_db_typed_uuid(allocation_id)))
+                            .select(LocalStorageDatasetAllocation::as_select())
+                            .first_async(&*conn)
+                            .await
+                            .map_err(|e| {
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
                                 )
-                                .select(
-                                    LocalStorageDatasetAllocation::as_select(),
-                                )
-                                .first_async(&*conn)
-                                .await
-                                .map_err(|e| {
-                                    public_error_from_diesel(
-                                        e,
-                                        ErrorHandler::Server,
-                                    )
-                                })?,
-                        )
+                                .internal_context(format!(
+                                    "local storage disk {} missing \
+                                    allocation {allocation_id}",
+                                    disk.id(),
+                                ))
+                            })?;
+
+                        Some(allocation)
                     } else {
                         None
                     };
