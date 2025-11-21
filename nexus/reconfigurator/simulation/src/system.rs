@@ -23,7 +23,9 @@ use nexus_types::{
     inventory::{CabooseWhich, Collection},
 };
 use omicron_common::{api::external::Generation, disk::M2Slot};
-use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
+use omicron_uuid_kinds::{
+    BlueprintUuid, CollectionUuid, ReconfiguratorSimUuid, SledUuid,
+};
 use strum::IntoEnumIterator as _;
 
 use crate::{
@@ -671,6 +673,16 @@ impl fmt::Display for ResolvedCollectionId {
     }
 }
 
+/// An identifier for a reconfigurator sim state.
+#[derive(Clone, Debug)]
+pub enum ReconfiguratorSimId {
+    /// The specified state by full UUID.
+    Id(ReconfiguratorSimUuid),
+
+    /// The specified state by UUID prefix.
+    Prefix(String),
+}
+
 /// A log entry corresponding to an individual operation on a
 /// [`SimSystemBuilder`].
 #[derive(Clone, Debug)]
@@ -687,6 +699,45 @@ pub enum SimSystemLogEntry {
     AddInternalDns(Generation),
     AddExternalDns(Generation),
     Wipe,
+}
+
+impl fmt::Display for SimSystemLogEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SimSystemLogEntry::LoadExample {
+                collection_id,
+                blueprint_id,
+                internal_dns_version,
+                external_dns_version,
+            } => {
+                write!(
+                    f,
+                    "load example: collection {}, blueprint {}, \
+                     internal dns {}, external dns {}",
+                    collection_id,
+                    blueprint_id,
+                    internal_dns_version,
+                    external_dns_version
+                )
+            }
+            SimSystemLogEntry::LoadSerialized(result) => {
+                write!(f, "load serialized:\n{}", result)
+            }
+            SimSystemLogEntry::AddCollection(id) => {
+                write!(f, "add collection {}", id)
+            }
+            SimSystemLogEntry::AddBlueprint(id) => {
+                write!(f, "add blueprint {}", id)
+            }
+            SimSystemLogEntry::AddInternalDns(generation) => {
+                write!(f, "add internal dns {}", generation)
+            }
+            SimSystemLogEntry::AddExternalDns(generation) => {
+                write!(f, "add external dns {}", generation)
+            }
+            SimSystemLogEntry::Wipe => write!(f, "wipe"),
+        }
+    }
 }
 
 /// The result of loading a serialized system state.

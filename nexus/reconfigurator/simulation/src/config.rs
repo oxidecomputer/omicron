@@ -248,6 +248,71 @@ pub enum SimConfigLogEntry {
     Wipe,
 }
 
+impl fmt::Display for SimConfigLogEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SimConfigLogEntry::LoadSerialized(result) => {
+                write!(f, "load serialized:\n{}", result)
+            }
+            SimConfigLogEntry::AddSilo(name) => {
+                write!(f, "add silo {}", name)
+            }
+            SimConfigLogEntry::RemoveSilo(name) => {
+                write!(f, "remove silo {}", name)
+            }
+            SimConfigLogEntry::SetSiloNames(names) => {
+                write!(
+                    f,
+                    "set silo names: {}",
+                    names
+                        .iter()
+                        .map(|n| n.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            SimConfigLogEntry::SetExternalDnsZoneName(name) => {
+                write!(f, "set external dns zone name: {}", name)
+            }
+            SimConfigLogEntry::SetNumNexus(num) => {
+                write!(f, "set num nexus: {}", num)
+            }
+            SimConfigLogEntry::SetActiveNexusZoneGeneration(generation) => {
+                write!(f, "set active nexus zone generation: {}", generation)
+            }
+            SimConfigLogEntry::SetExplicitActiveNexusZones(zones) => {
+                match zones {
+                    Some(zones) => write!(
+                        f,
+                        "set explicit active nexus zones: {}",
+                        zones
+                            .iter()
+                            .map(|z| z.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => write!(f, "clear explicit active nexus zones"),
+                }
+            }
+            SimConfigLogEntry::SetExplicitNotYetNexusZones(zones) => {
+                match zones {
+                    Some(zones) => write!(
+                        f,
+                        "set explicit not-yet nexus zones: {}",
+                        zones
+                            .iter()
+                            .map(|z| z.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => write!(f, "clear explicit not-yet nexus zones"),
+                }
+            }
+            SimConfigLogEntry::Wipe => write!(f, "wipe"),
+        }
+    }
+}
+
 /// The output of loading a serializable state into a [`SimConfigBuilder`].
 #[derive(Clone, Debug)]
 #[must_use]

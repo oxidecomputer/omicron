@@ -91,6 +91,12 @@ impl SimState {
 
     #[inline]
     #[must_use]
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
+
+    #[inline]
+    #[must_use]
     pub fn description(&self) -> &str {
         &self.description
     }
