@@ -173,6 +173,8 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
                 );
                 tracked_case.psus_impacted[slot] = true;
             }
+
+            // TODO: can we stuff a nice parsed representation in there?
         }
 
         Ok(())
@@ -251,6 +253,8 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
                 )
             })?;
             case.add_ereport(ereport, format!("PSU {psu_slot} {comment}"));
+
+            // TODO: can we stuff a nice parsed representation in there?
         }
 
         // we did not find existing case(s) involving this PSU; open a new one.
@@ -261,6 +265,8 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
             let mut case =
                 sitrep.cases.open_case(DiagnosisEngineKind::PowerShelf)?;
             case.add_ereport(ereport, format!("PSU {psu_slot} {comment}"));
+
+            // TODO: can we stuff a nice parsed representation in there?
             case.comment = format!(
                 "opened when power shelf {shelf} PSU {psu_slot} {comment}"
             );
@@ -403,9 +409,6 @@ fn grab_json_value<T: DeserializeOwned>(
 #[derive(Debug, Eq, PartialEq, serde::Deserialize)]
 struct PscEreport {
     #[serde(flatten)]
-    metadata: ereport_analysis::HubrisMetadata,
-
-    #[serde(flatten)]
     psu: PsuId,
     #[serde(flatten)]
     class: EreportClass,
@@ -463,8 +466,18 @@ mod test {
         let json_value: serde_json::Value =
             serde_json::from_str(ereport_analysis::test::PSU_PWR_BAD_JSON)
                 .expect("JSON should parse");
-        let ereport: PscEreport = serde_json::from_value(dbg!(json_value))
-            .expect("JSON value should be interpretable");
-        eprintln!("{ereport:?}");
+        let ereport: ereport_analysis::ParsedEreport<PscEreport> =
+            match serde_json::from_value(dbg!(json_value)) {
+                Ok(ereport) => ereport,
+                Err(e) => {
+                    panic!("ereport could not be  {e}")
+                }
+            };
+        dbg!(ereport);
+    }
+
+    #[test]
+    fn test_insert_remove_pwr_good() {
+        todo!()
     }
 }
