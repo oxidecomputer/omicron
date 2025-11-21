@@ -789,7 +789,8 @@ impl SledAgent {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
         };
 
-        // TODO-K: check this is actually correct
+        // TODO-K: check if this is correct, or if I should do something
+        // different for a simulated environment
         let runtime =
             tokio::runtime::Runtime::new().context("creating tokio runtime")?;
         let smf_services_in_maintenance =

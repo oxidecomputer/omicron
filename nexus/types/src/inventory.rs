@@ -759,21 +759,3 @@ impl IdOrdItem for InternalDnsGenerationStatus {
     }
     id_upcast!();
 }
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct SmfServicesStatus {
-    /// When this status check was taken
-    pub time_collected: DateTime<Utc>,
-    /// UUID of the sled
-    pub sled_id: SledUuid,
-    /// FMRIs of the services in maintenance if any
-    pub services_in_maintenance: Vec<String>,
-}
-
-impl IdOrdItem for SmfServicesStatus {
-    type Key<'a> = SledUuid;
-    fn key(&self) -> Self::Key<'_> {
-        self.sled_id
-    }
-    id_upcast!();
-}

@@ -32,6 +32,7 @@ use futures::stream::FuturesUnordered;
 use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
+use illumos_utils::svcs::Svcs;
 use illumos_utils::zpool::PathInPool;
 use itertools::Itertools as _;
 use nexus_sled_agent_shared::inventory::{
@@ -1119,16 +1120,11 @@ impl SledAgent {
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
-        // TODO-K: have sled agent collect svcs -Zxv periodically and stuff it
-        // into its existing inventory response.
-        //
-        // Do something like this
-        // let etherstub = Dladm::ensure_etherstub(
-        //  illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
-        // )
-        // .await
-        // .map_err(|e| Error::Etherstub(e))?;
-        let smf_services_in_maintenance = "".to_string();
+
+        // TODO-K: check this works and remove unwraps
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let smf_services_in_maintenance =
+            runtime.block_on(Svcs::in_maintenance()).unwrap();
 
         let ReconcilerInventory {
             disks,
