@@ -109,14 +109,11 @@ fn disk_attach_query_template() -> collection_attach::AttachQueryTemplate {
         },
         Some(move |builder: &mut QueryBuilder| {
             // Collection (instance) filter: state and active_propolis_id
-            let state_labels: Vec<_> = ok_to_attach_instance_states
-                .iter()
-                .map(|s| s.label())
-                .collect();
             builder.sql(" AND state = ANY(");
-            builder
-                .param()
-                .bind::<sql_types::Array<sql_types::Text>, _>(state_labels);
+            builder.param().bind::<
+                sql_types::Array<nexus_db_schema::enums::InstanceStateEnum>,
+                _,
+            >(ok_to_attach_instance_states.to_vec());
             builder.sql(") AND active_propolis_id IS NULL");
         }),
         Some(move |builder: &mut QueryBuilder| {
