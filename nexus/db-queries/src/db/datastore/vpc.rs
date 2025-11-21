@@ -129,7 +129,7 @@ fn vpc_subnet_to_router_attach_query_template()
         Some(|builder: &mut QueryBuilder| {
             // Collection (router) filter: kind = Custom
             builder.sql(" AND kind = ");
-            builder.param().bind::<sql_types::Text, _>("custom");
+            builder.param().bind::<nexus_db_schema::enums::VpcRouterKindEnum, _>(VpcRouterKind::Custom);
         }),
         None::<fn(&mut QueryBuilder)>, // No additional resource filter needed
     )

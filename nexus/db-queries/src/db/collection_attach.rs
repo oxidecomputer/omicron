@@ -472,6 +472,7 @@ impl AttachQueryTemplate {
         // Build the CTE query structure matching the QueryFragment implementation
 
         // WITH collection_by_id AS (...)
+        // This is just existence check - NO user filters here
         builder.sql("WITH collection_by_id AS (SELECT ");
         builder.fragment_unqualified(&CollectionType::as_select());
         builder.sql(" FROM ");
@@ -483,12 +484,10 @@ impl AttachQueryTemplate {
         builder.sql(" AND ");
         builder.sql(self.collection.time_deleted_column);
         builder.sql(" IS NULL");
-        if let Some(filter) = self.collection_filter {
-            filter(&mut builder);
-        }
         builder.sql(" FOR UPDATE), ");
 
         // resource_by_id AS (...)
+        // This is just existence check - NO user filters here
         builder.sql("resource_by_id AS (SELECT ");
         builder.fragment_unqualified(&ResourceType::as_select());
         builder.sql(" FROM ");
@@ -500,9 +499,6 @@ impl AttachQueryTemplate {
         builder.sql(" AND ");
         builder.sql(self.resource.time_deleted_column);
         builder.sql(" IS NULL");
-        if let Some(filter) = self.resource_filter {
-            filter(&mut builder);
-        }
         builder.sql(" FOR UPDATE), ");
 
         // resource_count AS (...)
@@ -518,6 +514,7 @@ impl AttachQueryTemplate {
         builder.sql(" IS NULL), ");
 
         // collection_info AS (...)
+        // This includes user-supplied constraints (filters)
         builder.sql("collection_info AS (SELECT ");
         builder.fragment_unqualified(&CollectionType::as_select());
         builder.sql(" FROM ");
@@ -528,9 +525,14 @@ impl AttachQueryTemplate {
         builder.param().bind::<sql_types::Uuid, _>(collection_id);
         builder.sql(" AND ");
         builder.sql(self.collection.time_deleted_column);
-        builder.sql(" IS NULL FOR UPDATE), ");
+        builder.sql(" IS NULL");
+        if let Some(filter) = self.collection_filter {
+            filter(&mut builder);
+        }
+        builder.sql(" FOR UPDATE), ");
 
         // resource_info AS (...)
+        // This includes user-supplied constraints (filters) and FK check
         builder.sql("resource_info AS (SELECT ");
         builder.fragment_unqualified(&ResourceType::as_select());
         builder.sql(" FROM ");
@@ -546,6 +548,9 @@ impl AttachQueryTemplate {
             builder.sql(" AND ");
             builder.sql(self.resource.collection_id_column);
             builder.sql(" IS NULL");
+        }
+        if let Some(filter) = self.resource_filter {
+            filter(&mut builder);
         }
         builder.sql(" FOR UPDATE), ");
 
