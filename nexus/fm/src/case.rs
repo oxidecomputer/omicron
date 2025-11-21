@@ -94,15 +94,15 @@ impl AllCases {
         Ok(case)
     }
 
-    pub fn case(&self, id: CaseUuid) -> Option<&CaseBuilder> {
-        self.cases.get(&id)
+    pub fn case(&self, id: &CaseUuid) -> Option<&CaseBuilder> {
+        self.cases.get(id)
     }
 
     pub fn case_mut(
         &mut self,
-        id: CaseUuid,
+        id: &CaseUuid,
     ) -> Option<id_ord_map::RefMut<'_, CaseBuilder>> {
-        self.cases.get_mut(&id)
+        self.cases.get_mut(id)
     }
 }
 
