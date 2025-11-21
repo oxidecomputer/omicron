@@ -81,7 +81,8 @@ async fn test_reject_creating_local_storage_disk(
     .unwrap();
     assert_eq!(
         error.message,
-        "unsupported value for \"size and block_size\": total size must be a multiple of block size 4096",
+        "unsupported value for \"size and block_size\": total size must be a \
+        multiple of block size 4096",
     );
 
     // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly divide
@@ -109,7 +110,8 @@ async fn test_reject_creating_local_storage_disk(
     .unwrap();
     assert_eq!(
         error.message,
-        "unsupported value for \"size\": total size must be a multiple of 1 GiB",
+        "unsupported value for \"size\": total size must be a multiple of 1 \
+        GiB",
     );
 }
 
