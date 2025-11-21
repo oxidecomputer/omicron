@@ -8,8 +8,9 @@ use super::DataStore;
 use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
+use crate::db::collection_attach;
 use crate::db::collection_attach::AttachError;
-use crate::db::collection_attach::DatastoreAttachTarget;
+use crate::db::collection_attach::AttachQuery;
 use crate::db::collection_detach::DatastoreDetachTarget;
 use crate::db::collection_detach::DetachError;
 use crate::db::model::ExternalIp;
@@ -25,6 +26,7 @@ use crate::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES_CREATING;
+use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -61,6 +63,72 @@ use std::net::IpAddr;
 use uuid::Uuid;
 
 const MAX_EXTERNAL_IPS_PLUS_SNAT: u32 = MAX_EXTERNAL_IPS_PER_INSTANCE + 1;
+
+/// Creates a database query template for attaching external IPs to instances.
+///
+/// This defines the complete SQL structure for the attach operation,
+/// including the SET clause and filters.
+fn external_ip_attach_query_template(
+    creating_instance: bool,
+    kind: IpKind,
+) -> collection_attach::AttachQueryTemplate {
+    use diesel::sql_types;
+    use nexus_db_schema::enums::{
+        InstanceStateEnum, IpAttachStateEnum, IpKindEnum,
+    };
+
+    let safe_states = if creating_instance {
+        SAFE_TO_ATTACH_INSTANCE_STATES_CREATING.to_vec()
+    } else {
+        SAFE_TO_ATTACH_INSTANCE_STATES.to_vec()
+    };
+
+    collection_attach::AttachQueryTemplate::new(
+        collection_attach::Collection::new(
+            "instance",     // collection table
+            "id",           // collection id column
+            "time_deleted", // collection time_deleted
+        ),
+        collection_attach::Resource::new(
+            "external_ip",  // resource table
+            "id",           // resource id column
+            "parent_id",    // resource FK column
+            "time_deleted", // resource time_deleted
+        ),
+        false, // allow_from_attached
+        |builder: &mut QueryBuilder, instance_id: uuid::Uuid| {
+            // Build SET clause: parent_id, time_modified, state
+            builder.sql("parent_id = ");
+            builder.param().bind::<sql_types::Nullable<sql_types::Uuid>, _>(
+                Some(instance_id),
+            );
+            builder.sql(", time_modified = ");
+            builder.param().bind::<sql_types::Timestamptz, _>(Utc::now());
+            builder.sql(", state = ");
+            builder
+                .param()
+                .bind::<IpAttachStateEnum, _>(IpAttachState::Attaching);
+        },
+        Some(move |builder: &mut QueryBuilder| {
+            // Collection (instance) filter: state and migration_id
+            builder.sql(" AND state = ANY(");
+            builder
+                .param()
+                .bind::<sql_types::Array<InstanceStateEnum>, _>(safe_states);
+            builder.sql(") AND migration_id IS NULL");
+        }),
+        Some(move |builder: &mut QueryBuilder| {
+            // Resource (external_ip) filter: state, parent_id, and kind
+            builder.sql(" AND state = ");
+            builder
+                .param()
+                .bind::<IpAttachStateEnum, _>(IpAttachState::Detached);
+            builder.sql(" AND kind = ");
+            builder.param().bind::<IpKindEnum, _>(kind);
+            builder.sql(" AND parent_id IS NULL");
+        }),
+    )
+}
 
 impl DataStore {
     /// Create an external IP address for source NAT for an instance.
@@ -430,39 +498,21 @@ impl DataStore {
     ) -> Result<Option<(ExternalIp, bool)>, Error> {
         use diesel::result::DatabaseErrorKind::UniqueViolation;
         use diesel::result::Error::DatabaseError;
-        use nexus_db_schema::schema::external_ip::dsl;
-        use nexus_db_schema::schema::external_ip::table;
-        use nexus_db_schema::schema::instance::dsl as inst_dsl;
-        use nexus_db_schema::schema::instance::table as inst_table;
 
-        let safe_states = if creating_instance {
-            &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
-        } else {
-            &SAFE_TO_ATTACH_INSTANCE_STATES[..]
-        };
+        // Create the query template with all SQL structure
+        let template =
+            external_ip_attach_query_template(creating_instance, kind);
 
-        let query = Instance::attach_resource(
+        // Build the query with runtime parameter values
+        let query: AttachQuery<ExternalIp, Instance> = template.build(
             instance_id.into_untyped_uuid(),
             ip_id,
-            inst_table
-                .into_boxed()
-                .filter(inst_dsl::state.eq_any(safe_states))
-                .filter(inst_dsl::migration_id.is_null()),
-            table
-                .into_boxed()
-                .filter(dsl::state.eq(IpAttachState::Detached))
-                .filter(dsl::kind.eq(kind))
-                .filter(dsl::parent_id.is_null()),
             MAX_EXTERNAL_IPS_PLUS_SNAT,
-            diesel::update(dsl::external_ip).set((
-                dsl::parent_id.eq(Some(instance_id.into_untyped_uuid())),
-                dsl::time_modified.eq(Utc::now()),
-                dsl::state.eq(IpAttachState::Attaching),
-            )),
         );
 
+        let conn = self.pool_connection_authorized(opctx).await?;
         let mut do_saga = true;
-        query.attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        query.attach_and_get_result_async(&conn)
         .await
         .map(|(_, resource)| Some(resource))
         .or_else(|e: AttachError<ExternalIp, _, _>| match e {
