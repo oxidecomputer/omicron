@@ -1159,7 +1159,7 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::shared::IpRange;
-    use nexus_types::inventory::SourceNatConfig;
+    use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -1214,7 +1214,7 @@ mod tests {
             let external_ip = if allocate_snat {
                 OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
                     id: ExternalIpUuid::new_v4(),
-                    snat_cfg: SourceNatConfig::new(
+                    snat_cfg: SourceNatConfigGeneric::new(
                         ip,
                         0,
                         NUM_SOURCE_NAT_PORTS - 1,

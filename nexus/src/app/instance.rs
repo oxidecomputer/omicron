@@ -20,6 +20,7 @@ use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_lookup::LookupPath;
 use nexus_db_lookup::lookup;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::InstanceIntendedState as IntendedState;
 use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
@@ -51,7 +52,11 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::ExternalIpConfig;
+use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
+use omicron_common::api::internal::shared::ExternalIps;
+use omicron_common::api::internal::shared::external_ip::ConcreteIp;
+use omicron_common::api::internal::shared::external_ip::SourceNatConfig;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::MulticastGroupUuid;
@@ -70,6 +75,7 @@ use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::VmmPutStateBody;
 use std::collections::HashSet;
 use std::matches;
+use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -1328,75 +1334,16 @@ impl super::Nexus {
             .derive_guest_network_interface_info(&opctx, &authz_instance)
             .await?;
 
-        // Collect the external IPs for the instance.
-        let (snat_ip, external_ips): (Vec<_>, Vec<_>) = self
+        // Collect the external IPs for the instance, and construct the external
+        // configuration for the sled-agent request.
+        let all_external_ips = self
             .db_datastore
             .instance_lookup_external_ips(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(authz_instance.id()),
             )
-            .await?
-            .into_iter()
-            .partition(|ip| ip.kind == IpKind::SNat);
-
-        // Sanity checks on the number and kind of each IP address.
-        if external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
-            return Err(Error::internal_error(
-                format!(
-                    "Expected the number of external IPs to be limited to \
-                    {}, but found {}",
-                    MAX_EXTERNAL_IPS_PER_INSTANCE,
-                    external_ips.len(),
-                )
-                .as_str(),
-            )
-            .into());
-        }
-
-        // If there are any external IPs not yet fully attached/detached,then
-        // there are attach/detach sagas in progress. That should complete in
-        // its own time, so return a 503 to indicate a possible retry.
-        if external_ips.iter().any(|v| v.state != IpAttachState::Attached) {
-            return Err(Error::unavail(
-                "External IP attach/detach is in progress during instance_ensure_registered"
-            ).into());
-        }
-
-        // Partition remaining external IPs by class: we can have at most
-        // one ephemeral ip.
-        let (ephemeral_ips, floating_ips): (Vec<_>, Vec<_>) = external_ips
-            .into_iter()
-            .partition(|ip| ip.kind == IpKind::Ephemeral);
-
-        if ephemeral_ips.len() > MAX_EPHEMERAL_IPS_PER_INSTANCE {
-            return Err(Error::internal_error(
-                format!(
-                "Expected at most {} ephemeral IP for an instance, found {}",
-                MAX_EPHEMERAL_IPS_PER_INSTANCE,
-                ephemeral_ips.len()
-            )
-                .as_str(),
-            )
-            .into());
-        }
-
-        let ephemeral_ip = ephemeral_ips.get(0).map(|model| model.ip.ip());
-
-        let floating_ips =
-            floating_ips.into_iter().map(|model| model.ip.ip()).collect();
-        if snat_ip.len() != 1 {
-            return Err(Error::internal_error(
-                "Expected exactly one SNAT IP address for an instance",
-            )
-            .into());
-        }
-        let source_nat =
-            SourceNatConfig::try_from(snat_ip.into_iter().next().unwrap())
-                .map_err(|err| {
-                    Error::internal_error(&format!(
-                        "read invalid SNAT config from db: {err}"
-                    ))
-                })?;
+            .await?;
+        let external_ips = build_external_ip_config(&all_external_ips)?;
 
         // Gather the firewall rules for the VPC this instance is in.
         // The NIC info we gathered above doesn't have VPC information
@@ -1500,9 +1447,7 @@ impl super::Nexus {
         let local_config = sled_agent_client::types::InstanceSledLocalConfig {
             hostname,
             nics,
-            source_nat,
-            ephemeral_ip,
-            floating_ips,
+            external_ips,
             firewall_rules,
             multicast_groups,
             dhcp_config: sled_agent_client::types::DhcpConfig {
@@ -2353,6 +2298,136 @@ impl super::Nexus {
             }
         }
     }
+}
+
+fn build_external_ip_config(
+    ips: &[ExternalIp],
+) -> Result<Option<ExternalIpConfig>, Error> {
+    // Partition into concrete IPv4 and IPv6 addresses, using subset of data
+    // needed for the concrete conversions only.
+    let mut ipv4 = Vec::new();
+    let mut ipv6 = Vec::new();
+    for ip in ips.iter() {
+        match ip.ip.ip() {
+            IpAddr::V4(v4) => {
+                let eip = ExternalIpData {
+                    ip: v4,
+                    first_port: ip.first_port.into(),
+                    last_port: ip.last_port.into(),
+                    kind: ip.kind,
+                    attach_state: ip.state,
+                };
+                ipv4.push(eip);
+            }
+            IpAddr::V6(v6) => {
+                let eip = ExternalIpData {
+                    ip: v6,
+                    first_port: ip.first_port.into(),
+                    last_port: ip.last_port.into(),
+                    kind: ip.kind,
+                    attach_state: ip.state,
+                };
+                ipv6.push(eip);
+            }
+        }
+    }
+    let ipv4_config = if ipv4.is_empty() {
+        None
+    } else {
+        Some(build_concrete_external_ip_config(ipv4)?)
+    };
+    let ipv6_config = if ipv6.is_empty() {
+        None
+    } else {
+        Some(build_concrete_external_ip_config(ipv6)?)
+    };
+    match (ipv4_config, ipv6_config) {
+        (None, None) => Ok(None),
+        (None, Some(v6)) => Ok(Some(ExternalIpConfig::V6(v6))),
+        (Some(v4), None) => Ok(Some(ExternalIpConfig::V4(v4))),
+        (Some(v4), Some(v6)) => {
+            Ok(Some(ExternalIpConfig::DualStack { v4, v6 }))
+        }
+    }
+}
+
+// Subset of an `ExternalIp` needed to build the `ExternalIpConfig` for the
+// concrete address version.
+struct ExternalIpData<T: ConcreteIp> {
+    ip: T,
+    first_port: u16,
+    last_port: u16,
+    kind: IpKind,
+    attach_state: IpAttachState,
+}
+
+fn build_concrete_external_ip_config<T>(
+    ips: Vec<ExternalIpData<T>>,
+) -> Result<ExternalIps<T>, Error>
+where
+    T: ConcreteIp,
+{
+    let mut builder = ExternalIpConfigBuilder::new();
+    let mut seen_snat_ip = false;
+    let mut seen_ephemeral_ip = false;
+    let mut floating_ips = Vec::new();
+    for ip in ips.iter() {
+        if ip.attach_state != IpAttachState::Attached {
+            return Err(Error::unavail(
+                "External IP attach/detach is in progress \
+            during instance_ensure_registered",
+            ));
+        }
+        match ip.kind {
+            IpKind::SNat if !seen_snat_ip => {
+                seen_snat_ip = true;
+                let source_nat =
+                    SourceNatConfig::new(ip.ip, ip.first_port, ip.last_port)
+                        .map_err(|e| {
+                            Error::internal_error(
+                                format!(
+                                    "Failed to build source NAT config: {e}"
+                                )
+                                .as_str(),
+                            )
+                        })?;
+                builder = builder.with_source_nat(source_nat);
+            }
+            IpKind::SNat => {
+                return Err(Error::internal_error(
+                    "Expected at most one SNAT IP address for an instance",
+                ));
+            }
+            IpKind::Ephemeral if !seen_ephemeral_ip => {
+                seen_ephemeral_ip = true;
+                builder = builder.with_ephemeral_ip(ip.ip);
+            }
+            IpKind::Ephemeral => {
+                return Err(Error::internal_error(
+                    "Expected at most 1 Ephemeral IP for an instance",
+                ));
+            }
+            IpKind::Floating => floating_ips.push(ip.ip),
+        }
+    }
+
+    // Ensure limit to the number of non-SNAT IPs.
+    let n_external_ips = usize::from(seen_ephemeral_ip) + floating_ips.len();
+    if n_external_ips > MAX_EXTERNAL_IPS_PER_INSTANCE {
+        return Err(Error::internal_error(
+            format!(
+                "Expected the number of external IPs per IP version to \
+            be limited to {}, but found {}",
+                MAX_EXTERNAL_IPS_PER_INSTANCE, n_external_ips
+            )
+            .as_str(),
+        ));
+    }
+    builder.with_floating_ips(floating_ips).build().map_err(|e| {
+        Error::internal_error(
+            format!("Failed to build external IPs: {e}").as_str(),
+        )
+    })
 }
 
 /// Writes the VMM and migration state supplied in `new_runtime_state` to the

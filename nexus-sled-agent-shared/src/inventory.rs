@@ -24,7 +24,7 @@ use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
-        internal::shared::{NetworkInterface, SourceNatConfig},
+        internal::shared::{NetworkInterface, SourceNatConfigGeneric},
     },
     disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
     update::ArtifactId,
@@ -1176,7 +1176,7 @@ pub enum OmicronZoneType {
         /// The service vNIC providing outbound connectivity using OPTE.
         nic: NetworkInterface,
         /// The SNAT configuration for outbound connections.
-        snat_cfg: SourceNatConfig,
+        snat_cfg: SourceNatConfigGeneric,
     },
 
     /// Type of clickhouse zone used for a single node clickhouse deployment
