@@ -824,7 +824,7 @@ impl super::Nexus {
         // Cannot migrate instance if it has local storage
         if self.instance_uses_local_storage(opctx, &authz_instance).await? {
             return Err(Error::invalid_request(format!(
-                "cannot migrate {} as it uses local storage",
+                "cannot migrate instance {} as it uses local storage",
                 authz_instance.id()
             )));
         }
