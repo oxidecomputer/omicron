@@ -63,7 +63,7 @@ use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::ReconfiguratorSimUuid;
+use omicron_uuid_kinds::ReconfiguratorSimStateUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
@@ -92,7 +92,7 @@ struct ReconfiguratorSim {
     // The simulator currently being used.
     sim: Simulator,
     // The current state.
-    current: ReconfiguratorSimUuid,
+    current: ReconfiguratorSimStateUuid,
     // The current system state
     log: slog::Logger,
 }
@@ -1024,38 +1024,38 @@ impl From<CollectionIdOpt> for CollectionId {
 }
 
 #[derive(Clone, Debug)]
-enum ReconfiguratorSimIdOpt {
+enum ReconfiguratorSimStateIdOpt {
     /// use a specific reconfigurator sim state by full UUID
-    Id(ReconfiguratorSimUuid),
+    Id(ReconfiguratorSimStateUuid),
     /// use a reconfigurator sim state by UUID prefix
     Prefix(String),
 }
 
-impl FromStr for ReconfiguratorSimIdOpt {
+impl FromStr for ReconfiguratorSimStateIdOpt {
     type Err = Infallible;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.parse::<ReconfiguratorSimUuid>() {
-            Ok(id) => Ok(ReconfiguratorSimIdOpt::Id(id)),
-            Err(_) => Ok(ReconfiguratorSimIdOpt::Prefix(s.to_owned())),
+        match s.parse::<ReconfiguratorSimStateUuid>() {
+            Ok(id) => Ok(ReconfiguratorSimStateIdOpt::Id(id)),
+            Err(_) => Ok(ReconfiguratorSimStateIdOpt::Prefix(s.to_owned())),
         }
     }
 }
 
-impl fmt::Display for ReconfiguratorSimIdOpt {
+impl fmt::Display for ReconfiguratorSimStateIdOpt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ReconfiguratorSimIdOpt::Id(id) => id.fmt(f),
-            ReconfiguratorSimIdOpt::Prefix(prefix) => prefix.fmt(f),
+            ReconfiguratorSimStateIdOpt::Id(id) => id.fmt(f),
+            ReconfiguratorSimStateIdOpt::Prefix(prefix) => prefix.fmt(f),
         }
     }
 }
 
-impl From<ReconfiguratorSimIdOpt> for ReconfiguratorSimId {
-    fn from(value: ReconfiguratorSimIdOpt) -> Self {
+impl From<ReconfiguratorSimStateIdOpt> for ReconfiguratorSimId {
+    fn from(value: ReconfiguratorSimStateIdOpt) -> Self {
         match value {
-            ReconfiguratorSimIdOpt::Id(id) => ReconfiguratorSimId::Id(id),
-            ReconfiguratorSimIdOpt::Prefix(prefix) => {
+            ReconfiguratorSimStateIdOpt::Id(id) => ReconfiguratorSimId::Id(id),
+            ReconfiguratorSimStateIdOpt::Prefix(prefix) => {
                 ReconfiguratorSimId::Prefix(prefix)
             }
         }
@@ -1519,7 +1519,7 @@ enum StateArgs {
 struct StateLogArgs {
     /// Starting state ID (defaults to current state)
     #[clap(long)]
-    from: Option<ReconfiguratorSimUuid>,
+    from: Option<ReconfiguratorSimStateUuid>,
 
     /// Limit number of states to display
     #[clap(long, short = 'n', requires = "from")]
@@ -1533,7 +1533,7 @@ struct StateLogArgs {
 #[derive(Debug, Args)]
 struct StateSwitchArgs {
     /// The state ID or unique prefix to switch to
-    state_id: ReconfiguratorSimIdOpt,
+    state_id: ReconfiguratorSimStateIdOpt,
 }
 
 #[derive(Debug, Args)]
