@@ -881,9 +881,16 @@ impl DataStore {
         })?;
 
         // Delete case impacts.
-        let case_impacted_locations_deleted = diesel::delete(impacted_location_dsl::fm_case_impacts_location.filter(impacted_location_dsl::sitrep_id.eq_any(ids.clone())).execute_async(&*conn).await.map_err(|e| {
-            public_error_from_diesel(e, ErrorHandler::Server).internal_context("failed to delete case location impact lists")
-        })
+        let case_impacted_locations_deleted = diesel::delete(
+            impacted_location_dsl::fm_case_impacts_location
+                .filter(impacted_location_dsl::sitrep_id.eq_any(ids.clone())),
+        )
+        .execute_async(&*conn)
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(e, ErrorHandler::Server)
+                .internal_context("failed to delete case location impact lists")
+        })?;
 
         // Delete case metadata records.
         let cases_deleted = diesel::delete(
