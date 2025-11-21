@@ -34,7 +34,6 @@ use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
-use nexus_types::inventory::SmfServicesStatus;
 use nexus_types::inventory::SpType;
 use nexus_types::inventory::TimeSync;
 use nexus_types::inventory::Zpool;
@@ -132,7 +131,6 @@ pub struct CollectionBuilder {
     cockroach_status: BTreeMap<NodeId, CockroachStatus>,
     ntp_timesync: IdOrdMap<TimeSync>,
     internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
-    smf_services_status: IdOrdMap<SmfServicesStatus>,
     // CollectionBuilderRng is taken by value, rather than passed in as a
     // mutable ref, to encourage a tree-like structure where each RNG is
     // generally independent.
@@ -167,7 +165,6 @@ impl CollectionBuilder {
             cockroach_status: BTreeMap::new(),
             ntp_timesync: IdOrdMap::new(),
             internal_dns_generation_status: IdOrdMap::new(),
-            smf_services_status: IdOrdMap::new(),
             rng: CollectionBuilderRng::from_entropy(),
         }
     }
@@ -195,7 +192,6 @@ impl CollectionBuilder {
             cockroach_status: self.cockroach_status,
             ntp_timesync: self.ntp_timesync,
             internal_dns_generation_status: self.internal_dns_generation_status,
-            smf_services_status: self.smf_services_status,
         }
     }
 
@@ -679,6 +675,7 @@ impl CollectionBuilder {
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
             zone_image_resolver: inventory.zone_image_resolver,
+            smf_services_in_maintenance: inventory.smf_services_in_maintenance,
         };
 
         self.sleds

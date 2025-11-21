@@ -129,7 +129,8 @@ pub struct Inventory {
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
     // TODO-K: Possibly a Vec<String>, or create an FMRI type or something?
-    // I think we may also want a timestamp?
+    // I think we may also want a timestamp? maybe not as we're already setting
+    // one with the inventory collection
     pub smf_services_in_maintenance: String,
 }
 

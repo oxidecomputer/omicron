@@ -3999,6 +3999,8 @@ impl DataStore {
                 reconciler_status,
                 last_reconciliation,
                 zone_image_resolver,
+                // TODO-K: Actually query the DB when there is something there
+                smf_services_in_maintenance: "".to_string(),
             };
             sled_agents
                 .insert_unique(sled_agent)
@@ -4083,8 +4085,6 @@ impl DataStore {
             cockroach_status,
             ntp_timesync,
             internal_dns_generation_status,
-            // TODO-K: Actually query the DB once the DB has this information
-            smf_services_status: IdOrdMap::new(),
         })
     }
 

@@ -181,9 +181,6 @@ pub struct Collection {
     pub ntp_timesync: IdOrdMap<TimeSync>,
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
-
-    /// The status of SMF services
-    pub smf_services_status: IdOrdMap<SmfServicesStatus>,
 }
 
 impl Collection {
@@ -707,6 +704,8 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
+    // TODO-K: change the type
+    pub smf_services_in_maintenance: String,
 }
 
 impl IdOrdItem for SledAgent {

@@ -619,6 +619,7 @@ fn display_sleds(
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
+            smf_services_in_maintenance,
         } = sled;
 
         writeln!(
@@ -893,6 +894,13 @@ fn display_sleds(
                     )
                 )?;
             }
+        }
+
+        // TODO-K: make sure this is the display we actually want
+        if !smf_services_in_maintenance.is_empty() {
+            writeln!(indented, "SMF services in maintenance:")?;
+            let mut indent2 = IndentWriter::new("  ", &mut indented);
+            writeln!(indent2, "{smf_services_in_maintenance}")?;
         }
 
         f = indented.into_inner();
