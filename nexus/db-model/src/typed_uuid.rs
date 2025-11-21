@@ -9,6 +9,7 @@ use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
+use iddqd::{Comparable, Equivalent};
 use omicron_uuid_kinds::{GenericUuid, TypedUuid, TypedUuidKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -113,5 +114,48 @@ impl<T: TypedUuidKind> GenericUuid for DbTypedUuid<T> {
     #[inline]
     fn as_untyped_uuid(&self) -> &Uuid {
         self.0.as_untyped_uuid()
+    }
+}
+
+impl<T: TypedUuidKind> Equivalent<TypedUuid<T>> for DbTypedUuid<T> {
+    #[inline]
+    fn equivalent(&self, other: &TypedUuid<T>) -> bool {
+        self.0.as_untyped_uuid() == other.as_untyped_uuid()
+    }
+}
+
+impl<T: TypedUuidKind> Comparable<TypedUuid<T>> for DbTypedUuid<T> {
+    #[inline]
+    fn compare(&self, key: &TypedUuid<T>) -> std::cmp::Ordering {
+        self.0.as_untyped_uuid().cmp(key.as_untyped_uuid())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omicron_uuid_kinds::SledUuid;
+    use std::hash::{BuildHasher, RandomState};
+    use test_strategy::proptest;
+
+    /// Test that the `Hash` implementation is consistent, as required by
+    /// `Equivalent`.
+    #[proptest]
+    fn test_hash_equality(id: SledUuid) {
+        let db_id = DbTypedUuid::from(id);
+        assert!(db_id.equivalent(&id));
+
+        let hasher = RandomState::new();
+        let id_hash = hasher.hash_one(&id);
+        let db_id_hash = hasher.hash_one(&db_id);
+        assert_eq!(id_hash, db_id_hash);
+    }
+
+    /// Test that the `compare` implementation is consistent, as required by
+    /// `Comparable`.
+    #[proptest]
+    fn test_compare_consistency(id1: SledUuid, id2: SledUuid) {
+        let db_id1 = DbTypedUuid::from(id1);
+        assert_eq!(db_id1.compare(&id2), id1.cmp(&id2));
     }
 }

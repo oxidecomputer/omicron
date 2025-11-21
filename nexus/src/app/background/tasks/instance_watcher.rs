@@ -89,7 +89,7 @@ impl InstanceWatcher {
         target: VirtualMachine,
         vmm: Vmm,
         sled: Sled,
-    ) -> impl Future<Output = Check> + Send + 'static {
+    ) -> impl Future<Output = Check> + Send + 'static + use<> {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
 
@@ -130,7 +130,7 @@ impl InstanceWatcher {
                 // code path as `mark_instance_failed`...
                 SledVmmState {
                     vmm_state: nexus::VmmRuntimeState {
-                        r#gen: vmm.runtime.r#gen.0.next(),
+                        generation: vmm.runtime.generation.0.next(),
                         state: nexus::VmmState::Failed,
                         time_updated: chrono::Utc::now(),
                     },
@@ -169,7 +169,7 @@ impl InstanceWatcher {
                         // code path as `mark_instance_failed`...
                         SledVmmState {
                             vmm_state: nexus::VmmRuntimeState {
-                                r#gen: vmm.runtime.r#gen.0.next(),
+                                generation: vmm.runtime.generation.0.next(),
                                 state: nexus::VmmState::Failed,
                                 time_updated: chrono::Utc::now(),
                             },

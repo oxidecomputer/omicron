@@ -32,7 +32,9 @@ use crate::{
 use daft::{Diffable, Leaf};
 use gfss::shamir::Share;
 use omicron_uuid_kinds::RackUuid;
+use serde::{Deserialize, Serialize};
 use slog::{Logger, error, info, o, warn};
+use slog_error_chain::SlogInlineError;
 
 /// An entity capable of participating in trust quorum
 ///
@@ -379,6 +381,16 @@ impl Node {
     }
 
     /// A peer node has disconnected from this one
+    ///
+    /// Note: It is safe if a call to `on_disconnect` is missed due to a new
+    /// connection replacing the existing connection and resulting in a call
+    /// to `on_connect` while the node thinks it still maintains a connection.
+    ///
+    /// All active behavior such as retries occur in `on_connect`. If the
+    /// contents of this method change such that it is no longer safe to call
+    /// `on_connect` without first calling `on_disconnect` for an already
+    /// connected peer, then we can call `on_disconnect` first from directly
+    /// within `on_connect`. For now that is unnecessary.
     pub fn on_disconnect(
         &mut self,
         ctx: &mut impl NodeHandlerCtx,
@@ -1063,7 +1075,16 @@ impl Node {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    SlogInlineError,
+    Serialize,
+    Deserialize,
+)]
 pub enum CommitError {
     #[error("invalid rack id")]
     InvalidRackId(
@@ -1077,7 +1098,16 @@ pub enum CommitError {
     Expunged { epoch: Epoch, from: BaseboardId },
 }
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    SlogInlineError,
+    Serialize,
+    Deserialize,
+)]
 pub enum PrepareAndCommitError {
     #[error("invalid rack id")]
     InvalidRackId(

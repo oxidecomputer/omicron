@@ -381,6 +381,8 @@ impl CollectionTaskHandle {
         let log = log.new(o!(
             "component" => "collection-task-handle",
             "producer_id" => producer.id.to_string(),
+            "producer_ip" => producer.address.ip().to_string(),
+            "producer_port" => producer.address.port(),
         ));
         Self { notifiers, log }
     }
@@ -536,6 +538,8 @@ impl CollectionTask {
         let log = log.new(o!(
             "component" => "collection-task",
             "producer_id" => producer.id.to_string(),
+            "producer_ip" => producer.address.ip().to_string(),
+            "producer_port" => producer.address.port(),
         ));
 
         // Watch channel for changes to the producer's endpoint information.

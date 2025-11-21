@@ -1,7 +1,7 @@
 [package]
 name = "omicron-common"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -26,7 +26,6 @@ futures.workspace = true
 hex.workspace = true
 http.workspace = true
 iddqd.workspace = true
-id-map.workspace = true
 ipnetwork.workspace = true
 lldp_protocol.workspace = true
 macaddr.workspace = true

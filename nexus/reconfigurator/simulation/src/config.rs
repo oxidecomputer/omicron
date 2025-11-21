@@ -166,7 +166,7 @@ impl SimConfigBuilder {
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
         active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
-        target_blueprint: Option<&BlueprintTarget>,
+        target_blueprint: &BlueprintTarget,
         all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
@@ -202,9 +202,10 @@ impl SimConfigBuilder {
         self.log.push(SimConfigLogEntry::SetNumNexus(num_nexus));
     }
 
-    pub fn set_active_nexus_zone_generation(&mut self, gen: Generation) {
-        self.inner.set_active_nexus_zone_generation(gen);
-        self.log.push(SimConfigLogEntry::SetActiveNexusZoneGeneration(gen));
+    pub fn set_active_nexus_zone_generation(&mut self, generation: Generation) {
+        self.inner.set_active_nexus_zone_generation(generation);
+        self.log
+            .push(SimConfigLogEntry::SetActiveNexusZoneGeneration(generation));
     }
 
     pub fn set_explicit_active_nexus_zones(
@@ -276,8 +277,8 @@ impl fmt::Display for SimConfigLogEntry {
             SimConfigLogEntry::SetNumNexus(num) => {
                 write!(f, "set num nexus: {}", num)
             }
-            SimConfigLogEntry::SetActiveNexusZoneGeneration(gen) => {
-                write!(f, "set active nexus zone generation: {}", gen)
+            SimConfigLogEntry::SetActiveNexusZoneGeneration(generation) => {
+                write!(f, "set active nexus zone generation: {}", generation)
             }
             SimConfigLogEntry::SetExplicitActiveNexusZones(zones) => {
                 match zones {
@@ -365,7 +366,7 @@ impl SimConfigBuilderInner {
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
         active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
-        target_blueprint: Option<&BlueprintTarget>,
+        target_blueprint: &BlueprintTarget,
         all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
@@ -442,8 +443,8 @@ impl SimConfigBuilderInner {
         self.config.num_nexus = Some(num_nexus);
     }
 
-    fn set_active_nexus_zone_generation(&mut self, gen: Generation) {
-        self.config.active_nexus_zone_generation = gen;
+    fn set_active_nexus_zone_generation(&mut self, generation: Generation) {
+        self.config.active_nexus_zone_generation = generation;
     }
 
     fn set_explicit_active_nexus_zones(
@@ -467,12 +468,17 @@ impl SimConfigBuilderInner {
 
 fn determine_active_nexus_generation(
     active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
-    target_blueprint: Option<&BlueprintTarget>,
+    target_blueprint: &BlueprintTarget,
     all_blueprints: &[Blueprint],
 ) -> Result<Generation, String> {
-    let Some(target_blueprint) = target_blueprint else {
-        return Err("no target blueprint set".to_string());
-    };
+    // Real systems always have at least one active Nexus zone, but our
+    // simulated system has some cases where we have none at all. We'll never be
+    // able to find the generation matching an empty set, but because this is a
+    // weird edge case that only applies to simulation, it's also fine to
+    // default to "the initial generation".
+    if active_nexus_zones.is_empty() {
+        return Ok(Generation::new());
+    }
 
     let Some(blueprint) =
         all_blueprints.iter().find(|bp| bp.id == target_blueprint.target_id)

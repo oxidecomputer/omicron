@@ -18,7 +18,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
         project_id -> Uuid,
-        volume_id -> Uuid,
         disk_state -> Text,
         attach_instance_id -> Nullable<Uuid>,
         state_generation -> Int8,
@@ -26,11 +25,26 @@ table! {
         slot -> Nullable<Int2>,
         size_bytes -> Int8,
         block_size -> crate::enums::BlockSizeEnum,
+        disk_type -> crate::enums::DiskTypeEnum,
+    }
+}
+
+table! {
+    disk_type_crucible (disk_id) {
+        disk_id -> Uuid,
+        volume_id -> Uuid,
         origin_snapshot -> Nullable<Uuid>,
         origin_image -> Nullable<Uuid>,
         pantry_address -> Nullable<Text>,
     }
 }
+
+allow_tables_to_appear_in_same_query!(disk, disk_type_crucible);
+allow_tables_to_appear_in_same_query!(volume, disk_type_crucible);
+allow_tables_to_appear_in_same_query!(
+    disk_type_crucible,
+    virtual_provisioning_resource
+);
 
 table! {
     image (id) {
@@ -401,7 +415,7 @@ table! {
 
         destination_volume_id -> Uuid,
 
-        gen -> Int8,
+        r#gen -> Int8,
         state -> crate::enums::SnapshotStateEnum,
         block_size -> crate::enums::BlockSizeEnum,
         size_bytes -> Int8,
@@ -1953,6 +1967,7 @@ table! {
         planner_enabled -> Bool,
         time_modified -> Timestamptz,
         add_zones_with_mupdate_override -> Bool,
+        tuf_repo_pruner_enabled -> Bool,
     }
 }
 
@@ -2029,6 +2044,8 @@ table! {
 
         host_phase_2_desired_slot_a -> Nullable<Text>,
         host_phase_2_desired_slot_b -> Nullable<Text>,
+
+        subnet -> Inet,
     }
 }
 
@@ -2576,6 +2593,9 @@ joinable!(instance_ssh_key -> instance (instance_id));
 allow_tables_to_appear_in_same_query!(sled, sled_instance);
 
 joinable!(network_interface -> probe (parent_id));
+allow_tables_to_appear_in_same_query!(probe, external_ip);
+allow_tables_to_appear_in_same_query!(external_ip, vpc_subnet);
+allow_tables_to_appear_in_same_query!(external_ip, vpc);
 
 table! {
     volume_resource_usage (usage_id) {
@@ -2702,39 +2722,23 @@ allow_tables_to_appear_in_same_query!(
 joinable!(webhook_delivery_attempt -> webhook_delivery (delivery_id));
 
 table! {
-    sp_ereport (restart_id, ena) {
+    ereport (restart_id, ena) {
         restart_id -> Uuid,
         ena -> Int8,
         time_deleted -> Nullable<Timestamptz>,
         time_collected -> Timestamptz,
         collector_id -> Uuid,
-
-        sp_type -> crate::enums::SpTypeEnum,
-        sp_slot -> Int4,
 
         part_number -> Nullable<Text>,
         serial_number -> Nullable<Text>,
+
         class -> Nullable<Text>,
-
-        report -> Jsonb,
-    }
-}
-
-table! {
-    host_ereport (restart_id, ena) {
-        restart_id -> Uuid,
-        ena -> Int8,
-        time_deleted -> Nullable<Timestamptz>,
-        time_collected -> Timestamptz,
-        collector_id -> Uuid,
-
-        sled_id -> Uuid,
-        sled_serial -> Text,
-        class -> Nullable<Text>,
-
         report -> Jsonb,
 
-        part_number -> Nullable<Text>,
+        reporter -> crate::enums::EreporterTypeEnum,
+        sp_type -> Nullable<crate::enums::SpTypeEnum>,
+        sp_slot -> Nullable<Int4>,
+        sled_id -> Nullable<Uuid>,
     }
 }
 
@@ -2755,6 +2759,57 @@ table! {
         volume_id -> Nullable<Uuid>,
     }
 }
+
+table! {
+    multicast_group (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        ip_pool_id -> Uuid,
+        ip_pool_range_id -> Uuid,
+        vni -> Int4,
+        multicast_ip -> Inet,
+        source_ips -> Array<Inet>,
+        mvlan -> Nullable<Int2>,
+        underlay_group_id -> Nullable<Uuid>,
+        tag -> Nullable<Text>,
+        state -> crate::enums::MulticastGroupStateEnum,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+    }
+}
+
+table! {
+    multicast_group_member (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        external_group_id -> Uuid,
+        parent_id -> Uuid,
+        sled_id -> Nullable<Uuid>,
+        state -> crate::enums::MulticastGroupMemberStateEnum,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+    }
+}
+
+table! {
+    underlay_multicast_group (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        multicast_ip -> Inet,
+        tag -> Nullable<Text>,
+        version_added -> Int8,
+        version_removed -> Nullable<Int8>,
+    }
+}
+
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
 
 table! {
@@ -2836,3 +2891,26 @@ allow_tables_to_appear_in_same_query!(
     physical_disk,
     rendezvous_local_storage_dataset
 );
+
+table! {
+    fm_sitrep (id) {
+        id -> Uuid,
+        parent_sitrep_id -> Nullable<Uuid>,
+        inv_collection_id -> Uuid,
+        time_created -> Timestamptz,
+        creator_id -> Uuid,
+        comment -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, inv_collection);
+
+table! {
+    fm_sitrep_history (version) {
+        version -> Int8,
+        sitrep_id -> Uuid,
+        time_made_current -> Timestamptz,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);

@@ -4,8 +4,6 @@
 
 //! Low-level facility for generating Blueprints
 
-use crate::blueprint_editor::BlueprintResourceAllocator;
-use crate::blueprint_editor::BlueprintResourceAllocatorInputError;
 use crate::blueprint_editor::DiskExpungeDetails;
 use crate::blueprint_editor::EditedSled;
 use crate::blueprint_editor::ExternalNetworkingChoice;
@@ -20,9 +18,7 @@ use crate::planner::ZoneExpungeReason;
 use crate::planner::rng::PlannerRng;
 use anyhow::Context as _;
 use anyhow::anyhow;
-use anyhow::bail;
 use clickhouse_admin_types::OXIMETER_CLUSTER;
-use id_map::IdMap;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
@@ -37,7 +33,6 @@ use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
 use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
 use nexus_types::deployment::BlueprintPhysicalDiskConfig;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-use nexus_types::deployment::BlueprintSledConfig;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -52,21 +47,20 @@ use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
-use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
-use nexus_types::inventory::Collection;
+use nexus_types::inventory::BaseboardId;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
 use omicron_common::address::DnsSubnet;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -79,7 +73,6 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
-use once_cell::unsync::OnceCell;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -95,14 +88,10 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
+use std::sync::Arc;
 use swrite::SWrite;
 use swrite::swriteln;
 use thiserror::Error;
-
-use super::ClickhouseZonesThatShouldBeRunning;
-use super::clickhouse::ClickhouseAllocator;
-use nexus_types::inventory::BaseboardId;
-use std::sync::Arc;
 
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
@@ -135,8 +124,8 @@ pub enum Error {
         #[source]
         err: SledEditError,
     },
-    #[error("error constructing resource allocator")]
-    AllocatorInput(#[from] BlueprintResourceAllocatorInputError),
+    #[error("error constructing external networking allocator")]
+    ExternalNetworkingAllocator(#[source] anyhow::Error),
     #[error("no commissioned sleds - rack subnet is unknown")]
     RackSubnetUnknownNoSleds,
     #[error("no reserved subnets available for internal DNS")]
@@ -482,15 +471,22 @@ impl fmt::Display for Operation {
     }
 }
 
+/// Equivalent to `nexus_types::deployment::planning_input::OximeterReadPolicy`,
+/// but without the `time_modified` field (which isn't stored in blueprints).
+#[derive(Debug, Clone, Copy)]
+struct OximeterReadPolicy {
+    version: Generation,
+    mode: OximeterReadMode,
+}
+
 /// Helper for assembling a blueprint
 ///
 /// There are two basic ways to assemble a new blueprint:
 ///
 /// 1. Build one directly. This would generally only be used once in the
 ///    lifetime of a rack, to assemble the first blueprint during rack setup.
-///    It is also common in tests. To start with a blueprint that contains an
-///    empty zone config for some number of sleds, use
-///    [`BlueprintBuilder::build_empty_with_sleds`].
+///    It is also common in tests. To start with an empty initial blueprint,
+///    use [`BlueprintBuilder::build_empty`].
 ///
 /// 2. Build one _from_ another blueprint, called the "parent", making changes
 ///    as desired.  Use [`BlueprintBuilder::new_based_on`] for this.  Once the
@@ -503,32 +499,24 @@ pub struct BlueprintBuilder<'a> {
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
-    /// The latest inventory collection
-    collection: &'a Collection,
+    /// Clickhouse cluster config
+    clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
+
+    /// Oximeter read policy
+    oximeter_read_policy: OximeterReadPolicy,
 
     /// The ID that the completed blueprint will have
     new_blueprint_id: BlueprintUuid,
-
-    // These fields are used to allocate resources for sleds.
-    input: &'a PlanningInput,
-
-    // `allocators` contains logic for choosing new underlay IPs, external IPs,
-    // internal DNS subnets, etc. It's held in a `OnceCell` to delay its
-    // creation until it's first needed; the planner expunges zones before
-    // adding zones, so this delay allows us to reuse resources that just came
-    // free. (This is implicit and awkward; as we rework the builder we should
-    // rework this to make it more explicit.)
-    //
-    // Note: this is currently still a `once_cell` `OnceCell` rather than a std
-    // `OnceCell`, because `get_or_try_init` isn't stable yet.
-    resource_allocator: OnceCell<BlueprintResourceAllocator>,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
     sled_editors: BTreeMap<SledUuid, SledEditor>,
     cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+    cockroachdb_fingerprint: String,
     target_release_minimum_generation: Generation,
     nexus_generation: Generation,
+    internal_dns_version: Generation,
+    external_dns_version: Generation,
 
     creator: String,
     operations: Vec<Operation>,
@@ -540,55 +528,19 @@ pub struct BlueprintBuilder<'a> {
 }
 
 impl<'a> BlueprintBuilder<'a> {
-    /// Directly construct a `Blueprint` that contains an empty zone config for
-    /// the given sleds.
-    pub fn build_empty_with_sleds(
-        sled_ids: impl Iterator<Item = SledUuid>,
-        creator: &str,
-    ) -> Blueprint {
-        Self::build_empty_with_sleds_impl(
-            sled_ids,
-            creator,
-            PlannerRng::from_entropy(),
-        )
+    /// Directly construct an empty blueprint: no sleds; default values for all
+    /// other fields.
+    pub fn build_empty(creator: &str) -> Blueprint {
+        Self::build_empty_seeded(creator, PlannerRng::from_entropy())
     }
 
-    /// A version of [`Self::build_empty_with_sleds`] that allows the
+    /// A version of [`Self::build_empty`] that allows the
     /// blueprint ID to be generated from a deterministic RNG.
-    pub fn build_empty_with_sleds_seeded(
-        sled_ids: impl Iterator<Item = SledUuid>,
-        creator: &str,
-        rng: PlannerRng,
-    ) -> Blueprint {
-        Self::build_empty_with_sleds_impl(sled_ids, creator, rng)
-    }
-
-    fn build_empty_with_sleds_impl(
-        sled_ids: impl Iterator<Item = SledUuid>,
-        creator: &str,
-        mut rng: PlannerRng,
-    ) -> Blueprint {
-        let sleds = sled_ids
-            .map(|sled_id| {
-                let config = BlueprintSledConfig {
-                    state: SledState::Active,
-                    sled_agent_generation: Generation::new(),
-                    disks: IdMap::default(),
-                    datasets: IdMap::default(),
-                    zones: IdMap::default(),
-                    remove_mupdate_override: None,
-                    host_phase_2:
-                        BlueprintHostPhase2DesiredSlots::current_contents(),
-                };
-                (sled_id, config)
-            })
-            .collect::<BTreeMap<_, _>>();
-        let num_sleds = sleds.len();
-
+    pub fn build_empty_seeded(creator: &str, mut rng: PlannerRng) -> Blueprint {
         let id = rng.next_blueprint();
         Blueprint {
             id,
-            sleds,
+            sleds: BTreeMap::new(),
             pending_mgs_updates: PendingMgsUpdates::new(),
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
@@ -603,7 +555,7 @@ impl<'a> BlueprintBuilder<'a> {
             oximeter_read_mode: OximeterReadMode::SingleNode,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
-            comment: format!("starting blueprint with {num_sleds} empty sleds"),
+            comment: "starting blueprint (empty)".to_string(),
             // The only reason to create empty blueprints is tests. If that
             // changes (e.g., if RSS starts using this builder to generate its
             // blueprints), we could take a `source` argument instead.
@@ -616,8 +568,6 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn new_based_on(
         log: &Logger,
         parent_blueprint: &'a Blueprint,
-        input: &'a PlanningInput,
-        inventory: &'a Collection,
         creator: &str,
         mut rng: PlannerRng,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
@@ -629,57 +579,40 @@ impl<'a> BlueprintBuilder<'a> {
         // Convert our parent blueprint's sled configs into `SledEditor`s.
         let mut sled_editors = BTreeMap::new();
         for (sled_id, sled_cfg) in &parent_blueprint.sleds {
-            let state = sled_cfg.state;
-
-            let editor = match state {
-                SledState::Active => {
-                    let subnet = input
-                        .sled_lookup(SledFilter::Commissioned, *sled_id)
-                        .with_context(|| {
-                            format!(
-                                "failed to find sled details for \
-                                 active sled in parent blueprint {sled_id}"
-                            )
-                        })?
-                        .resources
-                        .subnet;
-                    SledEditor::for_existing_active(subnet, sled_cfg.clone())
-                }
-                SledState::Decommissioned => {
-                    SledEditor::for_existing_decommissioned(sled_cfg.clone())
-                }
-            }
-            .with_context(|| {
-                format!("failed to construct SledEditor for sled {sled_id}")
-            })?;
-
+            let editor = SledEditor::for_existing(sled_cfg.clone())
+                .with_context(|| {
+                    format!("failed to construct SledEditor for sled {sled_id}")
+                })?;
             sled_editors.insert(*sled_id, editor);
         }
 
-        // Add new, empty `SledEditor`s for any commissioned sleds in our input
-        // that weren't in the parent blueprint. (These are newly-added sleds.)
-        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
-            if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
-                slot.insert(SledEditor::for_new_active(
-                    details.resources.subnet,
-                ));
-            }
-        }
+        // Copy the Oximeter read policy from our parent blueprint so we can
+        // track changes to it.
+        let oximeter_read_policy = OximeterReadPolicy {
+            version: parent_blueprint.oximeter_read_version,
+            mode: parent_blueprint.oximeter_read_mode,
+        };
 
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
-            collection: inventory,
+            clickhouse_cluster_config: parent_blueprint
+                .clickhouse_cluster_config
+                .clone(),
+            oximeter_read_policy,
             new_blueprint_id: rng.next_blueprint(),
-            input,
-            resource_allocator: OnceCell::new(),
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
+            cockroachdb_fingerprint: parent_blueprint
+                .cockroachdb_fingerprint
+                .clone(),
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
             nexus_generation: parent_blueprint.nexus_generation,
+            internal_dns_version: parent_blueprint.internal_dns_version,
+            external_dns_version: parent_blueprint.external_dns_version,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -695,17 +628,75 @@ impl<'a> BlueprintBuilder<'a> {
         self.new_blueprint_id
     }
 
+    /// Ensure a commissioned sled exists in this builder.
+    pub fn ensure_sled_exists(
+        &mut self,
+        sled_id: SledUuid,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    ) {
+        if let Entry::Vacant(slot) = self.sled_editors.entry(sled_id) {
+            slot.insert(SledEditor::for_new_active(sled_subnet));
+        }
+    }
+
+    pub fn set_cockroachdb_fingerprint(&mut self, fingerprint: String) {
+        self.cockroachdb_fingerprint = fingerprint;
+    }
+
+    pub fn set_internal_dns_version(&mut self, version: Generation) {
+        self.internal_dns_version = version;
+    }
+
+    pub fn set_external_dns_version(&mut self, version: Generation) {
+        self.external_dns_version = version;
+    }
+
+    /// Helper method to construct an empty [`ClickhouseClusterConfig`] using
+    /// this builder's internal RNG (for reproducible testing, primarily).
+    pub fn make_empty_clickhouse_cluster_config(
+        &mut self,
+    ) -> ClickhouseClusterConfig {
+        ClickhouseClusterConfig::new(
+            OXIMETER_CLUSTER.to_string(),
+            self.rng.next_clickhouse().to_string(),
+        )
+    }
+
+    /// Get the current Clickhouse cluster config.
+    pub fn clickhouse_cluster_config(
+        &self,
+    ) -> Option<&ClickhouseClusterConfig> {
+        self.clickhouse_cluster_config.as_ref()
+    }
+
+    /// Get the Clickhouse cluster config.
+    pub fn set_clickhouse_cluster_config(
+        &mut self,
+        clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
+    ) {
+        self.clickhouse_cluster_config = clickhouse_cluster_config;
+    }
+
+    /// Set the Oximeter read policy.
+    pub fn set_oximeter_read_policy(
+        &mut self,
+        version: Generation,
+        mode: OximeterReadMode,
+    ) {
+        self.oximeter_read_policy = OximeterReadPolicy { version, mode };
+    }
+
     pub fn available_internal_dns_subnets(
         &self,
-    ) -> Result<impl Iterator<Item = DnsSubnet>, Error> {
+    ) -> Result<impl Iterator<Item = DnsSubnet> + use<>, Error> {
         // TODO-multirack We need the rack subnet to know what the reserved
         // internal DNS subnets are. Pick any sled; this isn't right in
         // multirack (either DNS will be on a wider subnet or we need to pick a
         // particular rack subnet here?).
         let any_sled_subnet = self
-            .input
-            .all_sled_resources(SledFilter::Commissioned)
-            .map(|(_sled_id, resources)| resources.subnet)
+            .sled_editors
+            .values()
+            .filter_map(|editor| editor.subnet())
             .next()
             .ok_or(Error::RackSubnetUnknownNoSleds)?;
         let rack_subnet = ReservedRackSubnet::from_subnet(any_sled_subnet);
@@ -727,36 +718,6 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(rack_subnet.get_dns_subnets().into_iter().filter(move |subnet| {
             !internal_dns_subnets_in_use.contains(&subnet)
         }))
-    }
-
-    pub fn planning_input(&self) -> &PlanningInput {
-        &self.input
-    }
-
-    fn resource_allocator(
-        &mut self,
-    ) -> Result<&mut BlueprintResourceAllocator, Error> {
-        self.resource_allocator.get_or_try_init(|| {
-            // Check the planning input: there shouldn't be any external
-            // networking resources in the database (the source of `input`)
-            // that we don't know about from the parent blueprint.
-            //
-            // TODO-cleanup Should the planner do this instead? Move this check
-            // to blippy.
-            ensure_input_networking_records_appear_in_parent_blueprint(
-                self.parent_blueprint,
-                self.input,
-            )
-            .map_err(Error::Planner)?;
-
-            let allocator = BlueprintResourceAllocator::new(
-                self.sled_editors.values(),
-                self.input.external_ip_policy(),
-            )?;
-
-            Ok::<_, Error>(allocator)
-        })?;
-        Ok(self.resource_allocator.get_mut().expect("get_or_init succeeded"))
     }
 
     /// Iterates over the list of sled IDs for which we have zones.
@@ -831,7 +792,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
-    pub fn build(mut self, source: BlueprintSource) -> Blueprint {
+    pub fn build(self, source: BlueprintSource) -> Blueprint {
         let blueprint_id = self.new_blueprint_id();
 
         // Collect the Omicron zones config for all sleds, including sleds that
@@ -865,88 +826,22 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
-        // If we have the clickhouse cluster setup enabled via policy and we
-        // don't yet have a `ClickhouseClusterConfiguration`, then we must
-        // create one and feed it to our `ClickhouseAllocator`.
-        let clickhouse_allocator = if self.input.clickhouse_cluster_enabled() {
-            let parent_config = self
-                .parent_blueprint
-                .clickhouse_cluster_config
-                .clone()
-                .unwrap_or_else(|| {
-                    info!(
-                        self.log,
-                        concat!(
-                            "Clickhouse cluster enabled by policy: ",
-                            "generating initial 'ClickhouseClusterConfig' ",
-                            "and 'ClickhouseAllocator'"
-                        )
-                    );
-                    ClickhouseClusterConfig::new(
-                        OXIMETER_CLUSTER.to_string(),
-                        self.rng.next_clickhouse().to_string(),
-                    )
-                });
-            Some(ClickhouseAllocator::new(
-                self.log.clone(),
-                parent_config,
-                self.collection.latest_clickhouse_keeper_membership(),
-            ))
-        } else {
-            if self.parent_blueprint.clickhouse_cluster_config.is_some() {
-                info!(
-                    self.log,
-                    concat!(
-                        "clickhouse cluster disabled via policy ",
-                        "discarding existing 'ClickhouseAllocator' and ",
-                        "the resulting generated 'ClickhouseClusterConfig"
-                    )
-                );
-            }
-            None
-        };
-
-        // If we have an allocator, use it to generate a new config. If an error
-        // is returned then log it and carry over the parent_config.
-        let clickhouse_cluster_config = clickhouse_allocator.map(|a| {
-            let should_be_running = ClickhouseZonesThatShouldBeRunning::new(
-                sleds.iter().map(|(id, c)| (*id, c)),
-            );
-            match a.plan(&should_be_running) {
-                Ok(config) => config,
-                Err(e) => {
-                    error!(self.log, "clickhouse allocator error: {e}");
-                    a.parent_config().clone()
-                }
-            }
-        });
-
-        let (oximeter_read_mode, oximeter_read_version) = {
-            let policy = self.input.oximeter_read_settings();
-            (policy.mode.clone(), policy.version)
-        };
-
         Blueprint {
             id: blueprint_id,
             sleds,
             pending_mgs_updates: self.pending_mgs_updates,
             parent_blueprint_id: Some(self.parent_blueprint.id),
-            internal_dns_version: self.input.internal_dns_version(),
-            external_dns_version: self.input.external_dns_version(),
+            internal_dns_version: self.internal_dns_version,
+            external_dns_version: self.external_dns_version,
             target_release_minimum_generation: self
                 .target_release_minimum_generation,
             nexus_generation: self.nexus_generation,
-            cockroachdb_fingerprint: self
-                .input
-                .cockroachdb_settings()
-                .state_fingerprint
-                .clone(),
+            cockroachdb_fingerprint: self.cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
-
-            clickhouse_cluster_config,
-            oximeter_read_version: oximeter_read_version.into(),
-            oximeter_read_mode,
+            clickhouse_cluster_config: self.clickhouse_cluster_config,
+            oximeter_read_version: self.oximeter_read_policy.version,
+            oximeter_read_mode: self.oximeter_read_policy.mode,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
@@ -1354,6 +1249,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub(crate) fn sled_ensure_mupdate_override(
         &mut self,
         sled_id: SledUuid,
+        baseboard_id: &BaseboardId,
         // inv_mupdate_override_info has a weird type (not Option<&T>, not &str)
         // because this is what `Result::as_ref` returns.
         inv_mupdate_override_info: Result<
@@ -1369,12 +1265,7 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
 
         // Also map the editor to the corresponding PendingMgsUpdates.
-        let sled_details = self
-            .input
-            .sled_lookup(SledFilter::InService, sled_id)
-            .map_err(|error| Error::Planner(anyhow!(error)))?;
-        let pending_mgs_update =
-            self.pending_mgs_updates.entry(&sled_details.baseboard_id);
+        let pending_mgs_update = self.pending_mgs_updates.entry(baseboard_id);
         let noop_sled_info = noop_info.sled_info_mut(sled_id)?;
 
         editor
@@ -1446,25 +1337,20 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        external_ip: ExternalNetworkingChoice,
     ) -> Result<(), Error> {
         let id = self.rng.sled_rng(sled_id).next_zone();
-        let ExternalNetworkingChoice {
-            external_ip,
-            nic_ip,
-            nic_subnet,
-            nic_mac,
-        } = self.resource_allocator()?.next_external_ip_external_dns()?;
+        let ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac } =
+            external_ip;
         let nic = NetworkInterface {
             id: self.rng.sled_rng(sled_id).next_network_interface(),
             kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
             name: format!("external-dns-{id}").parse().unwrap(),
-            ip: nic_ip,
+            ip_config: nic_ip_config,
             mac: nic_mac,
-            subnet: nic_subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         let underlay_address = self.sled_alloc_ip(sled_id)?;
@@ -1543,14 +1429,14 @@ impl<'a> BlueprintBuilder<'a> {
         image_source: BlueprintZoneImageSource,
     ) -> Result<Ensure, Error> {
         let pool_name = ZpoolName::new_external(zpool_id);
+        let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to ensure crucible zone for unknown sled {sled_id}"
+            ))
+        })?;
 
         // If this sled already has a Crucible zone on this pool, do nothing.
-        let has_crucible_on_this_pool = {
-            let editor = self.sled_editors.get(&sled_id).ok_or_else(|| {
-                Error::Planner(anyhow!(
-                    "tried to ensure crucible zone for unknown sled {sled_id}"
-                ))
-            })?;
+        let has_crucible_on_this_pool =
             editor.zones(BlueprintZoneDisposition::is_in_service).any(|z| {
                 matches!(
                     &z.zone_type,
@@ -1560,17 +1446,19 @@ impl<'a> BlueprintBuilder<'a> {
                     })
                     if dataset.pool_name == pool_name
                 )
-            })
-        };
+            });
         if has_crucible_on_this_pool {
             return Ok(Ensure::NotNeeded);
         }
 
-        let sled_info = self.sled_resources(sled_id)?;
-        if !sled_info.zpools.contains_key(&zpool_id) {
+        // Double-check that our caller didn't pass a bad sled/zpool combo.
+        if !editor
+            .disks(BlueprintPhysicalDiskDisposition::is_in_service)
+            .any(|disk| disk.pool_id == zpool_id)
+        {
             return Err(Error::Planner(anyhow!(
                 "adding crucible zone for sled {:?}: \
-                attempted to use unknown zpool {:?}",
+                 attempted to use unknown zpool {:?}",
                 sled_id,
                 pool_name
             )));
@@ -1603,6 +1491,7 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        external_ip: ExternalNetworkingChoice,
         nexus_generation: Generation,
     ) -> Result<(), Error> {
         // Whether Nexus should use TLS and what the external DNS servers it
@@ -1633,6 +1522,7 @@ impl<'a> BlueprintBuilder<'a> {
             external_tls,
             external_dns_servers,
             image_source,
+            external_ip,
             nexus_generation,
         )
     }
@@ -1643,15 +1533,12 @@ impl<'a> BlueprintBuilder<'a> {
         external_tls: bool,
         external_dns_servers: Vec<IpAddr>,
         image_source: BlueprintZoneImageSource,
+        external_ip: ExternalNetworkingChoice,
         nexus_generation: Generation,
     ) -> Result<(), Error> {
         let nexus_id = self.rng.sled_rng(sled_id).next_zone();
-        let ExternalNetworkingChoice {
-            external_ip,
-            nic_ip,
-            nic_subnet,
-            nic_mac,
-        } = self.resource_allocator()?.next_external_ip_nexus()?;
+        let ExternalNetworkingChoice { external_ip, nic_ip_config, nic_mac } =
+            external_ip;
         let external_ip = OmicronZoneExternalFloatingIp {
             id: self.rng.sled_rng(sled_id).next_external_ip(),
             ip: external_ip,
@@ -1663,13 +1550,11 @@ impl<'a> BlueprintBuilder<'a> {
                 id: nexus_id.into_untyped_uuid(),
             },
             name: format!("nexus-{nexus_id}").parse().unwrap(),
-            ip: nic_ip,
+            ip_config: nic_ip_config,
             mac: nic_mac,
-            subnet: nic_subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         let ip = self.sled_alloc_ip(sled_id)?;
@@ -1868,34 +1753,150 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_add_zone(sled_id, zone)
     }
 
+    // The upstream NTP/DNS servers and domain _should_ come from Nexus and be
+    // modifiable by the operator, but currently can only be set at RSS. We can
+    // only promote a new boundary NTP zone by copying these settings from an
+    // existing one.
+    fn infer_boundary_ntp_config_from_parent_blueprint(
+        &self,
+    ) -> Result<BoundaryNtpConfig, Error> {
+        self.parent_blueprint
+            .all_omicron_zones(BlueprintZoneDisposition::any)
+            .find_map(|(_, z)| match &z.zone_type {
+                BlueprintZoneType::BoundaryNtp(zone_config) => {
+                    Some(BoundaryNtpConfig {
+                        ntp_servers: zone_config.ntp_servers.clone(),
+                        dns_servers: zone_config.dns_servers.clone(),
+                        domain: zone_config.domain.clone(),
+                    })
+                }
+                _ => None,
+            })
+            .ok_or(Error::NoBoundaryNtpZonesInParentBlueprint)
+    }
+
+    /// Add a new boundary NTP server to a sled.
+    ///
+    /// This is unusual: typically during planning we promote internal NTP
+    /// servers to boundary NTP servers via
+    /// `sled_promote_internal_ntp_to_boundary_ntp()`, because adding a new
+    /// boundary NTP zone to a sled is only valid if the sled doesn't currently
+    /// have any NTP zone at all. Only tests and possibly RSS can really make
+    /// use of this.
+    pub fn sled_add_zone_boundary_ntp(
+        &mut self,
+        sled_id: SledUuid,
+        image_source: BlueprintZoneImageSource,
+        external_ip: ExternalSnatNetworkingChoice,
+    ) -> Result<(), Error> {
+        let BoundaryNtpConfig { ntp_servers, dns_servers, domain } =
+            self.infer_boundary_ntp_config_from_parent_blueprint()?;
+        self.sled_add_zone_boundary_ntp_with_config(
+            sled_id,
+            ntp_servers,
+            dns_servers,
+            domain,
+            image_source,
+            external_ip,
+        )
+    }
+
+    /// Add a new boundary NTP server to a sled.
+    ///
+    /// This is unusual: typically during planning we promote internal NTP
+    /// servers to boundary NTP servers via
+    /// `sled_promote_internal_ntp_to_boundary_ntp()`, because adding a new
+    /// boundary NTP zone to a sled is only valid if the sled doesn't currently
+    /// have any NTP zone at all. Only tests and possibly RSS can really make
+    /// use of this.
+    pub fn sled_add_zone_boundary_ntp_with_config(
+        &mut self,
+        sled_id: SledUuid,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+        image_source: BlueprintZoneImageSource,
+        external_ip: ExternalSnatNetworkingChoice,
+    ) -> Result<(), Error> {
+        let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
+            Error::Planner(anyhow!(
+                "tried to promote NTP zone on unknown sled {sled_id}"
+            ))
+        })?;
+
+        // Ensure we have no other in-service NTP zones.
+        if let Some(in_service_ntp_zone) = editor
+            .zones(BlueprintZoneDisposition::is_in_service)
+            .find(|zone| zone.zone_type.is_ntp())
+        {
+            return Err(Error::Planner(anyhow!(
+                "attempted to add boundary NTP zone to sled {sled_id} which \
+                 already has an in-service NTP zone: {in_service_ntp_zone:?}"
+            )));
+        }
+
+        // Add the new boundary NTP zone.
+        let new_zone_id = self.rng.sled_rng(sled_id).next_zone();
+        let ExternalSnatNetworkingChoice { snat_cfg, nic_ip_config, nic_mac } =
+            external_ip;
+        let external_ip = OmicronZoneExternalSnatIp {
+            id: self.rng.sled_rng(sled_id).next_external_ip(),
+            snat_cfg,
+        };
+        let nic = NetworkInterface {
+            id: self.rng.sled_rng(sled_id).next_network_interface(),
+            kind: NetworkInterfaceKind::Service {
+                id: new_zone_id.into_untyped_uuid(),
+            },
+            name: format!("ntp-{new_zone_id}").parse().unwrap(),
+            ip_config: nic_ip_config,
+            mac: nic_mac,
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+        };
+
+        let underlay_ip = self.sled_alloc_ip(sled_id)?;
+        let port = omicron_common::address::NTP_PORT;
+        let zone_type =
+            BlueprintZoneType::BoundaryNtp(blueprint_zone_type::BoundaryNtp {
+                address: SocketAddrV6::new(underlay_ip, port, 0, 0),
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                external_ip,
+            });
+        let filesystem_pool =
+            self.sled_select_zpool(sled_id, zone_type.kind())?;
+
+        self.sled_add_zone(
+            sled_id,
+            BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: new_zone_id,
+                filesystem_pool,
+                zone_type,
+                image_source,
+            },
+        )
+    }
+
     pub fn sled_promote_internal_ntp_to_boundary_ntp(
         &mut self,
         sled_id: SledUuid,
         image_source: BlueprintZoneImageSource,
+        external_ip: ExternalSnatNetworkingChoice,
     ) -> Result<(), Error> {
-        // The upstream NTP/DNS servers and domain _should_ come from Nexus and
-        // be modifiable by the operator, but currently can only be set at RSS.
-        // We can only promote a new boundary NTP zone by copying these settings
-        // from an existing one.
-        let (ntp_servers, dns_servers, domain) = self
-            .parent_blueprint
-            .all_omicron_zones(BlueprintZoneDisposition::any)
-            .find_map(|(_, z)| match &z.zone_type {
-                BlueprintZoneType::BoundaryNtp(zone_config) => Some((
-                    zone_config.ntp_servers.clone(),
-                    zone_config.dns_servers.clone(),
-                    zone_config.domain.clone(),
-                )),
-                _ => None,
-            })
-            .ok_or(Error::NoBoundaryNtpZonesInParentBlueprint)?;
-
+        let BoundaryNtpConfig { ntp_servers, dns_servers, domain } =
+            self.infer_boundary_ntp_config_from_parent_blueprint()?;
         self.sled_promote_internal_ntp_to_boundary_ntp_with_config(
             sled_id,
             ntp_servers,
             dns_servers,
             domain,
             image_source,
+            external_ip,
         )
     }
 
@@ -1906,6 +1907,7 @@ impl<'a> BlueprintBuilder<'a> {
         dns_servers: Vec<IpAddr>,
         domain: Option<String>,
         image_source: BlueprintZoneImageSource,
+        external_ip: ExternalSnatNetworkingChoice,
     ) -> Result<(), Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
@@ -1947,55 +1949,13 @@ impl<'a> BlueprintBuilder<'a> {
         })?;
 
         // Add the new boundary NTP zone.
-        let new_zone_id = self.rng.sled_rng(sled_id).next_zone();
-        let ExternalSnatNetworkingChoice {
-            snat_cfg,
-            nic_ip,
-            nic_subnet,
-            nic_mac,
-        } = self.resource_allocator()?.next_external_ip_boundary_ntp()?;
-        let external_ip = OmicronZoneExternalSnatIp {
-            id: self.rng.sled_rng(sled_id).next_external_ip(),
-            snat_cfg,
-        };
-        let nic = NetworkInterface {
-            id: self.rng.sled_rng(sled_id).next_network_interface(),
-            kind: NetworkInterfaceKind::Service {
-                id: new_zone_id.into_untyped_uuid(),
-            },
-            name: format!("ntp-{new_zone_id}").parse().unwrap(),
-            ip: nic_ip,
-            mac: nic_mac,
-            subnet: nic_subnet,
-            vni: Vni::SERVICES_VNI,
-            primary: true,
-            slot: 0,
-            transit_ips: vec![],
-        };
-
-        let underlay_ip = self.sled_alloc_ip(sled_id)?;
-        let port = omicron_common::address::NTP_PORT;
-        let zone_type =
-            BlueprintZoneType::BoundaryNtp(blueprint_zone_type::BoundaryNtp {
-                address: SocketAddrV6::new(underlay_ip, port, 0, 0),
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic,
-                external_ip,
-            });
-        let filesystem_pool =
-            self.sled_select_zpool(sled_id, zone_type.kind())?;
-
-        self.sled_add_zone(
+        self.sled_add_zone_boundary_ntp_with_config(
             sled_id,
-            BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: new_zone_id,
-                filesystem_pool,
-                zone_type,
-                image_source,
-            },
+            ntp_servers,
+            dns_servers,
+            domain,
+            image_source,
+            external_ip,
         )
     }
 
@@ -2159,16 +2119,11 @@ impl<'a> BlueprintBuilder<'a> {
             ))
         })?;
 
-        // We'll check both the disks available to this sled per our current
-        // blueprint and the list of all in-service zpools on this sled per our
-        // planning input, and only pick zpools that are available in both.
-        let current_sled_disks = editor
+        // Only choose from zpools that are in-service.
+        let in_service_zpools = editor
             .disks(BlueprintPhysicalDiskDisposition::is_in_service)
             .map(|disk_config| disk_config.pool_id)
             .collect::<BTreeSet<_>>();
-
-        let all_in_service_zpools =
-            self.sled_resources(sled_id)?.all_zpools(ZpoolFilter::InService);
 
         // We refuse to choose a zpool for a zone of a given `zone_kind` if this
         // sled already has a durable zone of that kind on the same zpool. Build
@@ -2187,31 +2142,14 @@ impl<'a> BlueprintBuilder<'a> {
             skip_zpools.insert(&zone_config.filesystem_pool);
         }
 
-        for &zpool_id in all_in_service_zpools {
+        for zpool_id in in_service_zpools {
             let zpool_name = ZpoolName::new_external(zpool_id);
-            if !skip_zpools.contains(&zpool_name)
-                && current_sled_disks.contains(&zpool_id)
-            {
+            if !skip_zpools.contains(&zpool_name) {
                 return Ok(zpool_name);
             }
         }
-        Err(Error::NoAvailableZpool { sled_id, kind: zone_kind })
-    }
 
-    /// Returns the resources for a sled that hasn't been decommissioned.
-    fn sled_resources(
-        &self,
-        sled_id: SledUuid,
-    ) -> Result<&'a SledResources, Error> {
-        let details = self
-            .input
-            .sled_lookup(SledFilter::Commissioned, sled_id)
-            .map_err(|error| {
-                Error::Planner(anyhow!(error).context(format!(
-                    "for sled {sled_id}, error looking up resources"
-                )))
-            })?;
-        Ok(&details.resources)
+        Err(Error::NoAvailableZpool { sled_id, kind: zone_kind })
     }
 
     /// Determine the number of desired external DNS zones by counting
@@ -2327,166 +2265,6 @@ impl<'a> BlueprintBuilder<'a> {
             .debug_force_generation_bump()
             .map_err(|err| Error::SledEditError { sled_id, err })
     }
-}
-
-// Helper to validate that the system hasn't gone off the rails. There should
-// never be any external networking resources in the planning input (which is
-// derived from the contents of CRDB) that we don't know about from the parent
-// blueprint. It's possible a given planning iteration could see such a state
-// there have been intermediate changes made by other Nexus instances; e.g.,
-//
-// 1. Nexus A generates a `PlanningInput` by reading from CRDB
-// 2. Nexus B executes on a target blueprint that removes IPs/NICs from
-//    CRDB
-// 3. Nexus B regenerates a new blueprint and prunes the zone(s) associated
-//    with the IPs/NICs from step 2
-// 4. Nexus B makes this new blueprint the target
-// 5. Nexus A attempts to run planning with its `PlanningInput` from step 1 but
-//    the target blueprint from step 4; this will fail the following checks
-//    because the input contains records that were removed in step 3
-//
-// We do not need to handle this class of error; it's a transient failure that
-// will clear itself up when Nexus A repeats its planning loop from the top and
-// generates a new `PlanningInput`.
-//
-// There may still be database records corresponding to _expunged_ zones, but
-// that's okay: it just means we haven't yet realized a blueprint where those
-// zones are expunged. And those should should still be in the blueprint (not
-// pruned) until their database records are cleaned up.
-//
-// It's also possible that there may be networking records in the database
-// assigned to zones that have been expunged, and our parent blueprint uses
-// those same records for new zones. This is also fine and expected, and is a
-// similar case to the previous paragraph: a zone with networking resources was
-// expunged, the database doesn't realize it yet, but can still move forward and
-// make planning decisions that reuse those resources for new zones.
-pub(super) fn ensure_input_networking_records_appear_in_parent_blueprint(
-    parent_blueprint: &Blueprint,
-    input: &PlanningInput,
-) -> anyhow::Result<()> {
-    use nexus_types::deployment::OmicronZoneExternalIp;
-    use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
-    use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
-    use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
-    use omicron_common::address::NEXUS_OPTE_IPV6_SUBNET;
-    use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
-    use omicron_common::address::NTP_OPTE_IPV6_SUBNET;
-    use omicron_common::api::external::MacAddr;
-
-    let mut all_macs: HashSet<MacAddr> = HashSet::new();
-    let mut all_nexus_nic_ips: HashSet<IpAddr> = HashSet::new();
-    let mut all_boundary_ntp_nic_ips: HashSet<IpAddr> = HashSet::new();
-    let mut all_external_dns_nic_ips: HashSet<IpAddr> = HashSet::new();
-    let mut all_external_ips: HashSet<OmicronZoneExternalIp> = HashSet::new();
-
-    // Unlike the construction of the external IP allocator and existing IPs
-    // constructed above in `BuilderExternalNetworking::new()`, we do not
-    // check for duplicates here: we could very well see reuse of IPs
-    // between expunged zones or between expunged -> running zones.
-    for (_, z) in
-        parent_blueprint.all_omicron_zones(BlueprintZoneDisposition::any)
-    {
-        let zone_type = &z.zone_type;
-        match zone_type {
-            BlueprintZoneType::BoundaryNtp(ntp) => {
-                all_boundary_ntp_nic_ips.insert(ntp.nic.ip);
-            }
-            BlueprintZoneType::Nexus(nexus) => {
-                all_nexus_nic_ips.insert(nexus.nic.ip);
-            }
-            BlueprintZoneType::ExternalDns(dns) => {
-                all_external_dns_nic_ips.insert(dns.nic.ip);
-            }
-            _ => (),
-        }
-
-        if let Some((external_ip, nic)) = zone_type.external_networking() {
-            // As above, ignore localhost (used by the test suite).
-            if !external_ip.ip().is_loopback() {
-                all_external_ips.insert(external_ip);
-            }
-            all_macs.insert(nic.mac);
-        }
-    }
-    for external_ip_entry in
-        input.network_resources().omicron_zone_external_ips()
-    {
-        // As above, ignore localhost (used by the test suite).
-        if external_ip_entry.ip.ip().is_loopback() {
-            continue;
-        }
-        if !all_external_ips.contains(&external_ip_entry.ip) {
-            bail!(
-                "planning input contains unexpected external IP \
-                 (IP not found in parent blueprint): {external_ip_entry:?}"
-            );
-        }
-    }
-    for nic_entry in input.network_resources().omicron_zone_nics() {
-        if !all_macs.contains(&nic_entry.nic.mac) {
-            bail!(
-                "planning input contains unexpected NIC \
-                 (MAC not found in parent blueprint): {nic_entry:?}"
-            );
-        }
-        match nic_entry.nic.ip {
-            IpAddr::V4(ip) if NEXUS_OPTE_IPV4_SUBNET.contains(ip) => {
-                if !all_nexus_nic_ips.contains(&ip.into()) {
-                    bail!(
-                        "planning input contains unexpected NIC \
-                         (IP not found in parent blueprint): {nic_entry:?}"
-                    );
-                }
-            }
-            IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
-                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
-                    bail!(
-                        "planning input contains unexpected NIC \
-                         (IP not found in parent blueprint): {nic_entry:?}"
-                    );
-                }
-            }
-            IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
-                if !all_external_dns_nic_ips.contains(&ip.into()) {
-                    bail!(
-                        "planning input contains unexpected NIC \
-                         (IP not found in parent blueprint): {nic_entry:?}"
-                    );
-                }
-            }
-            IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
-                if !all_nexus_nic_ips.contains(&ip.into()) {
-                    bail!(
-                        "planning input contains unexpected NIC \
-                         (IP not found in parent blueprint): {nic_entry:?}"
-                    );
-                }
-            }
-            IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
-                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
-                    bail!(
-                        "planning input contains unexpected NIC \
-                         (IP not found in parent blueprint): {nic_entry:?}"
-                    );
-                }
-            }
-            IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
-                if !all_external_dns_nic_ips.contains(&ip.into()) {
-                    bail!(
-                        "planning input contains unexpected NIC \
-                         (IP not found in parent blueprint): {nic_entry:?}"
-                    );
-                }
-            }
-            _ => {
-                bail!(
-                    "planning input contains unexpected NIC \
-                    (IP not contained in known OPTE subnet): {nic_entry:?}"
-                )
-            }
-        }
-    }
-    Ok(())
 }
 
 /// The result of an `ensure_mupdate_override` call for a particular sled.
@@ -2776,9 +2554,16 @@ impl fmt::Display for BpMupdateOverrideNotClearedReason {
     }
 }
 
+struct BoundaryNtpConfig {
+    ntp_servers: Vec<String>,
+    dns_servers: Vec<IpAddr>,
+    domain: Option<String>,
+}
+
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use crate::blueprint_editor::ExternalNetworkingAllocator;
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
     use crate::example::example;
@@ -2791,6 +2576,8 @@ pub mod test {
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::OmicronZoneNetworkResources;
+    use nexus_types::deployment::PlanningInput;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
@@ -2803,9 +2590,12 @@ pub mod test {
 
     /// Checks various conditions that should be true for all blueprints
     #[track_caller]
-    pub fn verify_blueprint(blueprint: &Blueprint) {
-        let blippy_report =
-            Blippy::new(blueprint).into_report(BlippyReportSortKey::Kind);
+    pub fn verify_blueprint(
+        blueprint: &Blueprint,
+        planning_input: &PlanningInput,
+    ) {
+        let blippy_report = Blippy::new(blueprint, planning_input)
+            .into_report(BlippyReportSortKey::Kind);
         if !blippy_report.notes().is_empty() {
             eprintln!("{}", blueprint.display());
             eprintln!("---");
@@ -2824,13 +2614,11 @@ pub mod test {
             rng.next_system_rng(),
         )
         .build();
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &example.input);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &example.input,
-            &example.collection,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -2861,7 +2649,7 @@ pub mod test {
         }
 
         let blueprint2 = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint2);
+        verify_blueprint(&blueprint2, &example.input);
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
@@ -2881,8 +2669,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            &input,
-            &example.collection,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -2891,6 +2677,7 @@ pub mod test {
             .sled_lookup(SledFilter::Commissioned, new_sled_id)
             .unwrap()
             .resources;
+        builder.ensure_sled_exists(new_sled_id, new_sled_resources.subnet);
         builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
         builder
             .sled_ensure_zone_ntp(
@@ -2910,7 +2697,7 @@ pub mod test {
         builder.sled_ensure_zone_datasets(new_sled_id).unwrap();
 
         let blueprint3 = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint3);
+        verify_blueprint(&blueprint3, &input);
         let summary = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
             "expecting new NTP and Crucible zones:\n{}",
@@ -3003,9 +2790,9 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (collection, input, mut blueprint1) =
+        let (_collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME);
-        verify_blueprint(&blueprint1);
+        verify_blueprint(&blueprint1, &input);
 
         // Mark one sled as having a desired state of decommissioned.
         let decommision_sled_id =
@@ -3050,14 +2837,12 @@ pub mod test {
         let mut blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &input,
-            &collection,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
         .expect("created builder")
         .build(BlueprintSource::Test);
-        verify_blueprint(&blueprint2);
+        verify_blueprint(&blueprint2, &input);
 
         // We carried forward the desired state.
         assert_eq!(
@@ -3088,14 +2873,12 @@ pub mod test {
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            &input,
-            &collection,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
         .expect("created builder")
         .build(BlueprintSource::Test);
-        verify_blueprint(&blueprint3);
+        verify_blueprint(&blueprint3, &input);
         assert_eq!(
             blueprint3.sleds.get(&decommision_sled_id).map(|c| c.state),
             Some(SledState::Decommissioned),
@@ -3117,7 +2900,6 @@ pub mod test {
                 .create_zones(false)
                 .create_disks_in_blueprint(false)
                 .build();
-        let collection = example.collection;
         let input = example.input;
 
         {
@@ -3125,8 +2907,6 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3215,19 +2995,17 @@ pub mod test {
         static TEST_NAME: &str = "test_datasets_for_zpools_and_zones";
         let logctx = test_setup_log(TEST_NAME);
         let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (collection, input, blueprint) = example(&logctx.log, TEST_NAME);
+        let (_collection, input, blueprint) = example(&logctx.log, TEST_NAME);
 
         // Creating the "example" blueprint should already invoke
         // `sled_ensure_datasets`.
         //
         // Verify that it has created the datasets we expect to exist.
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint,
-            &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3276,13 +3054,11 @@ pub mod test {
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint,
-            &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3294,7 +3070,7 @@ pub mod test {
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
 
         // Find the datasets we've expunged in the blueprint
         let expunged_datasets = blueprint
@@ -3321,8 +3097,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint,
-            &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3363,12 +3137,17 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
         .expect("failed to create builder");
+
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                input.external_ip_policy(),
+            )
+            .expect("created external networking allocator");
 
         let err = builder
             .sled_add_zone_nexus(
@@ -3379,6 +3158,9 @@ pub mod test {
                     .map(|sa| sa.sled_id)
                     .expect("no sleds present"),
                 BlueprintZoneImageSource::InstallDataset,
+                external_networking_alloc
+                    .for_new_nexus()
+                    .expect("have IP for Nexus"),
                 parent.nexus_generation,
             )
             .unwrap_err();
@@ -3472,16 +3254,23 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
             .expect("failed to create builder");
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
+                    input.external_ip_policy(),
+                )
+                .expect("created external networking allocator");
             builder
                 .sled_add_zone_nexus(
                     sled_id,
                     BlueprintZoneImageSource::InstallDataset,
+                    external_networking_alloc
+                        .for_new_nexus()
+                        .expect("have IP for Nexus"),
                     parent.nexus_generation,
                 )
                 .expect("added nexus zone");
@@ -3494,17 +3283,24 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
             .expect("failed to create builder");
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
+                    input.external_ip_policy(),
+                )
+                .expect("created external networking allocator");
             for _ in 0..3 {
                 builder
                     .sled_add_zone_nexus(
                         sled_id,
                         BlueprintZoneImageSource::InstallDataset,
+                        external_networking_alloc
+                            .for_new_nexus()
+                            .expect("have IP for Nexus"),
                         parent.nexus_generation,
                     )
                     .expect("added nexus zone");
@@ -3538,29 +3334,25 @@ pub mod test {
                 builder.build()
             };
 
-            let mut builder = BlueprintBuilder::new_based_on(
+            let builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                &input,
-                &collection,
                 "test",
                 rng.next_planner_rng(),
             )
             .expect("failed to create builder");
-            let err = builder
-                .sled_add_zone_nexus(
-                    sled_id,
-                    BlueprintZoneImageSource::InstallDataset,
-                    parent.nexus_generation,
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
+                    input.external_ip_policy(),
                 )
-                .unwrap_err();
+                .expect("created external networking allocator");
+            let err = external_networking_alloc.for_new_nexus().unwrap_err();
 
             assert!(
                 matches!(
                     err,
-                    Error::AllocateExternalNetworking(
-                        ExternalNetworkingError::NoExternalServiceIpAvailable
-                    )
+                    ExternalNetworkingError::NoExternalServiceIpAvailable
                 ),
                 "unexpected error {err}"
             );
@@ -3619,8 +3411,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3636,7 +3426,7 @@ pub mod test {
         builder.sled_ensure_zone_datasets(target_sled_id).unwrap();
 
         let blueprint = builder.build(BlueprintSource::Test);
-        verify_blueprint(&blueprint);
+        verify_blueprint(&blueprint, &input);
         assert_eq!(
             blueprint
                 .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
@@ -3662,8 +3452,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            &input,
-            &collection,
             "test",
             rng.next_planner_rng(),
         )
@@ -3709,8 +3497,6 @@ pub mod test {
         let mut blueprint_builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &system.input,
-            &system.collection,
             TEST_NAME,
             rng.next_planner_rng(),
         )

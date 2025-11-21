@@ -14,6 +14,7 @@ use crate::metrics::MetricsRequestQueue;
 use crate::nexus::NexusClient;
 use crate::profile::*;
 use crate::zone_bundle::ZoneBundler;
+
 use chrono::Utc;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -23,7 +24,8 @@ use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
-    NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
+    DelegatedZvol, NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers,
+    SourceNatConfig,
 };
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -238,6 +240,18 @@ enum InstanceRequest {
     RefreshExternalIps {
         tx: oneshot::Sender<Result<(), ManagerError>>,
     },
+    JoinMulticastGroup {
+        membership: InstanceMulticastMembership,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    LeaveMulticastGroup {
+        membership: InstanceMulticastMembership,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    #[allow(dead_code)]
+    RefreshMulticastGroups {
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
 }
 
 impl InstanceRequest {
@@ -279,7 +293,10 @@ impl InstanceRequest {
             Self::IssueSnapshotRequest { tx, .. }
             | Self::AddExternalIp { tx, .. }
             | Self::DeleteExternalIp { tx, .. }
-            | Self::RefreshExternalIps { tx } => tx
+            | Self::RefreshExternalIps { tx }
+            | Self::JoinMulticastGroup { tx, .. }
+            | Self::LeaveMulticastGroup { tx, .. }
+            | Self::RefreshMulticastGroups { tx } => tx
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
         }
@@ -520,6 +537,8 @@ struct InstanceRunner {
     source_nat: SourceNatConfig,
     ephemeral_ip: Option<IpAddr>,
     floating_ips: Vec<IpAddr>,
+    // Multicast groups to which this instance belongs.
+    multicast_groups: Vec<InstanceMulticastMembership>,
     firewall_rules: Vec<ResolvedVpcFirewallRule>,
     dhcp_config: DhcpCfg,
 
@@ -541,6 +560,9 @@ struct InstanceRunner {
 
     // Queue to notify the sled agent's metrics task about our VNICs.
     metrics_queue: MetricsRequestQueue,
+
+    // Zvols to delegate to the Propolis zone
+    delegated_zvols: Vec<DelegatedZvol>,
 }
 
 impl InstanceRunner {
@@ -568,7 +590,7 @@ impl InstanceRunner {
         async fn stop_timeout_completed(
             stop_timeout: &mut Option<Pin<Box<tokio::time::Sleep>>>,
         ) {
-            if let Some(ref mut timeout) = stop_timeout {
+            if let Some(timeout) = stop_timeout {
                 timeout.await
             } else {
                 std::future::pending().await
@@ -708,6 +730,18 @@ impl InstanceRunner {
                             RefreshExternalIps { tx } => {
                                 tx.send(self.refresh_external_ips().map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            JoinMulticastGroup { membership, tx } => {
+                                tx.send(self.join_multicast_group(&membership).await.map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            LeaveMulticastGroup { membership, tx } => {
+                                tx.send(self.leave_multicast_group(&membership).await.map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
+                            },
+                            RefreshMulticastGroups { tx } => {
+                                tx.send(self.refresh_multicast_groups().map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
                             }
                         }
                     };
@@ -804,6 +838,15 @@ impl InstanceRunner {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 RefreshExternalIps { tx } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                JoinMulticastGroup { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                LeaveMulticastGroup { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                RefreshMulticastGroups { tx } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
             };
@@ -1433,7 +1476,7 @@ fn propolis_error_code(
     error: &PropolisClientError,
 ) -> Option<PropolisErrorCode> {
     // Is this a structured error response from the Propolis server?
-    let propolis_client::Error::ErrorResponse(ref rv) = &error else {
+    let propolis_client::Error::ErrorResponse(rv) = &error else {
         return None;
     };
 
@@ -1640,6 +1683,7 @@ impl Instance {
             source_nat: local_config.source_nat,
             ephemeral_ip: local_config.ephemeral_ip,
             floating_ips: local_config.floating_ips,
+            multicast_groups: local_config.multicast_groups,
             firewall_rules: local_config.firewall_rules,
             dhcp_config,
             state: InstanceStates::new(vmm_runtime, migration_id),
@@ -1649,6 +1693,7 @@ impl Instance {
             zone_builder_factory,
             zone_bundler,
             metrics_queue,
+            delegated_zvols: local_config.delegated_zvols,
         };
 
         let runner_handle = tokio::task::spawn(async move {
@@ -1771,6 +1816,42 @@ impl Instance {
     ) -> Result<(), Error> {
         self.tx
             .try_send(InstanceRequest::RefreshExternalIps { tx })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub fn join_multicast_group(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+        membership: &InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::JoinMulticastGroup {
+                membership: membership.clone(),
+                tx,
+            })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    pub fn leave_multicast_group(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+        membership: &InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::LeaveMulticastGroup {
+                membership: membership.clone(),
+                tx,
+            })
+            .or_else(InstanceRequest::fail_try_send)
+    }
+
+    #[allow(dead_code)]
+    pub fn refresh_multicast_groups(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    ) -> Result<(), Error> {
+        self.tx
+            .try_send(InstanceRequest::RefreshMulticastGroups { tx })
             .or_else(InstanceRequest::fail_try_send)
     }
 }
@@ -1987,6 +2068,24 @@ impl InstanceRunner {
             opte_ports.push(port);
         }
 
+        // When delegatng a zvol, delegating the associated rdsk device does
+        // _not_ require delegating the parent dataset. Future types of
+        // delegated zvol may want to delegate either the parent dataset or
+        // some other one.
+        let datasets: Vec<zone::Dataset> = vec![];
+
+        // For delegated devices, include the default list plus any for the
+        // delegated zvol devices.
+        let mut devices = vec![
+            zone::Device { name: "/dev/vmm/*".to_string() },
+            zone::Device { name: "/dev/vmmctl".to_string() },
+            zone::Device { name: "/dev/viona".to_string() },
+        ];
+
+        for delegated_zvol in &self.delegated_zvols {
+            devices.push(zone::Device { name: delegated_zvol.zvol_device() });
+        }
+
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
         let zname = propolis_zone_name(&self.propolis_id);
@@ -1998,6 +2097,7 @@ impl InstanceRunner {
             .into_iter()
             .choose(&mut rng)
             .ok_or_else(|| Error::U2NotFound)?;
+
         let installed_zone = self
             .zone_builder_factory
             .builder()
@@ -2009,14 +2109,10 @@ impl InstanceRunner {
             .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
                 self.propolis_id.into_untyped_uuid(),
             ))
-            .with_datasets(&[])
+            .with_datasets(&datasets)
             .with_filesystems(&[])
             .with_data_links(&[])
-            .with_devices(&[
-                zone::Device { name: "/dev/vmm/*".to_string() },
-                zone::Device { name: "/dev/vmmctl".to_string() },
-                zone::Device { name: "/dev/viona".to_string() },
-            ])
+            .with_devices(&devices)
             .with_opte_ports(opte_ports)
             .with_links(vec![])
             .with_limit_priv(vec![])
@@ -2255,6 +2351,141 @@ impl InstanceRunner {
     fn refresh_external_ips(&mut self) -> Result<(), Error> {
         self.refresh_external_ips_inner()
     }
+
+    async fn join_multicast_group(
+        &mut self,
+        membership: &InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        // Similar logic to add_external_ip - save state for rollback
+        let out = self.join_multicast_group_inner(membership).await;
+
+        if out.is_err() {
+            // Rollback state on error
+            self.multicast_groups.retain(|m| m != membership);
+        }
+        out
+    }
+
+    async fn leave_multicast_group(
+        &mut self,
+        membership: &InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        // Similar logic to delete_external_ip - save state for rollback
+        let out = self.leave_multicast_group_inner(membership).await;
+
+        if out.is_err() {
+            // Rollback state on error - readd the membership if it was removed
+            if !self.multicast_groups.contains(membership) {
+                self.multicast_groups.push(membership.clone());
+            }
+        }
+        out
+    }
+
+    fn refresh_multicast_groups(&mut self) -> Result<(), Error> {
+        self.refresh_multicast_groups_inner()
+    }
+
+    async fn join_multicast_group_inner(
+        &mut self,
+        membership: &InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        // Check for duplicate membership (idempotency)
+        if self.multicast_groups.contains(membership) {
+            return Ok(());
+        }
+
+        // Add to local state
+        self.multicast_groups.push(membership.clone());
+
+        // Update OPTE configuration
+        let Some(primary_nic) = self.primary_nic() else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+
+        // Convert InstanceMulticastMembership to MulticastGroupCfg
+        let multicast_cfg: Vec<illumos_utils::opte::MulticastGroupCfg> = self
+            .multicast_groups
+            .iter()
+            .map(|membership| illumos_utils::opte::MulticastGroupCfg {
+                group_ip: membership.group_ip,
+                sources: membership.sources.clone(),
+            })
+            .collect();
+
+        // Validate multicast configuration with OPTE
+        self.port_manager.multicast_groups_ensure(
+            primary_nic.id,
+            primary_nic.kind,
+            &multicast_cfg,
+        )?;
+
+        // TODO: Configure underlay multicast group addresses on the zone's vNIC.
+        // This should add the multicast group addresses to the zone's network
+        // interface so it can receive underlay multicast traffic (physical
+        // network layer). Rack-wide dataplane forwarding is handled by the
+        // RPW reconciler + DPD.
+        // See also: port_manager.rs multicast_groups_ensure() TODO about
+        // configuring OPTE port-level multicast group membership.
+
+        Ok(())
+    }
+
+    async fn leave_multicast_group_inner(
+        &mut self,
+        membership: &InstanceMulticastMembership,
+    ) -> Result<(), Error> {
+        // Remove from local state
+        self.multicast_groups.retain(|m| m != membership);
+
+        // Update OPTE configuration
+        let Some(primary_nic) = self.primary_nic() else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+
+        // Convert InstanceMulticastMembership to MulticastGroupCfg
+        let multicast_cfg: Vec<illumos_utils::opte::MulticastGroupCfg> = self
+            .multicast_groups
+            .iter()
+            .map(|membership| illumos_utils::opte::MulticastGroupCfg {
+                group_ip: membership.group_ip,
+                sources: membership.sources.clone(),
+            })
+            .collect();
+
+        self.port_manager.multicast_groups_ensure(
+            primary_nic.id,
+            primary_nic.kind,
+            &multicast_cfg,
+        )?;
+
+        Ok(())
+    }
+
+    fn refresh_multicast_groups_inner(&mut self) -> Result<(), Error> {
+        // Update OPTE configuration
+        let Some(primary_nic) = self.primary_nic() else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+
+        // Convert InstanceMulticastMembership to MulticastGroupCfg
+        let multicast_cfg: Vec<illumos_utils::opte::MulticastGroupCfg> = self
+            .multicast_groups
+            .iter()
+            .map(|membership| illumos_utils::opte::MulticastGroupCfg {
+                group_ip: membership.group_ip,
+                sources: membership.sources.clone(),
+            })
+            .collect();
+
+        self.port_manager.multicast_groups_ensure(
+            primary_nic.id,
+            primary_nic.kind,
+            &multicast_cfg,
+        )?;
+
+        Ok(())
+    }
 }
 
 #[cfg(all(test, target_os = "illumos"))]
@@ -2281,6 +2512,7 @@ mod tests {
         CurrentlyManagedZpoolsReceiver, InternalDiskDetails,
         InternalDisksReceiver,
     };
+    use sled_agent_types::instance::InstanceEnsureBody;
     use sled_agent_types::zone_bundle::CleanupContext;
     use sled_storage::config::MountConfig;
     use std::net::SocketAddrV6;
@@ -2486,12 +2718,14 @@ mod tests {
             .unwrap(),
             ephemeral_ip: None,
             floating_ips: vec![],
+            multicast_groups: vec![],
             firewall_rules: vec![],
             dhcp_config: DhcpConfig {
                 dns_servers: vec![],
                 host_domain: None,
                 search_domains: vec![],
             },
+            delegated_zvols: vec![],
         };
 
         InstanceInitialState {
@@ -2499,7 +2733,7 @@ mod tests {
             local_config,
             vmm_runtime: VmmRuntimeState {
                 state: VmmState::Starting,
-                gen: Generation::new(),
+                generation: Generation::new(),
                 time_updated: Default::default(),
             },
             propolis_addr,
@@ -3093,6 +3327,7 @@ mod tests {
                 source_nat: local_config.source_nat,
                 ephemeral_ip: local_config.ephemeral_ip,
                 floating_ips: local_config.floating_ips,
+                multicast_groups: local_config.multicast_groups,
                 firewall_rules: local_config.firewall_rules,
                 dhcp_config,
                 state: InstanceStates::new(vmm_runtime, migration_id),
@@ -3102,6 +3337,7 @@ mod tests {
                 zone_builder_factory,
                 zone_bundler,
                 metrics_queue,
+                delegated_zvols: local_config.delegated_zvols,
             }
         }
     }
@@ -3206,7 +3442,7 @@ mod tests {
             .send(InstanceMonitorMessage {
                 update: InstanceMonitorUpdate::State(
                     InstanceStateMonitorResponse {
-                        gen: 5,
+                        r#gen: 5,
                         migration: InstanceMigrateStatusResponse {
                             migration_in: None,
                             migration_out: None,
@@ -3294,5 +3530,26 @@ mod tests {
 
         assert_eq!(state.vmm_state.state, VmmState::Failed);
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_multicast_membership_equality() {
+        let membership1 = InstanceMulticastMembership {
+            group_ip: IpAddr::V4(Ipv4Addr::new(239, 1, 1, 1)),
+            sources: vec![],
+        };
+
+        let membership2 = InstanceMulticastMembership {
+            group_ip: IpAddr::V4(Ipv4Addr::new(239, 1, 1, 1)),
+            sources: vec![],
+        };
+
+        let membership3 = InstanceMulticastMembership {
+            group_ip: IpAddr::V4(Ipv4Addr::new(239, 1, 1, 2)),
+            sources: vec![],
+        };
+
+        assert_eq!(membership1, membership2);
+        assert_ne!(membership1, membership3);
     }
 }

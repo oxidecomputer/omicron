@@ -14,8 +14,8 @@ use omicron_uuid_kinds::{
 use typed_rng::TypedUuidRng;
 
 use crate::{
-    SimState,
-    errors::{StateIdPrefixError, StateMatch},
+    ReconfiguratorSimId, SimState,
+    errors::{StateIdResolveError, StateMatch},
     seed_from_entropy,
 };
 
@@ -131,10 +131,10 @@ impl Simulator {
     ///
     /// Returns the unique state ID that matches the given prefix.
     /// Returns an error if zero or multiple states match the prefix.
-    pub fn get_state_by_prefix(
+    fn get_state_by_prefix(
         &self,
         prefix: &str,
-    ) -> Result<ReconfiguratorSimStateUuid, StateIdPrefixError> {
+    ) -> Result<ReconfiguratorSimStateUuid, StateIdResolveError> {
         let mut matching_ids = Vec::new();
 
         if Self::ROOT_ID.to_string().starts_with(prefix) {
@@ -148,7 +148,7 @@ impl Simulator {
         }
 
         match matching_ids.len() {
-            0 => Err(StateIdPrefixError::NoMatch(prefix.to_string())),
+            0 => Err(StateIdResolveError::NoMatch(prefix.to_string())),
             1 => Ok(matching_ids[0]),
             n => {
                 // Sort for deterministic output.
@@ -168,13 +168,35 @@ impl Simulator {
                     })
                     .collect();
 
-                Err(StateIdPrefixError::Ambiguous {
+                Err(StateIdResolveError::Ambiguous {
                     prefix: prefix.to_string(),
                     count: n,
                     matches,
                 })
             }
         }
+    }
+
+    /// Resolve a [`ReconfiguratorSimId`] to a [`ReconfiguratorSimStateUuid`].
+    pub fn resolve_state_id(
+        &self,
+        id: ReconfiguratorSimId,
+    ) -> Result<ReconfiguratorSimStateUuid, StateIdResolveError> {
+        match id {
+            ReconfiguratorSimId::Id(id) => Ok(id),
+            ReconfiguratorSimId::Prefix(prefix) => {
+                self.get_state_by_prefix(&prefix)
+            }
+        }
+    }
+
+    /// Combines [`Self::resolve_state_id`] and [`Self::get_state`].
+    pub fn resolve_and_get_state(
+        &self,
+        id: ReconfiguratorSimId,
+    ) -> Result<&SimState, StateIdResolveError> {
+        let resolved = self.resolve_state_id(id)?;
+        self.get_state(resolved).ok_or(StateIdResolveError::NotFound(resolved))
     }
 
     #[inline]

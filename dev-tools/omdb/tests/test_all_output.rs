@@ -92,6 +92,7 @@ async fn test_omdb_usage_errors() {
         &["db", "ereport", "reporters", "--help"],
         &["db", "ereport", "info", "--help"],
         &["db", "sleds", "--help"],
+        &["db", "sitrep", "--help"],
         &["db", "saga"],
         &["db", "snapshots"],
         &["db", "network"],
@@ -679,6 +680,7 @@ fn clear_omdb_env() {
     for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_"))
     {
         eprintln!("removing {:?} from environment", env_var);
-        std::env::remove_var(env_var);
+        // SAFETY: https://nexte.st/docs/configuration/env-vars/#altering-the-environment-within-tests
+        unsafe { std::env::remove_var(env_var) };
     }
 }

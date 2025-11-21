@@ -148,6 +148,7 @@ pub enum SledEditError {
 pub(crate) struct SledEditor(InnerSledEditor);
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum InnerSledEditor {
     // Internally, `SledEditor` has a variant for each variant of `SledState`,
     // as the operations allowed in different states are substantially different
@@ -158,33 +159,18 @@ enum InnerSledEditor {
 }
 
 impl SledEditor {
-    pub fn for_existing_active(
-        subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub fn for_existing(
         config: BlueprintSledConfig,
     ) -> Result<Self, SledInputError> {
-        assert_eq!(
-            config.state,
-            SledState::Active,
-            "for_existing_active called on non-active sled"
-        );
-        let inner = ActiveSledEditor::new(subnet, config)?;
-        Ok(Self(InnerSledEditor::Active(inner)))
-    }
-
-    pub fn for_existing_decommissioned(
-        config: BlueprintSledConfig,
-    ) -> Result<Self, SledInputError> {
-        assert_eq!(
-            config.state,
-            SledState::Decommissioned,
-            "for_existing_decommissioned called on non-decommissioned sled"
-        );
-        let inner = EditedSled {
-            config,
-            edit_counts: SledEditCounts::zeroes(),
-            scalar_edits: EditedSledScalarEdits::zeroes(),
+        let inner = match config.state {
+            SledState::Active => {
+                InnerSledEditor::Active(ActiveSledEditor::new(config)?)
+            }
+            SledState::Decommissioned => {
+                InnerSledEditor::Decommissioned(EditedSled::new(config))
+            }
         };
-        Ok(Self(InnerSledEditor::Decommissioned(inner)))
+        Ok(Self(inner))
     }
 
     pub fn for_new_active(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
@@ -202,6 +188,17 @@ impl SledEditor {
         match &self.0 {
             InnerSledEditor::Active(_) => SledState::Active,
             InnerSledEditor::Decommissioned(_) => SledState::Decommissioned,
+        }
+    }
+
+    /// Returns the subnet of this sled if it is active, or `None` if it is
+    /// decommissioned.
+    pub fn subnet(&self) -> Option<Ipv6Subnet<SLED_PREFIX>> {
+        match &self.0 {
+            InnerSledEditor::Active(active) => {
+                Some(active.underlay_ip_allocator.subnet())
+            }
+            InnerSledEditor::Decommissioned(_) => None,
         }
     }
 
@@ -492,11 +489,18 @@ pub(crate) struct EditedSled {
     pub scalar_edits: EditedSledScalarEdits,
 }
 
+impl EditedSled {
+    fn new(config: BlueprintSledConfig) -> Self {
+        Self {
+            config,
+            edit_counts: SledEditCounts::zeroes(),
+            scalar_edits: EditedSledScalarEdits::zeroes(),
+        }
+    }
+}
+
 impl ActiveSledEditor {
-    pub fn new(
-        subnet: Ipv6Subnet<SLED_PREFIX>,
-        config: BlueprintSledConfig,
-    ) -> Result<Self, SledInputError> {
+    pub fn new(config: BlueprintSledConfig) -> Result<Self, SledInputError> {
         let zones =
             ZonesEditor::new(config.sled_agent_generation, config.zones);
 
@@ -509,7 +513,8 @@ impl ActiveSledEditor {
 
         Ok(Self {
             underlay_ip_allocator: SledUnderlayIpAllocator::new(
-                subnet, zone_ips,
+                config.subnet,
+                zone_ips,
             ),
             incoming_sled_agent_generation: config.sled_agent_generation,
             zones,
@@ -573,6 +578,7 @@ impl ActiveSledEditor {
         EditedSled {
             config: BlueprintSledConfig {
                 state: SledState::Active,
+                subnet: self.underlay_ip_allocator.subnet(),
                 sled_agent_generation,
                 disks,
                 datasets,

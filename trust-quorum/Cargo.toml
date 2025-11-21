@@ -1,7 +1,7 @@
 [package]
 name = "trust-quorum"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 description = "trust quorum library for use by bootstrap agent"
 
@@ -16,6 +16,7 @@ camino.workspace = true
 chacha20poly1305.workspace = true
 ciborium.workspace = true
 daft.workspace = true
+debug-ignore.workspace = true
 derive_more.workspace = true
 futures.workspace = true
 gfss.workspace = true

@@ -116,7 +116,7 @@ impl DataStore {
     async fn silo_create_query(
         opctx: &OpContext,
         silo: Silo,
-    ) -> Result<impl RunnableQuery<Silo>, Error> {
+    ) -> Result<impl RunnableQuery<Silo> + use<>, Error> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
         // If the new Silo has configuration mapping its roles to Fleet-level

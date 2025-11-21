@@ -1,7 +1,7 @@
 [package]
 name = "nexus-test-utils"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -15,6 +15,7 @@ camino-tempfile.workspace = true
 chrono.workspace = true
 crucible-agent-client.workspace = true
 dns-server.workspace = true
+dpd-client.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
 futures.workspace = true
@@ -25,7 +26,7 @@ hickory-resolver.workspace = true
 http.workspace = true
 http-body-util.workspace = true
 hyper.workspace = true
-id-map.workspace = true
+iddqd.workspace = true
 illumos-utils.workspace = true
 internal-dns-resolver.workspace = true
 internal-dns-types.workspace = true

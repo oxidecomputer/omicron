@@ -10,12 +10,12 @@ use common::LiveTestContext;
 use common::reconfigurator::blueprint_edit_current_target;
 use futures::TryStreamExt;
 use live_tests_macros::live_test;
-use nexus_inventory::CollectionBuilder;
 use nexus_lockstep_client::types::BlueprintTargetSet;
 use nexus_lockstep_client::types::QuiesceState;
 use nexus_lockstep_client::types::Saga;
 use nexus_lockstep_client::types::SagaState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -58,11 +58,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
         PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
             .await
             .expect("planning input");
-    let collection = datastore
-        .inventory_get_latest_collection(opctx)
-        .await
-        .expect("latest inventory collection")
-        .unwrap_or_else(|| CollectionBuilder::new("test").build());
     let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
     let nexus = initial_nexus_clients.first().expect("internal Nexus client");
 
@@ -73,8 +68,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let sled_id = *commissioned_sled_ids.first().expect("any sled id");
     let (blueprint1, blueprint2) = blueprint_edit_current_target(
         log,
-        &planning_input,
-        &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             // We have to tell the builder what image source to use for the new
@@ -115,8 +108,20 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
                     "could not find in-service Nexus in parent blueprint",
                 )?;
 
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                builder,
+                planning_input.external_ip_policy(),
+            )
+            .context("failed to construct external networking allocator")?
+            .for_new_nexus()
+            .context("failed to pick an external IP for Nexus")?;
             builder
-                .sled_add_zone_nexus(sled_id, image_source, *nexus_generation)
+                .sled_add_zone_nexus(
+                    sled_id,
+                    image_source,
+                    external_ip,
+                    *nexus_generation,
+                )
                 .context("adding Nexus zone")?;
 
             Ok(())
@@ -182,8 +187,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // Now expunge the zone we just created.
     let (_blueprint2, blueprint3) = blueprint_edit_current_target(
         log,
-        &planning_input,
-        &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             builder

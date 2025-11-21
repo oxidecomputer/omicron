@@ -108,10 +108,6 @@ impl KeyError {
         Self { id: ObjectId::Collection(id) }
     }
 
-    pub(crate) fn blueprint(id: BlueprintId) -> Self {
-        Self { id: ObjectId::Blueprint(id) }
-    }
-
     pub(crate) fn resolved_collection(id: ResolvedCollectionId) -> Self {
         Self { id: ObjectId::ResolvedCollection(id) }
     }
@@ -177,9 +173,9 @@ pub struct StateMatch {
     pub description: String,
 }
 
-/// Error when resolving a state ID by prefix.
+/// Error when resolving a state ID.
 #[derive(Clone, Debug, Error)]
-pub enum StateIdPrefixError {
+pub enum StateIdResolveError {
     /// No state found with the given prefix.
     #[error("no state found with prefix '{0}'")]
     NoMatch(String),
@@ -187,6 +183,10 @@ pub enum StateIdPrefixError {
     /// Multiple states found with the given prefix.
     #[error("prefix '{prefix}' is ambiguous: matches {count} states\n{}", format_matches(.matches))]
     Ambiguous { prefix: String, count: usize, matches: Vec<StateMatch> },
+
+    /// State not found by ID.
+    #[error("state not found: {0}")]
+    NotFound(ReconfiguratorSimStateUuid),
 }
 
 fn format_matches(matches: &[StateMatch]) -> String {
