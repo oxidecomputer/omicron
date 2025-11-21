@@ -28,7 +28,7 @@ type DiskTest<'a> =
 static PROJECT_NAME: &str = "springfield-squidport";
 
 fn get_project_selector() -> String {
-    format!("project={}", PROJECT_NAME)
+    format!("project={PROJECT_NAME}")
 }
 
 fn get_disks_url() -> String {
