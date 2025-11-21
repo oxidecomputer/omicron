@@ -6,6 +6,7 @@
 
 use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::background::BackgroundTask;
+use anyhow::Context;
 use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_auth::authz;
@@ -15,13 +16,16 @@ use nexus_db_queries::db::datastore::BlueprintLimitReachedOutput;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
+use nexus_reconfigurator_preparation::reconfigurator_state_assemble;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::PlanningReport;
 use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use nexus_types::internal_api::background::BlueprintPlannerStatus;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid as _;
+use oxide_debug_dropbox::DebugDropbox;
 use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
@@ -35,6 +39,7 @@ pub struct BlueprintPlanner {
     rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     blueprint_limit: u64,
+    debug_dropbox: Arc<DebugDropbox>,
 }
 
 /// The default number of blueprints, beyond which the auto-planner will stop
@@ -59,6 +64,7 @@ impl BlueprintPlanner {
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<Arc<Collection>>>,
         rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Self {
         let (tx_blueprint, _) = watch::channel(None);
         Self {
@@ -68,6 +74,7 @@ impl BlueprintPlanner {
             rx_blueprint,
             tx_blueprint,
             blueprint_limit: DEFAULT_BLUEPRINT_LIMIT,
+            debug_dropbox,
         }
     }
 
@@ -239,7 +246,8 @@ impl BlueprintPlanner {
             }
         }
 
-        // We have a fresh blueprint; save it.
+        // We have a fresh blueprint.  We're going to proceed with trying to
+        // make it the target.
         let blueprint_id = blueprint.id;
         info!(
             &opctx.log,
@@ -247,6 +255,50 @@ impl BlueprintPlanner {
             "parent_blueprint_id" => %parent_blueprint_id,
             "blueprint_id" => %blueprint_id,
         );
+
+        // Assemble a Reconfigurator state file that we can archive for future
+        // debugging.
+        let debug = match reconfigurator_state_assemble(
+            opctx,
+            &self.datastore,
+            input,
+            vec![(*collection).clone()],
+            vec![parent.clone(), blueprint.clone()],
+            target.clone(),
+        )
+        .await
+        .and_then(|s| {
+            serde_json::to_string(&s)
+                .context("serializing Reconfigurator state file")
+        }) {
+            Ok(d) => d,
+            Err(error) => {
+                // You could argue that this should be best-effort.  However,
+                // this really shouldn't fail under normal operation.  It should
+                // only fail if the database is partially offline or something
+                // like that.  In that case, it's fairly likely this whole
+                // operation is going to fail anyway.
+                //
+                // On the other hand, if we allowed this to be non-fatal, it
+                // would be easy to not notice if some *bug* caused this to stop
+                // working altogether, and then we'd silently lose valuable
+                // debugging information from deployed systems.  So we just
+                // treat this as fatal.
+                let error = InlineErrorChain::new(&*error);
+                error!(
+                    &opctx.log,
+                    "failed to assemble Reconfigurator state file";
+                    "blueprint_id" => %blueprint_id,
+                    &error,
+                );
+                return BlueprintPlannerStatus::Error(format!(
+                    "failed to assemble Reconfigurator state file: {}",
+                    error
+                ));
+            }
+        };
+
+        // Insert the new blueprint into the database.
         match self.datastore.blueprint_insert(opctx, &blueprint).await {
             Ok(()) => (),
             Err(error) => {
@@ -261,6 +313,25 @@ impl BlueprintPlanner {
                     blueprint_id, error
                 ));
             }
+        }
+
+        // Archive this Reconfigurator state file.  As above, we require that
+        // this succeed.
+        let debug_name =
+            blueprint_debug_filename(blueprint_id, &blueprint.time_created);
+        if let Err(error) =
+            self.debug_dropbox.deposit_file_str(&debug_name, &debug).await
+        {
+            let error = InlineErrorChain::new(&error);
+            error!(
+                &opctx.log,
+                "failed to save Reconfigurator state file to debug dropbox";
+                &error,
+            );
+            return BlueprintPlannerStatus::Error(format!(
+                "failed to save Reconfigurator state file to debug dropbox: {}",
+                error
+            ));
         }
 
         // Try to make it the current target.
@@ -415,6 +486,17 @@ impl BackgroundTask for BlueprintPlanner {
     }
 }
 
+fn blueprint_debug_filename(
+    blueprint_id: BlueprintUuid,
+    time_created: &chrono::DateTime<Utc>,
+) -> String {
+    format!(
+        "blueprint-autoplan-{}-{}.json",
+        time_created.format("%Y%m%dT%H%MZ"),
+        blueprint_id
+    )
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -424,6 +506,8 @@ mod test {
     use crate::app::background::tasks::inventory_load::InventoryLoader;
     use crate::app::{background::Activator, quiesce::NexusQuiesceHandle};
     use assert_matches::assert_matches;
+    use camino::Utf8Path;
+    use chrono::DateTime;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_test_utils::db::TestDatabase;
@@ -492,6 +576,9 @@ mod test {
                 time_modified: now_db_precision(),
             }),
         );
+        let debug_dropbox = Arc::new(
+            DebugDropbox::for_tests(Utf8Path::new(".")).await.unwrap(),
+        );
 
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(
@@ -499,6 +586,7 @@ mod test {
             rx_config_loader,
             rx_inventory,
             rx_loader.clone(),
+            debug_dropbox,
         );
 
         // On activation, the planner should run successfully and generate
@@ -669,12 +757,16 @@ mod test {
         // check_blueprint_limit_reached.
         let (_tx_inventory, rx_inventory) = watch::channel(None);
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
+        let debug_dropbox = Arc::new(
+            DebugDropbox::for_tests(Utf8Path::new(".")).await.unwrap(),
+        );
 
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),
             rx_config_loader,
             rx_inventory,
             rx_blueprint,
+            debug_dropbox,
         );
 
         // This limit matches the loop above.
@@ -736,5 +828,18 @@ mod test {
 
         db.terminate().await;
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_blueprint_debug_filename() {
+        let blueprint_id: BlueprintUuid =
+            "1dfe4b95-ac1e-40fa-b219-2c78cde26fc2".parse().unwrap();
+        let time_created: DateTime<Utc> =
+            "2025-11-20T19:09:00Z".parse().unwrap();
+        assert_eq!(
+            blueprint_debug_filename(blueprint_id, &time_created),
+            "blueprint-autoplan-20251120T1909Z-1dfe4b95-ac1e-40fa-b219-\
+             2c78cde26fc2.json",
+        );
     }
 }

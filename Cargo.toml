@@ -597,6 +597,8 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.12.2"
 oxide-client = { path = "clients/oxide-client" }
+# XXX-dap
+oxide-debug-dropbox = { path = "../oxide-debug-dropbox" }
 oxide-tokio-rt = "0.1.2"
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "795a1e0aeefb7a2c6fe4139779fdf66930d09b80", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }

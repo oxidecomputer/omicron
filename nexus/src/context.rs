@@ -10,8 +10,10 @@ use authn::external::scim::HttpAuthnScimToken;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::Duration;
+use nexus_config::DebugDropboxMode;
 use nexus_config::NexusConfig;
 use nexus_config::OmdbConfig;
 use nexus_config::SchemeName;
@@ -24,9 +26,11 @@ use omicron_common::address::{AZ_PREFIX, Ipv6Subnet};
 use omicron_uuid_kinds::ConsoleSessionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
+use oxide_debug_dropbox::DebugDropbox;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::env;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -130,6 +134,22 @@ impl ServerContext {
         log: Logger,
         config: &NexusConfig,
     ) -> Result<Arc<ServerContext>, String> {
+        let debug_dropbox = Arc::new(
+            match config.deployment.debug_dropbox_mode {
+                DebugDropboxMode::Production => {
+                    DebugDropbox::for_real(&log).await
+                }
+                DebugDropboxMode::Test => {
+                    DebugDropbox::for_tests(
+                        &log,
+                        Utf8Path::new("./test-debug-dropbox"),
+                    )
+                    .await
+                }
+            }
+            .map_err(|error| InlineErrorChain::new(&error).to_string())?,
+        );
+
         let nexus_schemes = config
             .pkg
             .authn
@@ -300,6 +320,7 @@ impl ServerContext {
             &producer_registry,
             config,
             Arc::clone(&authz),
+            debug_dropbox,
         )
         .await
         {

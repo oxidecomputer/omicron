@@ -40,6 +40,7 @@ max_vpc_ipv4_subnet_prefix = 29
 id = "913233fe-92a8-4635-9572-183f495429c4"
 rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
 techport_external_server_port = 0
+debug_dropbox_mode = "test"
 
 # Nexus may need to resolve external hosts (e.g. to grab IdP metadata).
 # These are the DNS servers it should use.

@@ -72,6 +72,7 @@ ntp-admin-client.workspace = true
 num-integer.workspace = true
 omicron-cockroach-metrics.workspace = true
 openssl.workspace = true
+oxide-debug-dropbox.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 oxnet.workspace = true

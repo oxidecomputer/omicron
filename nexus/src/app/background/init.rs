@@ -152,6 +152,7 @@ use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::fm;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use oxide_debug_dropbox::DebugDropbox;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -574,6 +575,7 @@ impl BackgroundTasksInitializer {
             reconfigurator_config_watcher.clone(),
             inventory_load_watcher.clone(),
             rx_blueprint.clone(),
+            args.debug_dropbox.clone(),
         );
         let rx_planner = blueprint_planner.watcher();
         driver.register(TaskDefinition {
@@ -1193,6 +1195,8 @@ pub struct BackgroundTasksData {
     /// Channel for exposing the latest loaded fault-management sitrep.
     pub sitrep_load_tx:
         watch::Sender<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
+    /// handle to debug dropbox (for saving debug data)
+    pub debug_dropbox: Arc<DebugDropbox>,
 }
 
 /// Starts the three DNS-propagation-related background tasks for either

@@ -37,6 +37,7 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use oxide_debug_dropbox::DebugDropbox;
 use oximeter_producer::Server as ProducerServer;
 use sagas::common_storage::PooledPantryClient;
 use sagas::common_storage::make_pantry_connection_pool;
@@ -319,6 +320,7 @@ impl Nexus {
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
         authz: Arc<authz::Authz>,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<Arc<Nexus>, String> {
         let all_versions = config
             .pkg
@@ -647,6 +649,7 @@ impl Nexus {
                     mgs_updates_tx,
                     blueprint_load_tx,
                     sitrep_load_tx,
+                    debug_dropbox,
                 },
             );
 
