@@ -300,7 +300,9 @@ impl super::Nexus {
 
         let disk_created = saga_outputs
             .lookup_node_output::<db::datastore::Disk>("created_disk")
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .map_err(|e| Error::InteralError {
+                internal_message: format!("{:#}", &e),
+            })
             .internal_context("looking up output from disk create saga")?;
 
         Ok(disk_created)
@@ -423,10 +425,12 @@ impl super::Nexus {
             }
 
             datastore::Disk::LocalStorage(_) => {
-                return Err(Error::internal_error(&format!(
-                    "cannot remove rop for local storage disk {}",
-                    disk.id()
-                )));
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "cannot remove rop for local storage disk {}",
+                        disk.id()
+                    ),
+                });
             }
         }
 
@@ -452,10 +456,12 @@ impl super::Nexus {
             }
 
             db::model::DiskType::LocalStorage => {
-                return Err(Error::internal_error(&format!(
-                    "cannot import to local storage disk {}",
-                    authz_disk.id()
-                )));
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "cannot import to local storage disk {}",
+                        authz_disk.id()
+                    ),
+                });
             }
         }
 
@@ -500,10 +506,12 @@ impl super::Nexus {
                 db::datastore::Disk::Crucible(disk) => disk,
 
                 db::datastore::Disk::LocalStorage(_) => {
-                    return Err(Error::internal_error(&format!(
-                        "cannot import to local storage disk {}",
-                        authz_disk.id()
-                    )));
+                    return Err(Error::InternalError {
+                        internal_message: format!(
+                            "cannot import to local storage disk {}",
+                            authz_disk.id()
+                        ),
+                    });
                 }
             };
 
@@ -599,20 +607,24 @@ impl super::Nexus {
                         }
                     }
 
-                    _ => Error::internal_error(&format!(
-                        "error sending bulk write to pantry: {}",
-                        e,
-                    )),
+                    _ => Error::InternalError {
+                        internal_message: format!(
+                            "error sending bulk write to pantry: {}",
+                            e,
+                        ),
+                    },
                 },
             )?;
 
             Ok(())
         } else {
             error!(self.log, "disk {} has no pantry address!", disk.id());
-            Err(Error::internal_error(&format!(
-                "disk {} has no pantry address!",
-                disk.id(),
-            )))
+            Err(Error::InternalError {
+                internal_message: format!(
+                    "disk {} has no pantry address!",
+                    disk.id(),
+                ),
+            })
         }
     }
 
@@ -636,10 +648,12 @@ impl super::Nexus {
             }
 
             db::model::DiskType::LocalStorage => {
-                return Err(Error::internal_error(&format!(
-                    "cannot import to local storage disk {}",
-                    authz_disk.id()
-                )));
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "cannot import to local storage disk {}",
+                        authz_disk.id()
+                    ),
+                });
             }
         }
 
@@ -684,10 +698,12 @@ impl super::Nexus {
                 datastore::Disk::Crucible(disk) => disk,
 
                 datastore::Disk::LocalStorage(_) => {
-                    return Err(Error::internal_error(&format!(
-                        "cannot finalize local storage disk {}",
-                        authz_disk.id()
-                    )));
+                    return Err(Error::InteralError {
+                        internal_message: format!(
+                            "cannot finalize local storage disk {}",
+                            authz_disk.id()
+                        ),
+                    });
                 }
             };
 
