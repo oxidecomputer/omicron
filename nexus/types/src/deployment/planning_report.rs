@@ -220,6 +220,7 @@ pub struct PlanningNoopImageSourceConverted {
     pub num_dataset: usize,
     pub host_phase_2_slot_a_eligible: bool,
     pub host_phase_2_slot_b_eligible: bool,
+    pub measurement_eligible: bool,
 }
 
 #[derive(
@@ -240,9 +241,14 @@ pub struct PlanningNoopImageSourceStepReport {
     pub sled_zones_all_already_artifact: BTreeSet<SledUuid>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
     pub sled_host_phase_2_both_already_artifact: BTreeSet<SledUuid>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default())))]
+    pub sled_measurements_already_artifact: BTreeSet<SledUuid>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub skipped_zones:
         BTreeMap<OmicronZoneUuid, PlanningNoopImageSourceSkipZoneReason>,
+    #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
+    pub skipped_sled_measurements:
+        BTreeMap<SledUuid, PlanningNoopImageSourceSkipSledMeasurementsReason>,
     #[cfg_attr(test, any(((0, 16).into(), Default::default(), Default::default())))]
     pub converted: BTreeMap<SledUuid, PlanningNoopImageSourceConverted>,
 }
@@ -255,7 +261,9 @@ impl PlanningNoopImageSourceStepReport {
             sled_zones_all_already_artifact: BTreeSet::new(),
             skipped_sled_host_phase_2: BTreeMap::new(),
             sled_host_phase_2_both_already_artifact: BTreeSet::new(),
+            sled_measurements_already_artifact: BTreeSet::new(),
             skipped_zones: BTreeMap::new(),
+            skipped_sled_measurements: BTreeMap::new(),
             converted: BTreeMap::new(),
         }
     }
@@ -265,6 +273,7 @@ impl PlanningNoopImageSourceStepReport {
             && self.skipped_sled_zones.is_empty()
             && self.skipped_sled_host_phase_2.is_empty()
             && self.skipped_zones.is_empty()
+            && self.skipped_sled_measurements.is_empty()
             && self.converted.is_empty()
     }
 
@@ -295,6 +304,18 @@ impl PlanningNoopImageSourceStepReport {
         self.sled_host_phase_2_both_already_artifact.insert(sled_id);
     }
 
+    pub fn sled_measurements_already_artifact(&mut self, sled_id: SledUuid) {
+        self.sled_measurements_already_artifact.insert(sled_id);
+    }
+
+    pub fn skip_sled_measurements(
+        &mut self,
+        sled_id: SledUuid,
+        reason: PlanningNoopImageSourceSkipSledMeasurementsReason,
+    ) {
+        self.skipped_sled_measurements.insert(sled_id, reason);
+    }
+
     pub fn skip_zone(
         &mut self,
         zone_id: OmicronZoneUuid,
@@ -310,6 +331,7 @@ impl PlanningNoopImageSourceStepReport {
         num_dataset: usize,
         host_phase_2_slot_a_eligible: bool,
         host_phase_2_slot_b_eligible: bool,
+        measurement_eligible: bool,
     ) {
         self.converted.insert(
             sled_id,
@@ -318,6 +340,7 @@ impl PlanningNoopImageSourceStepReport {
                 num_dataset,
                 host_phase_2_slot_a_eligible,
                 host_phase_2_slot_b_eligible,
+                measurement_eligible,
             },
         );
     }
@@ -334,8 +357,10 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
             // system.
             sled_zones_all_already_artifact: _,
             sled_host_phase_2_both_already_artifact: _,
+            sled_measurements_already_artifact: _,
             skipped_zones: _,
             converted,
+            skipped_sled_measurements,
         } = self;
 
         if *no_target_release {
@@ -357,7 +382,12 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
                 "* skipping noop host phase 2 desired contents check on sled {sled_id}: {reason}"
             )?;
         }
-
+        for (sled_id, reason) in skipped_sled_measurements.iter() {
+            writeln!(
+                f,
+                "* skipping noop measurement desired contents check on sled {sled_id}: {reason}"
+            )?;
+        }
         for (
             sled_id,
             PlanningNoopImageSourceConverted {
@@ -365,6 +395,7 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
                 num_dataset,
                 host_phase_2_slot_a_eligible,
                 host_phase_2_slot_b_eligible,
+                measurement_eligible,
             },
         ) in converted.iter()
         {
@@ -385,6 +416,12 @@ impl fmt::Display for PlanningNoopImageSourceStepReport {
                 writeln!(
                     f,
                     "* noop converting host phase 2 slot B to Artifact on sled {sled_id}"
+                )?;
+            }
+            if *measurement_eligible {
+                writeln!(
+                    f,
+                    "* noop converting current measurements to Artifact on sled {sled_id}"
                 )?;
             }
         }
@@ -439,6 +476,29 @@ pub enum PlanningNoopImageSourceSkipSledHostPhase2Reason {
 impl fmt::Display for PlanningNoopImageSourceSkipSledHostPhase2Reason {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
+            Self::SledNotInInventory => {
+                write!(f, "sled not present in latest inventory collection")
+            }
+        }
+    }
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[serde(rename_all = "snake_case", tag = "type")]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub enum PlanningNoopImageSourceSkipSledMeasurementsReason {
+    BothSlotsAlreadyArtifact,
+    SledNotInInventory,
+}
+
+impl fmt::Display for PlanningNoopImageSourceSkipSledMeasurementsReason {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::BothSlotsAlreadyArtifact => {
+                write!(f, "both measurement sets are already from artifacts")
+            }
             Self::SledNotInInventory => {
                 write!(f, "sled not present in latest inventory collection")
             }
@@ -742,6 +802,20 @@ impl IdOrdItem for BlockedMgsUpdate {
         &*self.baseboard_id
     }
     id_upcast!();
+}
+
+#[derive(
+    Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Diffable, JsonSchema,
+)]
+#[cfg_attr(test, derive(test_strategy::Arbitrary))]
+pub struct PlanningMeasurementUpdatesStepReport {
+    pub placeholder: u32,
+}
+
+impl PlanningMeasurementUpdatesStepReport {
+    pub fn new() -> Self {
+        Self { placeholder: 0 }
+    }
 }
 
 #[derive(
