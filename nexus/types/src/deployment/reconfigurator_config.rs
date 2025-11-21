@@ -117,6 +117,7 @@ impl fmt::Display for ReconfiguratorConfigViewDisplay<'_> {
 pub struct ReconfiguratorConfig {
     pub planner_enabled: bool,
     pub planner_config: PlannerConfig,
+    pub tuf_repo_pruner_enabled: bool,
 }
 
 impl ReconfiguratorConfig {
@@ -127,7 +128,11 @@ impl ReconfiguratorConfig {
 
 impl Default for ReconfiguratorConfig {
     fn default() -> Self {
-        Self { planner_enabled: true, planner_config: PlannerConfig::default() }
+        Self {
+            planner_enabled: true,
+            planner_config: PlannerConfig::default(),
+            tuf_repo_pruner_enabled: true,
+        }
     }
 }
 
@@ -139,8 +144,14 @@ pub struct ReconfiguratorConfigDisplay<'a> {
 impl fmt::Display for ReconfiguratorConfigDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
-            config: ReconfiguratorConfig { planner_enabled, planner_config },
+            config:
+                ReconfiguratorConfig {
+                    planner_enabled,
+                    planner_config,
+                    tuf_repo_pruner_enabled,
+                },
         } = self;
+        writeln!(f, "tuf repo pruner enabled: {}", tuf_repo_pruner_enabled)?;
         writeln!(f, "planner enabled: {}", planner_enabled)?;
         writeln!(f, "planner config:")?;
         // planner_config does its own indentation, so it's not necessary to
@@ -164,12 +175,18 @@ pub struct ReconfiguratorConfigDiffDisplay<'a, 'b> {
 
 impl fmt::Display for ReconfiguratorConfigDiffDisplay<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ReconfiguratorConfigDiff { planner_enabled, planner_config } =
-            self.diff;
+        let ReconfiguratorConfigDiff {
+            planner_enabled,
+            planner_config,
+            tuf_repo_pruner_enabled,
+        } = self.diff;
 
         let list = KvList::new(
             None,
-            vec![diff_row!(planner_enabled, "planner enabled")],
+            vec![
+                diff_row!(tuf_repo_pruner_enabled, "tuf repo pruner enabled"),
+                diff_row!(planner_enabled, "planner enabled"),
+            ],
         );
         // No need for writeln! here because KvList adds its own newlines.
         write!(f, "{list}")?;

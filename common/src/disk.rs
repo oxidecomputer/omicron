@@ -7,7 +7,8 @@
 use anyhow::bail;
 use camino::{Utf8Path, Utf8PathBuf};
 use daft::Diffable;
-use id_map::IdMappable;
+use iddqd::IdOrdItem;
+use iddqd::id_upcast;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -44,12 +45,14 @@ pub struct OmicronPhysicalDiskConfig {
     pub pool_id: ZpoolUuid,
 }
 
-impl IdMappable for OmicronPhysicalDiskConfig {
-    type Id = PhysicalDiskUuid;
+impl IdOrdItem for OmicronPhysicalDiskConfig {
+    type Key<'a> = PhysicalDiskUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+
+    id_upcast!();
 }
 
 #[derive(
@@ -410,12 +413,14 @@ pub struct DatasetConfig {
     pub inner: SharedDatasetConfig,
 }
 
-impl IdMappable for DatasetConfig {
-    type Id = DatasetUuid;
+impl IdOrdItem for DatasetConfig {
+    type Key<'a> = DatasetUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+
+    id_upcast!();
 }
 
 #[derive(

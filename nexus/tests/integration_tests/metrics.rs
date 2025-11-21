@@ -297,7 +297,7 @@ async fn test_instance_watcher_metrics(
             )
         }
         match timeseries.points.values(0) {
-            Some(ValueArray::Integer(ref vals)) => {
+            Some(ValueArray::Integer(vals)) => {
                 Ok(vals.iter().filter_map(|&v| v).sum())
             }
             x => panic!(

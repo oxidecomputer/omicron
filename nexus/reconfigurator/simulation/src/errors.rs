@@ -177,9 +177,9 @@ pub struct StateMatch {
     pub description: String,
 }
 
-/// Error when resolving a state ID by prefix.
+/// Error when resolving a state ID.
 #[derive(Clone, Debug, Error)]
-pub enum StateIdPrefixError {
+pub enum StateIdResolveError {
     /// No state found with the given prefix.
     #[error("no state found with prefix '{0}'")]
     NoMatch(String),
@@ -187,6 +187,10 @@ pub enum StateIdPrefixError {
     /// Multiple states found with the given prefix.
     #[error("prefix '{prefix}' is ambiguous: matches {count} states\n{}", format_matches(.matches))]
     Ambiguous { prefix: String, count: usize, matches: Vec<StateMatch> },
+
+    /// State not found by ID.
+    #[error("state not found: {0}")]
+    NotFound(ReconfiguratorSimUuid),
 }
 
 fn format_matches(matches: &[StateMatch]) -> String {

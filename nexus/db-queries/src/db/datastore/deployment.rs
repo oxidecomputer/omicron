@@ -40,7 +40,8 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use diesel::sql_types::Nullable;
 use futures::FutureExt;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
+use ipnetwork::Ipv6Network;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::OptionalError;
 use nexus_db_errors::TransactionError;
@@ -262,6 +263,7 @@ impl DataStore {
                     .slot_b
                     .artifact_hash()
                     .map(ArtifactHash),
+                subnet: Ipv6Network::from(sled.subnet).into(),
             })
             .collect::<Vec<_>>();
 
@@ -793,12 +795,18 @@ impl DataStore {
                 paginator = p.found_batch(&batch, &|(s, _, _)| s.sled_id);
 
                 for (s, slot_a_version, slot_b_version) in batch {
+                    let subnet = s.subnet().map_err(|e| {
+                        Error::internal_error(
+                            &InlineErrorChain::new(&*e).to_string(),
+                        )
+                    })?;
                     let config = BlueprintSledConfig {
                         state: s.sled_state.into(),
+                        subnet,
                         sled_agent_generation: *s.sled_agent_generation,
-                        disks: IdMap::new(),
-                        datasets: IdMap::new(),
-                        zones: IdMap::new(),
+                        disks: IdOrdMap::new(),
+                        datasets: IdOrdMap::new(),
+                        zones: IdOrdMap::new(),
                         remove_mupdate_override: s
                             .remove_mupdate_override
                             .map(|id| id.into()),
@@ -942,7 +950,13 @@ impl DataStore {
                                 e.to_string()
                             ))
                         })?;
-                    sled_config.zones.insert(zone);
+                    sled_config.zones.insert_unique(zone).map_err(|e| {
+                        Error::internal_error(&format!(
+                            "duplicate zone ID found, but \
+                             database guarantees uniqueness: {}",
+                            InlineErrorChain::new(&e),
+                        ))
+                    })?;
                 }
             }
         }
@@ -994,12 +1008,19 @@ impl DataStore {
                         ))
                     })?;
                     let disk_id = d.id;
-                    sled_config.disks.insert(d.try_into().map_err(|e| {
+                    let disk = d.try_into().map_err(|e| {
                         Error::internal_error(&format!(
                             "Cannot convert BpOmicronPhysicalDisk {}: {e}",
                             disk_id
                         ))
-                    })?);
+                    })?;
+                    sled_config.disks.insert_unique(disk).map_err(|e| {
+                        Error::internal_error(&format!(
+                            "duplicate disk ID found, but \
+                             database guarantees uniqueness: {}",
+                            InlineErrorChain::new(&e),
+                        ))
+                    })?;
                 }
             }
         }
@@ -1046,12 +1067,21 @@ impl DataStore {
                     })?;
 
                     let dataset_id = d.id;
-                    sled_config.datasets.insert(d.try_into().map_err(|e| {
+                    let dataset = d.try_into().map_err(|e| {
                         Error::internal_error(&format!(
                             "Cannot parse dataset {}: {e}",
                             dataset_id
                         ))
-                    })?);
+                    })?;
+                    sled_config.datasets.insert_unique(dataset).map_err(
+                        |e| {
+                            Error::internal_error(&format!(
+                                "duplicate dataset ID found, but \
+                                 database guarantees uniqueness: {}",
+                                InlineErrorChain::new(&e),
+                            ))
+                        },
+                    )?;
                 }
             }
         }
@@ -3113,32 +3143,27 @@ mod tests {
     use crate::db::raw_query_builder::QueryBuilder;
     use gateway_types::rot::RotSlot;
     use nexus_db_model::IpVersion;
-    use nexus_inventory::CollectionBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::planner::Planner;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
     use nexus_types::deployment::BlueprintHostPhase2DesiredSlots;
     use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
-    use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
-    use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::ExpectedActiveRotSlot;
-    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
-    use nexus_types::deployment::PlanningInputBuilder;
     use nexus_types::deployment::SledDetails;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
     use nexus_types::deployment::SledResources;
-    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
     use nexus_types::external_api::views::SledPolicy;
@@ -3147,46 +3172,30 @@ mod tests {
     use nexus_types::inventory::Collection;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
-    use omicron_common::api::external::MacAddr;
-    use omicron_common::api::external::Name;
     use omicron_common::api::external::TufArtifactMeta;
     use omicron_common::api::external::TufRepoDescription;
     use omicron_common::api::external::TufRepoMeta;
-    use omicron_common::api::external::Vni;
-    use omicron_common::api::internal::shared::NetworkInterface;
-    use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::disk::M2Slot;
     use omicron_common::update::ArtifactId;
-    use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::poll::wait_for_condition;
-    use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::Rng;
     use std::collections::BTreeSet;
     use std::mem;
-    use std::net::IpAddr;
-    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use std::str::FromStr;
     use std::sync::Arc;
-    use std::sync::LazyLock;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
-
-    static EMPTY_PLANNING_INPUT: LazyLock<PlanningInput> =
-        LazyLock::new(|| PlanningInputBuilder::empty_input());
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -3290,10 +3299,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an empty blueprint from it
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test");
         let authz_blueprint = authz_blueprint_from_id(blueprint1.id);
 
         // Trying to read it from the database should fail with the relevant
@@ -3438,12 +3444,18 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &planning_input,
-            &collection,
             "test",
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
+
+        // We made changes to the planning input we want to be reflected in the
+        // new blueprint; reuse the `Planner`'s method for replicating those
+        // changes.
+        Planner::update_builder_from_planning_input(
+            &mut builder,
+            &planning_input,
+        );
 
         // Ensure disks on our sled
         assert_eq!(
@@ -3786,8 +3798,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3843,8 +3853,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
-            &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3897,8 +3905,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint4,
-            &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3955,8 +3961,6 @@ mod tests {
         let blueprint6 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint5,
-            &planning_input,
-            &collection,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -4020,21 +4024,13 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("no target blueprint set"));
 
-        // Create an initial empty collection
-        let collection = CollectionBuilder::new("test").build();
-
         // Create three blueprints:
         // * `blueprint1` has no parent
         // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test1",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -4043,8 +4039,6 @@ mod tests {
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4144,8 +4138,6 @@ mod tests {
         let blueprint4 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4179,19 +4171,11 @@ mod tests {
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        // Create an initial empty collection
-        let collection = CollectionBuilder::new("test").build();
-
         // Create an initial blueprint and a child.
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
-            "test1",
-        );
+        let blueprint1 = BlueprintBuilder::build_empty("test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
-            &collection,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -4286,100 +4270,46 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    async fn create_blueprint_with_external_ip(
-        datastore: &DataStore,
-        opctx: &OpContext,
-    ) -> Blueprint {
-        // Create an initial blueprint and a child.
-        let sled_id = SledUuid::new_v4();
-        let mut blueprint = BlueprintBuilder::build_empty_with_sleds(
-            [sled_id].into_iter(),
-            "test1",
-        );
-
-        // To observe realistic database behavior, we need the invocation of
-        // "blueprint_ensure_external_networking_resources" to actually write something
-        // back to the database.
-        //
-        // While this is *mostly* made-up blueprint contents, the part that matters
-        // is that it's provisioning a zone (Nexus) which does have resources
-        // to be allocated.
-        let ip_range = IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 1),
-            Ipv4Addr::new(10, 0, 0, 10),
-        ))
-        .unwrap();
-        let (service_authz_ip_pool, service_ip_pool) = datastore
-            .ip_pools_service_lookup(&opctx, IpVersion::V4)
-            .await
-            .expect("lookup service ip pool");
-        datastore
-            .ip_pool_add_range(
-                &opctx,
-                &service_authz_ip_pool,
-                &service_ip_pool,
-                &ip_range,
-            )
-            .await
-            .expect("add range to service ip pool");
-        let zone_id = OmicronZoneUuid::new_v4();
-        blueprint.sleds.get_mut(&sled_id).unwrap().zones.insert(
-            BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id: zone_id,
-                filesystem_pool: ZpoolName::new_external(ZpoolUuid::new_v4()),
-                zone_type: BlueprintZoneType::Nexus(
-                    blueprint_zone_type::Nexus {
-                        internal_address: SocketAddrV6::new(
-                            Ipv6Addr::LOCALHOST,
-                            0,
-                            0,
-                            0,
-                        ),
-                        lockstep_port: 0,
-                        external_ip: OmicronZoneExternalFloatingIp {
-                            id: ExternalIpUuid::new_v4(),
-                            ip: "10.0.0.1".parse().unwrap(),
-                        },
-                        nic: NetworkInterface {
-                            id: Uuid::new_v4(),
-                            kind: NetworkInterfaceKind::Service {
-                                id: *zone_id.as_untyped_uuid(),
-                            },
-                            name: Name::from_str("mynic").unwrap(),
-                            ip: "172.30.2.6".parse().unwrap(),
-                            mac: MacAddr::random_system(),
-                            subnet: IpNet::host_net(IpAddr::V6(
-                                Ipv6Addr::LOCALHOST,
-                            )),
-                            vni: Vni::random(),
-                            primary: true,
-                            slot: 1,
-                            transit_ips: vec![],
-                        },
-                        external_tls: false,
-                        external_dns_servers: vec![],
-                        nexus_generation: Generation::new(),
-                    },
-                ),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            },
-        );
-
-        blueprint
-    }
-
     #[tokio::test]
     async fn test_ensure_external_networking_works_with_good_target() {
+        const TEST_NAME: &str =
+            "test_ensure_external_networking_works_with_good_target";
         // Setup
-        let logctx = dev::test_setup_log(
-            "test_ensure_external_networking_works_with_good_target",
-        );
+        let logctx = dev::test_setup_log(TEST_NAME);
         let db = TestDatabase::new_with_datastore(&logctx.log).await;
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
-        let blueprint =
-            create_blueprint_with_external_ip(&datastore, &opctx).await;
+        let (example, mut blueprint) =
+            ExampleSystemBuilder::new(&opctx.log, TEST_NAME).build();
+
+        // Insert the IP pool ranges used by our example system.
+        for pool_range in
+            example.system.external_ip_policy().clone().into_raw_ranges()
+        {
+            // This looks up the pool again for each range; we only need at most
+            // two (one V4, one V6), but our example system doesn't have many
+            // ranges so this should be fine.
+            let (service_authz_ip_pool, service_ip_pool) = datastore
+                .ip_pools_service_lookup(&opctx, pool_range.version().into())
+                .await
+                .expect("lookup service ip pool");
+            datastore
+                .ip_pool_add_range(
+                    &opctx,
+                    &service_authz_ip_pool,
+                    &service_ip_pool,
+                    &pool_range,
+                )
+                .await
+                .expect("add range to service IP pool");
+        }
+
+        // `ExampleSystemBuilder` returns a blueprint that has an empty parent.
+        // To make `blueprint` the target, we have to either insert that parent
+        // and make it the target first, or modify `blueprint` to make it look
+        // like it's the original. The latter is shorter.
+        blueprint.parent_blueprint_id = None;
+
         datastore.blueprint_insert(&opctx, &blueprint).await.unwrap();
 
         let bp_target = BlueprintTarget {
@@ -4430,8 +4360,6 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &example_system.input,
-            &example_system.collection,
             &format!("{test_name}-2"),
             PlannerRng::from_entropy(),
         )

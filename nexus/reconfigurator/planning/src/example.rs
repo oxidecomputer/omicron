@@ -12,6 +12,8 @@ use std::net::IpAddr;
 use std::net::Ipv4Addr;
 
 use crate::blueprint_builder::BlueprintBuilder;
+use crate::blueprint_editor::ExternalNetworkingAllocator;
+use crate::planner::Planner;
 use crate::planner::rng::PlannerRng;
 use crate::system::RotStateOverrides;
 use crate::system::SledBuilder;
@@ -534,32 +536,30 @@ impl ExampleSystemBuilder {
 
         let base_input = input_builder.clone().build();
 
-        // Start with an empty blueprint containing only our sleds, no zones.
-        let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
-            base_input.all_sled_ids(SledFilter::Commissioned),
+        // Start with an empty blueprint.
+        let initial_blueprint = BlueprintBuilder::build_empty_seeded(
             "test suite",
             rng.blueprint1_rng,
         );
-
-        // Start with an empty collection
-        let collection = system
-            .to_collection_builder()
-            .expect("failed to build collection")
-            .build();
 
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
             &self.log,
             &initial_blueprint,
-            &base_input,
-            &collection,
             "test suite",
             rng.blueprint2_rng,
         )
         .unwrap();
+        Planner::update_builder_from_planning_input(&mut builder, &base_input);
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                base_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator");
 
         // * Create disks and non-discretionary zones on all sleds.
         // * Only create discretionary zones on discretionary sleds.
@@ -587,6 +587,9 @@ impl ExampleSystemBuilder {
                     for _ in 0..nexus_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
+                        let external_ip = external_networking_alloc
+                            .for_new_nexus()
+                            .expect("should have an external IP for Nexus");
                         builder
                             .sled_add_zone_nexus_with_config(
                                 sled_id,
@@ -595,6 +598,7 @@ impl ExampleSystemBuilder {
                                 self.target_release
                                     .zone_image_source(ZoneKind::Nexus)
                                     .expect("obtained Nexus image source"),
+                                external_ip,
                                 initial_blueprint.nexus_generation,
                             )
                             .unwrap();
@@ -633,6 +637,11 @@ impl ExampleSystemBuilder {
                         .external_dns_count
                         .on(discretionary_ix, discretionary_sled_count)
                     {
+                        let external_ip = external_networking_alloc
+                            .for_new_external_dns()
+                            .expect(
+                                "should have an external IP for external DNS",
+                            );
                         builder
                             .sled_add_zone_external_dns(
                                 sled_id,
@@ -641,6 +650,7 @@ impl ExampleSystemBuilder {
                                     .expect(
                                         "obtained ExternalDNS image source",
                                     ),
+                                external_ip,
                             )
                             .unwrap();
                     }
@@ -739,6 +749,24 @@ impl ExampleSystemBuilder {
                     input_builder
                         .add_omicron_zone_external_ip(service_id, external_ip)
                         .expect("failed to add Omicron zone external IP");
+                    // TODO-completess: Support dual-stack Omicron zone NICs.
+                    // See https://github.com/oxidecomputer/omicron/issues/9314
+                    assert!(
+                        !nic.ip_config.is_dual_stack(),
+                        "Dual-stack OmicronZoneNics are not yet supported"
+                    );
+                    let ip = nic
+                        .ip_config
+                        .ipv4_addr()
+                        .copied()
+                        .map(IpAddr::V4)
+                        .unwrap_or_else(|| {
+                            nic.ip_config
+                                .ipv6_addr()
+                                .copied()
+                                .map(IpAddr::V6)
+                                .expect("must have at least one IP address")
+                        });
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,
@@ -746,7 +774,7 @@ impl ExampleSystemBuilder {
                                 // TODO-cleanup use `TypedUuid` everywhere
                                 id: VnicUuid::from_untyped_uuid(nic.id),
                                 mac: nic.mac,
-                                ip: nic.ip,
+                                ip,
                                 slot: nic.slot,
                                 primary: nic.primary,
                             },

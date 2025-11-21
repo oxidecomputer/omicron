@@ -1,7 +1,7 @@
 [package]
 name = "sled-agent-api"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -13,7 +13,6 @@ chrono.workspace = true
 dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
 http.workspace = true
-id-map.workspace = true
 iddqd.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true

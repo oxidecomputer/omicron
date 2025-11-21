@@ -1,7 +1,7 @@
 [package]
 name = "sled-agent-config-reconciler"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -20,7 +20,6 @@ dropshot.workspace = true
 either.workspace = true
 futures.workspace = true
 glob.workspace = true
-id-map.workspace = true
 iddqd.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true

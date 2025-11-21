@@ -68,6 +68,7 @@ async fn create_instance_expect_failure(
         start: true,
         auto_restart_policy: Default::default(),
         anti_affinity_groups: Vec::new(),
+        multicast_groups: Vec::new(),
     };
 
     NexusRequest::new(
@@ -160,6 +161,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             true,
             Default::default(),
             None,
+            Vec::new(),
         )
         .await;
     }

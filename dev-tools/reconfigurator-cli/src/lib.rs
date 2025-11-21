@@ -20,6 +20,7 @@ use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_planning::example::{
     ExampleSystemBuilder, extract_tuf_repo_description, tuf_assemble,
 };
@@ -28,7 +29,8 @@ use nexus_reconfigurator_planning::system::{
     RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
 };
 use nexus_reconfigurator_simulation::{
-    BlueprintId, CollectionId, GraphRenderOptions, SimState,
+    BlueprintId, CollectionId, GraphRenderOptions, GraphStartingState,
+    ReconfiguratorSimId, SimState,
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
@@ -72,6 +74,7 @@ use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::fmt::{self, Write};
 use std::io::IsTerminal;
+use std::net::IpAddr;
 use std::num::ParseIntError;
 use std::str::FromStr;
 use swrite::{SWrite, swrite, swriteln};
@@ -163,11 +166,32 @@ impl ReconfiguratorSim {
                 builder
                     .add_omicron_zone_external_ip(zone.id, external_ip)
                     .context("adding omicron zone external IP")?;
+
+                // TODO-completeness: This needs to support dual-stack zones.
+                // See https://github.com/oxidecomputer/omicron/issues/9288 and
+                // related issues.
+                let maybe_ip = if matches!(external_ip.ip(), IpAddr::V4(_)) {
+                    nic.ip_config.ipv4_addr().copied().map(IpAddr::V4)
+                } else {
+                    nic.ip_config.ipv6_addr().copied().map(IpAddr::V6)
+                };
+                let ip = maybe_ip.with_context(|| {
+                    format!(
+                        "Omicron zone has external and private IP \
+                        configurations with different IP versions. \
+                        zone_id={} zone_kind={} \
+                        external_ip={} private_ip_config={:?}",
+                        zone.id,
+                        zone.zone_type.kind().report_str(),
+                        external_ip.ip(),
+                        nic.ip_config,
+                    )
+                })?;
                 let nic = OmicronZoneNic {
                     // TODO-cleanup use `TypedUuid` everywhere
                     id: VnicUuid::from_untyped_uuid(nic.id),
                     mac: nic.mac,
-                    ip: nic.ip,
+                    ip,
                     slot: nic.slot,
                     primary: nic.primary,
                 };
@@ -999,6 +1023,45 @@ impl From<CollectionIdOpt> for CollectionId {
     }
 }
 
+#[derive(Clone, Debug)]
+enum ReconfiguratorSimIdOpt {
+    /// use a specific reconfigurator sim state by full UUID
+    Id(ReconfiguratorSimUuid),
+    /// use a reconfigurator sim state by UUID prefix
+    Prefix(String),
+}
+
+impl FromStr for ReconfiguratorSimIdOpt {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse::<ReconfiguratorSimUuid>() {
+            Ok(id) => Ok(ReconfiguratorSimIdOpt::Id(id)),
+            Err(_) => Ok(ReconfiguratorSimIdOpt::Prefix(s.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for ReconfiguratorSimIdOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReconfiguratorSimIdOpt::Id(id) => id.fmt(f),
+            ReconfiguratorSimIdOpt::Prefix(prefix) => prefix.fmt(f),
+        }
+    }
+}
+
+impl From<ReconfiguratorSimIdOpt> for ReconfiguratorSimId {
+    fn from(value: ReconfiguratorSimIdOpt) -> Self {
+        match value {
+            ReconfiguratorSimIdOpt::Id(id) => ReconfiguratorSimId::Id(id),
+            ReconfiguratorSimIdOpt::Prefix(prefix) => {
+                ReconfiguratorSimId::Prefix(prefix)
+            }
+        }
+    }
+}
+
 /// Clap field for an optional mupdate override UUID.
 ///
 /// This structure is similar to `Option`, but is specified separately to:
@@ -1265,7 +1328,7 @@ enum SetArgs {
     NumNexus { num_nexus: u16 },
     /// specify the generation of Nexus zones that are considered active when
     /// running the blueprint planner
-    ActiveNexusGen { gen: Generation },
+    ActiveNexusGen { r#gen: Generation },
     /// Control the set of Nexus zones seen as input to the planner
     NexusZones {
         #[clap(long, conflicts_with = "active")]
@@ -1459,7 +1522,7 @@ struct StateLogArgs {
     from: Option<ReconfiguratorSimUuid>,
 
     /// Limit number of states to display
-    #[clap(long, short = 'n')]
+    #[clap(long, short = 'n', requires = "from")]
     limit: Option<usize>,
 
     /// Show changes in each state (verbose mode)
@@ -1470,7 +1533,7 @@ struct StateLogArgs {
 #[derive(Debug, Args)]
 struct StateSwitchArgs {
     /// The state ID or unique prefix to switch to
-    state_id: String,
+    state_id: ReconfiguratorSimIdOpt,
 }
 
 #[derive(Debug, Args)]
@@ -2175,8 +2238,11 @@ fn cmd_blueprint_blippy(
     let resolved_id =
         state.system().resolve_blueprint_id(args.blueprint_id.into())?;
     let blueprint = state.system().get_blueprint(&resolved_id)?;
-    let report =
-        Blippy::new(&blueprint).into_report(BlippyReportSortKey::Severity);
+    let planning_input = sim
+        .planning_input(blueprint)
+        .context("failed to construct planning input")?;
+    let report = Blippy::new(&blueprint, &planning_input)
+        .into_report(BlippyReportSortKey::Severity);
     Ok(Some(format!("{}", report.display())))
 }
 
@@ -2260,15 +2326,13 @@ fn cmd_blueprint_edit(
         .map(|c| c.clone())
         .unwrap_or_else(|| CollectionBuilder::new("sim").build());
 
-    let mut builder = BlueprintBuilder::new_based_on(
-        &sim.log,
-        blueprint,
-        &planning_input,
-        &latest_collection,
-        creator,
-        rng,
-    )
-    .context("creating blueprint builder")?;
+    let mut builder =
+        BlueprintBuilder::new_based_on(&sim.log, blueprint, creator, rng)
+            .context("creating blueprint builder")?;
+
+    // We're acting as the planner here, so we need to update the builder for
+    // any static changes in the input (e.g., new sleds, new DNS versions, ...).
+    Planner::update_builder_from_planning_input(&mut builder, &planning_input);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
@@ -2286,8 +2350,20 @@ fn cmd_blueprint_edit(
                 &planning_input,
                 ZoneKind::Nexus,
             )?;
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .context("failed to construct external networking allocator")?
+            .for_new_nexus()
+            .context("failed to pick an external IP for Nexus")?;
             builder
-                .sled_add_zone_nexus(sled_id, image_source, nexus_generation)
+                .sled_add_zone_nexus(
+                    sled_id,
+                    image_source,
+                    external_ip,
+                    nexus_generation,
+                )
                 .context("failed to add Nexus zone")?;
             format!("added Nexus zone to sled {}", sled_id)
         }
@@ -2812,13 +2888,16 @@ fn cmd_state_log(
 ) -> anyhow::Result<Option<String>> {
     let StateLogArgs { from, limit, verbose } = args;
 
-    // Build rendering options.
+    let starting_state = if let Some(start) = from {
+        GraphStartingState::State { start, limit }
+    } else {
+        GraphStartingState::None
+    };
+
     let options = GraphRenderOptions::new(sim.current)
         .with_verbose(verbose)
-        .with_limit(limit)
-        .with_from(from);
+        .with_starting_state(starting_state);
 
-    // Render the graph.
     let output = sim.sim.render_graph(&options);
 
     Ok(Some(output))
@@ -2828,16 +2907,8 @@ fn cmd_state_switch(
     sim: &mut ReconfiguratorSim,
     args: StateSwitchArgs,
 ) -> anyhow::Result<Option<String>> {
-    // Try parsing as a full UUID first, then fall back to prefix matching.
-    let target_id = match args.state_id.parse::<ReconfiguratorSimUuid>() {
-        Ok(id) => id,
-        Err(_) => sim.sim.get_state_by_prefix(&args.state_id)?,
-    };
-
-    let state = sim
-        .sim
-        .get_state(target_id)
-        .ok_or_else(|| anyhow!("state {} not found", target_id))?;
+    let state = sim.sim.resolve_and_get_state(args.state_id.into())?;
+    let target_id = state.id();
 
     sim.current = target_id;
 
@@ -3039,10 +3110,10 @@ fn cmd_set(
                 .set_target_nexus_zone_count(usize::from(num_nexus));
             rv
         }
-        SetArgs::ActiveNexusGen { gen } => {
+        SetArgs::ActiveNexusGen { r#gen } => {
             let rv =
                 format!("will use active Nexus zones from generation {gen}");
-            state.config_mut().set_active_nexus_zone_generation(gen);
+            state.config_mut().set_active_nexus_zone_generation(r#gen);
             rv
         }
         SetArgs::NexusZones {

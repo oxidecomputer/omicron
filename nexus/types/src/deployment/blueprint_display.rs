@@ -53,6 +53,9 @@ pub mod constants {
         "(not present in collection)";
     pub const INVALID_VALUE_PARENS: &str = "(invalid value)";
     pub const GENERATION: &str = "generation";
+    pub const STATE: &str = "state";
+    pub const CONFIG_GENERATION: &str = "config generation";
+    pub const SUBNET: &str = "subnet";
 }
 use constants::*;
 use std::fmt::Display;

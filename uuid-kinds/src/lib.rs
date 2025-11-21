@@ -57,6 +57,7 @@ impl_typed_uuid_kinds! {
         Instance = {},
         InternalZpool = {},
         LoopbackAddress = {},
+        MulticastGroup = {},
         Mupdate = {},
         MupdateOverride = {},
         // `OmicronSledConfig`s do not themselves contain IDs, but we generate IDs
@@ -66,6 +67,7 @@ impl_typed_uuid_kinds! {
         OmicronSledConfig = {},
         OmicronZone = {},
         PhysicalDisk = {},
+        Probe = {},
         Propolis = {},
         Rack = {},
         RackInit = {},
@@ -74,6 +76,7 @@ impl_typed_uuid_kinds! {
         Region = {},
         SiloGroup = {},
         SiloUser = {},
+        Sitrep = {},
         Sled = {},
         SpUpdate = {},
         SupportBundle = {},

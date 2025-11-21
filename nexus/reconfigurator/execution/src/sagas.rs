@@ -100,6 +100,7 @@ fn find_expunged_same_generation(
 mod test {
     use super::*;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintSource;
@@ -138,8 +139,6 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &blueprint1,
-            &example.input,
-            &example.collection,
             "test suite",
             PlannerRng::from_entropy(),
         )
@@ -160,9 +159,23 @@ mod test {
         // Create the same number of Nexus zones in the next generation.
         // We'll use the same images.
         let g2 = g1.next();
+        let mut external_networking_alloc =
+            ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                example.input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator");
         for (sled_id, _zone_id, image_source) in &g1_nexus_ids {
+            let external_ip = external_networking_alloc
+                .for_new_nexus()
+                .expect("found external IP for Nexus");
             builder
-                .sled_add_zone_nexus(*sled_id, image_source.clone(), g2)
+                .sled_add_zone_nexus(
+                    *sled_id,
+                    image_source.clone(),
+                    external_ip,
+                    g2,
+                )
                 .expect("add Nexus zone");
         }
 
@@ -181,8 +194,6 @@ mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &blueprint2,
-            &example.input,
-            &example.collection,
             "test suite",
             PlannerRng::from_entropy(),
         )

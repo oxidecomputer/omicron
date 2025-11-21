@@ -21,7 +21,9 @@ use nexus_types::{
     inventory::{CabooseWhich, Collection},
 };
 use omicron_common::{api::external::Generation, disk::M2Slot};
-use omicron_uuid_kinds::{BlueprintUuid, CollectionUuid, SledUuid};
+use omicron_uuid_kinds::{
+    BlueprintUuid, CollectionUuid, ReconfiguratorSimUuid, SledUuid,
+};
 use strum::IntoEnumIterator as _;
 
 use crate::{
@@ -561,6 +563,16 @@ impl fmt::Display for ResolvedCollectionId {
     }
 }
 
+/// An identifier for a reconfigurator sim state.
+#[derive(Clone, Debug)]
+pub enum ReconfiguratorSimId {
+    /// The specified state by full UUID.
+    Id(ReconfiguratorSimUuid),
+
+    /// The specified state by UUID prefix.
+    Prefix(String),
+}
+
 /// A log entry corresponding to an individual operation on a
 /// [`SimSystemBuilder`].
 #[derive(Clone, Debug)]
@@ -607,11 +619,11 @@ impl fmt::Display for SimSystemLogEntry {
             SimSystemLogEntry::AddBlueprint(id) => {
                 write!(f, "add blueprint {}", id)
             }
-            SimSystemLogEntry::AddInternalDns(gen) => {
-                write!(f, "add internal dns {}", gen)
+            SimSystemLogEntry::AddInternalDns(generation) => {
+                write!(f, "add internal dns {}", generation)
             }
-            SimSystemLogEntry::AddExternalDns(gen) => {
-                write!(f, "add external dns {}", gen)
+            SimSystemLogEntry::AddExternalDns(generation) => {
+                write!(f, "add external dns {}", generation)
             }
             SimSystemLogEntry::Wipe => write!(f, "wipe"),
         }

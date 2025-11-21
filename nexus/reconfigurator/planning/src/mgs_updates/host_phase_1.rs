@@ -22,6 +22,7 @@ use omicron_common::api::external::TufArtifactMeta;
 use omicron_common::api::external::TufRepoDescription;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::SledUuid;
+use sled_hardware_types::OxideSled;
 use slog::Logger;
 use slog::debug;
 use slog::error;
@@ -376,12 +377,23 @@ pub(super) fn try_make_update(
         );
     };
 
+    let Some(sled_type) = OxideSled::try_from_model(&baseboard_id.part_number)
+    else {
+        return Err(FailedHostOsUpdateReason::UnableToDetermineSledModel(
+            baseboard_id.part_number.clone(),
+        ));
+    };
+
     let mut phase_1_artifacts = Vec::with_capacity(1);
     let mut phase_2_artifacts = Vec::with_capacity(1);
     for artifact in &current_artifacts.artifacts {
-        // TODO-correctness we only support gimlet at the moment, need
-        // to tell if this target is a gimlet or a comso
-        if artifact.id.kind == ArtifactKind::GIMLET_HOST_PHASE_1 {
+        if artifact.id.kind == ArtifactKind::COSMO_HOST_PHASE_1
+            && sled_type == OxideSled::Cosmo
+        {
+            phase_1_artifacts.push(artifact);
+        } else if artifact.id.kind == ArtifactKind::GIMLET_HOST_PHASE_1
+            && sled_type == OxideSled::Gimlet
+        {
             phase_1_artifacts.push(artifact);
         } else if artifact.id.kind == ArtifactKind::HOST_PHASE_2 {
             phase_2_artifacts.push(artifact);
@@ -476,7 +488,8 @@ mod tests {
     use crate::mgs_updates::ImpossibleUpdatePolicy;
     use crate::mgs_updates::MgsUpdatePlanner;
     use crate::mgs_updates::UpdateableBoard;
-    use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1;
+    use crate::mgs_updates::test_helpers::ARTIFACT_HASH_COSMO_HOST_PHASE_1;
+    use crate::mgs_updates::test_helpers::ARTIFACT_HASH_GIMLET_HOST_PHASE_1;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_1_V1_5;
     use crate::mgs_updates::test_helpers::ARTIFACT_HASH_HOST_PHASE_2;
@@ -560,7 +573,10 @@ mod tests {
         assert_eq!(first_update.baseboard_id.serial_number, "sled_0");
         assert_eq!(first_update.sp_type, SpType::Sled);
         assert_eq!(first_update.slot_id, 0);
-        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_HOST_PHASE_1);
+        assert_eq!(
+            first_update.artifact_hash,
+            ARTIFACT_HASH_GIMLET_HOST_PHASE_1
+        );
         assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
         assert_eq!(planned.pending_host_phase_2_changes.len(), 1);
         let (phase2_id, phase2_slot, phase2_contents) =
@@ -658,7 +674,10 @@ mod tests {
         assert_eq!(first_update.baseboard_id.serial_number, "sled_1");
         assert_eq!(first_update.sp_type, SpType::Sled);
         assert_eq!(first_update.slot_id, 1);
-        assert_eq!(first_update.artifact_hash, ARTIFACT_HASH_HOST_PHASE_1);
+        assert_eq!(
+            first_update.artifact_hash,
+            ARTIFACT_HASH_COSMO_HOST_PHASE_1
+        );
         assert_eq!(first_update.artifact_version, ARTIFACT_VERSION_2);
         assert_eq!(later_planned.pending_host_phase_2_changes.len(), 1);
         let (phase2_id, phase2_slot, phase2_contents) =
@@ -773,8 +792,8 @@ mod tests {
         // a new update reflecting that.
         let collection = test_boards
             .collection_builder()
-            .host_phase_1_artifacts(
-                ARTIFACT_HASH_HOST_PHASE_1,
+            .gimlet_host_phase_1_artifacts(
+                ARTIFACT_HASH_GIMLET_HOST_PHASE_1,
                 ARTIFACT_HASH_HOST_PHASE_1_V1_5,
             )
             .host_active_exception(

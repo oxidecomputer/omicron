@@ -174,7 +174,7 @@ impl LatencyTracker {
         let latency = start.elapsed();
         let status_code = match &result {
             Ok(response) => response.status_code(),
-            Err(ref e) => e.status_code().as_status(),
+            Err(e) => e.status_code().as_status(),
         };
         if let Err(e) =
             self.update(&context.endpoint.operation_id, status_code, latency)

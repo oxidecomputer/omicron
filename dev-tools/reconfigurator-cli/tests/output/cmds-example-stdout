@@ -82,7 +82,10 @@ zpools (10):
 blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
-  sled: 2eb69596-f081-4e2d-9425-9994926e0832 (active, config generation 2)
+  sled: 2eb69596-f081-4e2d-9425-9994926e0832
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   fd00:1122:3344:102::/64
 
     host phase 2 contents:
     ------------------------
@@ -196,7 +199,10 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
 
-  sled: 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (active, config generation 2)
+  sled: 32d8d836-4d8a-4e54-8fa9-f31d79c42646
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   fd00:1122:3344:103::/64
 
     host phase 2 contents:
     ------------------------
@@ -307,7 +313,10 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
 
-  sled: 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2)
+  sled: 89d02b1b-478c-401a-8e28-7a26f74fa41b
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   fd00:1122:3344:101::/64
 
     host phase 2 contents:
     ------------------------
@@ -497,7 +506,10 @@ zpools (4):
 blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
-  sled: 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2)
+  sled: 89d02b1b-478c-401a-8e28-7a26f74fa41b
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   fd00:1122:3344:101::/64
 
     host phase 2 contents:
     ------------------------
@@ -693,16 +705,16 @@ external DNS:
 from: blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
 to:   blueprint 86db3308-f817-4626-8838-4085949a6a41
 
- MODIFIED SLEDS:
+ ADDED SLEDS:
 
-  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 1 -> 2):
+  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2):
 
     host phase 2 contents:
     ------------------------
     slot   boot image source
     ------------------------
-    A      current contents 
-    B      current contents 
++   A      current contents 
++   B      current contents 
 
 
     physical disks:
@@ -913,16 +925,16 @@ external DNS:
 from: blueprint 86db3308-f817-4626-8838-4085949a6a41
 to:   blueprint 02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
- MODIFIED SLEDS:
+ REMOVED SLEDS:
 
-  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2 -> 1):
+  sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (was active, config generation 2):
 
     host phase 2 contents:
     ------------------------
     slot   boot image source
     ------------------------
-    A      current contents 
-    B      current contents 
+-   A      current contents 
+-   B      current contents 
 
 
     physical disks:
@@ -1149,7 +1161,10 @@ T ENA ID                                   PARENT                               
 blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
-  sled: 2eb69596-f081-4e2d-9425-9994926e0832 (active, config generation 2)
+  sled: 2eb69596-f081-4e2d-9425-9994926e0832
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   fd00:1122:3344:102::/64
 
     host phase 2 contents:
     ------------------------
@@ -1201,7 +1216,10 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
 
-  sled: 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (active, config generation 2)
+  sled: 32d8d836-4d8a-4e54-8fa9-f31d79c42646
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   fd00:1122:3344:103::/64
 
     host phase 2 contents:
     ------------------------
@@ -1253,7 +1271,10 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
 
-  sled: 89d02b1b-478c-401a-8e28-7a26f74fa41b (active, config generation 2)
+  sled: 89d02b1b-478c-401a-8e28-7a26f74fa41b
+    state:::::::::::::   active
+    config generation:   2
+    subnet::::::::::::   fd00:1122:3344:101::/64
 
     host phase 2 contents:
     ------------------------
@@ -1368,7 +1389,7 @@ done:       <REDACTED_TIMESTAMP>
 errors:     0
 
 Sled serial0
-    part number: model0
+    part number: 913-0000019
     power:    A2
     revision: 0
     MGS slot: Sled 0
@@ -1393,7 +1414,7 @@ Sled serial0
     RoT: slot B SHA3-256: slotBdigest1
 
 Sled serial1
-    part number: model1
+    part number: 913-0000019
     power:    A2
     revision: 0
     MGS slot: Sled 1
@@ -1418,7 +1439,7 @@ Sled serial1
     RoT: slot B SHA3-256: slotBdigest1
 
 Sled serial2
-    part number: model2
+    part number: 913-0000019
     power:    A2
     revision: 0
     MGS slot: Sled 2
@@ -2254,7 +2275,7 @@ switched to state 4d8d6725-1ae3-4f88-b9cb-a34db82d7439 (generation 13): reconfig
     add zones with mupdate override:   true
 
 
-> log -n 3
+> log
 ○  1d89a28e (generation 14)
 │  - wiped system, reconfigurator-sim config, and RNG state
 │  - reset seed to test-basic
@@ -2266,6 +2287,45 @@ switched to state 4d8d6725-1ae3-4f88-b9cb-a34db82d7439 (generation 13): reconfig
 ○  860f14d3 (generation 12)
 │  reconfigurator-cli set: planner config updated:
 │  *   add zones with mupdate override:   false -> true
+│
+○  953857be (generation 11)
+│  reconfigurator-cli set: no changes to planner config:
+│      add zones with mupdate override:   false
+│
+○  0a37e015 (generation 10)
+│  reconfigurator-cli blueprint-plan
+│
+○  4a3b153b (generation 9)
+│  reconfigurator-cli load-example
+│
+○  2f40b35e (generation 8)
+│  - wiped system, reconfigurator-sim config, and RNG state
+│  - reset seed to test-basic
+│
+○  9d1367b1 (generation 7)
+│  reconfigurator-cli blueprint-plan
+│
+○  2d296288 (generation 6)
+│  reconfigurator-cli load-example
+│
+○  bc89da4b (generation 5)
+│  - wiped system, reconfigurator-sim config, and RNG state
+│  - reset seed to test-basic
+│
+○  a887277f (generation 4)
+│  reconfigurator-cli load-example
+│
+○  c7f48fbf (generation 3)
+│  wiped system
+│
+○  ac7a3cd0 (generation 2)
+│  reconfigurator-cli inventory-generate
+│
+○  a6dcc37c (generation 1)
+│  reconfigurator-cli load-example
+│
+○  00000000 (generation 0)
+   root state
 
 
 
@@ -2275,7 +2335,7 @@ switched to state 860f14d3-e719-4fa8-a801-73164bd6463d (generation 12): reconfig
 *   add zones with mupdate override:   false -> true
 
 
-> log -n 3
+> log
 ○  1d89a28e (generation 14)
 │  - wiped system, reconfigurator-sim config, and RNG state
 │  - reset seed to test-basic
@@ -2287,6 +2347,45 @@ switched to state 860f14d3-e719-4fa8-a801-73164bd6463d (generation 12): reconfig
 @  860f14d3 (generation 12)
 │  reconfigurator-cli set: planner config updated:
 │  *   add zones with mupdate override:   false -> true
+│
+○  953857be (generation 11)
+│  reconfigurator-cli set: no changes to planner config:
+│      add zones with mupdate override:   false
+│
+○  0a37e015 (generation 10)
+│  reconfigurator-cli blueprint-plan
+│
+○  4a3b153b (generation 9)
+│  reconfigurator-cli load-example
+│
+○  2f40b35e (generation 8)
+│  - wiped system, reconfigurator-sim config, and RNG state
+│  - reset seed to test-basic
+│
+○  9d1367b1 (generation 7)
+│  reconfigurator-cli blueprint-plan
+│
+○  2d296288 (generation 6)
+│  reconfigurator-cli load-example
+│
+○  bc89da4b (generation 5)
+│  - wiped system, reconfigurator-sim config, and RNG state
+│  - reset seed to test-basic
+│
+○  a887277f (generation 4)
+│  reconfigurator-cli load-example
+│
+○  c7f48fbf (generation 3)
+│  wiped system
+│
+○  ac7a3cd0 (generation 2)
+│  reconfigurator-cli inventory-generate
+│
+○  a6dcc37c (generation 1)
+│  reconfigurator-cli load-example
+│
+○  00000000 (generation 0)
+   root state
 
 
 

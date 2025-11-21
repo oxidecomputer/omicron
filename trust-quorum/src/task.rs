@@ -7,12 +7,15 @@
 
 use crate::connection_manager::{
     ConnMgr, ConnMgrStatus, ConnToMainMsg, ConnToMainMsgInner,
+    DisconnectedPeer, ProxyConnState,
 };
 use crate::ledgers::PersistentStateLedger;
+use crate::proxy;
 use camino::Utf8PathBuf;
 use omicron_uuid_kinds::RackUuid;
 use serde::{Deserialize, Serialize};
 use slog::{Logger, debug, error, info, o, warn};
+use slog_error_chain::SlogInlineError;
 use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
@@ -32,6 +35,7 @@ use trust_quorum_protocol::{
 use bootstore::schemes::v0::NetworkConfig;
 
 /// Whether or not a configuration has committed or is still underway.
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommitStatus {
     Committed,
     Pending,
@@ -62,27 +66,28 @@ pub struct Config {
 /// LRTQ upgrade.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CoordinatorStatus {
-    config: Configuration,
-    acked_prepares: BTreeSet<BaseboardId>,
+    pub config: Configuration,
+    pub acked_prepares: BTreeSet<BaseboardId>,
 }
 
 // Details about a given node's status
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NodeStatus {
-    connected_peers: BTreeSet<BaseboardId>,
-    alarms: BTreeSet<Alarm>,
-    persistent_state: NodePersistentStateSummary,
+    pub connected_peers: BTreeSet<BaseboardId>,
+    pub alarms: BTreeSet<Alarm>,
+    pub persistent_state: NodePersistentStateSummary,
+    pub proxied_requests: u64,
 }
 
 /// A summary of a node's persistent state, leaving out things like key shares
 /// and hashes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NodePersistentStateSummary {
-    has_lrtq_share: bool,
-    configs: BTreeSet<Epoch>,
-    shares: BTreeSet<Epoch>,
-    commits: BTreeSet<Epoch>,
-    expunged: Option<ExpungedMetadata>,
+    pub has_lrtq_share: bool,
+    pub configs: BTreeSet<Epoch>,
+    pub shares: BTreeSet<Epoch>,
+    pub commits: BTreeSet<Epoch>,
+    pub expunged: Option<ExpungedMetadata>,
 }
 
 impl From<&PersistentState> for NodePersistentStateSummary {
@@ -160,10 +165,26 @@ pub enum NodeApiRequest {
 
     /// Retrieve the current network config
     NetworkConfig { responder: oneshot::Sender<Option<NetworkConfig>> },
+
+    /// Proxy a [`proxy::WireRequest`] operation to another node
+    ///
+    /// When sled-agent is not running there is no direct way to issue
+    /// operations from Nexus. This occurs when when a node has not yet joined a
+    /// trust quorum configuration, but the mechanism is also useful during RSS.
+    /// In these cases, we need to take an existing node that we have access to
+    /// and proxy requests over sprockets to the `destination` node.
+    Proxy {
+        // Where to send the `wire_request`
+        destination: BaseboardId,
+        /// The actual request proxied across nodes
+        wire_request: proxy::WireRequest,
+        /// A mechanism for responding to the caller
+        tx: oneshot::Sender<Result<proxy::WireValue, proxy::TrackerError>>,
+    },
 }
 
 /// An error response from a `NodeApiRequest`
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq, SlogInlineError)]
 pub enum NodeApiError {
     #[error("failed to send request to node task")]
     Send,
@@ -219,6 +240,12 @@ impl NodeTaskHandle {
 
     pub fn baseboard_id(&self) -> &BaseboardId {
         &self.baseboard_id
+    }
+
+    /// Return a [`proxy::Proxy`] that allows callers to proxy certain API requests
+    /// to other nodes.
+    pub fn proxy(&self) -> proxy::Proxy {
+        proxy::Proxy::new(self.tx.clone())
     }
 
     /// Initiate a trust quorum reconfiguration at this node
@@ -374,6 +401,9 @@ pub struct NodeTask {
     /// channels shared with trust quorum, but is not part of the trust quorum
     /// protocol.
     network_config: Option<NetworkConfig>,
+
+    /// A tracker for API requests proxied to other nodes
+    proxy_tracker: proxy::Tracker,
 }
 
 impl NodeTask {
@@ -435,6 +465,7 @@ impl NodeTask {
                 conn_mgr_rx,
                 rx,
                 network_config,
+                proxy_tracker: proxy::Tracker::new(),
             },
             NodeTaskHandle { baseboard_id, tx, listen_addr },
         )
@@ -452,9 +483,15 @@ impl NodeTask {
                     self.on_api_request(request).await;
                 }
                 res = self.conn_mgr.step(corpus.clone()) => {
-                    if let Err(err) = res {
-                        error!(self.log, "Failed to accept connection"; &err);
-                        continue;
+                    match res {
+                        Ok(Some(disconnected_peer)) => {
+                            self.on_disconnect(disconnected_peer);
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            error!(self.log, "Failed to accept connection"; &err);
+                            continue;
+                        }
                     }
                 }
                 Some(msg) = self.conn_mgr_rx.recv() => {
@@ -465,6 +502,14 @@ impl NodeTask {
             for envelope in self.ctx.drain_envelopes() {
                 self.conn_mgr.send(envelope).await;
             }
+        }
+    }
+
+    /// A task managing an established connenction to a peer has just exited
+    fn on_disconnect(&mut self, disconnected_peer: DisconnectedPeer) {
+        self.proxy_tracker.on_disconnect(disconnected_peer.task_id);
+        if let Some(peer_id) = disconnected_peer.peer_id {
+            self.node.on_disconnect(&mut self.ctx, peer_id);
         }
     }
 
@@ -489,10 +534,6 @@ impl NodeTask {
                     .await;
                 self.send_network_config(&peer_id).await;
                 self.node.on_connect(&mut self.ctx, peer_id);
-            }
-            ConnToMainMsgInner::Disconnected { peer_id } => {
-                self.conn_mgr.on_disconnected(task_id, peer_id.clone()).await;
-                self.node.on_disconnect(&mut self.ctx, peer_id);
             }
             ConnToMainMsgInner::Received { from, msg } => {
                 self.node.handle(&mut self.ctx, from, msg);
@@ -522,8 +563,55 @@ impl NodeTask {
                     self.broadcast_network_config(Some(&from)).await;
                 }
             }
+            ConnToMainMsgInner::ProxyRequestReceived { from, req } => {
+                info!(
+                    self.log,
+                    "Received proxy request : {req:#?}";
+                    "peer_id" => %from
+                );
+                self.handle_proxy_request(from, req).await;
+            }
+            ConnToMainMsgInner::ProxyResponseReceived { from, rsp } => {
+                info!(
+                    self.log,
+                    "Received proxy response: {rsp:#?}";
+                    "peer_id" => %from
+                );
+                let proxy::WireResponse { request_id, result } = rsp;
+                self.proxy_tracker.on_response(request_id, result);
+            }
         }
         self.save_persistent_state().await;
+    }
+
+    // Handle these requests exactly like we handle `NodeApiRequests` but then
+    // respond to the proxy node over the network rather than oneshot channel
+    // used by the API.
+    async fn handle_proxy_request(
+        &mut self,
+        from: BaseboardId,
+        req: proxy::WireRequest,
+    ) {
+        let proxy::WireRequest { request_id, op } = req;
+        match op {
+            proxy::WireOp::Commit { rack_id, epoch } => {
+                let res = self.commit(rack_id, epoch).await;
+                let result = res.map(Into::into).map_err(Into::into);
+                let rsp = proxy::WireResponse { request_id, result };
+                self.conn_mgr.proxy_response(&from, rsp).await;
+            }
+            proxy::WireOp::PrepareAndCommit { config } => {
+                let res = self.prepare_and_commit(config).await;
+                let result = res.map(Into::into).map_err(Into::into);
+                let rsp = proxy::WireResponse { request_id, result };
+                self.conn_mgr.proxy_response(&from, rsp).await;
+            }
+            proxy::WireOp::Status => {
+                let result = Ok(self.status().into());
+                let rsp = proxy::WireResponse { request_id, result };
+                self.conn_mgr.proxy_response(&from, rsp).await;
+            }
+        }
     }
 
     // Handle API requests from sled-agent
@@ -541,26 +629,16 @@ impl NodeTask {
                     .conn_mgr
                     .update_bootstrap_connections(addrs, corpus)
                     .await;
-                for peer_id in disconnected {
-                    self.node.on_disconnect(&mut self.ctx, peer_id);
+                for handle in disconnected {
+                    self.proxy_tracker.on_disconnect(handle.task_id());
+                    self.node.on_disconnect(&mut self.ctx, handle.baseboard_id);
                 }
             }
             NodeApiRequest::ClearSecrets => {
                 self.node.clear_secrets();
             }
             NodeApiRequest::Commit { rack_id, epoch, tx } => {
-                let res = self
-                    .node
-                    .commit_configuration(&mut self.ctx, rack_id, epoch)
-                    .map(|_| {
-                        if self.ctx.persistent_state().commits.contains(&epoch)
-                        {
-                            CommitStatus::Committed
-                        } else {
-                            CommitStatus::Pending
-                        }
-                    });
-                self.save_persistent_state().await;
+                let res = self.commit(rack_id, epoch).await;
                 let _ = tx.send(res);
             }
             NodeApiRequest::ConnMgrStatus { tx } => {
@@ -587,26 +665,10 @@ impl NodeTask {
                 let _ = tx.send(res);
             }
             NodeApiRequest::NodeStatus { tx } => {
-                let _ = tx.send(NodeStatus {
-                    connected_peers: self.ctx.connected().clone(),
-                    alarms: self.ctx.alarms().clone(),
-                    persistent_state: self.ctx.persistent_state().into(),
-                });
+                let _ = tx.send(self.status());
             }
             NodeApiRequest::PrepareAndCommit { config, tx } => {
-                let epoch = config.epoch;
-                let res = self
-                    .node
-                    .prepare_and_commit(&mut self.ctx, config)
-                    .map(|_| {
-                        if self.ctx.persistent_state().commits.contains(&epoch)
-                        {
-                            CommitStatus::Committed
-                        } else {
-                            CommitStatus::Pending
-                        }
-                    });
-                self.save_persistent_state().await;
+                let res = self.prepare_and_commit(config).await;
                 let _ = tx.send(res);
             }
             NodeApiRequest::Reconfigure { msg, tx } => {
@@ -626,7 +688,77 @@ impl NodeTask {
             NodeApiRequest::NetworkConfig { responder } => {
                 let _ = responder.send(self.network_config.clone());
             }
+            NodeApiRequest::Proxy { destination, wire_request, tx } => {
+                let request_id = wire_request.request_id;
+                match self
+                    .conn_mgr
+                    .proxy_request(&destination, wire_request)
+                    .await
+                {
+                    ProxyConnState::Connected(task_id) => {
+                        // Track the request. If the connection is disconnected
+                        // before the response is received, then the caller will
+                        // get notified about this.
+                        let req = proxy::TrackableRequest::new(
+                            task_id, request_id, tx,
+                        );
+                        self.proxy_tracker.insert(req);
+                    }
+                    ProxyConnState::Disconnected => {
+                        // Return the fact that the message was not sent immediately
+                        let _ = tx.send(Err(proxy::TrackerError::Disconnected));
+                    }
+                }
+            }
         }
+    }
+
+    /// Return the status of this [`NodeTask`]
+    fn status(&self) -> NodeStatus {
+        NodeStatus {
+            connected_peers: self.ctx.connected().clone(),
+            alarms: self.ctx.alarms().clone(),
+            persistent_state: self.ctx.persistent_state().into(),
+            proxied_requests: self.proxy_tracker.len() as u64,
+        }
+    }
+
+    /// Commit a configuration synchronously if possible
+    async fn commit(
+        &mut self,
+        rack_id: RackUuid,
+        epoch: Epoch,
+    ) -> Result<CommitStatus, CommitError> {
+        let res = self
+            .node
+            .commit_configuration(&mut self.ctx, rack_id, epoch)
+            .map(|_| {
+                if self.ctx.persistent_state().commits.contains(&epoch) {
+                    CommitStatus::Committed
+                } else {
+                    CommitStatus::Pending
+                }
+            });
+        self.save_persistent_state().await;
+        res
+    }
+
+    /// PrepareAndCommit a configuration synchronously if possible
+    async fn prepare_and_commit(
+        &mut self,
+        config: Configuration,
+    ) -> Result<CommitStatus, PrepareAndCommitError> {
+        let epoch = config.epoch;
+        let res =
+            self.node.prepare_and_commit(&mut self.ctx, config).map(|_| {
+                if self.ctx.persistent_state().commits.contains(&epoch) {
+                    CommitStatus::Committed
+                } else {
+                    CommitStatus::Pending
+                }
+            });
+        self.save_persistent_state().await;
+        res
     }
 
     /// Save `PersistentState` to storage if necessary
@@ -747,6 +879,8 @@ mod tests {
     use crate::connection_manager::{
         ConnState, RECONNECT_TIME, platform_id_to_baseboard_id,
     };
+    use crate::proxy::ProxyError;
+    use assert_matches::assert_matches;
     use camino::Utf8PathBuf;
     use dropshot::test_util::{LogContext, log_prefix_for_test};
     use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -1031,8 +1165,12 @@ mod tests {
                 .unwrap();
         }
 
-        let poll_interval = Duration::from_millis(1);
+        let logctx = &setup.logctx;
+
+        let poll_interval = Duration::from_millis(10);
         let poll_max = Duration::from_secs(10);
+
+        debug!(logctx.log, "BEFORE initial connection");
 
         // Wait for all nodes have `num_nodes - 1` established connections
         wait_for_condition(
@@ -1062,9 +1200,6 @@ mod tests {
         .await
         .unwrap();
 
-        // Pause time so we can jump it for reconnects
-        tokio::time::pause();
-
         // Killing a single node should cause all other nodes to start
         // reconnecting. This should cause the task id counter to start
         // incrementing at all nodes and for their to be one fewer established
@@ -1073,9 +1208,6 @@ mod tests {
         h.shutdown().await.unwrap();
         setup.join_handles.pop().unwrap();
         let stopped_addr = h.listen_addr;
-
-        // Speed up reconnection in the test
-        tokio::time::advance(RECONNECT_TIME).await;
 
         let poll_interval = Duration::from_millis(50);
         wait_for_condition(
@@ -1107,6 +1239,10 @@ mod tests {
                 if valid == num_nodes - 1 {
                     Ok(())
                 } else {
+                    // Speed up reconnection in the test
+                    tokio::time::pause();
+                    tokio::time::advance(RECONNECT_TIME).await;
+                    tokio::time::resume();
                     Err(CondCheckError::<()>::NotYet)
                 }
             },
@@ -1115,6 +1251,8 @@ mod tests {
         )
         .await
         .unwrap();
+
+        debug!(logctx.log, "AFTER poll for conns with node down");
 
         // Now let's bring back up the old node and ensure full connectivity again
         let (mut task, handle) = NodeTask::new(
@@ -1133,12 +1271,15 @@ mod tests {
             h.load_peer_addresses(listen_addrs.clone()).await.unwrap();
         }
 
+        debug!(logctx.log, "BEFORE last poll for conns with all nodes up");
+
         // Wait for all nodes have `num_nodes - 1` established connections
         wait_for_condition(
             async || {
                 let mut count = 0;
                 for h in &setup.node_handles {
                     let status = h.conn_mgr_status().await.unwrap();
+                    debug!(logctx.log, "{status:#?}");
                     if status
                         .connections
                         .iter()
@@ -1151,6 +1292,10 @@ mod tests {
                 if count == num_nodes {
                     Ok(())
                 } else {
+                    // Speed up reconnection in the test
+                    tokio::time::pause();
+                    tokio::time::advance(RECONNECT_TIME).await;
+                    tokio::time::resume();
                     Err(CondCheckError::<()>::NotYet)
                 }
             },
@@ -1160,12 +1305,14 @@ mod tests {
         .await
         .unwrap();
 
+        debug!(logctx.log, "BEFORE CLEANUP");
+
         setup.cleanup_successful();
     }
 
     /// Commit an initial configuration at all nodes
     #[tokio::test]
-    pub async fn tq_initial_config() {
+    async fn tq_initial_config() {
         let num_nodes = 4;
         let setup =
             TestSetup::spawn_nodes("tq_initial_config", num_nodes).await;
@@ -1214,31 +1361,17 @@ mod tests {
         .unwrap();
 
         // Commit at each node
-        //
-        // Nexus retries this idempotent command until each node acks. So we
-        // simulate that here.
-        wait_for_condition(
-            async || {
-                let mut acked = 0;
-                for h in &setup.node_handles {
-                    if matches!(
-                        h.commit(rack_id, Epoch(1)).await.unwrap(),
-                        CommitStatus::Committed
-                    ) {
-                        acked += 1;
-                    }
-                }
-                if acked == num_nodes {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet)
-                }
-            },
-            &poll_interval,
-            &poll_max,
-        )
-        .await
-        .unwrap();
+        // This should be immediate, since all nodes have acked prepares.
+        let mut acked = 0;
+        for h in &setup.node_handles {
+            if matches!(
+                h.commit(rack_id, Epoch(1)).await.unwrap(),
+                CommitStatus::Committed
+            ) {
+                acked += 1;
+            }
+        }
+        assert_eq!(acked, num_nodes);
 
         // Now load the rack secret at all nodes
         setup
@@ -1258,7 +1391,7 @@ mod tests {
     /// at the first 3 nodes. Then we go and issue a `PrepareAndCommit` to the last
     /// node and ensure it commits.
     #[tokio::test]
-    pub async fn tq_initial_config_prepare_and_commit() {
+    async fn tq_initial_config_prepare_and_commit() {
         let num_nodes = 4;
         let setup = TestSetup::spawn_nodes(
             "tq_initial_config_prepare_and_commit",
@@ -1322,31 +1455,17 @@ mod tests {
             coordinator.coordinator_status().await.unwrap().unwrap().config;
 
         // Commit at each node
-        //
-        // Nexus retries this idempotent command until each node acks. So we
-        // simulate that here.
-        wait_for_condition(
-            async || {
-                let mut acked = 0;
-                for h in &setup.node_handles[0..num_nodes - 1] {
-                    if matches!(
-                        h.commit(rack_id, Epoch(1)).await.unwrap(),
-                        CommitStatus::Committed,
-                    ) {
-                        acked += 1;
-                    }
-                }
-                if acked == num_nodes - 1 {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet)
-                }
-            },
-            &poll_interval,
-            &poll_max,
-        )
-        .await
-        .unwrap();
+        // This should be immediate, since all nodes have acked prepares.
+        let mut acked = 0;
+        for h in &setup.node_handles[0..num_nodes - 1] {
+            if matches!(
+                h.commit(rack_id, Epoch(1)).await.unwrap(),
+                CommitStatus::Committed
+            ) {
+                acked += 1;
+            }
+        }
+        assert_eq!(acked, num_nodes - 1);
 
         // Now ensure that the last node still hasn't prepared or committed for
         // epoch 1, and isn't connected to any other node.
@@ -1407,7 +1526,7 @@ mod tests {
     /// the configuration for the prior epoch. This should result in commit
     /// advancing to the latest epoch.
     #[tokio::test]
-    pub async fn tq_reconfig_with_commit_advance() {
+    async fn tq_reconfig_with_commit_advance() {
         let num_nodes = 4;
         let setup = TestSetup::spawn_nodes(
             "tq_recofnig_with_commit_advance",
@@ -1459,31 +1578,17 @@ mod tests {
         .unwrap();
 
         // Commit at each node
-        //
-        // Nexus retries this idempotent command until each node acks. So we
-        // simulate that here.
-        wait_for_condition(
-            async || {
-                let mut acked = 0;
-                for h in &setup.node_handles {
-                    if matches!(
-                        h.commit(rack_id, Epoch(1)).await.unwrap(),
-                        CommitStatus::Committed
-                    ) {
-                        acked += 1;
-                    }
-                }
-                if acked == num_nodes {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::<()>::NotYet)
-                }
-            },
-            &poll_interval,
-            &poll_max,
-        )
-        .await
-        .unwrap();
+        // This should be immediate, since all nodes have acked prepares.
+        let mut acked = 0;
+        for h in &setup.node_handles {
+            if matches!(
+                h.commit(rack_id, Epoch(1)).await.unwrap(),
+                CommitStatus::Committed
+            ) {
+                acked += 1;
+            }
+        }
+        assert_eq!(acked, num_nodes);
 
         // Now load the rack secret at all nodes
         setup
@@ -1639,7 +1744,7 @@ mod tests {
     }
 
     #[tokio::test]
-    pub async fn tq_upgrade_from_lrtq() {
+    async fn tq_upgrade_from_lrtq() {
         let num_nodes = 4;
         let (setup, rack_id) = TestSetup::spawn_nodes_with_lrtq_shares(
             "tq_upgrade_from_lrtq",
@@ -1726,7 +1831,7 @@ mod tests {
 
     /// Ensure state is persisted as we expect
     #[tokio::test]
-    pub async fn tq_persistent_state() {
+    async fn tq_persistent_state() {
         let num_nodes = 4;
         let mut setup =
             TestSetup::spawn_nodes("tq_initial_config", num_nodes).await;
@@ -2006,6 +2111,166 @@ mod tests {
                 .await,
             expected
         );
+
+        setup.cleanup_successful();
+    }
+
+    /// Proxy API requests to other nodes
+    #[tokio::test]
+    async fn tq_proxy() {
+        let num_nodes = 4;
+        let mut setup = TestSetup::spawn_nodes("tq_proxy", num_nodes).await;
+        let rack_id = RackUuid::new_v4();
+
+        // Trigger an initial configuration by using the first node as a
+        // coordinator. We're pretending to be the sled-agent with instruction from
+        // Nexus here.
+        let initial_config = ReconfigureMsg {
+            rack_id,
+            epoch: Epoch(1),
+            last_committed_epoch: None,
+            members: setup.members().cloned().collect(),
+            threshold: trust_quorum_protocol::Threshold(3),
+        };
+
+        // Tell nodes how to reach each other
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+
+        let coordinator = setup.node_handles.first().unwrap();
+        coordinator.reconfigure(initial_config).await.unwrap();
+
+        let poll_interval = Duration::from_millis(10);
+        let poll_max = Duration::from_secs(10);
+
+        // Wait for the coordinator to see `PrepareAck`s from all nodes
+        wait_for_condition(
+            async || {
+                let Ok(Some(s)) = coordinator.coordinator_status().await else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                if s.acked_prepares.len() == num_nodes {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
+
+        // Save the configuration as if we were nexus
+        let config =
+            coordinator.coordinator_status().await.unwrap().unwrap().config;
+
+        // Commit at each node except the last one
+        // Commit should be immediate since all nodes have acked prepares
+        let mut acked = 0;
+        for h in &setup.node_handles[0..num_nodes - 1] {
+            if matches!(
+                h.commit(rack_id, Epoch(1)).await.unwrap(),
+                CommitStatus::Committed
+            ) {
+                acked += 1;
+            }
+        }
+        assert_eq!(acked, num_nodes - 1);
+
+        // Proxy a commit through the first node to the last node
+        // It should commit immediately since it has prepared already.
+        let proxy = &setup.node_handles[0].proxy();
+        let destination = setup.members().last().unwrap().clone();
+        let status = proxy
+            .commit(destination.clone(), rack_id, Epoch(1))
+            .await
+            .expect("successful proxy op");
+        assert_eq!(status, CommitStatus::Committed);
+
+        // Commit should be idempotent
+        let status = proxy
+            .commit(destination.clone(), rack_id, Epoch(1))
+            .await
+            .expect("successful proxy op");
+        assert_eq!(status, CommitStatus::Committed);
+
+        // PrepareAndCommit should also be idempotent since the configuration is
+        // already committed
+        let status = proxy
+            .prepare_and_commit(destination.clone(), config.clone())
+            .await
+            .expect("successful proxy op");
+        assert_eq!(status, CommitStatus::Committed);
+
+        // Try to commit a configuration that doesn't exist
+        let err = proxy
+            .commit(destination.clone(), rack_id, Epoch(2))
+            .await
+            .expect_err("expected to fail proxy commit");
+        assert_eq!(
+            err,
+            ProxyError::<CommitError>::Inner(CommitError::NotPrepared(Epoch(
+                2
+            )))
+        );
+
+        // PrepareAndCommit should return pending, because it has to compute
+        // it's own keyshare for the new config, which will eventually fail.
+        //
+        // Nexus will never actually send a `PrepareAndCommit` when there hasn't
+        // been a commit. This is just here to check the behavior of the proxy
+        // code.
+        let mut config2 = config.clone();
+        config2.epoch = Epoch(2);
+        let status = proxy
+            .prepare_and_commit(destination.clone(), config2)
+            .await
+            .expect("successful proxy op");
+        assert_eq!(status, CommitStatus::Pending);
+
+        // Let's get the status for a remote node
+        let status = proxy
+            .status(destination.clone())
+            .await
+            .expect("successful status request");
+        assert_matches!(status, NodeStatus { .. });
+
+        // Let's stop the last node and ensure we get an error
+        setup.simulate_crash_of_last_node().await;
+        let err = proxy
+            .status(destination.clone())
+            .await
+            .expect_err("status request failed");
+        assert_eq!(err, ProxyError::Disconnected);
+
+        setup.simulate_restart_of_last_node().await;
+
+        // Inform all nodes about the last node. Restarting changes the network
+        // address because we use ephemeral ports.
+        for h in &setup.node_handles {
+            h.load_peer_addresses(setup.listen_addrs.iter().cloned().collect())
+                .await
+                .unwrap();
+        }
+        // Now load the rack secret at all nodes
+        setup
+            .wait_for_rack_secrets_and_assert_equality(
+                (0..num_nodes).collect(),
+                Epoch(1),
+            )
+            .await
+            .unwrap();
+
+        // Now ensure we can get the status for the last node again.
+        let status = proxy
+            .status(destination.clone())
+            .await
+            .expect("successful status request");
+        assert_matches!(status, NodeStatus { .. });
 
         setup.cleanup_successful();
     }
