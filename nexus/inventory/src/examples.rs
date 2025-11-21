@@ -981,5 +981,7 @@ pub fn sled_agent(
         reconciler_status,
         last_reconciliation,
         zone_image_resolver,
+        // TODO-K: Put something more credible here
+        smf_services_in_maintenance: "".to_string(),
     }
 }

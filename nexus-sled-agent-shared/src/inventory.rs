@@ -128,6 +128,9 @@ pub struct Inventory {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
+    // TODO-K: Possibly a Vec<String>, or create an FMRI type or something?
+    // I think we may also want a timestamp?
+    pub smf_services_in_maintenance: String,
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to

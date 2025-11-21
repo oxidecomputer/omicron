@@ -788,6 +788,9 @@ impl SledAgent {
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
         };
 
+        // TODO-K: actually put the services in maintenance here
+        let smf_services_in_maintenance = "".to_string();
+
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -860,6 +863,7 @@ impl SledAgent {
             ),
             // TODO: simulate the zone image resolver with greater fidelity
             zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+            smf_services_in_maintenance,
         })
     }
 

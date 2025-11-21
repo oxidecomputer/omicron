@@ -4083,6 +4083,8 @@ impl DataStore {
             cockroach_status,
             ntp_timesync,
             internal_dns_generation_status,
+            // TODO-K: Actually query the DB once the DB has this information
+            smf_services_status: IdOrdMap::new(),
         })
     }
 

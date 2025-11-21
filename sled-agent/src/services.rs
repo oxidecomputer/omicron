@@ -580,6 +580,8 @@ pub struct ServiceManagerInner {
     switch_zone_bootstrap_address: Ipv6Addr,
     zone_image_resolver: ZoneImageSourceResolver,
     system_api: Box<dyn SystemApi>,
+    // TODO-K: Should the services in maintenance live here?
+    // probably not...
 }
 
 // Late-binding information, only known once the sled agent is up and

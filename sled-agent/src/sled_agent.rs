@@ -1119,6 +1119,16 @@ impl SledAgent {
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
+        // TODO-K: have sled agent collect svcs -Zxv periodically and stuff it
+        // into its existing inventory response.
+        //
+        // Do something like this
+        // let etherstub = Dladm::ensure_etherstub(
+        //  illumos_utils::dladm::UNDERLAY_ETHERSTUB_NAME,
+        // )
+        // .await
+        // .map_err(|e| Error::Etherstub(e))?;
+        let smf_services_in_maintenance = "".to_string();
 
         let ReconcilerInventory {
             disks,
@@ -1145,6 +1155,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
+            smf_services_in_maintenance,
         })
     }
 

@@ -181,6 +181,9 @@ pub struct Collection {
     pub ntp_timesync: IdOrdMap<TimeSync>,
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
+    
+    /// The status of SMF services
+    pub smf_services_status: IdOrdMap<SmfServicesStatus>,
 }
 
 impl Collection {
@@ -754,6 +757,26 @@ impl IdOrdItem for InternalDnsGenerationStatus {
     type Key<'a> = OmicronZoneUuid;
     fn key(&self) -> Self::Key<'_> {
         self.zone_id
+    }
+    id_upcast!();
+}
+
+#[derive(
+    Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq,
+)]
+pub struct SmfServicesStatus {
+    /// When this status check was taken
+    pub time_collected: DateTime<Utc>,
+    /// UUID of the sled
+    pub sled_id: SledUuid,
+    /// FMRIs of the services in maintenance if any
+    pub services_in_maintenance: Vec<String>,
+}
+
+impl IdOrdItem for SmfServicesStatus {
+    type Key<'a> = SledUuid;
+    fn key(&self) -> Self::Key<'_> {
+        self.sled_id
     }
     id_upcast!();
 }

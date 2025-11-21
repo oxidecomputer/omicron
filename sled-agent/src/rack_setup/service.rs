@@ -1812,6 +1812,8 @@ mod test {
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                // TODO-K: Put something more credible here
+                smf_services_in_maintenance: "".to_string(),
             },
             true,
         )
