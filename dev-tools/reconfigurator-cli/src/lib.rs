@@ -2121,12 +2121,12 @@ fn cmd_blueprint_list(
     let mut rows = state.system().all_blueprints().collect::<Vec<_>>();
     rows.sort_unstable_by_key(|blueprint| blueprint.time_created);
     let rows = rows.into_iter().map(|blueprint| {
-        let (is_target, enabled) = match target_blueprint {
-            Some(t) if t.target_id == blueprint.id => {
-                let enabled = if t.enabled { "yes" } else { "no" };
-                ("*", enabled)
-            }
-            _ => ("", ""),
+        let (is_target, enabled) = if target_blueprint.target_id == blueprint.id
+        {
+            let enabled = if target_blueprint.enabled { "yes" } else { "no" };
+            ("*", enabled)
+        } else {
+            ("", "")
         };
         BlueprintRow {
             is_target,
