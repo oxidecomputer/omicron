@@ -8206,6 +8206,8 @@ dependencies = [
  "cargo_metadata 0.21.0",
  "clap",
  "expectorate",
+ "iddqd",
+ "indent_write",
  "newtype_derive",
  "omicron-test-utils",
  "omicron-workspace-hack",
