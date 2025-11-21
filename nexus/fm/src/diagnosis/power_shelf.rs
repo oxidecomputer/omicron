@@ -34,7 +34,7 @@ struct PscCase {
 type PsuSet = [bool; N_PSUS];
 const N_PSUS: usize = 6;
 
-const KNOWN_EREPORT_CLASSES: &[&str] = &[
+const PSU_EREPORT_CLASSES: &[&str] = &[
     "hw.remove.psu",
     "hw.insert.psu",
     "hw.pwr.pwr_good.good",
@@ -47,6 +47,16 @@ impl PowerShelfDiagnosis {
             log: log.new(slog::o!("de" => "power_shelf")),
             cases_by_shelf: [HashMap::new(), HashMap::new()],
         }
+    }
+
+    fn cases_for_shelf_and_psu(
+        &self,
+        shelf: u16,
+        psu: usize,
+    ) -> impl Iterator<Item = (&CaseUuid, &PscCase)> {
+        self.cases_by_shelf[shelf as usize]
+            .iter()
+            .filter(move |(_, case)| case.psus_impacted[psu])
     }
 }
 
@@ -104,7 +114,7 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
             let class = match &ereport.class {
                 // This is one we care about
                 Some(ref class)
-                    if KNOWN_EREPORT_CLASSES.contains(&class.as_ref()) =>
+                    if PSU_EREPORT_CLASSES.contains(&class.as_ref()) =>
                 {
                     slog::debug!(
                         self.log,
@@ -151,31 +161,17 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
                 self.cases_by_shelf[shelf as usize].entry(case.id).or_default();
 
             // Does the ereport include a PSU slot?
-            if let Some(slot) = ereport.report["slot"].as_u64() {
-                let slot = slot as usize;
-                if slot >= N_PSUS {
-                    slog::warn!(
-                        &self.log,
-                        "this is weird: I only know about power shelves with \
-                         {N_PSUS} PSU SLOTS, but this ereport claims to \
-                         involve slot {slot}";
-                        "case_id" => %case.id,
-                        "ereport_id" => %ereport.id,
-                        "ereport_class" => %class,
-                        "slot" => slot,
-                    )
-                } else {
-                    slog::debug!(
-                        &self.log,
-                        "found an ereport associated with PSU slot {slot}";
-                        "case_id" => %case.id,
-                        "ereport_id" => %ereport.id,
-                        "ereport_class" => %class,
-                        "shelf" => shelf,
-                        "slot" => slot,
-                    );
-                    tracked_case.psus_impacted[slot] = true;
-                }
+            if let Some(slot) = ereport_psu_slot(&ereport, &self.log) {
+                slog::debug!(
+                    &self.log,
+                    "found an ereport associated with PSU slot {slot}";
+                    "case_id" => %case.id,
+                    "ereport_id" => %ereport.id,
+                    "ereport_class" => %class,
+                    "shelf" => shelf,
+                    "slot" => slot,
+                );
+                tracked_case.psus_impacted[slot] = true;
             }
         }
 
@@ -191,7 +187,7 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
         let ereport::Reporter::Sp { sp_type: SpType::Power, slot } =
             ereport.reporter
         else {
-            slog::debug!(
+            slog::trace!(
                 self.log,
                 "skipping ereport that was not reported by a power shelf";
                 "ereport_id" => %ereport.id,
@@ -199,91 +195,139 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
             );
             return Ok(());
         };
+        let shelf = slot;
 
-        match ereport.data.class.as_deref() {
-            // PSU inserted
-            Some("hw.insert.psu") => {
-                // TODO: Check for existing cases tracked for this power shelf
-                // and see if the ereport is related to them.
-
-                let psc_psu = extract_psc_psu(&ereport, slot, &sitrep.log);
-                let mut case =
-                    sitrep.cases.open_case(DiagnosisEngineKind::PowerShelf)?;
-                case.add_ereport(ereport, "PSU inserted ereport");
-                case.comment =
-                    format!("PSC {slot} PSU {:?} inserted", psc_psu.psu_slot);
-                case.request_alert(&alert::power_shelf::PsuInserted::V0 {
-                    psc_psu,
-                })?;
-                case.impacts_location(
-                    &mut sitrep.impact_lists,
-                    SpType::Power,
-                    slot,
-                    "this is the PSC on the power shelf where the PSU was inserted",
-                )?;
-                // Nothing else to do at this time.
-                case.close();
-            }
-            Some("hw.remove.psu") => {
-                // TODO: Check for existing cases tracked for this power shelf
-                // and see if the ereport is related to them.
-
-                let psc_psu = extract_psc_psu(&ereport, slot, &sitrep.log);
-                let mut case =
-                    sitrep.cases.open_case(DiagnosisEngineKind::PowerShelf)?;
-                case.add_ereport(ereport, "PSU removed ereport");
-                case.impacts_location(
-                    &mut sitrep.impact_lists,
-                    SpType::Power,
-                    slot,
-                    "this is the PSC on the power shelf where the PSU was inserted",
-                )?;
-                case.comment =
-                    format!("PSC {slot} PSU {:?} removed", psc_psu.psu_slot);
-                case.request_alert(&alert::power_shelf::PsuRemoved::V0 {
-                    psc_psu,
-                })?;
-
-                // Nothing else to do at this time.
-                case.close();
-            }
-            Some(unknown) => {
+        let Some(class) = ereport.data.class.as_deref() else {
+            slog::warn!(
+                &self.log,
+                "ignoring PSC ereport with no class";
+                "ereport" => %ereport.id,
+                "shelf" =>  shelf,
+            );
+            return Ok(());
+        };
+        let comment = match class {
+            "hw.remove.psu" => "removed",
+            "hw.insert.psu" => "inserted",
+            "hw.pwr.pwr_good.good" => "asserted PWR_GOOD",
+            "hw.pwr.pwr_good.bad" => "deasserted PWR_GOOD",
+            unknown => {
                 slog::warn!(
-                    &sitrep.log,
+                    &self.log,
                     "ignoring unhandled PSC ereport class";
                     "ereport_class" => %unknown,
                     "ereport" => %ereport.id,
+                    "shelf" => shelf,
                 );
+                return Ok(());
             }
-            None => {
-                slog::warn!(
-                    &sitrep.log,
-                    "ignoring PSC ereport with no class";
-                    "ereport" => %ereport.id,
-                );
-            }
+        };
+
+        // PSU-specific ereports: inserted, removed, faulted, or un-faulted
+        let Some(psu_slot) = ereport_psu_slot(&ereport, &self.log) else {
+            const MSG: &str =
+                "ereports for PSU events should include a PSU slot";
+            slog::warn!(
+                self.log,
+                "{MSG}; {} has class {class} but did not include one",
+                    ereport.id;
+                "ereport_id" => %ereport.id,
+                "ereport_class" => ?ereport.class,
+                "shelf" => shelf,
+            );
+            anyhow::bail!(
+                "{MSG}; {} has class {class} but did not include one",
+                ereport.id
+            );
+        };
+
+        let mut tracked = false;
+        for (case_id, _case) in self.cases_for_shelf_and_psu(shelf, psu_slot) {
+            tracked = true;
+            let mut case = sitrep.cases.case_mut(case_id).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "we have tracked case {case_id} but it no longer exists \
+                     in the sitrep builder (this is a bug)",
+                )
+            })?;
+            case.add_ereport(ereport, format!("PSU {psu_slot} {comment}"));
+        }
+
+        // we did not find existing case(s) involving this PSU; open a new one.
+        //
+        // TODO(eliza): this logic will need to change eventually as we get
+        // smarter about analyzing faults effecting multiple PSUs in a shelf.
+        if !tracked {
+            let mut case =
+                sitrep.cases.open_case(DiagnosisEngineKind::PowerShelf)?;
+            case.add_ereport(ereport, format!("PSU {psu_slot} {comment}"));
+            case.comment = format!(
+                "opened when power shelf {shelf} PSU {psu_slot} {comment}"
+            );
+            case.impacts_location(
+                &mut sitrep.impact_lists,
+                SpType::Power,
+                shelf,
+                "this is the power shelf where the PSU event occurred",
+            )?;
+            self.cases_by_shelf[shelf as usize].insert(case.id, {
+                let mut case = PscCase { psus_impacted: [false; N_PSUS] };
+                case.psus_impacted[psu_slot] = true;
+                case
+            });
         }
 
         Ok(())
     }
 
-    fn finish(
-        &mut self,
-        _sitrep: &mut SitrepBuilder<'_>,
-    ) -> anyhow::Result<()> {
-        // TODO:
-        //
-        // - scan all of our tracked cases (newly opened and inherited from
-        //   the parent sitrep)
-        // - debouncing
-        // - determine whether undiagnosed cases can now be diagnosed
-        // - determine whether those cases have been resolved (looking at
-        //   any newly-added ereports, and inventory data/health endpoint
-        //   observations)
-        // - determine what Active Problems should be requested, updated,
-        //   and closed
-        // - determine what alerts should be requested
+    fn finish(&mut self, sitrep: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
+        let tracked_cases = self.cases_by_shelf.iter().enumerate().flat_map(
+            |(shelf, cases)| cases.iter().map(move |(k, v)| (shelf, k, v)),
+        );
+        for (shelf, case_id, slots) in tracked_cases {
+            let case = sitrep.cases.case_mut(case_id).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "we are tracking case {case_id} but it no longer exists \
+                     in the sitrep builder (this is a bug)"
+                )
+            })?;
+            slog::debug!(
+                &self.log,
+                "analyzing tracked case...";
+                "case_id" => %case_id,
+                "shelf" => shelf,
+            );
+            // TODO:
+            //
+            // - debouncing
+            // - determine whether undiagnosed cases can now be diagnosed
+            // - determine whether those cases have been resolved (looking at
+            //   any newly-added ereports, and inventory data/health endpoint
+            //   observations)
+            // - determine what Active Problems should be requested, updated,
+            //   and closed
+            // - determine what alerts should be requested
+        }
         Ok(())
+    }
+}
+
+fn ereport_psu_slot(ereport: &Ereport, log: &slog::Logger) -> Option<usize> {
+    let slot =
+        grab_json_value::<usize>(&ereport, "slot", &ereport.report, log)?;
+    if slot >= N_PSUS {
+        slog::warn!(
+            &log,
+            "this is weird: I only know about power shelves with \
+             {N_PSUS} PSU SLOTS, but this ereport claims to \
+             involve slot {slot}";
+            "ereport_id" => %ereport.id,
+            "ereport_class" => ?ereport.class,
+            "slot" => slot,
+        );
+        None
+    } else {
+        Some(slot)
     }
 }
 
