@@ -595,10 +595,15 @@ impl DataStore {
                 if local_storage_dataset_allocation.is_some() {
                     // This allocation is currently only performed during
                     // instance allocation, return an error here.
-                    return Err(err.bail(Error::internal_error(&format!(
-                        "local storage disk {} has an allocation!",
-                        disk.id(),
-                    ))));
+                    return Err(err.bail(Error::InternalError {
+                        internal_message: format!(
+                            "local storage dataset allocation is only \
+                            performed during instance allocation, but {} is \
+                            being created with an allocation when it should \
+                            be None",
+                            disk.id()
+                        ),
+                    }));
                 }
 
                 use nexus_db_schema::schema::disk_type_local_storage::dsl;
