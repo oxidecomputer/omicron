@@ -181,7 +181,7 @@ pub struct Collection {
     pub ntp_timesync: IdOrdMap<TimeSync>,
     /// The generation status of internal DNS servers
     pub internal_dns_generation_status: IdOrdMap<InternalDnsGenerationStatus>,
-    
+
     /// The status of SMF services
     pub smf_services_status: IdOrdMap<SmfServicesStatus>,
 }
@@ -761,9 +761,7 @@ impl IdOrdItem for InternalDnsGenerationStatus {
     id_upcast!();
 }
 
-#[derive(
-    Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq,
-)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct SmfServicesStatus {
     /// When this status check was taken
     pub time_collected: DateTime<Utc>,

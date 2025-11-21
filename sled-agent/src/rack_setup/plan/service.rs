@@ -1423,7 +1423,7 @@ mod tests {
                 last_reconciliation: None,
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
                 // TODO-K: put something more credible here
-                smf_services_in_maintenance: "".to_string()
+                smf_services_in_maintenance: "".to_string(),
             },
             is_scrimlet,
         )];
