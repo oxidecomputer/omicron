@@ -83,7 +83,7 @@ progenitor::generate_api!(
         RouterTarget = omicron_common::api::internal::shared::RouterTarget,
         RouterVersion = omicron_common::api::internal::shared::RouterVersion,
         SledRole = nexus_sled_agent_shared::inventory::SledRole,
-        SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
+        SourceNatConfigGeneric = omicron_common::api::internal::shared::SourceNatConfigGeneric,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         Vni = omicron_common::api::external::Vni,
         VpcFirewallIcmpFilter = omicron_common::api::external::VpcFirewallIcmpFilter,

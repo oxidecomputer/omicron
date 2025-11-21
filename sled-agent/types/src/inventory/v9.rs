@@ -12,7 +12,6 @@ use chrono::Utc;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
-use nexus_sled_agent_shared::inventory;
 use nexus_sled_agent_shared::inventory::BootPartitionContents;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
@@ -33,7 +32,7 @@ use omicron_common::api::internal::nexus::HostIdentifier;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::OmicronPhysicalDiskConfig;
@@ -78,35 +77,6 @@ pub struct Inventory {
     pub zone_image_resolver: ZoneImageResolverInventory,
 }
 
-impl TryFrom<inventory::Inventory> for Inventory {
-    type Error = external::Error;
-
-    fn try_from(value: inventory::Inventory) -> Result<Self, Self::Error> {
-        let ledgered_sled_config =
-            value.ledgered_sled_config.map(TryInto::try_into).transpose()?;
-        let reconciler_status = value.reconciler_status.try_into()?;
-        let last_reconciliation =
-            value.last_reconciliation.map(TryInto::try_into).transpose()?;
-        Ok(Self {
-            sled_id: value.sled_id,
-            sled_agent_address: value.sled_agent_address,
-            sled_role: value.sled_role,
-            baseboard: value.baseboard,
-            usable_hardware_threads: value.usable_hardware_threads,
-            usable_physical_ram: value.usable_physical_ram,
-            cpu_family: value.cpu_family,
-            reservoir_size: value.reservoir_size,
-            disks: value.disks,
-            zpools: value.zpools,
-            datasets: value.datasets,
-            ledgered_sled_config,
-            reconciler_status,
-            last_reconciliation,
-            zone_image_resolver: value.zone_image_resolver,
-        })
-    }
-}
-
 /// Describes the set of Reconfigurator-managed configuration elements of a sled
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OmicronSledConfig {
@@ -122,47 +92,6 @@ pub struct OmicronSledConfig {
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
-}
-
-impl TryFrom<OmicronSledConfig> for inventory::OmicronSledConfig {
-    type Error = external::Error;
-
-    fn try_from(value: OmicronSledConfig) -> Result<Self, Self::Error> {
-        let zones = value
-            .zones
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-        Ok(Self {
-            generation: value.generation,
-            disks: value.disks,
-            datasets: value.datasets,
-            zones,
-            remove_mupdate_override: value.remove_mupdate_override,
-            host_phase_2: value.host_phase_2,
-        })
-    }
-}
-
-impl TryFrom<inventory::OmicronSledConfig> for OmicronSledConfig {
-    type Error = external::Error;
-    fn try_from(
-        value: inventory::OmicronSledConfig,
-    ) -> Result<Self, Self::Error> {
-        let zones = value
-            .zones
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-        Ok(Self {
-            generation: value.generation,
-            disks: value.disks,
-            datasets: value.datasets,
-            zones,
-            remove_mupdate_override: value.remove_mupdate_override,
-            host_phase_2: value.host_phase_2,
-        })
-    }
 }
 
 /// Describes one Omicron-managed zone running on a sled
@@ -192,34 +121,6 @@ impl IdOrdItem for OmicronZoneConfig {
     id_upcast!();
 }
 
-impl TryFrom<OmicronZoneConfig> for inventory::OmicronZoneConfig {
-    type Error = external::Error;
-
-    fn try_from(value: OmicronZoneConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: value.id,
-            filesystem_pool: value.filesystem_pool,
-            zone_type: value.zone_type.try_into()?,
-            image_source: value.image_source,
-        })
-    }
-}
-
-impl TryFrom<inventory::OmicronZoneConfig> for OmicronZoneConfig {
-    type Error = external::Error;
-
-    fn try_from(
-        value: inventory::OmicronZoneConfig,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: value.id,
-            filesystem_pool: value.filesystem_pool,
-            zone_type: value.zone_type.try_into()?,
-            image_source: value.image_source,
-        })
-    }
-}
-
 /// Describes the set of Omicron-managed zones running on a sled
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct OmicronZonesConfig {
@@ -235,22 +136,6 @@ pub struct OmicronZonesConfig {
 
     /// list of running zones
     pub zones: Vec<OmicronZoneConfig>,
-}
-
-impl TryFrom<OmicronZonesConfig> for inventory::OmicronZonesConfig {
-    type Error = external::Error;
-
-    fn try_from(value: OmicronZonesConfig) -> Result<Self, Self::Error> {
-        value
-            .zones
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()
-            .map(|zones| inventory::OmicronZonesConfig {
-                generation: value.generation,
-                zones,
-            })
-    }
 }
 
 /// Describes what kind of zone this is (i.e., what component is running in it)
@@ -354,184 +239,6 @@ const fn default_nexus_lockstep_port() -> u16 {
     omicron_common::address::NEXUS_LOCKSTEP_PORT
 }
 
-impl TryFrom<OmicronZoneType> for inventory::OmicronZoneType {
-    type Error = external::Error;
-
-    fn try_from(value: OmicronZoneType) -> Result<Self, Self::Error> {
-        match value {
-            OmicronZoneType::BoundaryNtp {
-                address,
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic,
-                snat_cfg,
-            } => Ok(Self::BoundaryNtp {
-                address,
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic: nic.try_into()?,
-                snat_cfg,
-            }),
-            OmicronZoneType::Clickhouse { address, dataset } => {
-                Ok(Self::Clickhouse { address, dataset })
-            }
-            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
-                Ok(Self::ClickhouseKeeper { address, dataset })
-            }
-            OmicronZoneType::ClickhouseServer { address, dataset } => {
-                Ok(Self::ClickhouseServer { address, dataset })
-            }
-            OmicronZoneType::CockroachDb { address, dataset } => {
-                Ok(Self::CockroachDb { address, dataset })
-            }
-            OmicronZoneType::Crucible { address, dataset } => {
-                Ok(Self::Crucible { address, dataset })
-            }
-            OmicronZoneType::CruciblePantry { address } => {
-                Ok(Self::CruciblePantry { address })
-            }
-            OmicronZoneType::ExternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                nic,
-            } => Ok(Self::ExternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                nic: nic.try_into()?,
-            }),
-            OmicronZoneType::InternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                gz_address,
-                gz_address_index,
-            } => Ok(Self::InternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                gz_address,
-                gz_address_index,
-            }),
-            OmicronZoneType::InternalNtp { address } => {
-                Ok(Self::InternalNtp { address })
-            }
-            OmicronZoneType::Nexus {
-                internal_address,
-                lockstep_port,
-                external_ip,
-                nic,
-                external_tls,
-                external_dns_servers,
-            } => Ok(Self::Nexus {
-                internal_address,
-                lockstep_port,
-                external_ip,
-                nic: nic.try_into()?,
-                external_tls,
-                external_dns_servers,
-            }),
-            OmicronZoneType::Oximeter { address } => {
-                Ok(Self::Oximeter { address })
-            }
-        }
-    }
-}
-
-impl TryFrom<inventory::OmicronZoneType> for OmicronZoneType {
-    type Error = external::Error;
-
-    fn try_from(
-        value: inventory::OmicronZoneType,
-    ) -> Result<Self, Self::Error> {
-        match value {
-            inventory::OmicronZoneType::BoundaryNtp {
-                address,
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic,
-                snat_cfg,
-            } => Ok(Self::BoundaryNtp {
-                address,
-                ntp_servers,
-                dns_servers,
-                domain,
-                nic: nic.try_into()?,
-                snat_cfg,
-            }),
-            inventory::OmicronZoneType::Clickhouse { address, dataset } => {
-                Ok(Self::Clickhouse { address, dataset })
-            }
-            inventory::OmicronZoneType::ClickhouseKeeper {
-                address,
-                dataset,
-            } => Ok(Self::ClickhouseKeeper { address, dataset }),
-            inventory::OmicronZoneType::ClickhouseServer {
-                address,
-                dataset,
-            } => Ok(Self::ClickhouseServer { address, dataset }),
-            inventory::OmicronZoneType::CockroachDb { address, dataset } => {
-                Ok(Self::CockroachDb { address, dataset })
-            }
-            inventory::OmicronZoneType::Crucible { address, dataset } => {
-                Ok(Self::Crucible { address, dataset })
-            }
-            inventory::OmicronZoneType::CruciblePantry { address } => {
-                Ok(Self::CruciblePantry { address })
-            }
-            inventory::OmicronZoneType::ExternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                nic,
-            } => Ok(Self::ExternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                nic: nic.try_into()?,
-            }),
-            inventory::OmicronZoneType::InternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                gz_address,
-                gz_address_index,
-            } => Ok(Self::InternalDns {
-                dataset,
-                http_address,
-                dns_address,
-                gz_address,
-                gz_address_index,
-            }),
-            inventory::OmicronZoneType::InternalNtp { address } => {
-                Ok(Self::InternalNtp { address })
-            }
-            inventory::OmicronZoneType::Nexus {
-                internal_address,
-                lockstep_port,
-                external_ip,
-                nic,
-                external_tls,
-                external_dns_servers,
-            } => Ok(Self::Nexus {
-                internal_address,
-                lockstep_port,
-                external_ip,
-                nic: nic.try_into()?,
-                external_tls,
-                external_dns_servers,
-            }),
-            inventory::OmicronZoneType::Oximeter { address } => {
-                Ok(Self::Oximeter { address })
-            }
-        }
-    }
-}
-
 /// Describes the last attempt made by the sled-agent-config-reconciler to
 /// reconcile the current sled config against the actual state of the sled.
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -548,26 +255,6 @@ pub struct ConfigReconcilerInventory {
     ///
     /// `None` if `remove_mupdate_override` was not provided in the sled config.
     pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
-}
-
-impl TryFrom<inventory::ConfigReconcilerInventory>
-    for ConfigReconcilerInventory
-{
-    type Error = external::Error;
-
-    fn try_from(
-        value: inventory::ConfigReconcilerInventory,
-    ) -> Result<Self, Self::Error> {
-        Ok(Self {
-            last_reconciled_config: value.last_reconciled_config.try_into()?,
-            external_disks: value.external_disks,
-            datasets: value.datasets,
-            orphaned_datasets: value.orphaned_datasets,
-            zones: value.zones,
-            boot_partitions: value.boot_partitions,
-            remove_mupdate_override: value.remove_mupdate_override,
-        })
-    }
 }
 
 /// Status of the sled-agent-config-reconciler task.
@@ -590,35 +277,6 @@ pub enum ConfigReconcilerInventoryStatus {
     /// attempt, because that's always available via
     /// [`ConfigReconcilerInventory::last_reconciled_config`].
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
-}
-
-impl TryFrom<inventory::ConfigReconcilerInventoryStatus>
-    for ConfigReconcilerInventoryStatus
-{
-    type Error = external::Error;
-
-    fn try_from(
-        value: inventory::ConfigReconcilerInventoryStatus,
-    ) -> Result<Self, Self::Error> {
-        match value {
-            inventory::ConfigReconcilerInventoryStatus::NotYetRun => {
-                Ok(Self::NotYetRun)
-            }
-            inventory::ConfigReconcilerInventoryStatus::Running {
-                config,
-                started_at,
-                running_for,
-            } => Ok(Self::Running {
-                config: Box::new((*config).try_into()?),
-                started_at,
-                running_for,
-            }),
-            inventory::ConfigReconcilerInventoryStatus::Idle {
-                completed_at,
-                ran_for,
-            } => Ok(Self::Idle { completed_at, ran_for }),
-        }
-    }
 }
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
@@ -651,23 +309,6 @@ pub struct InstanceEnsureBody {
     pub metadata: InstanceMetadata,
 }
 
-impl TryFrom<InstanceEnsureBody> for crate::instance::InstanceEnsureBody {
-    type Error = external::Error;
-
-    fn try_from(value: InstanceEnsureBody) -> Result<Self, Self::Error> {
-        let local_config = value.local_config.try_into()?;
-        Ok(Self {
-            vmm_spec: value.vmm_spec,
-            local_config,
-            vmm_runtime: value.vmm_runtime,
-            instance_id: value.instance_id,
-            migration_id: value.migration_id,
-            propolis_addr: value.propolis_addr,
-            metadata: value.metadata,
-        })
-    }
-}
-
 /// Describes sled-local configuration that a sled-agent must establish to make
 /// the instance's virtual hardware fully functional.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -683,36 +324,6 @@ pub struct InstanceSledLocalConfig {
     pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
     pub dhcp_config: DhcpConfig,
     pub delegated_zvols: Vec<DelegatedZvol>,
-}
-
-impl TryFrom<InstanceSledLocalConfig>
-    for crate::instance::InstanceSledLocalConfig
-{
-    type Error = external::Error;
-
-    fn try_from(value: InstanceSledLocalConfig) -> Result<Self, Self::Error> {
-        let nics = value
-            .nics
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-        let firewall_rules = value
-            .firewall_rules
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?;
-        Ok(Self {
-            hostname: value.hostname,
-            nics,
-            source_nat: value.source_nat,
-            ephemeral_ip: value.ephemeral_ip,
-            floating_ips: value.floating_ips,
-            multicast_groups: value.multicast_groups,
-            firewall_rules,
-            dhcp_config: value.dhcp_config,
-            delegated_zvols: value.delegated_zvols,
-        })
-    }
 }
 
 /// VPC firewall rule after object name resolution has been performed by Nexus

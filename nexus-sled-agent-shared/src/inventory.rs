@@ -24,7 +24,7 @@ use omicron_common::update::OmicronZoneManifestSource;
 use omicron_common::{
     api::{
         external::{ByteCount, Generation},
-        internal::shared::{NetworkInterface, SourceNatConfig},
+        internal::shared::{NetworkInterface, SourceNatConfigGeneric},
     },
     disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
     update::ArtifactId,
@@ -1168,6 +1168,7 @@ pub struct OmicronZoneDataset {
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OmicronZoneType {
+    // TODO(ben) manually deserialize this and check nic / snat
     BoundaryNtp {
         address: SocketAddrV6,
         ntp_servers: Vec<String>,
@@ -1176,7 +1177,7 @@ pub enum OmicronZoneType {
         /// The service vNIC providing outbound connectivity using OPTE.
         nic: NetworkInterface,
         /// The SNAT configuration for outbound connections.
-        snat_cfg: SourceNatConfig,
+        snat_cfg: SourceNatConfigGeneric,
     },
 
     /// Type of clickhouse zone used for a single node clickhouse deployment
@@ -1239,6 +1240,7 @@ pub enum OmicronZoneType {
     InternalNtp {
         address: SocketAddrV6,
     },
+    // TODO(ben) manually deserialize this and check nic / external IP
     Nexus {
         /// The address at which the internal nexus server is reachable.
         internal_address: SocketAddrV6,
