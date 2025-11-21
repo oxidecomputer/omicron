@@ -207,6 +207,10 @@ async fn spawn_trust_quorum_task(
     global_zone_bootstrap_ip: Ipv6Addr,
     sprockets_config: SprocketsConfig,
 ) -> trust_quorum::NodeTaskHandle {
+    info!(
+        log,
+        "Using sprockets config for trust-quorum: {sprockets_config:#?}"
+    );
     let cluster_dataset_paths = config_reconciler
         .internal_disks_rx()
         .current()

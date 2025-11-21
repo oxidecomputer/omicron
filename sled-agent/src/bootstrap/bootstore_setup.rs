@@ -129,7 +129,7 @@ pub async fn poll_ddmd_for_bootstore_and_tq_peer_update(
                 if tq_peers != current_tq_peers {
                     current_tq_peers = tq_peers;
                     if let Err(err) = trust_quorum_handle
-                        .load_peer_addresses(current_bootstore_peers.clone())
+                        .load_peer_addresses(current_tq_peers.clone())
                         .await
                     {
                         error!(

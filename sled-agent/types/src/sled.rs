@@ -63,12 +63,12 @@ impl TryFrom<sled_hardware_types::Baseboard> for BaseboardId {
         use sled_hardware_types::Baseboard;
         match value {
             Baseboard::Gimlet { identifier, model, .. } => Ok(BaseboardId {
-                part_number: identifier,
-                serial_number: model,
+                part_number: model,
+                serial_number: identifier,
             }),
             Baseboard::Pc { identifier, model } => Ok(BaseboardId {
-                part_number: identifier,
-                serial_number: model,
+                part_number: model,
+                serial_number: identifier,
             }),
             Baseboard::Unknown => Err(UnknownError),
         }

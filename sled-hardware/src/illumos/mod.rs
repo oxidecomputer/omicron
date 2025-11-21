@@ -20,7 +20,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
-use uuid::Uuid;
 
 mod gpt;
 mod partitions;
@@ -630,11 +629,21 @@ fn poll_device_tree(
                     // returning this error. Each sled agent has to be uniquely
                     // identified for multiple non-sleds to work.
                     if inner.baseboard.is_none() {
+                        let mut serial_number = gethostname()
+                            .into_string()
+                            .unwrap_or_else(|_| "0000000000".to_string());
+                        // Hack for a4x2
+                        for (i, host) in
+                            ["g0", "g1", "g2", "g3"].iter().enumerate()
+                        {
+                            if host == &serial_number {
+                                serial_number = format!("{i:011}");
+                            }
+                        }
+
                         let pc_baseboard = Baseboard::new_pc(
-                            gethostname().into_string().unwrap_or_else(|_| {
-                                Uuid::new_v4().simple().to_string()
-                            }),
-                            root_node.clone(),
+                            serial_number,
+                            "PPP-PPPPPPP".to_string(),
                         );
 
                         info!(

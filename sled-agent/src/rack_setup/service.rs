@@ -305,7 +305,7 @@ impl RackSetupService {
                 )
                 .await
             {
-                warn!(log, "RSS injection failed: {}", e);
+                error!(log, "RSS injection failed"; &e);
                 Err(e)
             } else {
                 Ok(())
@@ -1537,10 +1537,19 @@ async fn init_trust_quorum(
 
     info!(log, "RSS: Starting to commit trust quorum initial configuration");
     // Continue to commit at all nodes until done
+
+    // Commit at this node.
+    trust_quorum_handle
+        .commit(rack_id, trust_quorum_protocol::Epoch(1))
+        .await?;
+
+    // Proxy commit at the rest of the nodes
     let mut acked = BTreeSet::new();
     let proxy = trust_quorum_handle.proxy();
     // TODO: Retries? Timeouts?
-    for id in &members {
+    for id in
+        members.iter().filter(|&id| id != trust_quorum_handle.baseboard_id())
+    {
         info!(log, "RSS: Attempting to commit initial trust quorum at {id}");
         match proxy
             .commit(id.clone(), rack_id, trust_quorum_protocol::Epoch(1))
