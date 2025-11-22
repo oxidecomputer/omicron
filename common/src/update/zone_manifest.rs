@@ -23,6 +23,9 @@ pub struct OmicronZoneManifest {
 impl OmicronZoneManifest {
     /// The name of the file.
     pub const FILE_NAME: &str = "zones.json";
+
+    /// Measurement file
+    pub const MEASUREMENT_FILE_NAME: &str = "measurements.json";
 }
 
 /// The source of truth for an Omicron zone manifest.
