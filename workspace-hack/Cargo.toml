@@ -5,7 +5,7 @@
 [package]
 name = "omicron-workspace-hack"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 description = "workspace-hack package, managed by hakari"
 # You can choose to publish this crate: see https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing.
 publish = false
@@ -83,7 +83,7 @@ libc = { version = "0.2.174", features = ["extra_traits"] }
 log = { version = "0.4.27", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.4" }
-newtype-uuid = { version = "1.3.1", features = ["proptest1"] }
+newtype-uuid = { version = "1.3.2", features = ["proptest1"] }
 nix = { version = "0.29.0", features = ["feature", "net", "uio"] }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
@@ -224,7 +224,7 @@ libc = { version = "0.2.174", features = ["extra_traits"] }
 log = { version = "0.4.27", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.4" }
-newtype-uuid = { version = "1.3.1", features = ["proptest1"] }
+newtype-uuid = { version = "1.3.2", features = ["proptest1"] }
 nix = { version = "0.29.0", features = ["feature", "net", "uio"] }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }

@@ -298,6 +298,8 @@ pub struct OmicronZoneExternalSnatIp {
 pub struct OmicronZoneNic {
     pub id: VnicUuid,
     pub mac: MacAddr,
+    // TODO-completeness: Support dual-stack NICs for Omicron zones. See
+    // https://github.com/oxidecomputer/omicron/issues/9314.
     pub ip: IpAddr,
     pub slot: u8,
     pub primary: bool,

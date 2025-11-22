@@ -1129,8 +1129,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
     // Set up a second sled-agent representing a sled with a Turin processor.
     // The instance itself requires only Milan, so it should be able to migrate
     // both directions.
-    let nexus_address =
-        cptestctx.server.get_http_server_internal_address().await;
+    let nexus_address = cptestctx.server.get_http_server_internal_address();
 
     let config = omicron_sled_agent::sim::Config::for_testing(
         SledUuid::new_v4(),
@@ -1319,8 +1318,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
 
     // Set up a second sled-agent representing a sled with a Turin processor.
     // The instance will require Turin, so it will be placed here.
-    let nexus_address =
-        cptestctx.server.get_http_server_internal_address().await;
+    let nexus_address = cptestctx.server.get_http_server_internal_address();
 
     let config = omicron_sled_agent::sim::Config::for_testing(
         SledUuid::new_v4(),
@@ -1397,8 +1395,7 @@ async fn test_instance_migration_unknown_sled_type(
 
     // Set up a second sled-agent representing a sled with unknown processor
     // type. We won't be able to migrate to (or from) here.
-    let nexus_address =
-        cptestctx.server.get_http_server_internal_address().await;
+    let nexus_address = cptestctx.server.get_http_server_internal_address();
 
     let config = omicron_sled_agent::sim::Config::for_testing(
         SledUuid::new_v4(),
@@ -6742,8 +6739,7 @@ async fn test_can_start_instance_with_cpu_platform(
         1
     );
 
-    let nexus_address =
-        cptestctx.server.get_http_server_internal_address().await;
+    let nexus_address = cptestctx.server.get_http_server_internal_address();
 
     let config = omicron_sled_agent::sim::Config::for_testing(
         SledUuid::new_v4(),

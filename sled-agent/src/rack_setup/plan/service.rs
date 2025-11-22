@@ -4,8 +4,12 @@
 
 //! Plan generation for "where should services be initialized".
 
+use anyhow::anyhow;
+use anyhow::bail;
+use chrono::Utc;
 use iddqd::IdOrdMap;
 use iddqd::errors::DuplicateItem;
+use iddqd::id_upcast;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns_types::config::{
     DnsConfigBuilder, DnsConfigParams, Host, Zone,
@@ -15,12 +19,16 @@ use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZoneDataset, SledRole,
 };
 use nexus_types::deployment::{
-    BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
+    Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
+    BlueprintHostPhase2DesiredSlots, BlueprintPhysicalDiskConfig,
+    BlueprintPhysicalDiskDisposition, BlueprintSledConfig, BlueprintSource,
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneImageSource,
-    BlueprintZoneType, OmicronZoneExternalFloatingAddr,
-    OmicronZoneExternalFloatingIp, OmicronZoneExternalSnatIp,
+    BlueprintZoneType, CockroachDbPreserveDowngrade,
+    OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
+    OmicronZoneExternalSnatIp, OximeterReadMode, PendingMgsUpdates,
     blueprint_zone_type,
 };
+use nexus_types::external_api::views::SledState;
 use omicron_common::address::{
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, Ipv6Subnet, MGD_PORT, MGS_PORT,
     NEXUS_INTERNAL_PORT, NEXUS_LOCKSTEP_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS,
@@ -29,8 +37,8 @@ use omicron_common::address::{
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
-    NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
-    SourceNatConfigError,
+    NetworkInterface, NetworkInterfaceKind, PrivateIpConfig,
+    PrivateIpConfigError, SourceNatConfig, SourceNatConfigError,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
@@ -46,7 +54,7 @@ use omicron_common::policy::{
     SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
+    BlueprintUuid, DatasetUuid, ExternalIpUuid, GenericUuid, OmicronZoneUuid,
     PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
 use rand::seq::IndexedRandom;
@@ -58,6 +66,7 @@ use sled_agent_client::{
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
@@ -93,6 +102,9 @@ pub enum PlanError {
 
     #[error("Unexpected dataset kind: {0}")]
     UnexpectedDataset(String),
+
+    #[error("invalid private IP configuration")]
+    InvalidPrivateIpConfig(#[from] PrivateIpConfigError),
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
@@ -158,9 +170,27 @@ impl SledConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug)]
+pub(crate) struct PlannedSledDescription {
+    pub(crate) underlay_address: SocketAddrV6,
+    pub(crate) sled_id: SledUuid,
+    pub(crate) subnet: Ipv6Subnet<SLED_PREFIX>,
+    pub(crate) config: SledConfig,
+}
+
+impl iddqd::IdOrdItem for PlannedSledDescription {
+    type Key<'a> = SocketAddrV6;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.underlay_address
+    }
+
+    id_upcast!();
+}
+
+#[derive(Clone, Debug)]
 pub struct Plan {
-    pub services: HashMap<SocketAddrV6, SledConfig>,
+    pub all_sleds: IdOrdMap<PlannedSledDescription>,
     pub dns_config: DnsConfigParams,
 }
 
@@ -210,29 +240,6 @@ pub fn from_source_nat_config_to_external_snat_ip(
 }
 
 impl Plan {
-    async fn is_sled_scrimlet(
-        log: &Logger,
-        address: SocketAddrV6,
-    ) -> Result<bool, PlanError> {
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .map_err(PlanError::HttpClient)?;
-        let client = SledAgentClient::new_with_client(
-            &format!("http://{}", address),
-            client,
-            log.new(o!("SledAgentClient" => address.to_string())),
-        );
-
-        let role = client.sled_role_get().await?.into_inner();
-        match role {
-            SledRole::Gimlet => Ok(false),
-            SledRole::Scrimlet => Ok(true),
-        }
-    }
-
     async fn get_inventory(
         log: &Logger,
         address: SocketAddrV6,
@@ -804,13 +811,18 @@ impl Plan {
                 .expect("freshly generated zone IDs are unique");
         }
 
-        let services: HashMap<_, _> = sled_info
+        let all_sleds = sled_info
             .into_iter()
-            .map(|sled_info| (sled_info.sled_address, sled_info.request))
+            .map(|sled_info| PlannedSledDescription {
+                underlay_address: sled_info.sled_address,
+                sled_id: sled_info.sled_id,
+                subnet: sled_info.subnet,
+                config: sled_info.request,
+            })
             .collect();
 
         let dns_config = dns_builder.build_full_config_for_initial_generation();
-        Ok(Self { services, dns_config })
+        Ok(Self { all_sleds, dns_config })
     }
 
     pub async fn create(
@@ -828,8 +840,10 @@ impl Plan {
                         let sled_address = get_sled_address(subnet);
                         let inventory =
                             Self::get_inventory(log, sled_address).await?;
-                        let is_scrimlet =
-                            Self::is_sled_scrimlet(log, sled_address).await?;
+                        let is_scrimlet = match inventory.sled_role {
+                            SledRole::Gimlet => false,
+                            SledRole::Scrimlet => true,
+                        };
                         Ok(SledInfo::new(
                             sled_request.body.id,
                             subnet,
@@ -845,6 +859,103 @@ impl Plan {
 
         let plan = Self::create_transient(config, sled_info)?;
         Ok(plan)
+    }
+
+    pub(crate) fn to_blueprint(
+        &self,
+        sled_agent_config_generation: Generation,
+    ) -> anyhow::Result<Blueprint> {
+        let mut blueprint_sleds = BTreeMap::new();
+        for sled_description in &self.all_sleds {
+            let sled_config = &sled_description.config;
+            let mut datasets = IdOrdMap::new();
+            for d in sled_config.datasets.values() {
+                // Only the "Crucible" dataset needs to know the address
+                let address = if *d.name.kind() == DatasetKind::Crucible {
+                    let address = sled_config.zones.iter().find_map(|z| {
+                        if let BlueprintZoneType::Crucible(
+                            blueprint_zone_type::Crucible { address, dataset },
+                        ) = &z.zone_type
+                        {
+                            if &dataset.pool_name == d.name.pool() {
+                                return Some(*address);
+                            }
+                        };
+                        None
+                    });
+                    if address.is_some() {
+                        address
+                    } else {
+                        bail!(
+                            "could not find Crucible zone for zpool {}",
+                            d.name.pool()
+                        )
+                    }
+                } else {
+                    None
+                };
+
+                datasets
+                    .insert_unique(BlueprintDatasetConfig {
+                        disposition: BlueprintDatasetDisposition::InService,
+                        id: d.id,
+                        pool: *d.name.pool(),
+                        kind: d.name.kind().clone(),
+                        address,
+                        compression: d.inner.compression,
+                        quota: d.inner.quota,
+                        reservation: d.inner.reservation,
+                    })
+                    .map_err(|e| {
+                        anyhow!(InlineErrorChain::new(&e).to_string())
+                    })?;
+            }
+
+            blueprint_sleds.insert(
+                sled_description.sled_id,
+                BlueprintSledConfig {
+                    state: SledState::Active,
+                    subnet: sled_description.subnet,
+                    sled_agent_generation: sled_agent_config_generation,
+                    disks: sled_config.disks.clone(),
+                    datasets,
+                    zones: sled_config.zones.clone(),
+                    host_phase_2:
+                        BlueprintHostPhase2DesiredSlots::current_contents(),
+                    remove_mupdate_override: None,
+                },
+            );
+        }
+
+        let id = BlueprintUuid::new_v4();
+        Ok(Blueprint {
+            id,
+            sleds: blueprint_sleds,
+            pending_mgs_updates: PendingMgsUpdates::new(),
+            parent_blueprint_id: None,
+            internal_dns_version: self.dns_config.generation,
+            // We don't configure external DNS during RSS, so set it to an
+            // initial generation of 1. Nexus will bump this up when it updates
+            // external DNS (including creating the recovery silo).
+            external_dns_version: Generation::new(),
+            target_release_minimum_generation: Generation::new(),
+            nexus_generation: Generation::new(),
+            // Nexus will fill in the CockroachDB values during initialization.
+            cockroachdb_fingerprint: String::new(),
+            cockroachdb_setting_preserve_downgrade:
+                CockroachDbPreserveDowngrade::DoNotModify,
+            // We do not create clickhouse clusters in RSS. We create them via
+            // reconfigurator only.
+            clickhouse_cluster_config: None,
+            // The oximeter read policy always defaults to single node. The
+            // initial generation of this policy in the DB is 1
+            oximeter_read_mode: OximeterReadMode::SingleNode,
+            oximeter_read_version: Generation::new(),
+            time_created: Utc::now(),
+            creator: "RSS".to_string(),
+            comment: "initial blueprint from rack setup".to_string(),
+            source: BlueprintSource::Rss,
+        })
     }
 }
 
@@ -1059,15 +1170,17 @@ impl ServicePortBuilder {
         };
         let external_ip = self.external_dns_ips.next()?;
 
-        let (ip, subnet) = match external_ip {
-            IpAddr::V4(_) => (
-                self.dns_v4_ips.next().unwrap().into(),
-                (*DNS_OPTE_IPV4_SUBNET).into(),
-            ),
-            IpAddr::V6(_) => (
-                self.dns_v6_ips.next().unwrap().into(),
-                (*DNS_OPTE_IPV6_SUBNET).into(),
-            ),
+        let ip_config = match external_ip {
+            IpAddr::V4(_) => PrivateIpConfig::new_ipv4(
+                self.dns_v4_ips.next().unwrap(),
+                *DNS_OPTE_IPV4_SUBNET,
+            )
+            .ok()?,
+            IpAddr::V6(_) => PrivateIpConfig::new_ipv6(
+                self.dns_v6_ips.next().unwrap(),
+                *DNS_OPTE_IPV6_SUBNET,
+            )
+            .ok()?,
         };
 
         let nic = NetworkInterface {
@@ -1077,13 +1190,11 @@ impl ServicePortBuilder {
                 id: svc_id.into_untyped_uuid(),
             },
             name: format!("external-dns-{svc_id}").parse().unwrap(),
-            ip,
+            ip_config,
             mac: self.random_mac(),
-            subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         Some((nic, external_ip))
@@ -1100,15 +1211,15 @@ impl ServicePortBuilder {
             .next_internal_service_ip()
             .ok_or_else(|| PlanError::ServiceIp("Nexus"))?;
 
-        let (ip, subnet) = match external_ip {
-            IpAddr::V4(_) => (
-                self.nexus_v4_ips.next().unwrap().into(),
-                (*NEXUS_OPTE_IPV4_SUBNET).into(),
-            ),
-            IpAddr::V6(_) => (
-                self.nexus_v6_ips.next().unwrap().into(),
-                (*NEXUS_OPTE_IPV6_SUBNET).into(),
-            ),
+        let ip_config = match external_ip {
+            IpAddr::V4(_) => PrivateIpConfig::new_ipv4(
+                self.nexus_v4_ips.next().unwrap(),
+                *NEXUS_OPTE_IPV4_SUBNET,
+            )?,
+            IpAddr::V6(_) => PrivateIpConfig::new_ipv6(
+                self.nexus_v6_ips.next().unwrap(),
+                *NEXUS_OPTE_IPV6_SUBNET,
+            )?,
         };
 
         let nic = NetworkInterface {
@@ -1118,13 +1229,11 @@ impl ServicePortBuilder {
                 id: svc_id.into_untyped_uuid(),
             },
             name: format!("nexus-{svc_id}").parse().unwrap(),
-            ip,
+            ip_config,
             mac: self.random_mac(),
-            subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         Ok((nic, external_ip))
@@ -1160,15 +1269,15 @@ impl ServicePortBuilder {
                 }
             };
 
-        let (ip, subnet) = match snat_ip {
-            IpAddr::V4(_) => (
-                self.ntp_v4_ips.next().unwrap().into(),
-                (*NTP_OPTE_IPV4_SUBNET).into(),
-            ),
-            IpAddr::V6(_) => (
-                self.ntp_v6_ips.next().unwrap().into(),
-                (*NTP_OPTE_IPV6_SUBNET).into(),
-            ),
+        let ip_config = match snat_ip {
+            IpAddr::V4(_) => PrivateIpConfig::new_ipv4(
+                self.ntp_v4_ips.next().unwrap(),
+                *NTP_OPTE_IPV4_SUBNET,
+            )?,
+            IpAddr::V6(_) => PrivateIpConfig::new_ipv6(
+                self.ntp_v6_ips.next().unwrap(),
+                *NTP_OPTE_IPV6_SUBNET,
+            )?,
         };
 
         let nic = NetworkInterface {
@@ -1178,13 +1287,11 @@ impl ServicePortBuilder {
                 id: svc_id.into_untyped_uuid(),
             },
             name: format!("ntp-{svc_id}").parse().unwrap(),
-            ip,
+            ip_config,
             mac: self.random_mac(),
-            subnet,
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
-            transit_ips: vec![],
         };
 
         Ok((nic, snat_cfg))
@@ -1429,9 +1536,9 @@ mod tests {
         let plan = Plan::create_transient(&config, sleds)
             .expect("Should have created plan");
 
-        assert_eq!(plan.services.len(), 1);
+        assert_eq!(plan.all_sleds.len(), 1);
 
-        let sled_config = plan.services.iter().next().unwrap().1;
+        let sled_config = &plan.all_sleds.iter().next().unwrap().config;
         assert_eq!(sled_config.disks.len(), DISK_COUNT);
 
         let zone_count = sled_config.zones.len();

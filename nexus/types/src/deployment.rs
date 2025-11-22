@@ -34,6 +34,8 @@ use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::TufArtifactMeta;
@@ -437,22 +439,22 @@ impl Blueprint {
         &self,
         nexus_zones: &BTreeSet<OmicronZoneUuid>,
     ) -> Result<Option<Generation>, anyhow::Error> {
-        let mut gen = None;
+        let mut r#gen = None;
         for (_, zone, nexus_zone) in
             self.all_nexus_zones(BlueprintZoneDisposition::is_in_service)
         {
             if nexus_zones.contains(&zone.id) {
                 let found_gen = nexus_zone.nexus_generation;
-                if let Some(gen) = gen {
-                    if found_gen != gen {
+                if let Some(r#gen) = r#gen {
+                    if found_gen != r#gen {
                         bail!("Multiple generations found for these zones");
                     }
                 }
-                gen = Some(found_gen);
+                r#gen = Some(found_gen);
             }
         }
 
-        Ok(gen)
+        Ok(r#gen)
     }
 
     /// Returns the Nexus generation number for Nexus `nexus_id`, which is
@@ -531,7 +533,7 @@ impl<'a> BlueprintHostPhase2TableData<'a> {
 
     fn diff_rows<'b>(
         diffs: &'b BlueprintHostPhase2DesiredSlotsDiff<'_>,
-    ) -> impl Iterator<Item = BpTableRow> + 'b {
+    ) -> impl Iterator<Item = BpTableRow> + 'b + use<'b> {
         [(M2Slot::A, &diffs.slot_a), (M2Slot::B, &diffs.slot_b)]
             .into_iter()
             .map(|(slot, diff)| {
@@ -814,6 +816,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
         for (sled_id, config) in sleds {
             let BlueprintSledConfig {
                 state,
+                subnet,
                 sled_agent_generation,
                 disks,
                 datasets,
@@ -822,14 +825,13 @@ impl fmt::Display for BlueprintDisplay<'_> {
                 host_phase_2,
             } = config;
 
-            // Report the sled state
-            writeln!(
-                f,
-                "\n  sled: {sled_id} ({state}, config generation \
-                 {sled_agent_generation})",
-            )?;
-
+            // Report toplevel sled info
+            writeln!(f, "\n  sled: {sled_id}")?;
             let mut rows = Vec::new();
+            rows.push((STATE, state.to_string()));
+            rows.push((CONFIG_GENERATION, sled_agent_generation.to_string()));
+            rows.push((SUBNET, subnet.to_string()));
+
             if let Some(id) = remove_mupdate_override {
                 rows.push((WILL_REMOVE_MUPDATE_OVERRIDE, id.to_string()));
             }
@@ -926,6 +928,7 @@ impl fmt::Display for BlueprintDisplay<'_> {
 )]
 pub struct BlueprintSledConfig {
     pub state: SledState,
+    pub subnet: Ipv6Subnet<SLED_PREFIX>,
 
     /// Generation number used when this type is converted into an
     /// `OmicronSledConfig` for use by sled-agent.
@@ -1044,7 +1047,7 @@ impl ZoneSortKey for OmicronZoneConfig {
     }
 }
 
-fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord {
+fn zone_sort_key<T: ZoneSortKey>(z: &T) -> impl Ord + use<T> {
     // First sort by kind, then by ID. This makes it so that zones of the same
     // kind (e.g. Crucible zones) are grouped together.
     (z.kind(), z.id())
@@ -2379,12 +2382,7 @@ impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
 pub struct UnstableReconfiguratorState {
     pub planning_input: PlanningInput,
     pub collections: Vec<Collection>,
-    // When collected from a deployed system, `target_blueprint` will always be
-    // `Some(_)`. `UnstableReconfiguratorState` is also used by
-    // `reconfigurator-cli`, which allows construction of states that do not
-    // represent a fully-deployed system (and maybe no blueprints at all, hence
-    // no target blueprint).
-    pub target_blueprint: Option<BlueprintTarget>,
+    pub target_blueprint: BlueprintTarget,
     pub blueprints: Vec<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,

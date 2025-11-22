@@ -513,7 +513,7 @@ impl UpdatesRequired {
         snapshot: &InstanceGestalt,
     ) -> Option<Self> {
         let mut new_runtime = snapshot.instance.runtime().clone();
-        new_runtime.gen = Generation(new_runtime.gen.next());
+        new_runtime.generation = Generation(new_runtime.generation.next());
         new_runtime.time_updated = Utc::now();
         let mut new_intent = None;
         let instance_id = snapshot.instance.id();
@@ -1723,7 +1723,9 @@ mod test {
                 &instance_id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
-                    gen: Generation(instance.runtime().gen.0.next()),
+                    generation: Generation(
+                        instance.runtime().generation.0.next(),
+                    ),
                     propolis_id: None,
                     dst_propolis_id: None,
                     migration_id: None,
@@ -1949,7 +1951,7 @@ mod test {
                 &vmm_id,
                 &VmmRuntimeState {
                     time_state_updated: Utc::now(),
-                    gen: Generation(vmm.runtime.gen.0.next()),
+                    generation: Generation(vmm.runtime.generation.0.next()),
                     state: VmmState::Destroyed,
                 },
             )
@@ -2609,7 +2611,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(src_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                gen: Generation(src_vmm.runtime.gen.0.next()),
+                generation: Generation(src_vmm.runtime.generation.0.next()),
                 state: vmm_state,
             };
 
@@ -2621,7 +2623,7 @@ mod test {
             let migration_out = MigrationRuntimeState {
                 migration_id: migration.id,
                 state: migration_state,
-                gen: migration.source_gen.0.next(),
+                generation: migration.source_gen.0.next(),
                 time_updated: Utc::now(),
             };
             let migrations = Migrations {
@@ -2666,7 +2668,7 @@ mod test {
             let vmm_id = PropolisUuid::from_untyped_uuid(target_vmm.id);
             let new_runtime = nexus_db_model::VmmRuntimeState {
                 time_state_updated: Utc::now(),
-                gen: Generation(target_vmm.runtime.gen.0.next()),
+                generation: Generation(target_vmm.runtime.generation.0.next()),
                 state: vmm_state,
             };
 
@@ -2678,7 +2680,7 @@ mod test {
             let migration_in = MigrationRuntimeState {
                 migration_id: migration.id,
                 state: migration_state,
-                gen: migration.target_gen.0.next(),
+                generation: migration.target_gen.0.next(),
                 time_updated: Utc::now(),
             };
             let migrations = Migrations {

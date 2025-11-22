@@ -127,7 +127,7 @@ impl HostPhase2TestContext {
             .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
-                    sled_agent_api::VERSION_MULTICAST_SUPPORT,
+                    sled_agent_api::latest_version(),
                 ),
             )))
             .start()
@@ -220,14 +220,13 @@ mod api_impl {
     use omicron_common::api::internal::shared::{
         ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
     };
-    use sled_agent_api::v7::InstanceEnsureBody;
-    use sled_agent_api::v7::InstanceMulticastBody;
     use sled_agent_api::*;
     use sled_agent_types::bootstore::BootstoreStatus;
     use sled_agent_types::disk::DiskEnsureBody;
     use sled_agent_types::early_networking::EarlyNetworkConfig;
     use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
     use sled_agent_types::instance::InstanceExternalIpBody;
+    use sled_agent_types::instance::InstanceMulticastBody;
     use sled_agent_types::instance::VmmPutStateBody;
     use sled_agent_types::instance::VmmPutStateResponse;
     use sled_agent_types::instance::VmmUnregisterResponse;
@@ -531,18 +530,10 @@ mod api_impl {
             unimplemented!()
         }
 
-        async fn vmm_register_v1(
+        async fn vmm_register(
             _rqctx: RequestContext<Self::Context>,
             _path_params: Path<VmmPathParam>,
             _body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
-        ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-            unimplemented!()
-        }
-
-        async fn vmm_register_v7(
-            _rqctx: RequestContext<Self::Context>,
-            _path_params: Path<VmmPathParam>,
-            _body: TypedBody<InstanceEnsureBody>,
         ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
             unimplemented!()
         }
@@ -896,6 +887,21 @@ mod api_impl {
         async fn probes_put(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<ProbeSet>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn local_storage_dataset_ensure(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<LocalStoragePathParam>,
+            _body: TypedBody<LocalStorageDatasetEnsureRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn local_storage_dataset_delete(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<LocalStoragePathParam>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

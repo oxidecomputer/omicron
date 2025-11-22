@@ -9,6 +9,7 @@
 
 use crate::api::external::{self, Error};
 use crate::policy::INTERNAL_DNS_REDUNDANCY;
+use daft::Diffable;
 use ipnetwork::Ipv6Network;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -156,6 +157,22 @@ pub const VPC_IPV6_PREFIX_LENGTH: u8 = 48;
 /// The prefix length for all VPC subnets
 pub const VPC_SUBNET_IPV6_PREFIX_LENGTH: u8 = 64;
 
+/// Minimum prefix size supported in IPv4 VPC Subnets.
+///
+/// NOTE: This is the minimum _prefix_, which sets the maximum subnet size.
+pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
+
+/// The number of reserved addresses at the beginning of a subnet range.
+pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
+
+/// The maximum prefix size by default.
+///
+/// There are 6 Oxide reserved IP addresses, 5 at the beginning for DNS and the
+/// like, and the broadcast address at the end of the subnet. This size provides
+/// room for 2 ** 6 - 6 = 58 IP addresses, which seems like a reasonable size
+/// for the smallest subnet that's still useful in many contexts.
+pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
+
 // The number of ports available to an SNAT IP.
 // Note that for static NAT, this value isn't used, and all ports are available.
 //
@@ -273,10 +290,17 @@ pub const SLED_RESERVED_ADDRESSES: u16 = 32;
     Eq,
     PartialOrd,
     Ord,
+    Diffable,
 )]
 #[schemars(rename = "Ipv6Subnet")]
 pub struct Ipv6Subnet<const N: u8> {
     net: Ipv6Net,
+}
+
+impl<const N: u8> std::fmt::Display for Ipv6Subnet<N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.net.fmt(f)
+    }
 }
 
 impl<const N: u8> Ipv6Subnet<N> {
@@ -299,6 +323,14 @@ impl<const N: u8> From<Ipv6Network> for Ipv6Subnet<N> {
         // Ensure the address is set to within-prefix only components.
         let net = Ipv6Net::new(net.network(), N).unwrap();
         Self { net }
+    }
+}
+
+impl<const N: u8> From<Ipv6Subnet<N>> for Ipv6Network {
+    fn from(net: Ipv6Subnet<N>) -> Self {
+        // Ipv6Subnet::new() asserts that `N` is a valid IPv6 prefix, so it's
+        // okay to unwrap here.
+        Self::new(net.net.prefix(), N).unwrap()
     }
 }
 
@@ -495,18 +527,18 @@ impl JsonSchema for IpRange {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
                     external::label_schema(
                         "v4",
-                        gen.subschema_for::<Ipv4Range>(),
+                        generator.subschema_for::<Ipv4Range>(),
                     ),
                     external::label_schema(
                         "v6",
-                        gen.subschema_for::<Ipv6Range>(),
+                        generator.subschema_for::<Ipv6Range>(),
                     ),
                 ]),
                 ..Default::default()

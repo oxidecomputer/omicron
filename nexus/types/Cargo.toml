@@ -1,7 +1,7 @@
 [package]
 name = "nexus-types"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 license = "MPL-2.0"
 
 [lints]
@@ -20,6 +20,7 @@ daft.workspace = true
 derive-where.workspace = true
 derive_more.workspace = true
 dropshot.workspace = true
+ereport-types.workspace = true
 futures.workspace = true
 http.workspace = true
 humantime.workspace = true

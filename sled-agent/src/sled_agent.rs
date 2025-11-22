@@ -32,7 +32,13 @@ use futures::stream::FuturesUnordered;
 use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
+use illumos_utils::zfs::CanMount;
+use illumos_utils::zfs::DatasetEnsureArgs;
+use illumos_utils::zfs::Mountpoint;
+use illumos_utils::zfs::SizeDetails;
+use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
+use illumos_utils::zpool::ZpoolOrRamdisk;
 use itertools::Itertools as _;
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronSledConfig, SledRole,
@@ -42,6 +48,7 @@ use omicron_common::address::{
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::{DiskRuntimeState, SledVmmState};
+use omicron_common::api::internal::shared::DelegatedZvol;
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
     ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
@@ -50,11 +57,12 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
 };
+use omicron_common::zpool_name::ZpoolName;
 use omicron_ddm_admin_client::Client as DdmAdminClient;
 use omicron_uuid_kinds::{
-    GenericUuid, MupdateOverrideUuid, PropolisUuid, SledUuid,
+    DatasetUuid, ExternalZpoolUuid, GenericUuid, MupdateOverrideUuid,
+    PropolisUuid, SledUuid,
 };
-use sled_agent_api::v7::{InstanceEnsureBody, InstanceMulticastBody};
 use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, InternalDisks,
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
@@ -63,8 +71,8 @@ use sled_agent_config_reconciler::{
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
-    InstanceExternalIpBody, VmmPutStateResponse, VmmStateRequested,
-    VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::probes::ProbeCreate;
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
@@ -842,42 +850,7 @@ impl SledAgent {
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
-    pub async fn instance_ensure_registered_v1(
-        &self,
-        propolis_id: PropolisUuid,
-        instance: sled_agent_types::instance::InstanceEnsureBody,
-    ) -> Result<SledVmmState, Error> {
-        // Convert v1 to v7
-        let v5_instance = sled_agent_api::v7::InstanceEnsureBody {
-            vmm_spec: instance.vmm_spec,
-            local_config: sled_agent_api::v7::InstanceSledLocalConfig {
-                hostname: instance.local_config.hostname,
-                nics: instance.local_config.nics,
-                source_nat: instance.local_config.source_nat,
-                ephemeral_ip: instance.local_config.ephemeral_ip,
-                floating_ips: instance.local_config.floating_ips,
-                multicast_groups: Vec::new(), // v1 doesn't support multicast
-                firewall_rules: instance.local_config.firewall_rules,
-                dhcp_config: instance.local_config.dhcp_config,
-            },
-            vmm_runtime: instance.vmm_runtime,
-            instance_id: instance.instance_id,
-            migration_id: instance.migration_id,
-            propolis_addr: instance.propolis_addr,
-            metadata: instance.metadata,
-        };
-        self.instance_ensure_registered_v7(propolis_id, v5_instance).await
-    }
-
-    pub async fn instance_ensure_registered_v7(
-        &self,
-        propolis_id: PropolisUuid,
-        instance: InstanceEnsureBody,
-    ) -> Result<SledVmmState, Error> {
-        self.instance_ensure_registered(propolis_id, instance).await
-    }
-
-    async fn instance_ensure_registered(
+    pub async fn instance_ensure_registered(
         &self,
         propolis_id: PropolisUuid,
         instance: InstanceEnsureBody,
@@ -1247,6 +1220,114 @@ impl SledAgent {
     /// Completely replace the set of probes managed by this sled.
     pub(crate) fn set_probes(&self, probes: IdHashMap<ProbeCreate>) {
         self.inner.probes.set_probes(probes);
+    }
+
+    pub(crate) async fn create_local_storage_dataset(
+        &self,
+        zpool_id: ExternalZpoolUuid,
+        dataset_id: DatasetUuid,
+        request: sled_agent_api::LocalStorageDatasetEnsureRequest,
+    ) -> Result<(), HttpError> {
+        // Ensure that the local storage dataset we want to use is still present
+        let present = self
+            .inner
+            .config_reconciler
+            .available_datasets_rx()
+            .all_mounted_local_storage_datasets()
+            .into_iter()
+            .any(|path_in_pool| match path_in_pool.pool {
+                ZpoolOrRamdisk::Zpool(zpool_name) => {
+                    zpool_name == ZpoolName::External(zpool_id)
+                }
+                ZpoolOrRamdisk::Ramdisk => false,
+            });
+
+        if !present {
+            // We cannot create a child dataset of the local storage dataset if
+            // it's not present! Return a 503.
+            let error =
+                format!("local storage dataset for pool {zpool_id} missing!");
+            return Err(HttpError::for_unavail(Some(error.clone()), error));
+        }
+
+        let delegated_zvol =
+            DelegatedZvol::LocalStorage { zpool_id, dataset_id };
+
+        let sled_agent_api::LocalStorageDatasetEnsureRequest {
+            dataset_size,
+            volume_size,
+        } = request;
+
+        Zfs::ensure_dataset(DatasetEnsureArgs {
+            name: &delegated_zvol.parent_dataset_name(),
+            // dataset will never be mounted but a unique value is required here
+            // just in case.
+            mountpoint: Mountpoint(
+                delegated_zvol.parent_dataset_mountpoint().into(),
+            ),
+            can_mount: CanMount::Off,
+            zoned: false,
+            // encryption details not required, will inherit from parent
+            // "oxp_UUID/crypt/local_storage", which inherits from
+            // "oxp_UUID/crypt"
+            encryption_details: None,
+            size_details: Some(SizeDetails {
+                quota: Some(dataset_size),
+                reservation: Some(dataset_size),
+                compression: omicron_common::disk::CompressionAlgorithm::Off,
+            }),
+            id: None,
+            additional_options: None,
+        })
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Zfs::ensure_dataset_volume(
+            delegated_zvol.volume_name(),
+            volume_size,
+            delegated_zvol.volblocksize(),
+        )
+        .await
+        .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn delete_local_storage_dataset(
+        &self,
+        zpool_id: ExternalZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> Result<(), HttpError> {
+        // Ensure that the local storage dataset we want to use is still present
+        let present = self
+            .inner
+            .config_reconciler
+            .available_datasets_rx()
+            .all_mounted_local_storage_datasets()
+            .into_iter()
+            .any(|path_in_pool| match path_in_pool.pool {
+                ZpoolOrRamdisk::Zpool(zpool_name) => {
+                    zpool_name == ZpoolName::External(zpool_id)
+                }
+                ZpoolOrRamdisk::Ramdisk => false,
+            });
+
+        if !present {
+            // We cannot destroy a child dataset of the local storage dataset if
+            // it's not present! Return a 503.
+            let error =
+                format!("local storage dataset for pool {zpool_id} missing!");
+            return Err(HttpError::for_unavail(Some(error.clone()), error));
+        }
+
+        let delegated_zvol =
+            DelegatedZvol::LocalStorage { zpool_id, dataset_id };
+
+        Zfs::destroy_dataset(&delegated_zvol.parent_dataset_name())
+            .await
+            .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
+
+        Ok(())
     }
 }
 
