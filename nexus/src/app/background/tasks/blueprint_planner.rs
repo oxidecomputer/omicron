@@ -6,6 +6,8 @@
 
 use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::background::BackgroundTask;
+use anyhow::anyhow;
+use anyhow::bail;
 use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_auth::authz;
@@ -81,6 +83,19 @@ impl BlueprintPlanner {
     /// If it is different from the current target blueprint,
     /// save it and make it the current target.
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
+        match self.plan_impl(opctx).await {
+            Ok(status) => status,
+            Err(error) => {
+                let error = InlineErrorChain::new(&*error);
+                BlueprintPlannerStatus::Error(error.to_string())
+            }
+        }
+    }
+
+    async fn plan_impl(
+        &mut self,
+        opctx: &OpContext,
+    ) -> Result<BlueprintPlannerStatus, anyhow::Error> {
         // Refuse to run if we haven't had a chance to load our config from the
         // database yet. (There might not be a config, which is fine! But the
         // loading task needs to have a chance to check.)
@@ -90,13 +105,13 @@ impl BlueprintPlanner {
                     opctx.log,
                     "reconfigurator config not yet loaded; doing nothing"
                 );
-                return BlueprintPlannerStatus::Disabled;
+                return Ok(BlueprintPlannerStatus::Disabled);
             }
             ReconfiguratorConfigLoaderState::Loaded(config) => config.clone(),
         };
         if !config.config.planner_enabled {
             debug!(&opctx.log, "blueprint planning disabled, doing nothing");
-            return BlueprintPlannerStatus::Disabled;
+            return Ok(BlueprintPlannerStatus::Disabled);
         }
 
         // Get the current target blueprint to use as a parent.
@@ -107,9 +122,7 @@ impl BlueprintPlanner {
                 "blueprint planning skipped";
                 "reason" => "no target blueprint loaded"
             );
-            return BlueprintPlannerStatus::Error(String::from(
-                "no target blueprint to use as parent for planning",
-            ));
+            bail!("no target blueprint to use as parent for planning");
         };
         let (target, parent) = &*loaded;
         let parent_blueprint_id = parent.id;
@@ -125,64 +138,51 @@ impl BlueprintPlanner {
                 "blueprint planning skipped";
                 "reason" => "no inventory collection available"
             );
-            return BlueprintPlannerStatus::Error(String::from(
-                "no inventory collection available",
-            ));
+            bail!("no inventory collection available");
         };
 
         // Assemble the planning context.
-        let input = match PlanningInputFromDb::assemble(
+        let input = PlanningInputFromDb::assemble(
             opctx,
             &self.datastore,
             config.config.planner_config,
         )
         .await
-        {
-            Ok(input) => input,
-            Err(error) => {
-                error!(
-                    &opctx.log,
-                    "can't assemble planning input";
-                    "error" => %error,
-                );
-                return BlueprintPlannerStatus::Error(format!(
-                    "can't assemble planning input: {error}"
-                ));
-            }
-        };
+        .map_err(|error| {
+            error!(
+                &opctx.log,
+                "can't assemble planning input";
+                "error" => %error,
+            );
+            anyhow!("can't assemble planning input: {error}")
+        })?;
 
         // Generate a new blueprint.
-        let planner = match Planner::new_based_on(
+        let planner = Planner::new_based_on(
             opctx.log.clone(),
             &parent,
             &input,
             "blueprint_planner",
             &collection,
             PlannerRng::from_entropy(),
-        ) {
-            Ok(planner) => planner,
-            Err(error) => {
-                error!(
-                    &opctx.log,
-                    "can't make planner";
-                    "error" => %error,
-                    "parent_blueprint_id" => %parent_blueprint_id,
-                );
-                return BlueprintPlannerStatus::Error(format!(
-                    "can't make planner based on {}: {}",
-                    parent_blueprint_id, error
-                ));
-            }
-        };
-        let blueprint = match planner.plan() {
-            Ok(blueprint) => blueprint,
-            Err(error) => {
-                error!(&opctx.log, "can't plan: {error}");
-                return BlueprintPlannerStatus::Error(format!(
-                    "can't plan: {error}"
-                ));
-            }
-        };
+        )
+        .map_err(|error| {
+            error!(
+                &opctx.log,
+                "can't make planner";
+                "error" => %error,
+                "parent_blueprint_id" => %parent_blueprint_id,
+            );
+            anyhow!(
+                "can't make planner based on {}: {}",
+                parent_blueprint_id,
+                error
+            )
+        })?;
+        let blueprint = planner.plan().map_err(|error| {
+            error!(&opctx.log, "can't plan: {error}");
+            anyhow!("can't plan: {error}")
+        })?;
 
         // We just ran the planner, so we should always get its report. This
         // output is for debugging only, though, so just make an empty one in
@@ -216,7 +216,7 @@ impl BlueprintPlanner {
             match self.check_blueprint_limit_reached(opctx, &report).await {
                 Ok(count) => count,
                 Err(status) => {
-                    return status;
+                    return Ok(status);
                 }
             };
 
@@ -230,12 +230,12 @@ impl BlueprintPlanner {
                     "blueprint unchanged from current target";
                     "parent_blueprint_id" => %parent_blueprint_id,
                 );
-                return BlueprintPlannerStatus::Unchanged {
+                return Ok(BlueprintPlannerStatus::Unchanged {
                     parent_blueprint_id,
                     report,
                     blueprint_count,
                     limit: self.blueprint_limit,
-                };
+                });
             }
         }
 
@@ -247,21 +247,17 @@ impl BlueprintPlanner {
             "parent_blueprint_id" => %parent_blueprint_id,
             "blueprint_id" => %blueprint_id,
         );
-        match self.datastore.blueprint_insert(opctx, &blueprint).await {
-            Ok(()) => (),
-            Err(error) => {
+        self.datastore.blueprint_insert(opctx, &blueprint).await.map_err(
+            |error| {
                 error!(
                     &opctx.log,
                     "can't save blueprint";
                     "error" => %error,
                     "blueprint_id" => %blueprint_id,
                 );
-                return BlueprintPlannerStatus::Error(format!(
-                    "can't save blueprint {}: {}",
-                    blueprint_id, error
-                ));
-            }
-        }
+                anyhow!("can't save blueprint {}: {}", blueprint_id, error)
+            },
+        )?;
 
         // Try to make it the current target.
         let target = BlueprintTarget {
@@ -299,27 +295,27 @@ impl BlueprintPlanner {
                         );
                     }
                 }
-                return BlueprintPlannerStatus::Planned {
+                return Ok(BlueprintPlannerStatus::Planned {
                     parent_blueprint_id,
                     error: format!("{error}"),
                     report,
                     blueprint_count,
                     limit: self.blueprint_limit,
-                };
+                });
             }
         }
 
         // We have a new target!
 
         self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
-        BlueprintPlannerStatus::Targeted {
+        Ok(BlueprintPlannerStatus::Targeted {
             parent_blueprint_id,
             blueprint_id,
             report,
             // A new blueprint was added, so increment the count by 1.
             blueprint_count: blueprint_count + 1,
             limit: self.blueprint_limit,
-        }
+        })
     }
 
     async fn check_blueprint_limit_reached(
