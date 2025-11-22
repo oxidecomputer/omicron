@@ -257,7 +257,6 @@ impl DisksByIdBuilder {
         self.add_generic_disk(disk, backend)
     }
 
-    #[allow(unused)] // for now!
     fn add_file_backed_disk(
         &mut self,
         disk: &Disk,
@@ -491,6 +490,15 @@ impl super::Nexus {
 
                     builder.add_crucible_disk(disk, &volume)?;
                 }
+
+                db::datastore::Disk::LocalStorage(local_storage_disk) => {
+                    builder.add_file_backed_disk(
+                        disk,
+                        // Use the delegated zvol as the target for the file
+                        // backed disk
+                        local_storage_disk.zvol_path()?,
+                    )?;
+                }
             }
         }
 
@@ -503,9 +511,6 @@ impl super::Nexus {
         // module's selected device name for the appropriate disk.
         if let Some(boot_disk_id) = instance.boot_disk_id {
             if let Some(disk) = disks.0.get(&boot_disk_id) {
-                // XXX here is where we would restrict the type of disk used for
-                // a boot disk. should we?
-
                 let entry = BootOrderEntry {
                     id: SpecKey::Name(disk.device_name.clone()),
                 };

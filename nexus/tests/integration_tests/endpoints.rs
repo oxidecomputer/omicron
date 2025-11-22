@@ -388,7 +388,7 @@ pub static DEMO_DISK_URL: LazyLock<String> = LazyLock::new(|| {
 });
 pub static DEMO_DISK_CREATE: LazyLock<params::DiskCreate> =
     LazyLock::new(|| {
-        params::DiskCreate {
+        params::DiskCreate::Crucible {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
@@ -408,7 +408,7 @@ pub static DEMO_IMPORT_DISK_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-import-disk".parse().unwrap());
 pub static DEMO_IMPORT_DISK_CREATE: LazyLock<params::DiskCreate> =
     LazyLock::new(|| {
-        params::DiskCreate {
+        params::DiskCreate::Crucible {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_IMPORT_DISK_NAME.clone(),
                 description: "".parse().unwrap(),

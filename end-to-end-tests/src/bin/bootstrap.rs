@@ -95,7 +95,7 @@ async fn run_test() -> Result<()> {
             ctx.client
                 .disk_create()
                 .project(ctx.project_name.clone())
-                .body(DiskCreate {
+                .body(DiskCreate::Crucible {
                     name: disk_name.clone(),
                     description: String::new(),
                     disk_source: DiskSource::Blank {

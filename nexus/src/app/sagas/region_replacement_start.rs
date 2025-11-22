@@ -821,7 +821,10 @@ pub(crate) mod test {
         let disk_id = disk.identity.id;
 
         let Disk::Crucible(disk) =
-            datastore.disk_get(&opctx, disk_id).await.unwrap();
+            datastore.disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let allocated_regions =
             datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
@@ -1136,7 +1139,10 @@ pub(crate) mod test {
         let disk_id = disk.identity.id;
 
         let Disk::Crucible(disk) =
-            datastore.disk_get(&opctx, disk_id).await.unwrap();
+            datastore.disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let allocated_regions =
             datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
@@ -1209,7 +1215,10 @@ pub(crate) mod test {
         let disk_id = disk.identity.id;
 
         let Disk::Crucible(disk) =
-            datastore.disk_get(&opctx, disk_id).await.unwrap();
+            datastore.disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let allocated_regions =
             datastore.get_allocated_regions(disk.volume_id()).await.unwrap();
