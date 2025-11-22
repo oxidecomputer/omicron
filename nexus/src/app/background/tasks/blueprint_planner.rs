@@ -7,7 +7,6 @@
 use super::reconfigurator_config::ReconfiguratorConfigLoaderState;
 use crate::app::background::BackgroundTask;
 use anyhow::anyhow;
-use anyhow::bail;
 use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_auth::authz;
@@ -28,6 +27,15 @@ use serde_json::json;
 use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch::{self, Receiver, Sender};
+
+/// Error type for blueprint planning operations.
+#[derive(Debug, thiserror::Error)]
+enum PlanError {
+    #[error("warning")]
+    Warning(#[source] anyhow::Error),
+    #[error("error")]
+    Error(#[source] anyhow::Error),
+}
 
 /// Background task that runs the update planner.
 pub struct BlueprintPlanner {
@@ -85,9 +93,26 @@ impl BlueprintPlanner {
     pub async fn plan(&mut self, opctx: &OpContext) -> BlueprintPlannerStatus {
         match self.plan_impl(opctx).await {
             Ok(status) => status,
-            Err(error) => {
-                let error = InlineErrorChain::new(&*error);
-                BlueprintPlannerStatus::Error(error.to_string())
+            Err(plan_error) => {
+                match &plan_error {
+                    PlanError::Warning(_) => {
+                        warn!(
+                            &opctx.log,
+                            "blueprint planning skipped";
+                            "error" => InlineErrorChain::new(&plan_error),
+                        );
+                    }
+                    PlanError::Error(_) => {
+                        error!(
+                            &opctx.log,
+                            "blueprint planning failed";
+                            "error" => InlineErrorChain::new(&plan_error),
+                        );
+                    }
+                }
+                BlueprintPlannerStatus::Error(
+                    InlineErrorChain::new(&plan_error).to_string(),
+                )
             }
         }
     }
@@ -95,7 +120,7 @@ impl BlueprintPlanner {
     async fn plan_impl(
         &mut self,
         opctx: &OpContext,
-    ) -> Result<BlueprintPlannerStatus, anyhow::Error> {
+    ) -> Result<BlueprintPlannerStatus, PlanError> {
         // Refuse to run if we haven't had a chance to load our config from the
         // database yet. (There might not be a config, which is fine! But the
         // loading task needs to have a chance to check.)
@@ -117,12 +142,9 @@ impl BlueprintPlanner {
         // Get the current target blueprint to use as a parent.
         // Cloned so that we don't block the channel.
         let Some(loaded) = self.rx_blueprint.borrow_and_update().clone() else {
-            warn!(
-                &opctx.log,
-                "blueprint planning skipped";
-                "reason" => "no target blueprint loaded"
-            );
-            bail!("no target blueprint to use as parent for planning");
+            return Err(PlanError::Warning(anyhow!(
+                "no target blueprint to use as parent for planning"
+            )));
         };
         let (target, parent) = &*loaded;
         let parent_blueprint_id = parent.id;
@@ -133,12 +155,9 @@ impl BlueprintPlanner {
         let Some(collection) =
             self.rx_inventory.borrow_and_update().as_ref().map(Arc::clone)
         else {
-            warn!(
-                &opctx.log,
-                "blueprint planning skipped";
-                "reason" => "no inventory collection available"
-            );
-            bail!("no inventory collection available");
+            return Err(PlanError::Warning(anyhow!(
+                "no inventory collection available"
+            )));
         };
 
         // Assemble the planning context.
@@ -149,12 +168,7 @@ impl BlueprintPlanner {
         )
         .await
         .map_err(|error| {
-            error!(
-                &opctx.log,
-                "can't assemble planning input";
-                "error" => %error,
-            );
-            anyhow!("can't assemble planning input: {error}")
+            PlanError::Error(anyhow!("can't assemble planning input: {error}"))
         })?;
 
         // Generate a new blueprint.
@@ -167,21 +181,14 @@ impl BlueprintPlanner {
             PlannerRng::from_entropy(),
         )
         .map_err(|error| {
-            error!(
-                &opctx.log,
-                "can't make planner";
-                "error" => %error,
-                "parent_blueprint_id" => %parent_blueprint_id,
-            );
-            anyhow!(
+            PlanError::Error(anyhow!(
                 "can't make planner based on {}: {}",
                 parent_blueprint_id,
                 error
-            )
+            ))
         })?;
         let blueprint = planner.plan().map_err(|error| {
-            error!(&opctx.log, "can't plan: {error}");
-            anyhow!("can't plan: {error}")
+            PlanError::Error(anyhow!("can't plan: {error}"))
         })?;
 
         // We just ran the planner, so we should always get its report. This
@@ -249,13 +256,11 @@ impl BlueprintPlanner {
         );
         self.datastore.blueprint_insert(opctx, &blueprint).await.map_err(
             |error| {
-                error!(
-                    &opctx.log,
-                    "can't save blueprint";
-                    "error" => %error,
-                    "blueprint_id" => %blueprint_id,
-                );
-                anyhow!("can't save blueprint {}: {}", blueprint_id, error)
+                PlanError::Error(anyhow!(
+                    "can't save blueprint {}: {}",
+                    blueprint_id,
+                    error
+                ))
             },
         )?;
 
