@@ -3919,7 +3919,7 @@ dependencies = [
  "gateway-messages",
  "hex",
  "hubpack",
- "hubtools",
+ "hubtools 0.4.6",
  "lru-cache",
  "lzss",
  "nix 0.27.1",
@@ -4726,6 +4726,27 @@ dependencies = [
 name = "hubtools"
 version = "0.4.6"
 source = "git+https://github.com/oxidecomputer/hubtools.git?branch=main#cec2560e9a0126e9e687d51b385a57891abc87c3"
+dependencies = [
+ "digest",
+ "hex",
+ "lpc55_areas",
+ "lpc55_sign",
+ "object 0.30.4",
+ "path-slash",
+ "rsa",
+ "thiserror 1.0.69",
+ "tlvc 0.3.1 (git+https://github.com/oxidecomputer/tlvc)",
+ "tlvc-text",
+ "toml 0.7.8",
+ "x509-cert",
+ "zerocopy 0.6.6",
+ "zip 0.6.6",
+]
+
+[[package]]
+name = "hubtools"
+version = "0.4.7"
+source = "git+https://github.com/oxidecomputer/hubtools.git?rev=2b1ef9b38d75563ea800baa3b17327eec17b1b7a#2b1ef9b38d75563ea800baa3b17327eec17b1b7a"
 dependencies = [
  "digest",
  "hex",
@@ -7027,7 +7048,7 @@ dependencies = [
  "gateway-test-utils",
  "gateway-types",
  "http",
- "hubtools",
+ "hubtools 0.4.7",
  "id-map",
  "iddqd",
  "internal-dns-resolver",
@@ -8273,7 +8294,7 @@ dependencies = [
  "http-body-util",
  "httpmock",
  "httptest",
- "hubtools",
+ "hubtools 0.4.7",
  "hyper",
  "hyper-rustls",
  "hyper-staticfile",
@@ -13343,7 +13364,7 @@ dependencies = [
  "gateway-messages",
  "gateway-types",
  "hex",
- "hubtools",
+ "hubtools 0.4.7",
  "nexus-types",
  "nix 0.30.1",
  "omicron-common",
@@ -15033,7 +15054,7 @@ dependencies = [
  "fs-err 2.11.0",
  "futures",
  "hex",
- "hubtools",
+ "hubtools 0.4.6",
  "indent_write",
  "itertools 0.13.0",
  "parse-size",
@@ -15378,7 +15399,7 @@ dependencies = [
  "fs-err 3.1.1",
  "futures",
  "hex",
- "hubtools",
+ "hubtools 0.4.7",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -16069,7 +16090,7 @@ dependencies = [
  "hickory-resolver 0.25.2",
  "http",
  "http-body-util",
- "hubtools",
+ "hubtools 0.4.7",
  "hyper",
  "illumos-utils",
  "installinator",
