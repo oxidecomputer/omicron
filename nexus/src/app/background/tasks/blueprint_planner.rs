@@ -117,7 +117,7 @@ impl BlueprintPlanner {
                         warn!(
                             &opctx.log,
                             "blueprint planning skipped";
-                            error,
+                            &error,
                         );
                     }
                     PlanError::AssemblePlanningInput(_)
@@ -127,7 +127,7 @@ impl BlueprintPlanner {
                         error!(
                             &opctx.log,
                             "blueprint planning failed";
-                            error,
+                            &error,
                         );
                     }
                 }
