@@ -32,13 +32,13 @@ use tokio::sync::watch::{self, Receiver, Sender};
 /// Error type for blueprint planning operations.
 #[derive(Debug, thiserror::Error)]
 enum PlanError {
-    // Warning-level errors
+    // Warning-level problems
     #[error("no target blueprint available")]
     NoTargetBlueprint,
     #[error("no inventory collection available")]
     NoInventoryCollection,
 
-    // Error-level errors
+    // Error-level problems
     #[error("failed to assemble planning input")]
     AssemblePlanningInput(#[source] Error),
     #[error("failed to make planner")]
