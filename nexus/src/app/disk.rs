@@ -300,8 +300,8 @@ impl super::Nexus {
 
         let disk_created = saga_outputs
             .lookup_node_output::<db::datastore::Disk>("created_disk")
-            .map_err(|e| Error::InteralError {
-                internal_message: format!("{:#}", &e),
+            .map_err(|e| Error::InternalError {
+                internal_message: format!("{e:#}"),
             })
             .internal_context("looking up output from disk create saga")?;
 
@@ -609,8 +609,7 @@ impl super::Nexus {
 
                     _ => Error::InternalError {
                         internal_message: format!(
-                            "error sending bulk write to pantry: {}",
-                            e,
+                            "error sending bulk write to pantry: {e}"
                         ),
                     },
                 },
@@ -698,7 +697,7 @@ impl super::Nexus {
                 datastore::Disk::Crucible(disk) => disk,
 
                 datastore::Disk::LocalStorage(_) => {
-                    return Err(Error::InteralError {
+                    return Err(Error::InternalError {
                         internal_message: format!(
                             "cannot finalize local storage disk {}",
                             authz_disk.id()
