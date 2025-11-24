@@ -76,6 +76,10 @@ use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+// TODO-K: removeme
+use illumos_utils::svcs::Svcs;
+use tokio::task;
+
 /// Simulates management of the control plane on a sled
 ///
 /// The current implementation simulates a server directly in this program.
@@ -791,13 +795,26 @@ impl SledAgent {
         Ok(addr)
     }
 
-    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+    // TODO-K: Remove async
+    pub async fn inventory(
+        &self,
+        addr: SocketAddr,
+    ) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
             }
             SocketAddr::V6(v6) => v6,
         };
+
+        // TODO-K: removeme
+        let smf_services_in_maintenance = task::spawn_blocking(|| {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(Svcs::in_maintenance())
+        })
+        .await
+        .unwrap()
+        .unwrap();
 
         let storage = self.storage.lock();
 
@@ -818,7 +835,7 @@ impl SledAgent {
 
         // TODO-K: check if this is correct, or if I should do something
         // different for a simulated environment
-        let smf_services_in_maintenance = "".to_string();
+        //let smf_services_in_maintenance = "".to_string();
 
         Ok(Inventory {
             sled_id: self.id,

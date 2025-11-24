@@ -704,7 +704,8 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
-    // TODO-K: change the type
+    // TODO-K: change the type. What's the point of this type and also Inventory???
+    // they're the same almost?
     pub smf_services_in_maintenance: String,
 }
 

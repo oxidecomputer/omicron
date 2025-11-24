@@ -590,7 +590,8 @@ pub async fn run_standalone_server(
             }
             SocketAddr::V6(addr) => addr,
         };
-        let inventory = server.sled_agent.inventory(underlay_address.into())?;
+        let inventory =
+            server.sled_agent.inventory(underlay_address.into()).await?;
         let mut all_sleds = IdOrdMap::new();
         all_sleds.insert_overwrite(PlannedSledDescription {
             underlay_address,

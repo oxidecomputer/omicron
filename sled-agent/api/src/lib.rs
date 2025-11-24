@@ -74,6 +74,7 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (11, ADD_SMF_SERVICES_HEALTH_CHECK),
     (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
     (9, DELEGATE_ZVOL_TO_PROPOLIS),
     (8, REMOVE_SLED_ROLE),
@@ -686,6 +687,10 @@ pub trait SledAgentApi {
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError>;
+
+    // TODO-K: Just adding VERSION_ADD_SMF_SERVICES_HEALTH_CHECK above doesn't
+    // seem to work. Looks like I need to create a whole new module and endpoint
+    // for v10_inventory like the others?
 
     /// Fetch basic information about this sled
     #[endpoint {
