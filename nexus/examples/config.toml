@@ -163,6 +163,9 @@ fm.sitrep_load_period_secs = 15
 # is activated every time the current sitrep changes. Periodic activations are
 # only necessary to ensure that it always happens eventually.
 fm.sitrep_gc_period_secs = 600
+# Executing the current sitrep is triggered whenever a new sitrep is loaded,
+# so we need not set the periodic activation interval too high.
+fm.execution_period_secs = 300
 probe_distributor.period_secs = 60
 multicast_reconciler.period_secs = 60
 # TTL for sled-to-backplane-port mapping cache

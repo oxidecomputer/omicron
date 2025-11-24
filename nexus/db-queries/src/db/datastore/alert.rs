@@ -11,6 +11,8 @@ use crate::db::model::AlertClass;
 use crate::db::model::AlertIdentity;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
+use diesel::result::Error as DieselError;
 use diesel::result::OptionalExtension;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
@@ -29,7 +31,7 @@ impl DataStore {
         payload: serde_json::Value,
     ) -> CreateResult<Alert> {
         let conn = self.pool_connection_authorized(&opctx).await?;
-        diesel::insert_into(alert_dsl::alert)
+        let alert = diesel::insert_into(alert_dsl::alert)
             .values(Alert {
                 identity: AlertIdentity::new(id),
                 time_dispatched: None,
@@ -40,7 +42,23 @@ impl DataStore {
             .returning(Alert::as_returning())
             .get_result_async(&*conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| match e {
+                DieselError::DatabaseError(
+                    DatabaseErrorKind::UniqueViolation,
+                    _,
+                ) => Error::conflict(format!("alert ID {id} already exists")),
+                e => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+
+        slog::debug!(
+            &opctx.log,
+            "published alert";
+            "alert_id" => ?id,
+            "alert_class" => %class,
+            "time_created" => ?alert.identity.time_created,
+        );
+
+        Ok(alert)
     }
 
     pub async fn alert_select_next_for_dispatch(

@@ -51,6 +51,7 @@ pub struct BackgroundTasks {
     pub task_webhook_deliverator: Activator,
     pub task_sp_ereport_ingester: Activator,
     pub task_reconfigurator_config_loader: Activator,
+    pub task_fm_execution: Activator,
     pub task_fm_sitrep_loader: Activator,
     pub task_fm_sitrep_gc: Activator,
     pub task_probe_distributor: Activator,
