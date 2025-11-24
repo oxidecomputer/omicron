@@ -1121,10 +1121,8 @@ impl SledAgent {
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
-        // TODO-K: check this works and remove unwraps
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let smf_services_in_maintenance =
-            runtime.block_on(Svcs::in_maintenance()).unwrap();
+        // TODO-K: Get rid of unwrap
+        let smf_services_in_maintenance = Svcs::in_maintenance().await.unwrap();
 
         let ReconcilerInventory {
             disks,

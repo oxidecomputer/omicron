@@ -24,7 +24,6 @@ use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
-use illumos_utils::svcs::Svcs;
 use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
     HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
@@ -791,10 +790,7 @@ impl SledAgent {
 
         // TODO-K: check if this is correct, or if I should do something
         // different for a simulated environment
-        let runtime =
-            tokio::runtime::Runtime::new().context("creating tokio runtime")?;
-        let smf_services_in_maintenance =
-            runtime.block_on(Svcs::in_maintenance())?;
+        let smf_services_in_maintenance = "".to_string();
 
         Ok(Inventory {
             sled_id: self.id,
