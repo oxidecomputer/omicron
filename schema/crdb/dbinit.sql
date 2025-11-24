@@ -6843,7 +6843,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS
 ON omicron.public.fm_sitrep_history (sitrep_id);
 
 CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
-    'power_shelf',
+    'power_shelf'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (

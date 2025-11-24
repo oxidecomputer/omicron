@@ -6,7 +6,6 @@ use crate::AlertClass;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::alert;
-use omicron_uuid_kinds::AlertUuid;
 use serde::{Deserialize, Serialize};
 
 /// A webhook event.

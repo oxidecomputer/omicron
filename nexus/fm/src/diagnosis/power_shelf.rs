@@ -209,8 +209,8 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
             return Ok(());
         };
         let comment = match class {
-            "hw.remove.psu" => "removed",
-            "hw.insert.psu" => "inserted",
+            "hw.remove.psu" => "was removed",
+            "hw.insert.psu" => "was inserted",
             "hw.pwr.pwr_good.good" => "asserted PWR_GOOD",
             "hw.pwr.pwr_good.bad" => "deasserted PWR_GOOD",
             unknown => {
@@ -378,7 +378,7 @@ fn grab_json_value<T: DeserializeOwned>(
     obj: &Value,
     log: &slog::Logger,
 ) -> Option<T> {
-    let v = match obj.get("key") {
+    let v = match obj.get(key) {
         Some(v) => v,
         None => {
             slog::warn!(
@@ -460,6 +460,11 @@ struct PmbusStatus {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::ereport_analysis::test as ereport_test;
+    use nexus_types::fm::ereport::Reporter;
+    use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::EreporterRestartUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
 
     #[test]
     fn test_pwr_bad_ereport() {
@@ -477,7 +482,50 @@ mod test {
     }
 
     #[test]
-    fn test_insert_remove_pwr_good() {
-        todo!()
+    fn test_remove_insert_pwr_good() {
+        const TEST_NAME: &str = "test_remove_insert_pwr_good";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut reporter = ereport_test::SimReporter::new(
+            Reporter::Sp { sp_type: SpType::Power, slot: 0 },
+            EreporterRestartUuid::new_v4(),
+        );
+
+        let (example_system, _) =
+            nexus_reconfigurator_planning::example::ExampleSystemBuilder::new(
+                &logctx.log,
+                TEST_NAME,
+            )
+            .nsleds(2)
+            .build();
+        let mut de = PowerShelfDiagnosis::new(&logctx.log);
+        let mut sitrep =
+            SitrepBuilder::new(&logctx.log, &example_system.collection, None);
+
+        de.analyze_ereport(
+            &mut sitrep,
+            &Arc::new(reporter.parse_ereport(ereport_test::PSU_REMOVE_JSON)),
+        )
+        .expect("analyzing ereport 1 should succeed");
+
+        de.analyze_ereport(
+            &mut sitrep,
+            &Arc::new(reporter.parse_ereport(ereport_test::PSU_INSERT_JSON)),
+        )
+        .expect("analyzing ereport 2 should succeed");
+
+        de.analyze_ereport(
+            &mut sitrep,
+            &Arc::new(reporter.parse_ereport(ereport_test::PSU_PWR_GOOD_JSON)),
+        )
+        .expect("analyzing ereport 3 should succeed");
+
+        de.finish(&mut sitrep).expect("finish should return Ok");
+
+        let sitrep = sitrep.build(OmicronZoneUuid::new_v4());
+
+        // TODO(eliza) ACTUALLY MAKE SOME ASSERTIONS ABOUT THE SITREP
+        eprintln!("{sitrep:#?}");
+
+        logctx.cleanup_successful();
     }
 }
