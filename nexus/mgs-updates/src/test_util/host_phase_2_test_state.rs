@@ -127,7 +127,7 @@ impl HostPhase2TestContext {
             .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
                 dropshot::ClientSpecifiesVersionInHeader::new(
                     omicron_common::api::VERSION_HEADER,
-                    sled_agent_api::VERSION_MULTICAST_SUPPORT,
+                    sled_agent_api::latest_version(),
                 ),
             )))
             .start()
@@ -889,6 +889,21 @@ mod api_impl {
         async fn probes_put(
             _request_context: RequestContext<Self::Context>,
             _body: TypedBody<ProbeSet>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn local_storage_dataset_ensure(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<LocalStoragePathParam>,
+            _body: TypedBody<LocalStorageDatasetEnsureRequest>,
+        ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+            unimplemented!()
+        }
+
+        async fn local_storage_dataset_delete(
+            _request_context: RequestContext<Self::Context>,
+            _path_params: Path<LocalStoragePathParam>,
         ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
             unimplemented!()
         }

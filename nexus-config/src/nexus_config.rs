@@ -14,7 +14,10 @@ use ipnet::Ipv6Net;
 use nexus_types::deployment::ReconfiguratorConfig;
 use omicron_common::address::IPV6_ADMIN_SCOPED_MULTICAST_PREFIX;
 use omicron_common::address::Ipv6Subnet;
+pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX;
+pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
+pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -319,14 +322,6 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
     }
 }
 
-/// Minimum prefix size supported in IPv4 VPC Subnets.
-///
-/// NOTE: This is the minimum _prefix_, which sets the maximum subnet size.
-pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
-
-/// The number of reserved addresses at the beginning of a subnet range.
-pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
-
 impl Tunables {
     fn validate_ipv4_prefix(prefix: u8) -> Result<(), InvalidTunable> {
         let absolute_max: u8 = 32_u8
@@ -352,14 +347,6 @@ impl Tunables {
         }
     }
 }
-
-/// The maximum prefix size by default.
-///
-/// There are 6 Oxide reserved IP addresses, 5 at the beginning for DNS and the
-/// like, and the broadcast address at the end of the subnet. This size provides
-/// room for 2 ** 6 - 6 = 58 IP addresses, which seems like a reasonable size
-/// for the smallest subnet that's still useful in many contexts.
-pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
 
 impl Default for Tunables {
     fn default() -> Self {

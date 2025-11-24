@@ -166,7 +166,7 @@ impl SimConfigBuilder {
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
         active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
-        target_blueprint: Option<&BlueprintTarget>,
+        target_blueprint: &BlueprintTarget,
         all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
@@ -248,6 +248,71 @@ pub enum SimConfigLogEntry {
     Wipe,
 }
 
+impl fmt::Display for SimConfigLogEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SimConfigLogEntry::LoadSerialized(result) => {
+                write!(f, "load serialized:\n{}", result)
+            }
+            SimConfigLogEntry::AddSilo(name) => {
+                write!(f, "add silo {}", name)
+            }
+            SimConfigLogEntry::RemoveSilo(name) => {
+                write!(f, "remove silo {}", name)
+            }
+            SimConfigLogEntry::SetSiloNames(names) => {
+                write!(
+                    f,
+                    "set silo names: {}",
+                    names
+                        .iter()
+                        .map(|n| n.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+            SimConfigLogEntry::SetExternalDnsZoneName(name) => {
+                write!(f, "set external dns zone name: {}", name)
+            }
+            SimConfigLogEntry::SetNumNexus(num) => {
+                write!(f, "set num nexus: {}", num)
+            }
+            SimConfigLogEntry::SetActiveNexusZoneGeneration(generation) => {
+                write!(f, "set active nexus zone generation: {}", generation)
+            }
+            SimConfigLogEntry::SetExplicitActiveNexusZones(zones) => {
+                match zones {
+                    Some(zones) => write!(
+                        f,
+                        "set explicit active nexus zones: {}",
+                        zones
+                            .iter()
+                            .map(|z| z.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => write!(f, "clear explicit active nexus zones"),
+                }
+            }
+            SimConfigLogEntry::SetExplicitNotYetNexusZones(zones) => {
+                match zones {
+                    Some(zones) => write!(
+                        f,
+                        "set explicit not-yet nexus zones: {}",
+                        zones
+                            .iter()
+                            .map(|z| z.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => write!(f, "clear explicit not-yet nexus zones"),
+                }
+            }
+            SimConfigLogEntry::Wipe => write!(f, "wipe"),
+        }
+    }
+}
+
 /// The output of loading a serializable state into a [`SimConfigBuilder`].
 #[derive(Clone, Debug)]
 #[must_use]
@@ -301,7 +366,7 @@ impl SimConfigBuilderInner {
         external_dns_zone_names: Vec<String>,
         silo_names: Vec<Name>,
         active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
-        target_blueprint: Option<&BlueprintTarget>,
+        target_blueprint: &BlueprintTarget,
         all_blueprints: &[Blueprint],
         res: &mut LoadSerializedResultBuilder,
     ) -> LoadSerializedConfigResult {
@@ -403,12 +468,17 @@ impl SimConfigBuilderInner {
 
 fn determine_active_nexus_generation(
     active_nexus_zones: &BTreeSet<OmicronZoneUuid>,
-    target_blueprint: Option<&BlueprintTarget>,
+    target_blueprint: &BlueprintTarget,
     all_blueprints: &[Blueprint],
 ) -> Result<Generation, String> {
-    let Some(target_blueprint) = target_blueprint else {
-        return Err("no target blueprint set".to_string());
-    };
+    // Real systems always have at least one active Nexus zone, but our
+    // simulated system has some cases where we have none at all. We'll never be
+    // able to find the generation matching an empty set, but because this is a
+    // weird edge case that only applies to simulation, it's also fine to
+    // default to "the initial generation".
+    if active_nexus_zones.is_empty() {
+        return Ok(Generation::new());
+    }
 
     let Some(blueprint) =
         all_blueprints.iter().find(|bp| bp.id == target_blueprint.target_id)

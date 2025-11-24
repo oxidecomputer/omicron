@@ -7,6 +7,7 @@
 use std::{fmt, hash::Hash};
 
 use indexmap::IndexMap;
+use omicron_uuid_kinds::{TypedUuid, TypedUuidKind};
 use swrite::{SWrite, swrite};
 
 pub(crate) fn join_comma_or_none<I, T: fmt::Display>(iter: I) -> String
@@ -54,6 +55,35 @@ where
     map.shift_insert(ix, key, value);
 
     Ok(())
+}
+
+/// Displays a prefix of the given UUID string based on whether `verbose` is
+/// true.
+pub struct DisplayUuidPrefix<T: TypedUuidKind> {
+    uuid: TypedUuid<T>,
+    verbose: bool,
+}
+
+impl<T: TypedUuidKind> DisplayUuidPrefix<T> {
+    pub fn new(uuid: TypedUuid<T>, verbose: bool) -> Self {
+        Self { uuid, verbose }
+    }
+}
+
+impl<T: TypedUuidKind> fmt::Display for DisplayUuidPrefix<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.verbose {
+            self.uuid.fmt(f)
+        } else {
+            // We have a pretty small number of states, so for all practical
+            // purposes, the first component of the UUID (8 hex digits, 32 bits)
+            // are sufficient. We could potentially improve this to determine
+            // unique prefixes using a trie and highlight them like Jujutsu
+            // does.
+            let bytes = self.uuid.as_fields();
+            write!(f, "{:08x}", bytes.0)
+        }
+    }
 }
 
 #[derive(Debug)]

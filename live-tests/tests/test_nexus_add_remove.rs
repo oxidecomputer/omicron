@@ -68,7 +68,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let sled_id = *commissioned_sled_ids.first().expect("any sled id");
     let (blueprint1, blueprint2) = blueprint_edit_current_target(
         log,
-        &planning_input,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             // We have to tell the builder what image source to use for the new
@@ -188,7 +187,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     // Now expunge the zone we just created.
     let (_blueprint2, blueprint3) = blueprint_edit_current_target(
         log,
-        &planning_input,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             builder

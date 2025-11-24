@@ -220,6 +220,76 @@ pub struct DestroySnapshotError {
     err: crate::ExecutionError,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum EnsureDatasetVolumeErrorInner {
+    #[error(transparent)]
+    Execution(#[from] crate::ExecutionError),
+
+    #[error(transparent)]
+    GetValue(#[from] GetValueError),
+
+    #[error("value {value_name} parse error: {value} not a number!")]
+    ValueParseError { value_name: String, value: String },
+
+    #[error("expected {value_name} to be {expected}, but saw {actual}")]
+    ValueMismatch { value_name: String, expected: u64, actual: u64 },
+}
+
+/// Error returned by [`Zfs::ensure_dataset_volume`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to ensure volume '{name}': {err}")]
+pub struct EnsureDatasetVolumeError {
+    name: String,
+    #[source]
+    err: EnsureDatasetVolumeErrorInner,
+}
+
+impl EnsureDatasetVolumeError {
+    pub fn execution(name: String, err: crate::ExecutionError) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::Execution(err),
+        }
+    }
+
+    pub fn get_value(name: String, err: GetValueError) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::GetValue(err),
+        }
+    }
+
+    pub fn value_parse(
+        name: String,
+        value_name: String,
+        value: String,
+    ) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::ValueParseError {
+                value_name,
+                value,
+            },
+        }
+    }
+
+    pub fn value_mismatch(
+        name: String,
+        value_name: String,
+        expected: u64,
+        actual: u64,
+    ) -> Self {
+        EnsureDatasetVolumeError {
+            name,
+            err: EnsureDatasetVolumeErrorInner::ValueMismatch {
+                value_name,
+                expected,
+                actual,
+            },
+        }
+    }
+}
+
 /// Wraps commands for interacting with ZFS.
 pub struct Zfs {}
 
@@ -1087,7 +1157,7 @@ impl Zfs {
 
         // We ensure that the currently running process has the ability to
         // act on the underlying mountpoint.
-        if !zoned {
+        if wants_mounting {
             let mut command = Command::new(PFEXEC);
             let user = whoami::username();
             let mount = format!("{mountpoint}");
@@ -1338,6 +1408,88 @@ impl Zfs {
             result[i] = value.to_string();
         }
         Ok(result)
+    }
+
+    pub async fn ensure_dataset_volume(
+        name: String,
+        size: ByteCount,
+        block_size: u32,
+    ) -> Result<(), EnsureDatasetVolumeError> {
+        let mut command = Command::new(PFEXEC);
+        let cmd = command.args(&[ZFS, "create"]);
+
+        cmd.args(&[
+            "-V",
+            &size.to_bytes().to_string(),
+            "-o",
+            &format!("volblocksize={}", block_size),
+            &name,
+        ]);
+
+        // The command to create a dataset is not idempotent and will fail with
+        // "dataset already exists" if the volume is created already. Eat this
+        // and return Ok instead.
+
+        match execute_async(cmd).await {
+            Ok(_) => Ok(()),
+
+            Err(crate::ExecutionError::CommandFailure(info))
+                if info.stderr.contains("dataset already exists") =>
+            {
+                // Validate that the total size and volblocksize are what is
+                // being requested: these cannot be changed once the volume is
+                // created.
+
+                let [actual_size, actual_block_size] =
+                    Self::get_values(&name, &["volsize", "volblocksize"], None)
+                        .await
+                        .map_err(|err| {
+                            EnsureDatasetVolumeError::get_value(
+                                name.clone(),
+                                err,
+                            )
+                        })?;
+
+                let actual_size: u64 = actual_size.parse().map_err(|_| {
+                    EnsureDatasetVolumeError::value_parse(
+                        name.clone(),
+                        String::from("volsize"),
+                        actual_size,
+                    )
+                })?;
+
+                let actual_block_size: u32 =
+                    actual_block_size.parse().map_err(|_| {
+                        EnsureDatasetVolumeError::value_parse(
+                            name.clone(),
+                            String::from("volblocksize"),
+                            actual_block_size,
+                        )
+                    })?;
+
+                if actual_size != size.to_bytes() {
+                    return Err(EnsureDatasetVolumeError::value_mismatch(
+                        name.clone(),
+                        String::from("volsize"),
+                        size.to_bytes(),
+                        actual_size,
+                    ));
+                }
+
+                if actual_block_size != block_size {
+                    return Err(EnsureDatasetVolumeError::value_mismatch(
+                        name.clone(),
+                        String::from("volblocksize"),
+                        u64::from(block_size),
+                        u64::from(actual_block_size),
+                    ));
+                }
+
+                Ok(())
+            }
+
+            Err(err) => Err(EnsureDatasetVolumeError::execution(name, err)),
+        }
     }
 }
 

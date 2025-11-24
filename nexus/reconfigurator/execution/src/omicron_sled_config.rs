@@ -97,6 +97,7 @@ mod tests {
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::REPO_DEPOT_PORT;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::shared::DatasetKind;
@@ -109,6 +110,7 @@ mod tests {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use std::net::Ipv6Addr;
     use std::net::SocketAddr;
 
     type ControlPlaneTestContext =
@@ -259,6 +261,7 @@ mod tests {
 
         let sled_config = BlueprintSledConfig {
             state: SledState::Active,
+            subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
             sled_agent_generation: sim_sled_agent_config_generation.next(),
             disks,
             datasets,

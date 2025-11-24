@@ -67,22 +67,16 @@
 //! after a clean slate upon failure.
 //! See <https://github.com/oxidecomputer/omicron/issues/7174> for details.
 
-use super::plan::service::SledConfig;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::rack_setup::plan::service::{
-    Plan as ServicePlan, PlanError as ServicePlanError,
-};
+use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
-use anyhow::{Context, anyhow, bail};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use chrono::Utc;
 use dns_service_client::DnsError;
-use iddqd::IdOrdMap;
 use internal_dns_resolver::Resolver as DnsResolver;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
@@ -93,19 +87,11 @@ use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventoryResult, HostPhase2DesiredSlots, OmicronSledConfig,
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
-use nexus_types::deployment::{
-    Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
-    BlueprintHostPhase2DesiredSlots, BlueprintSledConfig, BlueprintSource,
-    BlueprintZoneType, CockroachDbPreserveDowngrade, OximeterReadMode,
-    PendingMgsUpdates, blueprint_zone_type,
-};
-use nexus_types::external_api::views::SledState;
+use nexus_types::deployment::{BlueprintZoneType, blueprint_zone_type};
 use ntp_admin_client::{
     Client as NtpAdminClient, Error as NtpAdminError, types::TimeSync,
 };
-use omicron_common::address::{
-    COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT, get_sled_address,
-};
+use omicron_common::address::{COCKROACH_ADMIN_PORT, NTP_ADMIN_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
@@ -115,9 +101,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::DatasetKind;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -136,13 +120,16 @@ use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
-use std::collections::{BTreeMap, BTreeSet, btree_map};
+use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
+
+pub(crate) use crate::rack_setup::plan::service::Plan as ServicePlan;
+pub(crate) use crate::rack_setup::plan::service::PlannedSledDescription;
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
@@ -576,7 +563,9 @@ impl ServiceInner {
         zone_configs: &HashMap<SocketAddrV6, OmicronZonesConfig>,
     ) -> Result<(), SetupServiceError> {
         cancel_safe_futures::future::join_all_then_try(
-            plan.services.iter().map(|(sled_address, config)| async move {
+            plan.all_sleds.iter().map(|sled_description| async move {
+                let sled_address = &sled_description.underlay_address;
+                let config = &sled_description.config;
                 let zones_config = zone_configs
                     .get(sled_address)
                     .ok_or_else(|| {
@@ -622,35 +611,31 @@ impl ServiceInner {
         &self,
         service_plan: &ServicePlan,
     ) -> Result<(), SetupServiceError> {
+        use blueprint_zone_type::InternalDns;
+
         let log = &self.log;
 
         // Determine the list of DNS servers that are supposed to exist based on
         // the service plan that has just been deployed.
-        let dns_server_ips =
-            // iterate sleds
-            service_plan.services.iter().filter_map(
-                |(_, sled_config)| {
-                    // iterate zones for this sled
-                    let dns_addrs: Vec<SocketAddrV6> = sled_config
-                        .zones
-                        .iter()
-                        .filter_map(|zone_config| {
-                            match &zone_config.zone_type {
-                                BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns{ http_address, .. })
-                                => {
-                                    Some(*http_address)
-                                },
-                                _ => None,
-                            }
-                        })
-                        .collect();
-                    if !dns_addrs.is_empty() {
-                        Some(dns_addrs)
-                    } else {
-                        None
-                    }
-                }
-            )
+        let dns_server_ips = service_plan
+            .all_sleds
+            .iter()
+            .map(|sled_description| &sled_description.config)
+            .filter_map(|sled_config| {
+                // iterate zones for this sled
+                let dns_addrs: Vec<SocketAddrV6> = sled_config
+                    .zones
+                    .iter()
+                    .filter_map(|zone_config| match &zone_config.zone_type {
+                        BlueprintZoneType::InternalDns(InternalDns {
+                            http_address,
+                            ..
+                        }) => Some(*http_address),
+                        _ => None,
+                    })
+                    .collect();
+                if !dns_addrs.is_empty() { Some(dns_addrs) } else { None }
+            })
             .flatten()
             .collect::<Vec<SocketAddrV6>>();
 
@@ -778,16 +763,22 @@ impl ServiceInner {
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Handing off control to Nexus");
 
-        // Remap our plan into an easier-to-use type...
-        let sled_configs_by_id =
-            build_sled_configs_by_id(sled_plan, service_plan)
-                .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
-        // ... and use that to derive the initial blueprint from our plan.
-        let blueprint = build_initial_blueprint_from_plan(
-            &sled_configs_by_id,
-            service_plan,
-        )
-        .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
+        // Convert `service_plan` into the initial blueprint for the system.
+        let blueprint = service_plan
+            .to_blueprint(
+                // This is a bit of a hack. We only construct a blueprint after
+                // completing RSS, so we need to know the final generation value
+                // sent to all sleds. Arguably, we should record this in
+                // `service_plan`; however, that doesn't match how we use it:
+                // `service_plan` contains the final set of configs on
+                // constructing, then as we run RSS we send sleds a filtered
+                // down config at earlier generations. We know that the final
+                // config sent to all sleds used `V5_EVERYTHING` (i.e., "don't
+                // filter anything out"), so use that as the generation for all
+                // sled configs in the blueprint, too.
+                DeployStepVersion::V5_EVERYTHING,
+            )
+            .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
         info!(
             self.log,
@@ -995,29 +986,33 @@ impl ServiceInner {
         };
         info!(self.log, "rack_network_config: {:#?}", rack_network_config);
 
-        let physical_disks: Vec<_> = sled_configs_by_id
+        let physical_disks: Vec<_> = service_plan
+            .all_sleds
             .iter()
-            .flat_map(|(sled_id, config)| {
-                config.disks.iter().map(|config| {
+            .flat_map(|sled_description| {
+                sled_description.config.disks.iter().map(|config| {
                     NexusTypes::PhysicalDiskPutRequest {
                         id: config.id,
                         vendor: config.identity.vendor.clone(),
                         serial: config.identity.serial.clone(),
                         model: config.identity.model.clone(),
                         variant: NexusTypes::PhysicalDiskKind::U2,
-                        sled_id: sled_id.into_untyped_uuid(),
+                        sled_id: sled_description.sled_id.into_untyped_uuid(),
                     }
                 })
             })
             .collect();
 
-        let zpools = sled_configs_by_id
+        let zpools = service_plan
+            .all_sleds
             .iter()
-            .flat_map(|(sled_id, config)| {
-                config.disks.iter().map(|config| NexusTypes::ZpoolPutRequest {
-                    id: config.pool_id.into_untyped_uuid(),
-                    physical_disk_id: config.id,
-                    sled_id: sled_id.into_untyped_uuid(),
+            .flat_map(|sled_description| {
+                sled_description.config.disks.iter().map(|config| {
+                    NexusTypes::ZpoolPutRequest {
+                        id: config.pool_id.into_untyped_uuid(),
+                        physical_disk_id: config.id,
+                        sled_id: sled_description.sled_id.into_untyped_uuid(),
+                    }
                 })
             })
             .collect();
@@ -1102,8 +1097,9 @@ impl ServiceInner {
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
         let crdb_admin_address = service_plan
-            .services
-            .values()
+            .all_sleds
+            .iter()
+            .map(|sled_description| &sled_description.config)
             .flat_map(|sled_config| sled_config.zones.iter())
             .find_map(|zone_config| match &zone_config.zone_type {
                 BlueprintZoneType::CockroachDb(cockroach_db) => {
@@ -1365,8 +1361,9 @@ impl ServiceInner {
         // Wait until time is synchronized on all sleds before proceeding.
         rss_step.update(RssStep::WaitForTimeSync);
         let ntp_addresses: Vec<_> = service_plan
-            .services
-            .values()
+            .all_sleds
+            .iter()
+            .map(|sled_description| &sled_description.config)
             .map(|sled_config| {
                 sled_config
                     .zones
@@ -1506,162 +1503,6 @@ impl DeployStepVersion {
     const V5_EVERYTHING: Generation = Self::V4_COCKROACHDB.next();
 }
 
-// Build a map of sled ID to `SledConfig` based on the two plan types we
-// generate. This is a bit of a code smell (why doesn't the plan generate this
-// on its own if we need it?); we should be able to get rid of it when
-// we get to https://github.com/oxidecomputer/omicron/issues/5272.
-fn build_sled_configs_by_id(
-    sled_plan: &SledPlan,
-    service_plan: &ServicePlan,
-) -> anyhow::Result<BTreeMap<SledUuid, SledConfig>> {
-    let mut sled_configs = BTreeMap::new();
-    for sled_request in sled_plan.sleds.values() {
-        let sled_addr = get_sled_address(sled_request.body.subnet);
-        let sled_id = sled_request.body.id;
-        let entry = match sled_configs.entry(sled_id) {
-            btree_map::Entry::Vacant(entry) => entry,
-            btree_map::Entry::Occupied(_) => {
-                bail!(
-                    "duplicate sled address found while deriving blueprint: \
-                     {sled_addr}"
-                );
-            }
-        };
-        let sled_config =
-            service_plan.services.get(&sled_addr).with_context(|| {
-                format!(
-                    "missing services in plan for sled {sled_id} ({sled_addr})"
-                )
-            })?;
-        entry.insert(sled_config.clone());
-    }
-
-    if sled_configs.len() != service_plan.services.len() {
-        bail!(
-            "error mapping service plan to sled IDs; converted {} sled \
-             addresses into {} sled configs",
-            service_plan.services.len(),
-            sled_configs.len(),
-        );
-    }
-
-    Ok(sled_configs)
-}
-
-// Build an initial blueprint
-fn build_initial_blueprint_from_plan(
-    sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
-    service_plan: &ServicePlan,
-) -> anyhow::Result<Blueprint> {
-    build_initial_blueprint_from_sled_configs(
-        sled_configs_by_id,
-        service_plan.dns_config.generation,
-    )
-}
-
-pub(crate) fn build_initial_blueprint_from_sled_configs(
-    sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
-    internal_dns_version: Generation,
-) -> anyhow::Result<Blueprint> {
-    let mut blueprint_sleds = BTreeMap::new();
-    for (sled_id, sled_config) in sled_configs_by_id {
-        let mut datasets = IdOrdMap::new();
-        for d in sled_config.datasets.values() {
-            // Only the "Crucible" dataset needs to know the address
-            let address = if *d.name.kind() == DatasetKind::Crucible {
-                let address = sled_config.zones.iter().find_map(|z| {
-                    if let BlueprintZoneType::Crucible(
-                        blueprint_zone_type::Crucible { address, dataset },
-                    ) = &z.zone_type
-                    {
-                        if &dataset.pool_name == d.name.pool() {
-                            return Some(*address);
-                        }
-                    };
-                    None
-                });
-                if address.is_some() {
-                    address
-                } else {
-                    bail!(
-                        "could not find Crucible zone for zpool {}",
-                        d.name.pool()
-                    )
-                }
-            } else {
-                None
-            };
-
-            datasets
-                .insert_unique(BlueprintDatasetConfig {
-                    disposition: BlueprintDatasetDisposition::InService,
-                    id: d.id,
-                    pool: *d.name.pool(),
-                    kind: d.name.kind().clone(),
-                    address,
-                    compression: d.inner.compression,
-                    quota: d.inner.quota,
-                    reservation: d.inner.reservation,
-                })
-                .map_err(|e| anyhow!(InlineErrorChain::new(&e).to_string()))?;
-        }
-
-        blueprint_sleds.insert(
-            *sled_id,
-            BlueprintSledConfig {
-                state: SledState::Active,
-                // This is a bit of a hack. We only construct a blueprint after
-                // completing RSS, so we need to know the final generation value
-                // sent to all sleds. Arguably, we should record this in the
-                // serialized RSS plan; however, we have already deployed
-                // systems that did not. We know that every such system used
-                // `V5_EVERYTHING` as the final generation count, so we can just
-                // use that value here. If we ever change this, in particular in
-                // a way where newly-deployed systems will have a different
-                // value, we will need to revisit storing this in the serialized
-                // RSS plan.
-                sled_agent_generation: DeployStepVersion::V5_EVERYTHING,
-                disks: sled_config.disks.clone(),
-                datasets,
-                zones: sled_config.zones.clone(),
-                host_phase_2: BlueprintHostPhase2DesiredSlots::current_contents(
-                ),
-                remove_mupdate_override: None,
-            },
-        );
-    }
-
-    let id = BlueprintUuid::new_v4();
-    Ok(Blueprint {
-        id,
-        sleds: blueprint_sleds,
-        pending_mgs_updates: PendingMgsUpdates::new(),
-        parent_blueprint_id: None,
-        internal_dns_version,
-        // We don't configure external DNS during RSS, so set it to an initial
-        // generation of 1. Nexus will bump this up when it updates external DNS
-        // (including creating the recovery silo).
-        external_dns_version: Generation::new(),
-        target_release_minimum_generation: Generation::new(),
-        nexus_generation: Generation::new(),
-        // Nexus will fill in the CockroachDB values during initialization.
-        cockroachdb_fingerprint: String::new(),
-        cockroachdb_setting_preserve_downgrade:
-            CockroachDbPreserveDowngrade::DoNotModify,
-        // We do not create clickhouse clusters in RSS. We create them via
-        // reconfigurator only.
-        clickhouse_cluster_config: None,
-        // The oximeter read policy always defaults to single node. The
-        // initial generation of this policy in the DB is 1
-        oximeter_read_mode: OximeterReadMode::SingleNode,
-        oximeter_read_version: Generation::new(),
-        time_created: Utc::now(),
-        creator: "RSS".to_string(),
-        comment: "initial blueprint from rack setup".to_string(),
-        source: BlueprintSource::Rss,
-    })
-}
-
 /// Facilitates creating a sequence of OmicronZonesConfig objects for each sled
 /// in a service plan to enable phased rollout of services
 ///
@@ -1686,11 +1527,11 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
         initial_version: Generation,
     ) -> Self {
         let last_configs = service_plan
-            .services
-            .keys()
-            .map(|sled_address| {
+            .all_sleds
+            .iter()
+            .map(|sled_description| {
                 (
-                    *sled_address,
+                    sled_description.underlay_address,
                     OmicronZonesConfig {
                         generation: initial_version,
                         zones: vec![],
@@ -1720,9 +1561,11 @@ impl<'a> OmicronZonesConfigGenerator<'a> {
     ) -> OmicronZonesConfigGenerator<'a> {
         let last_configs = self
             .service_plan
-            .services
+            .all_sleds
             .iter()
-            .map(|(sled_address, sled_config)| {
+            .map(|sled_description| {
+                let sled_address = &sled_description.underlay_address;
+                let sled_config = &sled_description.config;
                 let mut zones = match self.last_configs.get(sled_address) {
                     Some(config) => {
                         assert!(version > config.generation);
@@ -1863,10 +1706,7 @@ mod test {
         let g1 = Generation::new();
         let v1 =
             OmicronZonesConfigGenerator::initial_version(&service_plan, g1);
-        assert_eq!(
-            service_plan.services.keys().len(),
-            v1.sled_configs().keys().len()
-        );
+        assert_eq!(service_plan.all_sleds.len(), v1.sled_configs().len());
         for (_, configs) in v1.sled_configs() {
             assert_eq!(configs.generation, g1);
             assert!(configs.zones.is_empty());
@@ -1960,7 +1800,13 @@ mod test {
             v6_nfound += config.zones.len();
             assert_eq!(
                 config.zones.len(),
-                service_plan.services.get(sled_address).unwrap().zones.len()
+                service_plan
+                    .all_sleds
+                    .get(sled_address)
+                    .unwrap()
+                    .config
+                    .zones
+                    .len()
             );
         }
         assert!(v6_nfound > v5_nfound);
@@ -1975,28 +1821,13 @@ mod test {
         let fake_sleds = make_fake_sleds();
 
         let rss_config = Config::test_config();
-        let use_trust_quorum = false;
-        let sled_plan = SledPlan::create(
-            &logctx.log,
-            &rss_config,
-            fake_sleds
-                .iter()
-                .map(|sled_info| *sled_info.sled_address.ip())
-                .collect(),
-            use_trust_quorum,
-        );
         let service_plan =
             ServicePlan::create_transient(&rss_config, fake_sleds)
                 .expect("created service plan");
 
-        let sled_configs_by_id =
-            build_sled_configs_by_id(&sled_plan, &service_plan)
-                .expect("built sled configs");
-        let blueprint = build_initial_blueprint_from_plan(
-            &sled_configs_by_id,
-            &service_plan,
-        )
-        .expect("built blueprint");
+        let blueprint = service_plan
+            .to_blueprint(DeployStepVersion::V5_EVERYTHING)
+            .expect("built blueprint");
 
         let report = Blippy::new_blueprint_only(&blueprint)
             .into_report(BlippyReportSortKey::Kind);

@@ -1120,4 +1120,39 @@ impl SledAgentApi for SledAgentImpl {
         request_context.context().set_probes(body.into_inner().probes);
         Ok(HttpResponseUpdatedNoContent())
     }
+
+    async fn local_storage_dataset_ensure(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let path_params = path_params.into_inner();
+        let request = body.into_inner();
+
+        sa.create_local_storage_dataset(
+            path_params.zpool_id,
+            path_params.dataset_id,
+            request,
+        )
+        .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn local_storage_dataset_delete(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let path_params = path_params.into_inner();
+
+        sa.delete_local_storage_dataset(
+            path_params.zpool_id,
+            path_params.dataset_id,
+        )
+        .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
 }

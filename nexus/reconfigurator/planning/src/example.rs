@@ -13,6 +13,7 @@ use std::net::Ipv4Addr;
 
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_editor::ExternalNetworkingAllocator;
+use crate::planner::Planner;
 use crate::planner::rng::PlannerRng;
 use crate::system::RotStateOverrides;
 use crate::system::SledBuilder;
@@ -535,9 +536,8 @@ impl ExampleSystemBuilder {
 
         let base_input = input_builder.clone().build();
 
-        // Start with an empty blueprint containing only our sleds, no zones.
-        let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
-            base_input.all_sled_ids(SledFilter::Commissioned),
+        // Start with an empty blueprint.
+        let initial_blueprint = BlueprintBuilder::build_empty_seeded(
             "test suite",
             rng.blueprint1_rng,
         );
@@ -546,11 +546,11 @@ impl ExampleSystemBuilder {
         let mut builder = BlueprintBuilder::new_based_on(
             &self.log,
             &initial_blueprint,
-            &base_input,
             "test suite",
             rng.blueprint2_rng,
         )
         .unwrap();
+        Planner::update_builder_from_planning_input(&mut builder, &base_input);
 
         let discretionary_sled_count =
             base_input.all_sled_ids(SledFilter::Discretionary).count();
@@ -749,6 +749,24 @@ impl ExampleSystemBuilder {
                     input_builder
                         .add_omicron_zone_external_ip(service_id, external_ip)
                         .expect("failed to add Omicron zone external IP");
+                    // TODO-completess: Support dual-stack Omicron zone NICs.
+                    // See https://github.com/oxidecomputer/omicron/issues/9314
+                    assert!(
+                        !nic.ip_config.is_dual_stack(),
+                        "Dual-stack OmicronZoneNics are not yet supported"
+                    );
+                    let ip = nic
+                        .ip_config
+                        .ipv4_addr()
+                        .copied()
+                        .map(IpAddr::V4)
+                        .unwrap_or_else(|| {
+                            nic.ip_config
+                                .ipv6_addr()
+                                .copied()
+                                .map(IpAddr::V6)
+                                .expect("must have at least one IP address")
+                        });
                     input_builder
                         .add_omicron_zone_nic(
                             service_id,
@@ -756,7 +774,7 @@ impl ExampleSystemBuilder {
                                 // TODO-cleanup use `TypedUuid` everywhere
                                 id: VnicUuid::from_untyped_uuid(nic.id),
                                 mac: nic.mac,
-                                ip: nic.ip,
+                                ip,
                                 slot: nic.slot,
                                 primary: nic.primary,
                             },

@@ -118,10 +118,19 @@ impl super::DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
 
-            let mut interface: NetworkInterface =
-                interface.into_internal(db_subnet.ipv4_block.0.into());
+            let interface = NetworkInterface {
+                vni: vni.0,
+                ..interface.into_internal(
+                    db_subnet.ipv4_block.0,
+                    db_subnet.ipv6_block.0,
+                )?
+            };
 
-            interface.vni = vni.0;
+            // TODO ProbeInfo still uses version 1 of the network interface. We
+            // need to support version 2, which allows dual-stack IP
+            // configurations.
+            // See https://github.com/oxidecomputer/omicron/issues/9248.
+            let interface = interface.try_into()?;
 
             result.push(ProbeInfo {
                 id: probe.id(),
@@ -162,9 +171,17 @@ impl super::DataStore {
 
         let vni = self.resolve_vpc_to_vni(opctx, interface.vpc_id).await?;
 
-        let mut interface: NetworkInterface =
-            interface.into_internal(db_subnet.ipv4_block.0.into());
-        interface.vni = vni.0;
+        let interface = NetworkInterface {
+            vni: vni.0,
+            ..interface
+                .into_internal(db_subnet.ipv4_block.0, db_subnet.ipv6_block.0)?
+        };
+
+        // TODO ProbeInfo still uses version 1 of the network interface. We
+        // need to support version 2, which allows dual-stack IP
+        // configurations.
+        // See https://github.com/oxidecomputer/omicron/issues/9248.
+        let interface = interface.try_into()?;
 
         Ok(ProbeInfo {
             id: probe.id(),
@@ -382,6 +399,7 @@ impl super::DataStore {
                 external_ip::dsl::kind,
                 nexus_db_model::NetworkInterface::as_select(),
                 vpc_subnet::dsl::ipv4_block,
+                vpc_subnet::dsl::ipv6_block,
                 vpc::dsl::vni,
             ))
             .get_results_async::<(
@@ -391,14 +409,13 @@ impl super::DataStore {
                 nexus_db_model::SqlU16,
                 nexus_db_model::IpKind,
                 nexus_db_model::NetworkInterface,
-                // TODO: Need to extract IPv6 block when we support dual-stack
-                // external IP addresses. See
-                // https://github.com/oxidecomputer/omicron/issues/9318.
                 nexus_db_model::Ipv4Net,
+                nexus_db_model::Ipv6Net,
                 nexus_db_model::Vni,
             )>(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map(|rows| {
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .and_then(|rows| {
                 rows.into_iter()
                     .map(
                         |(
@@ -409,6 +426,7 @@ impl super::DataStore {
                             kind,
                             nic,
                             ipv4_block,
+                            ipv6_block,
                             vni,
                         )| {
                             let kind = db_ip_kind_to_sled(kind);
@@ -421,18 +439,17 @@ impl super::DataStore {
                                 }];
                             let interface = NetworkInterface {
                                 vni: vni.0,
-                                ..nic.into_internal((*ipv4_block).into())
+                                ..nic.into_internal(*ipv4_block, *ipv6_block)?
                             };
-                            ProbeCreate {
+                            Ok(ProbeCreate {
                                 id: ProbeUuid::from_untyped_uuid(probe_id),
                                 external_ips,
                                 interface,
-                            }
+                            })
                         },
                     )
-                    .collect()
+                    .collect::<Result<_, _>>()
             })
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Remove a probe from the data store.

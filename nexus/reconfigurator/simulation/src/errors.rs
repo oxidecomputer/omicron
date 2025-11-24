@@ -4,8 +4,11 @@
 
 use std::collections::BTreeSet;
 
+use indent_write::indentable::Indentable as _;
 use itertools::Itertools;
 use omicron_common::api::external::{Generation, Name};
+use omicron_uuid_kinds::ReconfiguratorSimUuid;
+use swrite::{SWrite, swriteln};
 use thiserror::Error;
 
 use crate::{
@@ -105,10 +108,6 @@ impl KeyError {
         Self { id: ObjectId::Collection(id) }
     }
 
-    pub(crate) fn blueprint(id: BlueprintId) -> Self {
-        Self { id: ObjectId::Blueprint(id) }
-    }
-
     pub(crate) fn resolved_collection(id: ResolvedCollectionId) -> Self {
         Self { id: ObjectId::ResolvedCollection(id) }
     }
@@ -161,4 +160,49 @@ impl UnknownZoneNamesError {
     pub(crate) fn new(unknown: Vec<String>, known: BTreeSet<String>) -> Self {
         Self { unknown, known }
     }
+}
+
+/// A state that matched a prefix query.
+#[derive(Clone, Debug)]
+pub struct StateMatch {
+    /// The state ID.
+    pub id: ReconfiguratorSimUuid,
+    /// The state generation.
+    pub generation: Generation,
+    /// The state description.
+    pub description: String,
+}
+
+/// Error when resolving a state ID.
+#[derive(Clone, Debug, Error)]
+pub enum StateIdResolveError {
+    /// No state found with the given prefix.
+    #[error("no state found with prefix '{0}'")]
+    NoMatch(String),
+
+    /// Multiple states found with the given prefix.
+    #[error("prefix '{prefix}' is ambiguous: matches {count} states\n{}", format_matches(.matches))]
+    Ambiguous { prefix: String, count: usize, matches: Vec<StateMatch> },
+
+    /// State not found by ID.
+    #[error("state not found: {0}")]
+    NotFound(ReconfiguratorSimUuid),
+}
+
+fn format_matches(matches: &[StateMatch]) -> String {
+    let mut output = String::new();
+    for state_match in matches {
+        swriteln!(
+            output,
+            "  - {} generation {}:",
+            state_match.id,
+            state_match.generation
+        );
+        swriteln!(
+            output,
+            "{}",
+            state_match.description.trim_end().indented("    ")
+        );
+    }
+    output
 }

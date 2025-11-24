@@ -66,6 +66,8 @@ use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_PORT;
@@ -80,6 +82,7 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
@@ -996,6 +999,13 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .mac_addrs
             .next()
             .expect("ran out of MAC addresses");
+        let ip_config = PrivateIpConfig::new_ipv4(
+            NEXUS_OPTE_IPV4_SUBNET
+                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
+                .unwrap(),
+            *NEXUS_OPTE_IPV4_SUBNET,
+        )
+        .unwrap();
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
@@ -1019,20 +1029,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 lockstep_port,
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
-                    ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
-                        .unwrap()
-                        .into(),
                     kind: NetworkInterfaceKind::Service {
                         id: id.into_untyped_uuid(),
                     },
                     mac,
                     name: format!("nexus-{}", id).parse().unwrap(),
+                    ip_config,
                     primary: true,
                     slot: 0,
-                    subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
                     vni: Vni::SERVICES_VNI,
-                    transit_ips: vec![],
                 },
                 nexus_generation: Generation::new(),
             }),
@@ -1166,14 +1171,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         )
         .await;
 
-        let external_server_addr =
-            server.get_http_server_external_address().await;
+        let external_server_addr = server.get_http_server_external_address();
         let techport_external_server_addr =
-            server.get_http_server_techport_address().await;
-        let internal_server_addr =
-            server.get_http_server_internal_address().await;
-        let lockstep_server_addr =
-            server.get_http_server_lockstep_address().await;
+            server.get_http_server_techport_address();
+        let internal_server_addr = server.get_http_server_internal_address();
+        let lockstep_server_addr = server.get_http_server_lockstep_address();
         let testctx_external = ClientTestContext::new(
             external_server_addr,
             self.logctx
@@ -1371,6 +1373,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let internal_ip = NTP_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let private_ip_config =
+            PrivateIpConfig::new_ipv4(internal_ip, *NTP_OPTE_IPV4_SUBNET)
+                .unwrap();
         let external_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let address = format!("[::1]:{NTP_PORT}").parse().unwrap(); // localhost
         let zone_id = OmicronZoneUuid::new_v4();
@@ -1396,16 +1401,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         kind: NetworkInterfaceKind::Service {
                             id: zone_id.into_untyped_uuid(),
                         },
-                        ip: internal_ip.into(),
+                        ip_config: private_ip_config,
                         mac,
                         name: format!("boundary-ntp-{zone_id}")
                             .parse()
                             .unwrap(),
                         primary: true,
                         slot: 0,
-                        subnet: (*NTP_OPTE_IPV4_SUBNET).into(),
                         vni: Vni::SERVICES_VNI,
-                        transit_ips: vec![],
                     },
                     external_ip: OmicronZoneExternalSnatIp {
                         id: ExternalIpUuid::new_v4(),
@@ -1475,6 +1478,24 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .to_string()
             .parse()
             .unwrap();
+
+        let ip_config = if dns.dns_server.local_address().is_ipv4() {
+            PrivateIpConfig::new_ipv4(
+                DNS_OPTE_IPV4_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+                    .unwrap(),
+                *DNS_OPTE_IPV4_SUBNET,
+            )
+            .unwrap()
+        } else {
+            PrivateIpConfig::new_ipv6(
+                DNS_OPTE_IPV6_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u128 + 1)
+                    .unwrap(),
+                *DNS_OPTE_IPV6_SUBNET,
+            )
+            .unwrap()
+        };
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
@@ -1489,10 +1510,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     http_address: dropshot_address,
                     nic: NetworkInterface {
                         id: Uuid::new_v4(),
-                        ip: DNS_OPTE_IPV4_SUBNET
-                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
-                            .unwrap()
-                            .into(),
                         kind: NetworkInterfaceKind::Service {
                             id: zone_id.into_untyped_uuid(),
                         },
@@ -1500,11 +1517,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         name: format!("external-dns-{}", zone_id)
                             .parse()
                             .unwrap(),
+                        ip_config,
                         primary: true,
                         slot: 0,
-                        subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
                         vni: Vni::SERVICES_VNI,
-                        transit_ips: vec![],
                     },
                 },
             ),
@@ -1708,6 +1724,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                     sled_agent_generation,
                     disks,
                     datasets,
