@@ -21,6 +21,7 @@ pub struct Svcs {}
 impl Svcs {
     /// Lists SMF services in maintenance
     // TODO-K: Do not return a string
+    // TODO-K: change to not running?
     pub async fn in_maintenance() -> Result<String, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Zxv"]);
@@ -33,6 +34,7 @@ impl Svcs {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Information about an SMF service in maintenance
+// TODO-K: change to not running?
 pub struct SvcInMaintenance {
     fmri: String,
     zone: String,
@@ -92,22 +94,31 @@ impl SvcInMaintenance {
                 // is not part of the fmri?
                 current_svc.fmri = line.to_string();
             } else {
-                // TODO-K: get rid of the unwrap
-                let (key, value) = line.split_once(": ").unwrap();
-                match key {
-                    "Zone" => current_svc.zone = value.to_string(),
-                    "State" => current_svc.state = value.to_string(),
-                    "Reason" => current_svc.reason = value.to_string(),
-                    // TODO-K: I know this is wrong, find a better way
-                    "See" => current_svc.additional_info.push_str(value),
-                    "Impact" => {
-                        current_svc.impact = value.to_string();
-                        // This should be the last line for each service, add
-                        // the service to the vector.
-                        svcs.push(current_svc.clone());
+                if let Some((key, value)) = line.split_once(": ") {
+                    match key.trim() {
+                        "Zone" => current_svc.zone = value.to_string(),
+                        // TODO-K: Only add if state is maintenance? Or add any
+                        // state and decice on a layer above if we want to only
+                        // keep maintenance ones
+                        "State" => current_svc.state = value.to_string(),
+                        "Reason" => current_svc.reason = value.to_string(),
+                        // TODO-K: I know this is wrong, find a better way
+                        // make into a vec
+                        "See" => current_svc.additional_info.push_str(value),
+                        "Impact" => {
+                            current_svc.impact = value.to_string();
+                            // This should be the last line for each service, add
+                            // the service to the vector.
+                            svcs.push(current_svc.clone());
+                        }
+                        // TODO-K: Should this really be an error or should I just log?
+                        _ => {
+                            return Err(ExecutionError::ParseFailure(format!(
+                                "Failed to parse: {}",
+                                key
+                            )));
+                        }
                     }
-                    // TODO-K: Should this really be an error or should I just log?
-                    _ => return Err(ExecutionError::ParseFailure("OHNO".to_string()))
                 }
             }
         }
@@ -123,5 +134,53 @@ impl Display for SvcInMaintenance {
         write!(f, "reason: {}", self.reason)?;
         write!(f, "impact: {}", self.impact)?;
         write!(f, "see: {}", self.additional_info)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_svc_maintenance_parse() {
+        let output = r#"svc:/site/fake-service:default (?)
+  Zone: global
+ State: maintenance since Mon Nov 24 06:57:19 2025
+Reason: Restarting too quickly.
+   See: http://illumos.org/msg/SMF-8000-L5
+   See: /var/svc/log/site-fake-service:default.log
+Impact: This service is not running.
+
+svc:/system/omicron/baseline:default (Omicron brand baseline generation)
+  Zone: global
+ State: maintenance since Mon Nov 24 05:39:49 2025
+Reason: Start method failed repeatedly, last died on Killed (9).
+   See: http://illumos.org/msg/SMF-8000-KS
+   See: man -M /usr/share/man -s 7 omicron1
+   See: /var/svc/log/system-omicron-baseline:default.log
+Impact: This service is not running."#;
+
+        let services = SvcInMaintenance::parse(output.as_bytes()).unwrap();
+
+        // We want to make sure we only have two entries
+        assert_eq!(services.len(), 2);
+
+        assert_eq!(services[0], SvcInMaintenance{
+            fmri: "svc:/site/fake-service:default (?)".to_string(),
+            zone: "global".to_string(),
+            state: "maintenance since Mon Nov 24 06:57:19 2025".to_string(),
+            reason: "Restarting too quickly.".to_string(),
+            additional_info: "http://illumos.org/msg/SMF-8000-L5/var/svc/log/site-fake-service:default.log".to_string(),
+            impact: "This service is not running.".to_string(),
+        });
+
+        assert_eq!(services[1], SvcInMaintenance{
+            fmri: "svc:/system/omicron/baseline:default (Omicron brand baseline generation)".to_string(),
+            zone: "global".to_string(),
+            state: "maintenance since Mon Nov 24 05:39:49 2025".to_string(),
+            reason: "Start method failed repeatedly, last died on Killed (9).".to_string(),
+            additional_info: "http://illumos.org/msg/SMF-8000-KSman -M /usr/share/man -s 7 omicron1/var/svc/log/system-omicron-baseline:default.log".to_string(),
+            impact: "This service is not running.".to_string(),
+        });
     }
 }
