@@ -810,7 +810,7 @@ impl SledAgent {
         // TODO-K: removeme
         let smf_services_in_maintenance = task::spawn_blocking(|| {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(Svcs::in_maintenance())
+            rt.block_on(Svcs::enabled_not_running())
         })
         .await
         .unwrap()

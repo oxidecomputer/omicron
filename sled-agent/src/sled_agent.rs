@@ -1131,7 +1131,9 @@ impl SledAgent {
             self.inner.services.zone_image_resolver().status().to_inventory();
 
         // TODO-K: Get rid of unwrap
-        let smf_services_in_maintenance = Svcs::in_maintenance().await.unwrap();
+        // TODO-K: Filter out the ones just in maintenance?
+        let smf_services_in_maintenance =
+            Svcs::enabled_not_running().await.unwrap();
 
         let ReconcilerInventory {
             disks,

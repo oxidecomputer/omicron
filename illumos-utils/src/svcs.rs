@@ -22,7 +22,7 @@ impl Svcs {
     /// Lists SMF services in maintenance
     // TODO-K: Do not return a string
     // TODO-K: change to not running?
-    pub async fn in_maintenance() -> Result<String, ExecutionError> {
+    pub async fn enabled_not_running() -> Result<String, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Zxv"]);
         let output = execute_async(cmd).await?;
@@ -31,33 +31,34 @@ impl Svcs {
     }
 }
 
+// TODO-K: Write enum for possible states
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-/// Information about an SMF service in maintenance
-// TODO-K: change to not running?
-pub struct SvcInMaintenance {
+/// Information about an SMF service that is enabled but not running
+pub struct SvcNotRunning {
     fmri: String,
     zone: String,
     state: String,
     reason: String,
     impact: String,
-    additional_info: String,
+    additional_info: Vec<String>,
 }
 
-impl SvcInMaintenance {
-    fn new() -> SvcInMaintenance {
-        SvcInMaintenance {
+impl SvcNotRunning {
+    fn new() -> SvcNotRunning {
+        SvcNotRunning {
             fmri: "".to_string(),
             zone: "".to_string(),
             state: "".to_string(),
             reason: "".to_string(),
             impact: "".to_string(),
-            additional_info: "".to_string(),
+            additional_info: vec![],
         }
     }
     // TODO-K: Should probably add a logger here to print out the data
     // in case the output is not in the format we expect it to be
-    fn parse(data: &[u8]) -> Result<Vec<SvcInMaintenance>, ExecutionError> {
+    fn parse(data: &[u8]) -> Result<Vec<SvcNotRunning>, ExecutionError> {
         let mut svcs = vec![];
         // TODO-K: handle the case where we get an empty line or whatever
         if data.is_empty() {
@@ -83,16 +84,19 @@ impl SvcInMaintenance {
         //    See: /var/svc/log/system-omicron-baseline:default.log
         // Impact: This service is not running.
         let s = String::from_utf8_lossy(data);
-        let mut current_svc = SvcInMaintenance::new();
+        let mut current_svc = SvcNotRunning::new();
         let lines = s.trim().lines();
         for line in lines {
-            // TODO-K: Account for the empty line between services
             if line.starts_with("svc:") {
                 // This is a new service, wipe the slate clean
-                current_svc = SvcInMaintenance::new();
-                // TODO-K: perhaps remove the stuff between the parenthesis that
-                // is not part of the fmri?
-                current_svc.fmri = line.to_string();
+                current_svc = SvcNotRunning::new();
+                // We remove the text inside the parenthesis that is not part
+                // of the fmri. As we are already checking that the line starts
+                // with "svc:" there should be no risk of there being nothing
+                // in the line
+                if let Some(fmri) = line.split_whitespace().next() {
+                    current_svc.fmri = fmri.to_string()
+                };
             } else {
                 if let Some((key, value)) = line.split_once(": ") {
                     match key.trim() {
@@ -102,9 +106,9 @@ impl SvcInMaintenance {
                         // keep maintenance ones
                         "State" => current_svc.state = value.to_string(),
                         "Reason" => current_svc.reason = value.to_string(),
-                        // TODO-K: I know this is wrong, find a better way
-                        // make into a vec
-                        "See" => current_svc.additional_info.push_str(value),
+                        "See" => {
+                            current_svc.additional_info.push(value.to_string())
+                        }
                         "Impact" => {
                             current_svc.impact = value.to_string();
                             // This should be the last line for each service, add
@@ -120,20 +124,23 @@ impl SvcInMaintenance {
                         }
                     }
                 }
+                // TODO-K: If none, should I log the line if not empty?
             }
         }
         Ok(svcs)
     }
 }
 
-impl Display for SvcInMaintenance {
+impl Display for SvcNotRunning {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "FMRI: {}", self.fmri)?;
         write!(f, "zone: {}", self.zone)?;
         write!(f, "state: {}", self.state)?;
         write!(f, "reason: {}", self.reason)?;
-        write!(f, "impact: {}", self.impact)?;
-        write!(f, "see: {}", self.additional_info)
+        for info in &self.additional_info {
+            write!(f, "see: {}", info)?;
+        }
+        write!(f, "impact: {}", self.impact)
     }
 }
 
@@ -142,8 +149,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_svc_maintenance_parse() {
-        let output = r#"svc:/site/fake-service:default (?)
+    fn test_svc_not_running_parse() {
+        let output = r#"svc:/site/fake-service:default
   Zone: global
  State: maintenance since Mon Nov 24 06:57:19 2025
 Reason: Restarting too quickly.
@@ -160,27 +167,43 @@ Reason: Start method failed repeatedly, last died on Killed (9).
    See: /var/svc/log/system-omicron-baseline:default.log
 Impact: This service is not running."#;
 
-        let services = SvcInMaintenance::parse(output.as_bytes()).unwrap();
+        let services = SvcNotRunning::parse(output.as_bytes()).unwrap();
 
         // We want to make sure we only have two entries
         assert_eq!(services.len(), 2);
 
-        assert_eq!(services[0], SvcInMaintenance{
-            fmri: "svc:/site/fake-service:default (?)".to_string(),
-            zone: "global".to_string(),
-            state: "maintenance since Mon Nov 24 06:57:19 2025".to_string(),
-            reason: "Restarting too quickly.".to_string(),
-            additional_info: "http://illumos.org/msg/SMF-8000-L5/var/svc/log/site-fake-service:default.log".to_string(),
-            impact: "This service is not running.".to_string(),
-        });
+        assert_eq!(
+            services[0],
+            SvcNotRunning {
+                fmri: "svc:/site/fake-service:default".to_string(),
+                zone: "global".to_string(),
+                state: "maintenance since Mon Nov 24 06:57:19 2025".to_string(),
+                reason: "Restarting too quickly.".to_string(),
+                additional_info: vec![
+                    "http://illumos.org/msg/SMF-8000-L5".to_string(),
+                    "/var/svc/log/site-fake-service:default.log".to_string(),
+                ],
+                impact: "This service is not running.".to_string(),
+            }
+        );
 
-        assert_eq!(services[1], SvcInMaintenance{
-            fmri: "svc:/system/omicron/baseline:default (Omicron brand baseline generation)".to_string(),
-            zone: "global".to_string(),
-            state: "maintenance since Mon Nov 24 05:39:49 2025".to_string(),
-            reason: "Start method failed repeatedly, last died on Killed (9).".to_string(),
-            additional_info: "http://illumos.org/msg/SMF-8000-KSman -M /usr/share/man -s 7 omicron1/var/svc/log/system-omicron-baseline:default.log".to_string(),
-            impact: "This service is not running.".to_string(),
-        });
+        assert_eq!(
+            services[1],
+            SvcNotRunning {
+                fmri: "svc:/system/omicron/baseline:default".to_string(),
+                zone: "global".to_string(),
+                state: "maintenance since Mon Nov 24 05:39:49 2025".to_string(),
+                reason:
+                    "Start method failed repeatedly, last died on Killed (9)."
+                        .to_string(),
+                additional_info: vec![
+                    "http://illumos.org/msg/SMF-8000-KS".to_string(),
+                    "man -M /usr/share/man -s 7 omicron1".to_string(),
+                    "/var/svc/log/system-omicron-baseline:default.log"
+                        .to_string(),
+                ],
+                impact: "This service is not running.".to_string(),
+            }
+        );
     }
 }
