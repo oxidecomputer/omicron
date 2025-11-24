@@ -930,6 +930,10 @@ pub struct FmTasksConfig {
     /// garbage collects unneeded fault management sitreps in the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_gc_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// executes actions requested in the current situation report.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub execution_period_secs: Duration,
 }
 
 impl Default for FmTasksConfig {
@@ -940,6 +944,9 @@ impl Default for FmTasksConfig {
             // time the current sitrep changes, and activating it more
             // frequently won't make things more responsive.
             sitrep_gc_period_secs: Duration::from_secs(600),
+            // This, too, is activated whenever a new sitrep is loaded, so we
+            // need not set the periodic activation interval too high.
+            execution_period_secs: Duration::from_secs(300),
         }
     }
 }
@@ -1281,6 +1288,7 @@ mod test {
             fm.sitrep_gc_period_secs = 49
             probe_distributor.period_secs = 50
             multicast_reconciler.period_secs = 60
+            fm.execution_period_secs = 51
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1529,6 +1537,7 @@ mod test {
                         fm: FmTasksConfig {
                             sitrep_load_period_secs: Duration::from_secs(48),
                             sitrep_gc_period_secs: Duration::from_secs(49),
+                            execution_period_secs: Duration::from_secs(51),
                         },
                         probe_distributor: ProbeDistributorConfig {
                             period_secs: Duration::from_secs(50),
@@ -1640,6 +1649,7 @@ mod test {
             fm.sitrep_load_period_secs = 45
             fm.sitrep_gc_period_secs = 46
             probe_distributor.period_secs = 47
+            fm.execution_period_secs = 48
             multicast_reconciler.period_secs = 60
 
             [default_region_allocation_strategy]

@@ -23,7 +23,7 @@ pub struct SitrepLoader {
     tx: watch::Sender<CurrentSitrep>,
 }
 
-type CurrentSitrep = Option<Arc<(SitrepVersion, Sitrep)>>;
+pub type CurrentSitrep = Option<Arc<(SitrepVersion, Sitrep)>>;
 
 impl BackgroundTask for SitrepLoader {
     fn activate<'a>(
