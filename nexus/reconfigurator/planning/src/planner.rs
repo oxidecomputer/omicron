@@ -2599,13 +2599,15 @@ pub(crate) mod test {
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
     use crate::example::example;
-    use crate::system::SledBuilder;
     use chrono::DateTime;
     use chrono::Utc;
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
+    use nexus_reconfigurator_blippy::Blippy;
+    use nexus_reconfigurator_blippy::BlippyReportSortKey;
+    use nexus_reconfigurator_simulation::BlueprintId;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
     use nexus_types::deployment::BlueprintArtifactVersion;
@@ -2652,10 +2654,12 @@ pub(crate) mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use oxnet::Ipv6Net;
+    use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
     use semver::Version;
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeMap;
     use std::collections::HashMap;
+    use std::mem;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
@@ -2687,6 +2691,37 @@ pub(crate) mod test {
                 _ => None,
             })
             .collect::<BTreeSet<_>>()
+    }
+
+    #[track_caller]
+    pub(crate) fn assert_sim_planning_makes_no_changes(
+        sim: &mut ReconfiguratorCliTestState,
+    ) {
+        sim.run(&["blueprint-plan latest latest"]).unwrap();
+        let blueprint = sim.blueprint(BlueprintId::Latest).unwrap();
+        let input = sim.planning_input(BlueprintId::Latest).unwrap();
+        verify_blueprint(blueprint, &input);
+
+        let summary = sim.blueprint_diff_parent(BlueprintId::Latest).unwrap();
+        assert_eq!(summary.diff.sleds.added.len(), 0);
+        assert_eq!(summary.diff.sleds.removed.len(), 0);
+        assert_eq!(summary.diff.sleds.modified().count(), 0);
+    }
+
+    /// Checks various conditions that should be true for all blueprints
+    #[track_caller]
+    pub fn verify_sim_latest_blueprint(sim: &ReconfiguratorCliTestState) {
+        let blueprint = sim.blueprint(BlueprintId::Latest).unwrap();
+        let planning_input = sim.planning_input(BlueprintId::Latest).unwrap();
+
+        let blippy_report = Blippy::new(blueprint, &planning_input)
+            .into_report(BlippyReportSortKey::Kind);
+        if !blippy_report.notes().is_empty() {
+            eprintln!("{}", blueprint.display());
+            eprintln!("---");
+            eprintln!("{}", blippy_report.display());
+            panic!("expected blippy report for blueprint to have no notes");
+        }
     }
 
     #[track_caller]
@@ -2724,40 +2759,20 @@ pub(crate) mod test {
     fn test_basic_add_sled() {
         static TEST_NAME: &str = "planner_basic_add_sled";
         let logctx = test_setup_log(TEST_NAME);
+        let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
 
         // Use our example system.
-        let mut rng = SimRngState::from_seed(TEST_NAME);
-        let (mut example, blueprint1) = ExampleSystemBuilder::new_with_rng(
-            &logctx.log,
-            rng.next_system_rng(),
-        )
-        .build();
-        verify_blueprint(&blueprint1, &example.input);
-
-        let input = example
-            .system
-            .to_planning_input_builder()
-            .expect("created PlanningInputBuilder")
-            .build();
-
+        sim.run(&["load-example"]).unwrap();
+        let blueprint1 = sim.blueprint(BlueprintId::Latest).unwrap();
         println!("{}", blueprint1.display());
+        verify_sim_latest_blueprint(&sim);
 
         // Now run the planner.  It should do nothing because our initial
         // system didn't have any issues that the planner currently knows how to
         // fix.
-        let blueprint2 = Planner::new_based_on(
-            logctx.log.clone(),
-            &blueprint1,
-            &input,
-            "no-op?",
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, "bp2")),
-        )
-        .expect("failed to create planner")
-        .plan()
-        .expect("failed to plan");
+        sim.run(&["blueprint-plan latest latest"]).unwrap();
+        let summary = sim.blueprint_diff_parent(BlueprintId::Latest).unwrap();
 
-        let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expected no changes):\n{}", summary.display());
         assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
@@ -2772,29 +2787,15 @@ pub(crate) mod test {
         assert_eq!(summary.total_datasets_added(), 0);
         assert_eq!(summary.total_datasets_removed(), 0);
         assert_eq!(summary.total_datasets_modified(), 0);
-        verify_blueprint(&blueprint2, &input);
+        mem::drop(summary);
+        verify_sim_latest_blueprint(&sim);
 
         // Now add a new sled.
-        let mut sled_id_rng = rng.next_sled_id_rng();
-        let new_sled_id = sled_id_rng.next();
-        let _ =
-            example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
-        let input = example.system.to_planning_input_builder().unwrap().build();
+        sim.run(&["sled-add", "blueprint-plan latest latest"]).unwrap();
 
         // Check that the first step is to add an NTP zone
-        let blueprint3 = Planner::new_based_on(
-            logctx.log.clone(),
-            &blueprint2,
-            &input,
-            "test: add NTP?",
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, "bp3")),
-        )
-        .expect("failed to create planner")
-        .plan()
-        .expect("failed to plan");
+        let summary = sim.blueprint_diff_parent(BlueprintId::Latest).unwrap();
 
-        let summary = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
             "2 -> 3 (expect new NTP zone on new sled):\n{}",
             summary.display()
@@ -2811,13 +2812,12 @@ pub(crate) mod test {
         //    + local storage), plus one transient zone root for the NTP zone
         assert_eq!(summary.total_datasets_added(), 31);
 
-        let (&sled_id, sled_added) =
+        let (&&new_sled_id, sled_added) =
             summary.diff.sleds.added.first_key_value().unwrap();
         // We have defined elsewhere that the first generation contains no
         // zones.  So the first one with zones must be newer.  See
         // OmicronZonesConfig::INITIAL_GENERATION.
         assert!(sled_added.sled_agent_generation > Generation::new());
-        assert_eq!(*sled_id, new_sled_id);
         assert_eq!(sled_added.zones.len(), 1);
         assert!(matches!(
             sled_added.zones.first().unwrap().kind(),
@@ -2825,62 +2825,28 @@ pub(crate) mod test {
         ));
         assert_eq!(summary.diff.sleds.removed.len(), 0);
         assert_eq!(summary.diff.sleds.modified().count(), 0);
-        verify_blueprint(&blueprint3, &input);
+        let blueprint3_id = sim.blueprint(BlueprintId::Latest).unwrap().id;
+        mem::drop(summary);
+        verify_sim_latest_blueprint(&sim);
 
         // Check that with no change in inventory, the planner makes no changes.
         // It needs to wait for inventory to reflect the new NTP zone before
         // proceeding.
-        let blueprint4 = Planner::new_based_on(
-            logctx.log.clone(),
-            &blueprint3,
-            &input,
-            "test: add nothing more",
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, "bp4")),
-        )
-        .expect("failed to create planner")
-        .plan()
-        .expect("failed to plan");
-        let summary = blueprint4.diff_since_blueprint(&blueprint3);
-        println!("3 -> 4 (expected no changes):\n{}", summary.display());
-        assert_eq!(summary.diff.sleds.added.len(), 0);
-        assert_eq!(summary.diff.sleds.removed.len(), 0);
-        assert_eq!(summary.diff.sleds.modified().count(), 0);
-        verify_blueprint(&blueprint4, &input);
+        assert_sim_planning_makes_no_changes(&mut sim);
 
         // Now update the inventory to have the requested NTP zone.
-        //
-        // TODO: mutating example.system doesn't automatically update
-        // example.collection -- this should be addressed via API improvements.
-        example
-            .system
-            .sled_set_omicron_config(
-                new_sled_id,
-                blueprint4
-                    .sleds
-                    .get(&new_sled_id)
-                    .expect("blueprint should contain zones for new sled")
-                    .clone()
-                    .into_in_service_sled_config(),
-            )
-            .unwrap();
-        let collection =
-            example.system.to_collection_builder().unwrap().build();
+        sim.run(&[
+            &format!("sled-set {new_sled_id} omicron-config latest"),
+            "inventory-generate",
+            "blueprint-plan latest latest",
+        ])
+        .unwrap();
 
         // Check that the next step is to add Crucible zones
-        let blueprint5 = Planner::new_based_on(
-            logctx.log.clone(),
-            &blueprint3,
-            &input,
-            "test: add Crucible zones?",
-            &collection,
-            PlannerRng::from_seed((TEST_NAME, "bp5")),
-        )
-        .expect("failed to create planner")
-        .plan()
-        .expect("failed to plan");
+        let summary = sim
+            .blueprint_diff(BlueprintId::Id(blueprint3_id), BlueprintId::Latest)
+            .unwrap();
 
-        let summary = blueprint5.diff_since_blueprint(&blueprint3);
         println!("3 -> 5 (expect Crucible zones):\n{}", summary.display());
         assert_contents(
             "tests/output/planner_basic_add_sled_3_5.txt",
@@ -2908,16 +2874,18 @@ pub(crate) mod test {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             }
         }
-        verify_blueprint(&blueprint5, &input);
+        mem::drop(zones_diff);
+        mem::drop(summary);
+        verify_sim_latest_blueprint(&sim);
 
-        // Check that there are no more steps.
-        assert_planning_makes_no_changes(
-            &logctx.log,
-            &blueprint5,
-            &input,
-            &collection,
-            TEST_NAME,
-        );
+        // Check that there are no more steps once the Crucible zones are
+        // deployed.
+        sim.run(&[
+            &format!("sled-set {new_sled_id} omicron-config latest"),
+            "inventory-generate",
+        ])
+        .unwrap();
+        assert_sim_planning_makes_no_changes(&mut sim);
 
         logctx.cleanup_successful();
     }
@@ -6240,7 +6208,7 @@ pub(crate) mod test {
         let not_yet_nexus_zones =
             get_nexus_ids_at_generation(&blueprint, active_generation.next());
 
-        let mut input = std::mem::replace(
+        let mut input = mem::replace(
             &mut example.input,
             nexus_types::deployment::PlanningInputBuilder::empty_input(),
         )
@@ -6635,7 +6603,7 @@ pub(crate) mod test {
         // This is a replacement for the reconfigurator executor, which
         // would normally propagate records for these zones into the
         // database.
-        let mut input = std::mem::replace(
+        let mut input = mem::replace(
             &mut example.input,
             nexus_types::deployment::PlanningInputBuilder::empty_input(),
         )

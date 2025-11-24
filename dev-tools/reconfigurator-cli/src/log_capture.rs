@@ -45,6 +45,15 @@ impl LogCapture {
         (slf, logger)
     }
 
+    /// Create a new `LogCapture` that does not actually capture any logs.
+    ///
+    /// This exists to allow use of functions that require a `LogCapture`
+    /// instance, but when logging is handled by something else (e.g., an outer
+    /// Rust test calling into reconfigurator-cli).
+    pub fn new_noop() -> Self {
+        Self { lines: Arc::new(Mutex::new(Vec::new())) }
+    }
+
     /// Take all buffered log lines out of the `LogCapture`.
     ///
     /// Additional logs emitted after this is called will continue to be
