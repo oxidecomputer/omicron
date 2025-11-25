@@ -22,13 +22,13 @@ use slog_error_chain::InlineErrorChain;
 use std::sync::Arc;
 use tokio::sync::watch;
 
-pub struct FmExecutor {
+pub struct FmRendezvous {
     datastore: Arc<DataStore>,
     sitrep_watcher: watch::Receiver<CurrentSitrep>,
     alert_dispatcher: Activator,
 }
 
-impl BackgroundTask for FmExecutor {
+impl BackgroundTask for FmRendezvous {
     fn activate<'a>(
         &'a mut self,
         opctx: &'a OpContext,
@@ -49,7 +49,7 @@ impl BackgroundTask for FmExecutor {
     }
 }
 
-impl FmExecutor {
+impl FmRendezvous {
     pub fn new(
         datastore: Arc<DataStore>,
         rx: watch::Receiver<CurrentSitrep>,
