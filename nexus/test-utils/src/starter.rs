@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::ControlPlaneTestContext;
-use crate::ControlPlaneTestContextSledAgent;
 use crate::OXIMETER_UUID;
 use crate::PRODUCER_UUID;
 use crate::SLED_AGENT_UUID;
@@ -1398,6 +1397,38 @@ impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
         }
 
         self.blueprint_sleds = Some(blueprint_sleds);
+    }
+}
+
+pub struct ControlPlaneTestContextSledAgent {
+    _storage: camino_tempfile::Utf8TempDir,
+
+    server: sim::Server,
+}
+
+impl ControlPlaneTestContextSledAgent {
+    pub fn sled_agent(&self) -> &Arc<sim::SledAgent> {
+        &self.server.sled_agent
+    }
+
+    pub fn server(&self) -> &sim::Server {
+        &self.server
+    }
+
+    pub fn sled_agent_id(&self) -> SledUuid {
+        self.server.sled_agent.id
+    }
+
+    pub fn local_addr(&self) -> SocketAddr {
+        self.server.http_server.local_addr()
+    }
+
+    pub async fn start_pantry(&mut self) -> &sim::PantryServer {
+        self.server.start_pantry().await
+    }
+
+    pub async fn teardown(self) {
+        self.server.http_server.close().await.unwrap();
     }
 }
 
