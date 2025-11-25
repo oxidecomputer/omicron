@@ -13,7 +13,6 @@ use authn::external::token::HttpAuthnToken;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::Duration;
-use nexus_config::DebugDropboxMode;
 use nexus_config::NexusConfig;
 use nexus_config::OmdbConfig;
 use nexus_config::SchemeName;
@@ -67,8 +66,9 @@ impl ApiContext {
         rack_id: Uuid,
         log: Logger,
         config: &NexusConfig,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<Self, String> {
-        ServerContext::new(rack_id, log, config)
+        ServerContext::new(rack_id, log, config, debug_dropbox)
             .await
             .map(|context| Self { kind: ServerKind::Internal, context })
     }
@@ -133,23 +133,8 @@ impl ServerContext {
         rack_id: Uuid,
         log: Logger,
         config: &NexusConfig,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<Arc<ServerContext>, String> {
-        let debug_dropbox = Arc::new(
-            match config.deployment.debug_dropbox_mode {
-                DebugDropboxMode::Production => {
-                    DebugDropbox::for_real(&log).await
-                }
-                DebugDropboxMode::Test => {
-                    DebugDropbox::for_tests(
-                        &log,
-                        Utf8Path::new("./test-debug-dropbox"),
-                    )
-                    .await
-                }
-            }
-            .map_err(|error| InlineErrorChain::new(&error).to_string())?,
-        );
-
         let nexus_schemes = config
             .pkg
             .authn

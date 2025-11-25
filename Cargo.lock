@@ -7400,6 +7400,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-debug-dropbox",
  "oximeter 0.1.0",
  "oximeter-collector",
  "oximeter-producer",

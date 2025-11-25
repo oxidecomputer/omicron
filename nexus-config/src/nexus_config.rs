@@ -193,8 +193,6 @@ pub struct DeploymentConfig {
     /// Configuration for HTTP clients to external services.
     #[serde(default)]
     pub external_http_clients: ExternalHttpClientConfig,
-    /// Configuration for debug dropbox
-    pub debug_dropbox_mode: DebugDropboxMode,
 }
 
 fn default_techport_external_server_port() -> u16 {
@@ -979,13 +977,6 @@ pub struct ProbeDistributorConfig {
     pub period_secs: Duration,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum DebugDropboxMode {
-    Production,
-    Test,
-}
-
 /// Configuration for a nexus server
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct PackageConfig {
@@ -1206,7 +1197,6 @@ mod test {
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
-            debug_dropbox_mode = "test"
             [deployment.external_http_clients]
             interface = "opte0"
             [deployment.dropshot_external]
@@ -1337,7 +1327,6 @@ mod test {
                         )
                     },
                     database: Database::FromDns,
-                    debug_dropbox_mode: DebugDropboxMode::Test,
                     external_dns_servers: vec![
                         "1.1.1.1".parse().unwrap(),
                         "9.9.9.9".parse().unwrap(),
@@ -1580,7 +1569,6 @@ mod test {
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             techport_external_server_port = 12345
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
-            debug_dropbox_mode = "production"
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024
@@ -1692,7 +1680,6 @@ mod test {
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
-            debug_dropbox_mode = "production"
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024
@@ -1749,7 +1736,6 @@ mod test {
             id = "28b90dc4-c22a-65ba-f49a-f051fe01208f"
             rack_id = "38b90dc4-c22a-65ba-f49a-f051fe01208f"
             external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
-            debug_dropbox_mode = "test"
             [deployment.dropshot_external]
             bind_address = "10.1.2.3:4567"
             default_request_body_max_bytes = 1024

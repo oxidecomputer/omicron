@@ -2390,9 +2390,6 @@ impl ServiceManager {
                         nexus_config::ExternalHttpClientConfig {
                             interface: Some(opte_iface_name.to_string()),
                         },
-
-                    debug_dropbox_mode:
-                        nexus_config::DebugDropboxMode::Production,
                 };
 
                 // Copy the partial config file to the expected

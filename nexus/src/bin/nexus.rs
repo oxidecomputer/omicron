@@ -48,5 +48,30 @@ async fn do_run() -> Result<(), CmdError> {
     let config = NexusConfig::from_file(config_path)
         .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
-    run_server(&config).await.map_err(|err| CmdError::Failure(anyhow!(err)))
+    use slog::Drain;
+    let (drain, registration) =
+        slog_dtrace::with_drain(
+            config.pkg.log.to_logger("nexus").map_err(|message| {
+                format!("initializing logger: {}", message)
+            })?,
+        );
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
+    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
+        let msg = format!("failed to register DTrace probes: {}", e);
+        error!(log, "{}", msg);
+        return CmdError::Failure(anyhow!(msg));
+    } else {
+        debug!(log, "registered DTrace probes");
+    }
+
+    let debug_dropbox = Arc::new(
+        DebugDropbox::for_real(&log)
+            .await
+            .context("creating debug dropbox")
+            .map_err(CmdError::Failure)?,
+    );
+
+    run_server(&config, log, debug_dropbox)
+        .await
+        .map_err(|err| CmdError::Failure(anyhow!(err)))
 }

@@ -41,7 +41,6 @@ address = "[::1]:8123"
 # Identifier for this instance of Nexus
 id = "a4ef738a-1fb0-47b1-9da2-4919c7ec7c7f"
 rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
-debug_dropbox_mode = "test"
 # Since we expect to be the second instance of Nexus running on this system,
 # pick any available port.
 techport_external_server_port = 0

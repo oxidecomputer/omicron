@@ -46,6 +46,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use oxide_debug_dropbox::DebugDropbox;
 use oximeter::types::ProducerRegistry;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
@@ -75,6 +76,7 @@ impl InternalServer {
     pub async fn start(
         config: &NexusConfig,
         log: &Logger,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<InternalServer, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
         info!(log, "setting up nexus server");
@@ -85,6 +87,7 @@ impl InternalServer {
             config.deployment.rack_id,
             ctxlog,
             &config,
+            debug_dropbox,
         )
         .await?;
 
@@ -289,8 +292,10 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
+        debug_dropbox: Arc<DebugDropbox>,
     ) -> Result<InternalServer, String> {
-        let internal_server = InternalServer::start(config, &log).await?;
+        let internal_server =
+            InternalServer::start(config, &log, debug_dropbox).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
         Ok(internal_server)
     }
@@ -510,23 +515,13 @@ impl nexus_test_interface::NexusServer for Server {
 }
 
 /// Run an instance of the Nexus server.
-pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
-    use slog::Drain;
-    let (drain, registration) =
-        slog_dtrace::with_drain(
-            config.pkg.log.to_logger("nexus").map_err(|message| {
-                format!("initializing logger: {}", message)
-            })?,
-        );
-    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
-    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
-        let msg = format!("failed to register DTrace probes: {}", e);
-        error!(log, "{}", msg);
-        return Err(msg);
-    } else {
-        debug!(log, "registered DTrace probes");
-    }
-    let internal_server = InternalServer::start(config, &log).await?;
+pub async fn run_server(
+    config: &NexusConfig,
+    log: slog::Logger,
+    debug_dropbox: Arc<DebugDropbox>,
+) -> Result<(), String> {
+    let internal_server =
+        InternalServer::start(config, &log, debug_dropbox).await?;
     let server = Server::start(internal_server).await?;
     server.wait_for_finish().await
 }
