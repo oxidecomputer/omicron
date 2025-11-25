@@ -1900,7 +1900,7 @@ pub async fn start_oximeter(
 
 /// Creates and starts a producer server.
 ///
-/// Actual producers can be registered with the [`register_producer`]
+/// Actual producers can be registered with the `register_producer`
 /// helper function.
 pub fn start_producer_server(
     nexus_address: SocketAddr,
