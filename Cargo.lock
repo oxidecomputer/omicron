@@ -6899,6 +6899,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "typed-rng",
 ]
 
 [[package]]
