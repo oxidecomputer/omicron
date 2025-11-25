@@ -13,6 +13,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Display;
+use std::str::FromStr;
 use tokio::process::Command;
 
 /// Wraps commands for interacting with interfaces.
@@ -20,8 +21,6 @@ pub struct Svcs {}
 
 impl Svcs {
     /// Lists SMF services in maintenance
-    // TODO-K: Do not return a string
-    // TODO-K: change to not running?
     pub async fn enabled_not_running()
     -> Result<Vec<SvcNotRunning>, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
@@ -32,7 +31,49 @@ impl Svcs {
     }
 }
 
-// TODO-K: Write enum for possible states
+/// Each service instance is always in a well-defined state based on its
+/// dependencies, the results of the execution of its methods, and its potential
+/// contracts events. See https://illumos.org/man/7/smf for more information.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SvcState {
+    /// Initial state for all service instances.
+    Uninitailized,
+    /// The instance is enabled, but not yet running or available to run.
+    Offline,
+    /// The instance is enabled and running or is available to run.
+    Online,
+    /// The instance is enabled and running or available to run. It is, however,
+    /// functioning at a limited capacity in comparison to normal operation.
+    Degraded,
+    /// The instance is enabled, but not able to run.
+    Maintenance,
+    /// The instance is disabled.
+    Disabled,
+    /// Represents a legacy instance that is not managed by the service
+    /// management facility.
+    LegacyRun,
+}
+
+impl FromStr for SvcState {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<SvcState, Self::Err> {
+        match s {
+            "Uninitailized" | "uninitailized" => Ok(SvcState::Uninitailized),
+            "Offline" | "offline" => Ok(SvcState::Offline),
+            "Online" | "online" => Ok(SvcState::Online),
+            "Degraded" | "degraded" => Ok(SvcState::Degraded),
+            "Maintenance" | "maintenance" => Ok(SvcState::Maintenance),
+            "Disabled" | "disabled" => Ok(SvcState::Disabled),
+            "Legacy Run" | "legacy run" | "Legacy run" | "legacy_run"
+            | "legacy-run" => Ok(SvcState::LegacyRun),
+            _ => Err(format!("{s} is not a valid SMF service instance state")),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -40,20 +81,22 @@ impl Svcs {
 pub struct SvcNotRunning {
     fmri: String,
     zone: String,
-    state: String,
+    state: SvcState,
+    // TODO-K: Add state_since or something like that
     reason: String,
     impact: String,
     additional_info: Vec<String>,
 }
 
-// TODO-K: new struct SvcsNot runnig with a IdOrdMap? Parse fn can lived there
+// TODO-K: new struct SvcsNotRunning with a IdOrdMap? Parse fn can lived there
 
 impl SvcNotRunning {
     fn new() -> SvcNotRunning {
         SvcNotRunning {
             fmri: "".to_string(),
             zone: "".to_string(),
-            state: "".to_string(),
+            // TODO-K: Should this be an option?
+            state: SvcState::Uninitailized,
             reason: "".to_string(),
             impact: "".to_string(),
             additional_info: vec![],
@@ -107,7 +150,15 @@ impl SvcNotRunning {
                         // TODO-K: Only add if state is maintenance? Or add any
                         // state and decice on a layer above if we want to only
                         // keep maintenance ones
-                        "State" => current_svc.state = value.to_string(),
+                        "State" => {
+                            if let Some(state) = value.split_whitespace().next()
+                            {
+                                // TODO-K: get rid of unwrap
+                                current_svc.state =
+                                    SvcState::from_str(state).unwrap()
+                            };
+                            // TODO-K: Set the time this state was active
+                        }
                         "Reason" => current_svc.reason = value.to_string(),
                         "See" => {
                             current_svc.additional_info.push(value.to_string())
@@ -136,14 +187,23 @@ impl SvcNotRunning {
 
 impl Display for SvcNotRunning {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "FMRI: {}", self.fmri)?;
-        write!(f, "zone: {}", self.zone)?;
-        write!(f, "state: {}", self.state)?;
-        write!(f, "reason: {}", self.reason)?;
-        for info in &self.additional_info {
+        let SvcNotRunning {
+            fmri,
+            zone,
+            state,
+            reason,
+            impact,
+            additional_info,
+        } = self;
+
+        write!(f, "FMRI: {}", fmri)?;
+        write!(f, "zone: {}", zone)?;
+        write!(f, "state: {:?}", state)?;
+        write!(f, "reason: {}", reason)?;
+        for info in additional_info {
             write!(f, "see: {}", info)?;
         }
-        write!(f, "impact: {}", self.impact)
+        write!(f, "impact: {}", impact)
     }
 }
 
@@ -180,7 +240,7 @@ Impact: This service is not running."#;
             SvcNotRunning {
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "global".to_string(),
-                state: "maintenance since Mon Nov 24 06:57:19 2025".to_string(),
+                state: SvcState::Maintenance,
                 reason: "Restarting too quickly.".to_string(),
                 additional_info: vec![
                     "http://illumos.org/msg/SMF-8000-L5".to_string(),
@@ -195,7 +255,7 @@ Impact: This service is not running."#;
             SvcNotRunning {
                 fmri: "svc:/system/omicron/baseline:default".to_string(),
                 zone: "global".to_string(),
-                state: "maintenance since Mon Nov 24 05:39:49 2025".to_string(),
+                state: SvcState::Maintenance,
                 reason:
                     "Start method failed repeatedly, last died on Killed (9)."
                         .to_string(),
