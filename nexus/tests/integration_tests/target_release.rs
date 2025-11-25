@@ -12,7 +12,6 @@ use http::method::Method;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::{NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::object_get;
-use nexus_test_utils::test_setup;
 use nexus_types::external_api::params::SetTargetReleaseParams;
 use nexus_types::external_api::views;
 use semver::Version;
@@ -24,7 +23,9 @@ use crate::integration_tests::updates::TestTrustRoot;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_set_target_release() -> Result<()> {
     let ctx =
-        test_setup::<omicron_nexus::Server>("get_set_target_release", 0).await;
+        nexus_test_utils::ControlPlaneBuilder::new("get_set_target_release")
+            .start::<omicron_nexus::Server>()
+            .await;
     let client = &ctx.external_client;
     let logctx = &ctx.logctx;
 

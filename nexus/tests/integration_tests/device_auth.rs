@@ -7,7 +7,6 @@ use std::num::NonZeroU32;
 use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::{HttpErrorResponseBody, ResultsPage};
-use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use nexus_auth::authn::USER_TEST_UNPRIVILEGED;
 use nexus_config::NexusConfig;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
@@ -21,7 +20,6 @@ use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest, RequestBuilder},
     resource_helpers::grant_iam,
 };
-use nexus_test_utils::{load_test_config, test_setup_with_config};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, views};
 use nexus_types::external_api::{
@@ -33,7 +31,6 @@ use nexus_types::external_api::{
 use omicron_uuid_kinds::SiloUserUuid;
 
 use http::{StatusCode, header, method::Method};
-use omicron_sled_agent::sim;
 use oxide_client::types::{FleetRole, SiloRole};
 use serde::Deserialize;
 use tokio::time::{Duration, sleep};
@@ -994,34 +991,38 @@ async fn test_admin_logout_deletes_tokens_and_sessions(
 #[tokio::test]
 async fn test_session_list_excludes_expired() {
     // Test with default TTL - session should not be expired
-    let mut config = load_test_config();
-    test_session_list_with_config(&mut config, 1).await;
+    test_session_list_with_config(&|_config| (), 1).await;
 
     // Test with idle TTL = 0 - session should be expired immediately
-    let mut config = load_test_config();
-    config.pkg.console.session_idle_timeout_minutes = 0;
-    test_session_list_with_config(&mut config, 0).await;
+    test_session_list_with_config(
+        &|config| {
+            config.pkg.console.session_idle_timeout_minutes = 0;
+        },
+        0,
+    )
+    .await;
 
     // Test with abs TTL = 0 - session should be expired immediately
-    let mut config = load_test_config();
-    config.pkg.console.session_absolute_timeout_minutes = 0;
-    test_session_list_with_config(&mut config, 0).await;
+    test_session_list_with_config(
+        &|config| {
+            config.pkg.console.session_absolute_timeout_minutes = 0;
+        },
+        0,
+    )
+    .await;
 }
 
 /// Set up a test context with the given config, create a user in the test suite
 /// silo, and create a session, and assert about the length of the session list
 async fn test_session_list_with_config(
-    config: &mut NexusConfig,
+    modify_config: &dyn Fn(&mut NexusConfig) -> (),
     expected_sessions: usize,
 ) {
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_session_list_excludes_expired",
-        config,
-        sim::SimMode::Explicit,
-        None,
-        0,
-        DEFAULT_SP_SIM_CONFIG.into(),
     )
+    .with_modified_default_config(modify_config)
+    .start::<omicron_nexus::Server>()
     .await;
     let testctx = &cptestctx.external_client;
 

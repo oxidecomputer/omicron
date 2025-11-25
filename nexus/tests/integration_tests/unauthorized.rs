@@ -22,7 +22,6 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::TestDataset;
-use nexus_test_utils::test_setup;
 use omicron_common::disk::DatasetKind;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -64,7 +63,9 @@ type DiskTest<'a> =
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_unauthorized() {
     let cptestctx =
-        test_setup::<omicron_nexus::Server>("test_unauthorized", 0).await;
+        nexus_test_utils::ControlPlaneBuilder::new("test_unauthorized")
+            .start::<omicron_nexus::Server>()
+            .await;
 
     let mut disk_test = DiskTest::new(&cptestctx).await;
     let sled_id = cptestctx.first_sled_id();

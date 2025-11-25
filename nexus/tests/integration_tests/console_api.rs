@@ -6,7 +6,6 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use dropshot::ResultsPage;
 use dropshot::test_util::ClientTestContext;
-use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use http::{StatusCode, header, method::Method};
 use nexus_auth::context::OpContext;
 use std::env::current_dir;
@@ -22,7 +21,6 @@ use nexus_test_utils::resource_helpers::create_console_session;
 use nexus_test_utils::resource_helpers::{
     create_silo, grant_iam, object_create,
 };
-use nexus_test_utils::{load_test_config, test_setup_with_config};
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{self, ProjectCreate};
 use nexus_types::external_api::shared::{
@@ -30,7 +28,6 @@ use nexus_types::external_api::shared::{
 };
 use nexus_types::external_api::{shared, views};
 use omicron_common::api::external::{Error, IdentityMetadataCreateParams};
-use omicron_sled_agent::sim;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 
 type ControlPlaneTestContext =
@@ -387,20 +384,16 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 
 #[tokio::test]
 async fn test_absolute_static_dir() {
-    let mut config = load_test_config();
-    config.pkg.console.static_dir =
-        Utf8PathBuf::try_from(current_dir().unwrap())
-            .unwrap()
-            .join("tests/static");
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
-        "test_absolute_static_dir",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        0,
-        DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_absolute_static_dir")
+            .with_modified_default_config(&|config| {
+                config.pkg.console.static_dir =
+                    Utf8PathBuf::try_from(current_dir().unwrap())
+                        .unwrap()
+                        .join("tests/static");
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
     let testctx = &cptestctx.external_client;
 
     // existing file is returned
@@ -941,17 +934,14 @@ async fn expect_redirect(testctx: &ClientTestContext, from: &str, to: &str) {
 /// the session was found but is expired. vs not found at all
 #[tokio::test]
 async fn test_session_idle_timeout_deletes_session() {
-    // set idle timeout to 0 so we can test expiration
-    let mut config = load_test_config();
-    config.pkg.console.session_idle_timeout_minutes = 0;
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_session_idle_timeout_deletes_session",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        0,
-        DEFAULT_SP_SIM_CONFIG.into(),
     )
+    .with_modified_default_config(&|config| {
+        // set idle timeout to 0 so we can test expiration
+        config.pkg.console.session_idle_timeout_minutes = 0;
+    })
+    .start::<omicron_nexus::Server>()
     .await;
     let testctx = &cptestctx.external_client;
 

@@ -25,12 +25,11 @@ pub mod resource_helpers;
 pub mod sql;
 mod starter;
 
+pub use nexus_test::ControlPlaneBuilder;
 pub use nexus_test::ControlPlaneTestContext;
 pub use nexus_test::load_test_config;
 #[cfg(feature = "omicron-dev")]
 pub use nexus_test::omicron_dev_setup_with_config;
-pub use nexus_test::test_setup;
-pub use nexus_test::test_setup_with_config;
 pub use starter::ControlPlaneStarter;
 pub use starter::ControlPlaneTestContextSledAgent;
 pub use starter::register_test_producer;
