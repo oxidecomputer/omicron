@@ -22,12 +22,13 @@ impl Svcs {
     /// Lists SMF services in maintenance
     // TODO-K: Do not return a string
     // TODO-K: change to not running?
-    pub async fn enabled_not_running() -> Result<String, ExecutionError> {
+    pub async fn enabled_not_running()
+    -> Result<Vec<SvcNotRunning>, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Zxv"]);
         let output = execute_async(cmd).await?;
         // TODO-K: handle stderr and acutally parse the output
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        SvcNotRunning::parse(&output.stdout)
     }
 }
 
@@ -44,6 +45,8 @@ pub struct SvcNotRunning {
     impact: String,
     additional_info: Vec<String>,
 }
+
+// TODO-K: new struct SvcsNot runnig with a IdOrdMap? Parse fn can lived there
 
 impl SvcNotRunning {
     fn new() -> SvcNotRunning {

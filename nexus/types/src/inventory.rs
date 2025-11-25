@@ -22,6 +22,7 @@ pub use gateway_types::rot::RotSlot;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use illumos_utils::svcs::SvcNotRunning;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
@@ -704,9 +705,10 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
-    // TODO-K: change the type. What's the point of this type and also Inventory???
+    // TODO-K: What's the point of this type and also sled_agent::Inventory?
     // they're the same almost?
-    pub smf_services_in_maintenance: String,
+    // TODO-K: change for not running? extract only in maintenance?
+    pub smf_services_in_maintenance: Vec<SvcNotRunning>,
 }
 
 impl IdOrdItem for SledAgent {

@@ -4000,7 +4000,7 @@ impl DataStore {
                 last_reconciliation,
                 zone_image_resolver,
                 // TODO-K: Actually query the DB when there is something there
-                smf_services_in_maintenance: "".to_string(),
+                smf_services_in_maintenance: vec![],
             };
             sled_agents
                 .insert_unique(sled_agent)

@@ -356,8 +356,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                // TODO-K: Put something more credible here
-                smf_services_in_maintenance: "".to_string(),
+                smf_services_in_maintenance: vec![],
             }))
         }
 

@@ -15,6 +15,7 @@ use daft::Diffable;
 use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
+use illumos_utils::svcs::SvcNotRunning;
 use indent_write::fmt::IndentWriter;
 use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
 use omicron_common::ledger::Ledgerable;
@@ -128,10 +129,7 @@ pub struct Inventory {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
-    // TODO-K: Possibly a Vec<String>, or create an FMRI type or something?
-    // I think we may also want a timestamp? maybe not as we're already setting
-    // one with the inventory collection
-    pub smf_services_in_maintenance: String,
+    pub smf_services_in_maintenance: Vec<SvcNotRunning>,
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to
