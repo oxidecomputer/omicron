@@ -38,6 +38,97 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+pub struct ControlPlaneBuilder<'a> {
+    // required
+    test_name: &'a str,
+
+    // fields with defaults that are cheap to construct
+    nextra_sled_agents: u16,
+    sim_mode: sim::SimMode,
+    tls_cert: Option<Certificate>,
+    gateway_config_file: Utf8PathBuf,
+
+    // fields with defaults that need to be constructed lazily
+    nexus_config: Option<NexusConfig>,
+}
+
+impl<'a> ControlPlaneBuilder<'a> {
+    pub fn new(test_name: &'a str) -> ControlPlaneBuilder<'a> {
+        ControlPlaneBuilder {
+            test_name,
+            nextra_sled_agents: 0,
+            sim_mode: sim::SimMode::Explicit,
+            tls_cert: None,
+            gateway_config_file: DEFAULT_SP_SIM_CONFIG.into(),
+            nexus_config: None,
+        }
+    }
+
+    pub fn extra_sled_agents(mut self, nextra: u16) -> ControlPlaneBuilder<'a> {
+        self.nextra_sled_agents = nextra;
+        self
+    }
+
+    pub fn sim_mode(
+        mut self,
+        sim_mode: sim::SimMode,
+    ) -> ControlPlaneBuilder<'a> {
+        self.sim_mode = sim_mode;
+        self
+    }
+
+    pub fn tls_cert(
+        mut self,
+        tls_cert: Option<Certificate>,
+    ) -> ControlPlaneBuilder<'a> {
+        self.tls_cert = tls_cert;
+        self
+    }
+
+    pub fn mgs_config_file(
+        mut self,
+        path: Utf8PathBuf,
+    ) -> ControlPlaneBuilder<'a> {
+        self.gateway_config_file = path;
+        self
+    }
+
+    pub fn nexus_config(
+        mut self,
+        config: NexusConfig,
+    ) -> ControlPlaneBuilder<'a> {
+        self.nexus_config = Some(config);
+        self
+    }
+
+    pub fn with_modified_default_config(
+        mut self,
+        f: &dyn Fn(&mut NexusConfig) -> (),
+    ) -> ControlPlaneBuilder<'a> {
+        let mut config = load_test_config();
+        f(&mut config);
+        self.nexus_config = Some(config);
+        self
+    }
+
+    pub async fn start<N: NexusServer>(self) -> ControlPlaneTestContext<N> {
+        let mut nexus_config =
+            self.nexus_config.unwrap_or_else(|| load_test_config());
+        let starter =
+            ControlPlaneStarter::<N>::new(self.test_name, &mut nexus_config);
+        setup_with_config_impl(
+            starter,
+            PopulateCrdb::FromEnvironmentSeed,
+            self.sim_mode,
+            self.tls_cert,
+            self.nextra_sled_agents,
+            self.gateway_config_file,
+            false,
+        )
+        .await
+    }
+}
+
 pub struct ControlPlaneTestContext<N> {
     pub start_time: chrono::DateTime<chrono::Utc>,
     pub external_client: ClientTestContext,
@@ -210,44 +301,6 @@ pub fn load_test_config() -> NexusConfig {
     let config_file_path = Utf8Path::new("tests/config.test.toml");
     NexusConfig::from_file(config_file_path)
         .expect("failed to load config.test.toml")
-}
-
-pub async fn test_setup<N: NexusServer>(
-    test_name: &str,
-    extra_sled_agents: u16,
-) -> ControlPlaneTestContext<N> {
-    let mut config = load_test_config();
-    test_setup_with_config::<N>(
-        test_name,
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        extra_sled_agents,
-        DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await
-}
-
-/// Setup routine to use for tests.
-pub async fn test_setup_with_config<N: NexusServer>(
-    test_name: &str,
-    config: &mut NexusConfig,
-    sim_mode: sim::SimMode,
-    initial_cert: Option<Certificate>,
-    extra_sled_agents: u16,
-    gateway_config_file: Utf8PathBuf,
-) -> ControlPlaneTestContext<N> {
-    let starter = ControlPlaneStarter::<N>::new(test_name, config);
-    setup_with_config_impl(
-        starter,
-        PopulateCrdb::FromEnvironmentSeed,
-        sim_mode,
-        initial_cert,
-        extra_sled_agents,
-        gateway_config_file,
-        false,
-    )
-    .await
 }
 
 /// Setup routine to use for `omicron-dev`. Use [`test_setup_with_config`] for

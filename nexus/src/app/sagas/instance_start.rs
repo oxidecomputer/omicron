@@ -1015,10 +1015,11 @@ mod test {
 
     #[tokio::test]
     async fn should_start_with_dead_switch() {
-        let cptestctx = nexus_test_utils::test_setup::<crate::Server>(
+        let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
             "should_start_with_dead_switch",
-            3,
         )
+        .extra_sled_agents(3)
+        .start::<crate::Server>()
         .await;
 
         let client = &cptestctx.external_client;

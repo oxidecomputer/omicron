@@ -126,10 +126,12 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
         {
             #input_func
 
-            let ctx = ::nexus_test_utils::test_setup::<#which_nexus>(
+            let ctx = ::nexus_test_utils::ControlPlaneBuilder::new(
                 #func_ident_string,
-                #extra_sled_agents,
-            ).await;
+            )
+            .extra_sled_agents(#extra_sled_agents)
+            .start::<#which_nexus>()
+            .await;
             #func_ident(&ctx).await;
             ctx.teardown().await;
         }
