@@ -129,6 +129,9 @@ impl<'a> ControlPlaneBuilder<'a> {
     }
 }
 
+/// Helper for setting up the control plane for testing and accessing its parts
+///
+/// See [`ControlPlaneBuilder`] for setting one up.
 pub struct ControlPlaneTestContext<N> {
     pub start_time: chrono::DateTime<chrono::Utc>,
     pub external_client: ClientTestContext,
@@ -303,7 +306,7 @@ pub fn load_test_config() -> NexusConfig {
         .expect("failed to load config.test.toml")
 }
 
-/// Setup routine to use for `omicron-dev`. Use [`test_setup_with_config`] for
+/// Setup routine to use for `omicron-dev`. Use [`ControlPlaneBuilder`] for
 /// tests.
 ///
 /// The main difference from tests is that this routine ensures the seed tarball
