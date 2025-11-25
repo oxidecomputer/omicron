@@ -59,7 +59,16 @@ pub struct EreportData {
 
 /// Describes the source of an ereport.
 #[derive(
-    Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize,
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+    Hash,
 )]
 #[serde(tag = "reporter")]
 pub enum Reporter {
