@@ -1135,7 +1135,7 @@ impl BackgroundTasksInitializer {
             description:
                 "updates externally visible database tables to match the \
                  current fault management sitrep",
-            period: config.fm.rendezvouz_period_secs,,
+            period: config.fm.rendezvouz_period_secs,
             task_impl: Box::new(fm_rendezvous::FmRendezvous::new(datastore.clone(), sitrep_watcher.clone(), task_alert_dispatcher.clone())),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![Box::new(sitrep_watcher.clone())],
