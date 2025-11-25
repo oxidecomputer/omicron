@@ -9,3 +9,6 @@ pub mod builder;
 pub mod diagnosis;
 pub mod ereport_analysis;
 pub use builder::{CaseBuilder, SitrepBuilder};
+
+#[cfg(test)]
+pub mod test_util;

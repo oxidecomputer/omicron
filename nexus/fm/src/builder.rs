@@ -46,6 +46,8 @@ impl<'a> SitrepBuilder<'a> {
         parent_sitrep: Option<&'a fm::Sitrep>,
         mut rng: SitrepBuilderRng,
     ) -> Self {
+        // TODO(eliza): should the RNG also be seeded with the parent sitrep
+        // UUID and/or the Omicron zone UUID? Hmm.
         let sitrep_id = rng.sitrep_id();
         let log = log.new(slog::o!(
             "sitrep_id" => format!("{sitrep_id:?}"),

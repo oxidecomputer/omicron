@@ -461,10 +461,11 @@ struct PmbusStatus {
 mod test {
     use super::*;
     use crate::ereport_analysis::test as ereport_test;
+    use crate::test_util::FmTest;
+    use chrono::{DateTime, Utc};
     use nexus_types::fm::ereport::Reporter;
-    use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::EreporterRestartUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use std::time::Duration;
 
     #[test]
     fn test_pwr_bad_ereport() {
@@ -483,49 +484,51 @@ mod test {
 
     #[test]
     fn test_remove_insert_pwr_good() {
-        const TEST_NAME: &str = "test_remove_insert_pwr_good";
-        let logctx = test_setup_log(TEST_NAME);
-        let mut reporter = ereport_test::SimReporter::new(
-            Reporter::Sp { sp_type: SpType::Power, slot: 0 },
-            EreporterRestartUuid::new_v4(),
-        );
+        let FmTest { logctx, mut reporters, system_builder, sitrep_rng } =
+            FmTest::new("test_remove_insert_pwr_good");
 
-        let (example_system, _) =
-            nexus_reconfigurator_planning::example::ExampleSystemBuilder::new(
-                &logctx.log,
-                TEST_NAME,
-            )
-            .nsleds(2)
-            .build();
-        let mut de = PowerShelfDiagnosis::new(&logctx.log);
+        let mut reporter = reporters
+            .reporter(Reporter::Sp { sp_type: SpType::Power, slot: 0 });
+        let (example_system, _) = system_builder.nsleds(2).build();
         let mut sitrep = SitrepBuilder::new_with_rng(
             &logctx.log,
             &example_system.collection,
             None,
-            crate::builder::SitrepBuilderRng::from_seed(TEST_NAME),
+            sitrep_rng,
         );
+        // It's the beginning of time!
+        let t0 = DateTime::<Utc>::MIN_UTC;
 
+        let mut de = PowerShelfDiagnosis::new(&logctx.log);
         de.analyze_ereport(
             &mut sitrep,
-            &Arc::new(reporter.parse_ereport(ereport_test::PSU_REMOVE_JSON)),
+            &Arc::new(
+                reporter.parse_ereport(t0, ereport_test::PSU_REMOVE_JSON),
+            ),
         )
         .expect("analyzing ereport 1 should succeed");
 
         de.analyze_ereport(
             &mut sitrep,
-            &Arc::new(reporter.parse_ereport(ereport_test::PSU_INSERT_JSON)),
+            &Arc::new(reporter.parse_ereport(
+                t0 + Duration::from_secs(1),
+                ereport_test::PSU_INSERT_JSON,
+            )),
         )
         .expect("analyzing ereport 2 should succeed");
 
         de.analyze_ereport(
             &mut sitrep,
-            &Arc::new(reporter.parse_ereport(ereport_test::PSU_PWR_GOOD_JSON)),
+            &Arc::new(reporter.parse_ereport(
+                t0 + Duration::from_secs(2),
+                ereport_test::PSU_PWR_GOOD_JSON,
+            )),
         )
         .expect("analyzing ereport 3 should succeed");
 
         de.finish(&mut sitrep).expect("finish should return Ok");
 
-        let sitrep = sitrep.build(OmicronZoneUuid::new_v4());
+        let sitrep = sitrep.build(OmicronZoneUuid::nil());
 
         // TODO(eliza) ACTUALLY MAKE SOME ASSERTIONS ABOUT THE SITREP
         eprintln!("{sitrep:#?}");
