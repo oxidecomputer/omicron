@@ -2599,6 +2599,7 @@ pub(crate) mod test {
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
     use crate::example::example;
+    use crate::system::SledBuilder;
     use chrono::DateTime;
     use chrono::Utc;
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
@@ -2762,7 +2763,7 @@ pub(crate) mod test {
         let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
 
         // Use our example system.
-        sim.run(&["load-example"]).unwrap();
+        sim.load_example(|builder| Ok(builder)).unwrap();
         let blueprint1 = sim.blueprint(BlueprintId::Latest).unwrap();
         println!("{}", blueprint1.display());
         verify_sim_latest_blueprint(&sim);
@@ -2770,9 +2771,7 @@ pub(crate) mod test {
         // Now run the planner.  It should do nothing because our initial
         // system didn't have any issues that the planner currently knows how to
         // fix.
-        sim.run(&["blueprint-plan latest latest"]).unwrap();
-        let summary = sim.blueprint_diff_parent(BlueprintId::Latest).unwrap();
-
+        let (_blueprint2, summary) = sim.run_planner().unwrap();
         println!("1 -> 2 (expected no changes):\n{}", summary.display());
         assert_eq!(summary.diff.sleds.added.len(), 0);
         assert_eq!(summary.diff.sleds.removed.len(), 0);
@@ -2791,10 +2790,17 @@ pub(crate) mod test {
         verify_sim_latest_blueprint(&sim);
 
         // Now add a new sled.
-        sim.run(&["sled-add", "blueprint-plan latest latest"]).unwrap();
+        let mut new_sled_id = None;
+        sim.change_state(|state| {
+            let sled_id = state.rng_mut().next_sled_id();
+            let new_sled = SledBuilder::new().id(sled_id);
+            state.system_mut().description_mut().sled(new_sled)?;
+            new_sled_id = Some(sled_id);
+            Ok(format!("added sled {sled_id}"))
+        }).expect("added sled");
 
         // Check that the first step is to add an NTP zone
-        let summary = sim.blueprint_diff_parent(BlueprintId::Latest).unwrap();
+        let (_blueprint3, summary) = sim.run_planner().unwrap();
 
         println!(
             "2 -> 3 (expect new NTP zone on new sled):\n{}",

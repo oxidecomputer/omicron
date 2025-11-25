@@ -5,15 +5,21 @@
 //! helpers for writing Rust tests that use reconfigurator-cli to drive a
 //! simulated system
 
+use crate::BlueprintIdOpt;
+use crate::BlueprintPlanArgs;
+use crate::CollectionIdOpt;
 use crate::LogCapture;
 use crate::ReconfiguratorSim;
 use crate::TopLevelArgs;
+use crate::cmd_blueprint_plan;
 use crate::process_command;
 use anyhow::Context;
 use anyhow::bail;
 use clap::CommandFactory;
 use clap::FromArgMatches;
+use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_simulation::BlueprintId;
+use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::errors::KeyError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintDiffSummary;
@@ -55,6 +61,52 @@ impl ReconfiguratorCliTestState {
             }
         }
 
+        Ok(())
+    }
+
+    pub fn load_example<F>(&mut self, f: F) -> anyhow::Result<()>
+    where
+        F: FnOnce(ExampleSystemBuilder) -> anyhow::Result<ExampleSystemBuilder>,
+    {
+        if let Some(output) = self.sim.load_example(None, f)? {
+            println!("{output}");
+        }
+
+        Ok(())
+    }
+
+    pub fn run_planner(
+        &mut self,
+    ) -> anyhow::Result<(&Blueprint, BlueprintDiffSummary<'_>)> {
+        if let Some(output) = cmd_blueprint_plan(
+            &mut self.sim,
+            BlueprintPlanArgs {
+                parent_blueprint_id: BlueprintIdOpt::Latest,
+                collection_id: Some(CollectionIdOpt::Latest),
+            },
+        )? {
+            println!("{output}");
+        }
+        let system = self.sim.current_state().system();
+        let blueprint = system
+            .resolve_and_get_blueprint(BlueprintId::Latest)
+            .expect("planning succeeded, so we must have a latest blueprint");
+        let parent_id = BlueprintId::Id(blueprint.parent_blueprint_id.expect(
+            "planning succeeded, so we must have had a parent blueprint",
+        ));
+        let parent = system
+            .resolve_and_get_blueprint(parent_id)
+            .expect("planning succeeded, so we must have a latest blueprint");
+        Ok((blueprint, blueprint.diff_since_blueprint(parent)))
+    }
+
+    pub fn change_state<F>(&mut self, f: F) -> anyhow::Result<()>
+    where
+        F: FnOnce(&mut SimStateBuilder) -> anyhow::Result<String>,
+    {
+        let mut state = self.sim.current_state().to_mut();
+        let description = f(&mut state)?;
+        self.sim.commit_and_bump(description, state);
         Ok(())
     }
 
