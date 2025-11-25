@@ -498,8 +498,12 @@ mod test {
             .nsleds(2)
             .build();
         let mut de = PowerShelfDiagnosis::new(&logctx.log);
-        let mut sitrep =
-            SitrepBuilder::new(&logctx.log, &example_system.collection, None);
+        let mut sitrep = SitrepBuilder::new_with_rng(
+            &logctx.log,
+            &example_system.collection,
+            None,
+            crate::builder::SitrepBuilderRng::from_seed(TEST_NAME),
+        );
 
         de.analyze_ereport(
             &mut sitrep,

@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use super::rng;
 use crate::alert;
 use anyhow::Context;
 use chrono::Utc;
 use iddqd::id_ord_map::{self, IdOrdMap};
 use nexus_types::fm;
 use nexus_types::inventory::SpType;
-use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::CaseUuid;
 use omicron_uuid_kinds::SitrepUuid;
 use std::collections::{HashMap, HashSet};
@@ -19,6 +19,7 @@ pub struct CaseBuilder {
     pub log: slog::Logger,
     pub case: fm::Case,
     pub sitrep_id: SitrepUuid,
+    rng: rng::CaseBuilderRng,
 }
 
 #[derive(Debug)]
@@ -26,13 +27,15 @@ pub struct AllCases {
     log: slog::Logger,
     sitrep_id: SitrepUuid,
     pub cases: IdOrdMap<CaseBuilder>,
+    rng: rng::SitrepBuilderRng,
 }
 
 impl AllCases {
-    pub fn new(
+    pub(super) fn new(
         log: slog::Logger,
         sitrep_id: SitrepUuid,
         parent_sitrep: Option<&fm::Sitrep>,
+        mut rng: rng::SitrepBuilderRng,
     ) -> (Self, ImpactLists) {
         // Copy forward any open cases from the parent sitrep.
         // If a case was closed in the parent sitrep, skip it.
@@ -48,11 +51,12 @@ impl AllCases {
                         .or_default()
                         .insert(case.id);
                 }
-                CaseBuilder::new(&log, sitrep_id, case.clone())
+                let rng = rng::CaseBuilderRng::new(case.id, &mut rng);
+                CaseBuilder::new(&log, sitrep_id, case.clone(), rng)
             })
             .collect();
 
-        let cases = Self { log, sitrep_id, cases };
+        let cases = Self { log, sitrep_id, cases, rng };
         let impact_lists = ImpactLists { cases_by_sp: cases_by_location };
         (cases, impact_lists)
     }
@@ -61,7 +65,7 @@ impl AllCases {
         &mut self,
         de: fm::DiagnosisEngineKind,
     ) -> anyhow::Result<iddqd::id_ord_map::RefMut<'_, CaseBuilder>> {
-        let id = CaseUuid::new_v4();
+        let (id, case_rng) = self.rng.next_case();
         let sitrep_id = self.sitrep_id;
         let case = match self.cases.entry(&id) {
             iddqd::id_ord_map::Entry::Occupied(_) => {
@@ -80,7 +84,9 @@ impl AllCases {
                     alerts_requested: Default::default(),
                     impacted_locations: Default::default(),
                 };
-                entry.insert(CaseBuilder::new(&self.log, sitrep_id, case))
+                entry.insert(CaseBuilder::new(
+                    &self.log, sitrep_id, case, case_rng,
+                ))
             }
         };
 
@@ -107,20 +113,25 @@ impl AllCases {
 }
 
 impl CaseBuilder {
-    fn new(log: &slog::Logger, sitrep_id: SitrepUuid, case: fm::Case) -> Self {
+    fn new(
+        log: &slog::Logger,
+        sitrep_id: SitrepUuid,
+        case: fm::Case,
+        rng: rng::CaseBuilderRng,
+    ) -> Self {
         let log = log.new(slog::o!(
             "case_id" => format!("{:?}", case.id),
             "de" => case.de.to_string(),
             "created_sitrep_id" => format!("{:?}", case.created_sitrep_id),
         ));
-        Self { log, case, sitrep_id }
+        Self { log, case, sitrep_id, rng }
     }
 
     pub fn request_alert<A: alert::Alert>(
         &mut self,
         alert: &A,
     ) -> anyhow::Result<()> {
-        let id = AlertUuid::new_v4();
+        let id = self.rng.next_alert();
         let class = A::CLASS;
         let req = fm::AlertRequest {
             id,

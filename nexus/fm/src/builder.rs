@@ -12,6 +12,8 @@ use slog::Logger;
 
 mod case;
 pub use case::{AllCases, CaseBuilder};
+pub(crate) mod rng;
+pub use rng::SitrepBuilderRng;
 
 #[derive(Debug)]
 pub struct SitrepBuilder<'a> {
@@ -30,7 +32,21 @@ impl<'a> SitrepBuilder<'a> {
         inventory: &'a inventory::Collection,
         parent_sitrep: Option<&'a fm::Sitrep>,
     ) -> Self {
-        let sitrep_id = SitrepUuid::new_v4();
+        Self::new_with_rng(
+            log,
+            inventory,
+            parent_sitrep,
+            SitrepBuilderRng::from_entropy(),
+        )
+    }
+
+    pub fn new_with_rng(
+        log: &Logger,
+        inventory: &'a inventory::Collection,
+        parent_sitrep: Option<&'a fm::Sitrep>,
+        mut rng: SitrepBuilderRng,
+    ) -> Self {
+        let sitrep_id = rng.sitrep_id();
         let log = log.new(slog::o!(
             "sitrep_id" => format!("{sitrep_id:?}"),
             "parent_sitrep_id" => format!("{:?}", parent_sitrep.as_ref().map(|s| s.id())),
@@ -38,7 +54,7 @@ impl<'a> SitrepBuilder<'a> {
         ));
 
         let (cases, impact_lists) =
-            case::AllCases::new(log.clone(), sitrep_id, parent_sitrep);
+            case::AllCases::new(log.clone(), sitrep_id, parent_sitrep, rng);
 
         slog::info!(
             &log,
