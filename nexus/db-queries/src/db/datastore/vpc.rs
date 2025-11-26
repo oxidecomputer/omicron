@@ -2980,6 +2980,7 @@ mod tests {
     use nexus_db_model::IpConfig;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
+    use nexus_reconfigurator_planning::planner::Planner;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
@@ -3325,11 +3326,19 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp0,
-                &planning_input,
                 "test",
                 PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
+
+            // We made changes to the planning input we want to be reflected in
+            // the new blueprint; reuse the `Planner`'s method for replicating
+            // those changes.
+            Planner::update_builder_from_planning_input(
+                &mut builder,
+                &planning_input,
+            );
+
             for &sled_id in &sled_ids {
                 builder
                     .sled_add_disks(
@@ -3418,7 +3427,6 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp2,
-                &planning_input,
                 "test",
                 PlannerRng::from_entropy(),
             )

@@ -1451,7 +1451,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &opctx.log,
             &bp1,
-            &input,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )
@@ -1496,7 +1495,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &opctx.log,
             &bp2,
-            &input,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )

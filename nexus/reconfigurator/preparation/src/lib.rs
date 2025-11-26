@@ -613,7 +613,7 @@ pub async fn reconfigurator_state_assemble(
     Ok(UnstableReconfiguratorState {
         planning_input,
         collections,
-        target_blueprint: Some(target_blueprint),
+        target_blueprint,
         blueprints,
         internal_dns,
         external_dns,

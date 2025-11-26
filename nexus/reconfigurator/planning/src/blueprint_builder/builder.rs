@@ -47,8 +47,6 @@ use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::OximeterReadMode;
 use nexus_types::deployment::PendingMgsUpdate;
 use nexus_types::deployment::PendingMgsUpdates;
-use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::TufRepoContentsError;
 use nexus_types::deployment::ZpoolName;
@@ -59,8 +57,10 @@ use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
 use omicron_common::address::DnsSubnet;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::ReservedRackSubnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -568,7 +568,6 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn new_based_on(
         log: &Logger,
         parent_blueprint: &'a Blueprint,
-        input: &PlanningInput,
         creator: &str,
         mut rng: PlannerRng,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
@@ -585,16 +584,6 @@ impl<'a> BlueprintBuilder<'a> {
                     format!("failed to construct SledEditor for sled {sled_id}")
                 })?;
             sled_editors.insert(*sled_id, editor);
-        }
-
-        // Add new, empty `SledEditor`s for any commissioned sleds in our input
-        // that weren't in the parent blueprint. (These are newly-added sleds.)
-        for (sled_id, details) in input.all_sleds(SledFilter::Commissioned) {
-            if let Entry::Vacant(slot) = sled_editors.entry(sled_id) {
-                slot.insert(SledEditor::for_new_active(
-                    details.resources.subnet,
-                ));
-            }
         }
 
         // Copy the Oximeter read policy from our parent blueprint so we can
@@ -615,16 +604,15 @@ impl<'a> BlueprintBuilder<'a> {
             sled_editors,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
-            cockroachdb_fingerprint: input
-                .cockroachdb_settings()
-                .state_fingerprint
+            cockroachdb_fingerprint: parent_blueprint
+                .cockroachdb_fingerprint
                 .clone(),
             pending_mgs_updates: parent_blueprint.pending_mgs_updates.clone(),
             target_release_minimum_generation: parent_blueprint
                 .target_release_minimum_generation,
             nexus_generation: parent_blueprint.nexus_generation,
-            internal_dns_version: input.internal_dns_version(),
-            external_dns_version: input.external_dns_version(),
+            internal_dns_version: parent_blueprint.internal_dns_version,
+            external_dns_version: parent_blueprint.external_dns_version,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -638,6 +626,29 @@ impl<'a> BlueprintBuilder<'a> {
 
     pub fn new_blueprint_id(&self) -> BlueprintUuid {
         self.new_blueprint_id
+    }
+
+    /// Ensure a commissioned sled exists in this builder.
+    pub fn ensure_sled_exists(
+        &mut self,
+        sled_id: SledUuid,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    ) {
+        if let Entry::Vacant(slot) = self.sled_editors.entry(sled_id) {
+            slot.insert(SledEditor::for_new_active(sled_subnet));
+        }
+    }
+
+    pub fn set_cockroachdb_fingerprint(&mut self, fingerprint: String) {
+        self.cockroachdb_fingerprint = fingerprint;
+    }
+
+    pub fn set_internal_dns_version(&mut self, version: Generation) {
+        self.internal_dns_version = version;
+    }
+
+    pub fn set_external_dns_version(&mut self, version: Generation) {
+        self.external_dns_version = version;
     }
 
     /// Helper method to construct an empty [`ClickhouseClusterConfig`] using
@@ -2565,6 +2576,8 @@ pub mod test {
     use nexus_types::deployment::BlueprintDatasetDisposition;
     use nexus_types::deployment::ExternalIpPolicy;
     use nexus_types::deployment::OmicronZoneNetworkResources;
+    use nexus_types::deployment::PlanningInput;
+    use nexus_types::deployment::SledFilter;
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
@@ -2606,7 +2619,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &example.input,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -2657,7 +2669,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            &input,
             "test_basic",
             rng.next_planner_rng(),
         )
@@ -2666,6 +2677,7 @@ pub mod test {
             .sled_lookup(SledFilter::Commissioned, new_sled_id)
             .unwrap()
             .resources;
+        builder.ensure_sled_exists(new_sled_id, new_sled_resources.subnet);
         builder.sled_add_disks(new_sled_id, &new_sled_resources).unwrap();
         builder
             .sled_ensure_zone_ntp(
@@ -2825,7 +2837,6 @@ pub mod test {
         let mut blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &input,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
@@ -2862,7 +2873,6 @@ pub mod test {
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            &input,
             "test_decommissioned_sleds",
             rng.next_planner_rng(),
         )
@@ -2897,7 +2907,6 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                &input,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -2997,7 +3006,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint,
-            &input,
             "test",
             rng.next_planner_rng(),
         )
@@ -3051,7 +3059,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint,
-            &input,
             "test",
             rng.next_planner_rng(),
         )
@@ -3090,7 +3097,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint,
-            &input,
             "test",
             rng.next_planner_rng(),
         )
@@ -3131,7 +3137,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            &input,
             "test",
             rng.next_planner_rng(),
         )
@@ -3249,7 +3254,6 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                &input,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3279,7 +3283,6 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                &input,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3334,7 +3337,6 @@ pub mod test {
             let builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                &input,
                 "test",
                 rng.next_planner_rng(),
             )
@@ -3409,7 +3411,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            &input,
             "test",
             rng.next_planner_rng(),
         )
@@ -3451,7 +3452,6 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            &input,
             "test",
             rng.next_planner_rng(),
         )
@@ -3497,7 +3497,6 @@ pub mod test {
         let mut blueprint_builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &system.input,
             TEST_NAME,
             rng.next_planner_rng(),
         )

@@ -28,7 +28,10 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     RotStateOverrides, SledBuilder, SledInventoryVisibility, SystemDescription,
 };
-use nexus_reconfigurator_simulation::{BlueprintId, CollectionId, SimState};
+use nexus_reconfigurator_simulation::{
+    BlueprintId, CollectionId, GraphRenderOptions, GraphStartingState,
+    ReconfiguratorSimId, SimState,
+};
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -60,7 +63,7 @@ use omicron_repl_utils::run_repl_from_file;
 use omicron_repl_utils::run_repl_on_stdin;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::ReconfiguratorSimUuid;
+use omicron_uuid_kinds::ReconfiguratorSimStateUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
@@ -89,7 +92,7 @@ struct ReconfiguratorSim {
     // The simulator currently being used.
     sim: Simulator,
     // The current state.
-    current: ReconfiguratorSimUuid,
+    current: ReconfiguratorSimStateUuid,
     // The current system state
     log: slog::Logger,
 }
@@ -345,6 +348,8 @@ fn process_command(
         Commands::LoadExample(args) => cmd_load_example(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
+        Commands::State(StateArgs::Log(args)) => cmd_state_log(sim, args),
+        Commands::State(StateArgs::Switch(args)) => cmd_state_switch(sim, args),
         Commands::Wipe(args) => cmd_wipe(sim, args),
     };
 
@@ -443,6 +448,9 @@ enum Commands {
     LoadExample(LoadExampleArgs),
     /// show information about what's in a saved file
     FileContents(FileContentsArgs),
+    /// state-related commands
+    #[command(flatten)]
+    State(StateArgs),
     /// reset the state of the REPL
     Wipe(WipeArgs),
 }
@@ -1015,6 +1023,45 @@ impl From<CollectionIdOpt> for CollectionId {
     }
 }
 
+#[derive(Clone, Debug)]
+enum ReconfiguratorSimStateIdOpt {
+    /// use a specific reconfigurator sim state by full UUID
+    Id(ReconfiguratorSimStateUuid),
+    /// use a reconfigurator sim state by UUID prefix
+    Prefix(String),
+}
+
+impl FromStr for ReconfiguratorSimStateIdOpt {
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.parse::<ReconfiguratorSimStateUuid>() {
+            Ok(id) => Ok(ReconfiguratorSimStateIdOpt::Id(id)),
+            Err(_) => Ok(ReconfiguratorSimStateIdOpt::Prefix(s.to_owned())),
+        }
+    }
+}
+
+impl fmt::Display for ReconfiguratorSimStateIdOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReconfiguratorSimStateIdOpt::Id(id) => id.fmt(f),
+            ReconfiguratorSimStateIdOpt::Prefix(prefix) => prefix.fmt(f),
+        }
+    }
+}
+
+impl From<ReconfiguratorSimStateIdOpt> for ReconfiguratorSimId {
+    fn from(value: ReconfiguratorSimStateIdOpt) -> Self {
+        match value {
+            ReconfiguratorSimStateIdOpt::Id(id) => ReconfiguratorSimId::Id(id),
+            ReconfiguratorSimStateIdOpt::Prefix(prefix) => {
+                ReconfiguratorSimId::Prefix(prefix)
+            }
+        }
+    }
+}
+
 /// Clap field for an optional mupdate override UUID.
 ///
 /// This structure is similar to `Option`, but is specified separately to:
@@ -1453,6 +1500,40 @@ struct FileContentsArgs {
 struct SaveArgs {
     /// output file
     filename: Utf8PathBuf,
+}
+
+#[derive(Debug, Subcommand)]
+enum StateArgs {
+    /// display a log of simulator states
+    ///
+    /// Shows the history of states from the current state back to the root.
+    Log(StateLogArgs),
+    /// switch to a different state
+    ///
+    /// Changes the current working state to the specified state. All subsequent
+    /// commands will operate from this state.
+    Switch(StateSwitchArgs),
+}
+
+#[derive(Debug, Args)]
+struct StateLogArgs {
+    /// Starting state ID (defaults to current state)
+    #[clap(long)]
+    from: Option<ReconfiguratorSimStateUuid>,
+
+    /// Limit number of states to display
+    #[clap(long, short = 'n', requires = "from")]
+    limit: Option<usize>,
+
+    /// Show changes in each state (verbose mode)
+    #[clap(long, short = 'v')]
+    verbose: bool,
+}
+
+#[derive(Debug, Args)]
+struct StateSwitchArgs {
+    /// The state ID or unique prefix to switch to
+    state_id: ReconfiguratorSimStateIdOpt,
 }
 
 #[derive(Debug, Args)]
@@ -2121,12 +2202,12 @@ fn cmd_blueprint_list(
     let mut rows = state.system().all_blueprints().collect::<Vec<_>>();
     rows.sort_unstable_by_key(|blueprint| blueprint.time_created);
     let rows = rows.into_iter().map(|blueprint| {
-        let (is_target, enabled) = match target_blueprint {
-            Some(t) if t.target_id == blueprint.id => {
-                let enabled = if t.enabled { "yes" } else { "no" };
-                ("*", enabled)
-            }
-            _ => ("", ""),
+        let (is_target, enabled) = if target_blueprint.target_id == blueprint.id
+        {
+            let enabled = if target_blueprint.enabled { "yes" } else { "no" };
+            ("*", enabled)
+        } else {
+            ("", "")
         };
         BlueprintRow {
             is_target,
@@ -2245,14 +2326,13 @@ fn cmd_blueprint_edit(
         .map(|c| c.clone())
         .unwrap_or_else(|| CollectionBuilder::new("sim").build());
 
-    let mut builder = BlueprintBuilder::new_based_on(
-        &sim.log,
-        blueprint,
-        &planning_input,
-        creator,
-        rng,
-    )
-    .context("creating blueprint builder")?;
+    let mut builder =
+        BlueprintBuilder::new_based_on(&sim.log, blueprint, creator, rng)
+            .context("creating blueprint builder")?;
+
+    // We're acting as the planner here, so we need to update the builder for
+    // any static changes in the input (e.g., new sleds, new DNS versions, ...).
+    Planner::update_builder_from_planning_input(&mut builder, &planning_input);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
@@ -2802,6 +2882,44 @@ fn cmd_save(
     )))
 }
 
+fn cmd_state_log(
+    sim: &mut ReconfiguratorSim,
+    args: StateLogArgs,
+) -> anyhow::Result<Option<String>> {
+    let StateLogArgs { from, limit, verbose } = args;
+
+    let starting_state = if let Some(start) = from {
+        GraphStartingState::State { start, limit }
+    } else {
+        GraphStartingState::None
+    };
+
+    let options = GraphRenderOptions::new(sim.current)
+        .with_verbose(verbose)
+        .with_starting_state(starting_state);
+
+    let output = sim.sim.render_graph(&options);
+
+    Ok(Some(output))
+}
+
+fn cmd_state_switch(
+    sim: &mut ReconfiguratorSim,
+    args: StateSwitchArgs,
+) -> anyhow::Result<Option<String>> {
+    let state = sim.sim.resolve_and_get_state(args.state_id.into())?;
+    let target_id = state.id();
+
+    sim.current = target_id;
+
+    Ok(Some(format!(
+        "switched to state {} (generation {}): {}",
+        target_id,
+        state.generation(),
+        state.description()
+    )))
+}
+
 fn cmd_wipe(
     sim: &mut ReconfiguratorSim,
     args: WipeArgs,
@@ -2813,7 +2931,7 @@ fn cmd_wipe(
             state.config_mut().wipe();
             state.rng_mut().reset_state();
             format!(
-                "- wiped system, reconfigurator-sim config, and RNG state\n
+                "- wiped system, reconfigurator-sim config, and RNG state\n\
                  - reset seed to {}",
                 state.rng_mut().seed()
             )

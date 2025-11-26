@@ -264,9 +264,8 @@ mod tests {
         let log = &logctx.log;
 
         // Build an example system with one sled.
-        let (example_system, bp0) =
+        let (_, bp0) =
             ExampleSystemBuilder::new(log, TEST_NAME).nsleds(1).build();
-        let input = example_system.input;
 
         // `ExampleSystemBuilder` doesn't place any cockroach nodes; assert so
         // we bail out early if that changes.
@@ -287,7 +286,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &bp0,
-            &input,
             TEST_NAME,
             PlannerRng::from_entropy(),
         )
