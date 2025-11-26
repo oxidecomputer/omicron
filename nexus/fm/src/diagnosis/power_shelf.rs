@@ -709,6 +709,10 @@ mod test {
 
         assert!(insert_alert.is_some(), "no PSU inserted alert was requested!");
         assert!(remove_alert.is_some(), "no PSU removed alert was requested!");
+        assert!(
+            !case0.is_open(),
+            "case should have been closed since everything is okay"
+        );
 
         logctx.cleanup_successful();
     }
