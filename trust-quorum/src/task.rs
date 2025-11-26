@@ -2219,7 +2219,7 @@ mod tests {
         );
 
         // PrepareAndCommit should return pending, because it has to compute
-        // it's own keyshare for the new config, which will eventually fail.
+        // its own keyshare for the new config, which will eventually fail.
         //
         // Nexus will never actually send a `PrepareAndCommit` when there hasn't
         // been a commit. This is just here to check the behavior of the proxy
@@ -2266,11 +2266,26 @@ mod tests {
             .unwrap();
 
         // Now ensure we can get the status for the last node again.
-        let status = proxy
-            .status(destination.clone())
-            .await
-            .expect("successful status request");
-        assert_matches!(status, NodeStatus { .. });
+        //
+        // We must wait for connection here, because we don't know if the unlock
+        // at the last node (4) was a result of receiving the share from the proxy node
+        // (node 1).
+        wait_for_condition(
+            async || {
+                let Ok(status) = proxy.status(destination.clone()).await else {
+                    return Err(CondCheckError::<()>::NotYet);
+                };
+                if matches!(status, NodeStatus { .. }) {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            },
+            &poll_interval,
+            &poll_max,
+        )
+        .await
+        .unwrap();
 
         setup.cleanup_successful();
     }
