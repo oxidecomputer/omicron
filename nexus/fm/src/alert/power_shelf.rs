@@ -5,6 +5,7 @@
 //! Power shelf alerts.
 
 use super::{Alert, VpdIdentity};
+use chrono::{DateTime, Utc};
 use nexus_types::fm::AlertClass;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,7 @@ pub enum PsuInserted {
     V0 {
         #[serde(flatten)]
         psc_psu: PscPsu,
+        time: DateTime<Utc>,
     },
 }
 
@@ -28,16 +30,17 @@ pub enum PsuRemoved {
     V0 {
         #[serde(flatten)]
         psc_psu: PscPsu,
+        time: DateTime<Utc>,
     },
 }
 
 impl Alert for PsuRemoved {
-    const CLASS: AlertClass = AlertClass::PsuInserted;
+    const CLASS: AlertClass = AlertClass::PsuRemoved;
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PscPsu {
-    pub psc_id: VpdIdentity,
+    pub psc_id: Option<VpdIdentity>,
     pub psc_slot: u16,
     pub psu_id: PsuIdentity,
     pub psu_slot: Option<u16>,
