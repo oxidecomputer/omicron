@@ -15,6 +15,8 @@ use chrono::Utc;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use slog::Logger;
+use slog::info;
 use std::fmt::Display;
 use tokio::process::Command;
 
@@ -23,12 +25,13 @@ pub struct Svcs {}
 
 impl Svcs {
     /// Lists SMF services that are enabled but not running
-    pub async fn enabled_not_running()
-    -> Result<Vec<SvcNotRunning>, ExecutionError> {
+    pub async fn enabled_not_running(
+        log: &Logger,
+    ) -> Result<Vec<SvcNotRunning>, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Zxv"]);
         let output = execute_async(cmd).await?;
-        SvcNotRunning::parse(&output.stdout)
+        SvcNotRunning::parse(log, &output.stdout)
     }
 }
 
@@ -84,10 +87,7 @@ pub struct SvcNotRunning {
     zone: String,
     state: SvcState,
     // TODO-K: Do I need a deserialiser like parse_cockroach_cli_timestamp?
-    // TODO-K: Should this just be a string so we don't run into the case where
-    // we are unable to parse, and block the whole thing due to that? Maybe
-    // make it into an option? Or into an enum with an Unknown variant?
-    state_since: DateTime<Utc>,
+    state_since: Option<DateTime<Utc>>,
     reason: String,
     impact: String,
     additional_info: Vec<String>,
@@ -98,21 +98,22 @@ pub struct SvcNotRunning {
 impl SvcNotRunning {
     fn new() -> SvcNotRunning {
         SvcNotRunning {
-            fmri: "".to_string(),
-            zone: "".to_string(),
+            fmri: String::new(),
+            zone: String::new(),
             state: SvcState::Unknown,
-            // TODO-K: Make this an option?
-            state_since: Utc::now(),
-            reason: "".to_string(),
-            impact: "".to_string(),
+            state_since: None,
+            reason: String::new(),
+            impact: String::new(),
             additional_info: vec![],
         }
     }
     // TODO-K: Should probably add a logger here to print out the data
     // in case the output is not in the format we expect it to be
-    fn parse(data: &[u8]) -> Result<Vec<SvcNotRunning>, ExecutionError> {
+    fn parse(
+        log: &Logger,
+        data: &[u8],
+    ) -> Result<Vec<SvcNotRunning>, ExecutionError> {
         let mut svcs = vec![];
-        // TODO-K: handle the case where we get an empty line or whatever
         if data.is_empty() {
             return Ok(svcs);
         }
@@ -163,20 +164,29 @@ impl SvcNotRunning {
                             if let Some((_, state_since)) =
                                 value.split_once("since ")
                             {
-                                current_svc.state_since =
-                                    DateTime::from_naive_utc_and_offset(
-                                        NaiveDateTime::parse_from_str(
+                                let naive = match NaiveDateTime::parse_from_str(
+                                    state_since,
+                                    "%a %b %d %H:%M:%S %Y",
+                                ) {
+                                    Ok(t) => Some(t),
+                                    Err(e) => {
+                                        info!(
+                                            log,
+                                            "unable to parse service instance state since time {}: {}",
                                             state_since,
-                                            "%a %b %d %H:%M:%S %Y",
-                                        )
-                                        // TODO-K: Do something differently if this fails?
-                                        .map_err(|e| {
-                                            ExecutionError::ParseFailure(
-                                                format!("{}", e),
-                                            )
-                                        })?,
-                                        Utc,
+                                            e
+                                        );
+                                        None
+                                    }
+                                };
+
+                                if let Some(n) = naive {
+                                    current_svc.state_since = Some(
+                                        DateTime::from_naive_utc_and_offset(
+                                            n, Utc,
+                                        ),
                                     );
+                                };
                             }
                         }
                         "Reason" => current_svc.reason = value.to_string(),
@@ -232,6 +242,18 @@ impl Display for SvcNotRunning {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slog::Drain;
+    use slog::o;
+    use slog_term::FullFormat;
+    use slog_term::PlainDecorator;
+    use slog_term::TestStdoutWriter;
+
+    fn log() -> slog::Logger {
+        let decorator = PlainDecorator::new(TestStdoutWriter);
+        let drain = FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, o!())
+    }
 
     #[test]
     fn test_svc_not_running_parse() {
@@ -252,7 +274,8 @@ Reason: Start method failed repeatedly, last died on Killed (9).
    See: /var/svc/log/system-omicron-baseline:default.log
 Impact: This service is not running."#;
 
-        let services = SvcNotRunning::parse(output.as_bytes()).unwrap();
+        let log = log();
+        let services = SvcNotRunning::parse(&log, output.as_bytes()).unwrap();
 
         // We want to make sure we only have two entries
         assert_eq!(services.len(), 2);
@@ -263,14 +286,14 @@ Impact: This service is not running."#;
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "global".to_string(),
                 state: SvcState::Maintenance,
-                state_since: DateTime::from_naive_utc_and_offset(
+                state_since: Some(DateTime::from_naive_utc_and_offset(
                     NaiveDateTime::parse_from_str(
                         "Mon Nov 24 06:57:19 2025",
                         "%a %b %d %H:%M:%S %Y",
                     )
                     .unwrap(),
                     Utc,
-                ),
+                )),
                 reason: "Restarting too quickly.".to_string(),
                 additional_info: vec![
                     "http://illumos.org/msg/SMF-8000-L5".to_string(),
@@ -286,15 +309,14 @@ Impact: This service is not running."#;
                 fmri: "svc:/system/omicron/baseline:default".to_string(),
                 zone: "global".to_string(),
                 state: SvcState::Maintenance,
-                state_since: DateTime::from_naive_utc_and_offset(
+                state_since: Some(DateTime::from_naive_utc_and_offset(
                     NaiveDateTime::parse_from_str(
                         "Mon Nov 24 05:39:49 2025",
                         "%a %b %d %H:%M:%S %Y",
                     )
-                    // TODO-K: Do something differently if this fails
                     .unwrap(),
                     Utc,
-                ),
+                )),
                 reason:
                     "Start method failed repeatedly, last died on Killed (9)."
                         .to_string(),

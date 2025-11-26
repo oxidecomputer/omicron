@@ -67,6 +67,7 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 
+use slog::Drain;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -795,6 +796,15 @@ impl SledAgent {
         Ok(addr)
     }
 
+    // TODO-K: Removeme
+    fn log() -> slog::Logger {
+        let decorator =
+            slog_term::PlainDecorator::new(slog_term::TestStdoutWriter);
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, o!())
+    }
+
     // TODO-K: Remove async
     pub async fn inventory(
         &self,
@@ -809,8 +819,9 @@ impl SledAgent {
 
         // TODO-K: removeme
         let smf_services_in_maintenance = task::spawn_blocking(|| {
+            let log = SledAgent::log();
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(Svcs::enabled_not_running())
+            rt.block_on(Svcs::enabled_not_running(&log))
         })
         .await
         .unwrap()

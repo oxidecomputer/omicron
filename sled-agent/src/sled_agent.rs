@@ -1133,7 +1133,7 @@ impl SledAgent {
         // TODO-K: Get rid of unwrap
         // TODO-K: Filter out the ones just in maintenance?
         let smf_services_in_maintenance =
-            Svcs::enabled_not_running().await.unwrap();
+            Svcs::enabled_not_running(&self.log).await.unwrap();
 
         let ReconcilerInventory {
             disks,
