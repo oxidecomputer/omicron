@@ -120,9 +120,9 @@ impl CaseBuilder {
         rng: rng::CaseBuilderRng,
     ) -> Self {
         let log = log.new(slog::o!(
-            "case_id" => format!("{:?}", case.id),
+            "case_id" => case.id.to_string(),
             "de" => case.de.to_string(),
-            "created_sitrep_id" => format!("{:?}", case.created_sitrep_id),
+            "created_sitrep_id" => case.created_sitrep_id.to_string(),
         ));
         Self { log, case, sitrep_id, rng }
     }
@@ -150,7 +150,7 @@ impl CaseBuilder {
         slog::info!(
             &self.log,
             "requested an alert";
-            "alert_id" => ?id,
+            "alert_id" => %id,
             "alert_class" => ?class,
         );
 
@@ -178,7 +178,7 @@ impl CaseBuilder {
                 slog::info!(
                     self.log,
                     "assigned ereport {} to case", report.id();
-                    "ereport_id" => ?report.id(),
+                    "ereport_id" => %report.id(),
                     "ereport_class" => ?report.class,
                 );
             }
@@ -186,7 +186,7 @@ impl CaseBuilder {
                 slog::warn!(
                     self.log,
                     "ereport {} already assigned to case", report.id();
-                    "ereport_id" => ?report.id(),
+                    "ereport_id" => %report.id(),
                     "ereport_class" => ?report.class,
                 );
             }

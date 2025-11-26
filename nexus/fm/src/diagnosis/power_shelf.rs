@@ -18,6 +18,7 @@ use nexus_types::inventory::SpType;
 use omicron_uuid_kinds::CaseUuid;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use slog_error_chain::InlineErrorChain;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -34,11 +35,15 @@ struct PscCase {
 type PsuSet = [bool; N_PSUS];
 const N_PSUS: usize = 6;
 
+const PSU_REMOVE_CLASS: &str = "hw.remove.psu";
+const PSU_INSERT_CLASS: &str = "hw.insert.psu";
+const PSU_PWR_GOOD_CLASS: &str = "hw.pwr.pwr_good.good";
+const PSU_PWR_BAD_CLASS: &str = "hw.pwr.pwr_good.bad";
 const PSU_EREPORT_CLASSES: &[&str] = &[
-    "hw.remove.psu",
-    "hw.insert.psu",
-    "hw.pwr.pwr_good.good",
-    "hw.pwr.pwr_good.bad",
+    PSU_REMOVE_CLASS,
+    PSU_INSERT_CLASS,
+    PSU_PWR_GOOD_CLASS,
+    PSU_PWR_BAD_CLASS,
 ];
 
 impl PowerShelfDiagnosis {
@@ -56,7 +61,7 @@ impl PowerShelfDiagnosis {
     ) -> impl Iterator<Item = (&CaseUuid, &PscCase)> {
         self.cases_by_shelf[shelf as usize]
             .iter()
-            .filter(move |(_, case)| case.psus_impacted[psu])
+            .filter(move |(_, case)| case.psus_impacted[psu - 1])
     }
 }
 
@@ -209,10 +214,10 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
             return Ok(());
         };
         let comment = match class {
-            "hw.remove.psu" => "was removed",
-            "hw.insert.psu" => "was inserted",
-            "hw.pwr.pwr_good.good" => "asserted PWR_GOOD",
-            "hw.pwr.pwr_good.bad" => "deasserted PWR_GOOD",
+            c if c == PSU_REMOVE_CLASS => "was removed",
+            c if c == PSU_INSERT_CLASS => "was inserted",
+            c if c == PSU_PWR_GOOD_CLASS => "asserted PWR_GOOD",
+            c if c == PSU_PWR_BAD_CLASS => "deasserted PWR_GOOD",
             unknown => {
                 slog::warn!(
                     &self.log,
@@ -278,7 +283,7 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
             )?;
             self.cases_by_shelf[shelf as usize].insert(case.id, {
                 let mut case = PscCase { psus_impacted: [false; N_PSUS] };
-                case.psus_impacted[psu_slot] = true;
+                case.psus_impacted[psu_slot - 1] = true;
                 case
             });
         }
@@ -287,11 +292,21 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
     }
 
     fn finish(&mut self, sitrep: &mut SitrepBuilder<'_>) -> anyhow::Result<()> {
+        // TODO:
+        //
+        // - debouncing
+        // - determine whether undiagnosed cases can now be diagnosed
+        // - determine whether those cases have been resolved (looking at
+        //   any newly-added ereports, and inventory data/health endpoint
+        //   observations)
+        // - determine what Active Problems should be requested, updated,
+        //   and closed
+        // - determine what alerts should be requested
         let tracked_cases = self.cases_by_shelf.iter().enumerate().flat_map(
             |(shelf, cases)| cases.iter().map(move |(k, v)| (shelf, k, v)),
         );
         for (shelf, case_id, slots) in tracked_cases {
-            let case = sitrep.cases.case_mut(case_id).ok_or_else(|| {
+            let mut case = sitrep.cases.case_mut(case_id).ok_or_else(|| {
                 anyhow::anyhow!(
                     "we are tracking case {case_id} but it no longer exists \
                      in the sitrep builder (this is a bug)"
@@ -303,17 +318,163 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
                 "case_id" => %case_id,
                 "shelf" => shelf,
             );
-            // TODO:
-            //
-            // - debouncing
-            // - determine whether undiagnosed cases can now be diagnosed
-            // - determine whether those cases have been resolved (looking at
-            //   any newly-added ereports, and inventory data/health endpoint
-            //   observations)
-            // - determine what Active Problems should be requested, updated,
-            //   and closed
-            // - determine what alerts should be requested
+
+            // These will be used for diagnosing problems eventually...
+            // TODO(eliza): these currently always assume that we expect 6
+            // PSU/shelf...
+            let mut psus_ok = [true; 6];
+            let mut psus_present = [true; 6];
+
+            // TODO(eliza): this iterates over ereports ordered by
+            // (restart_id,ENA)...but the restart IDs are not temporally
+            // ordered. we should figure that out...
+            let mut case_ereports =
+                case.ereports.iter().map(|e| e.clone()).collect::<Vec<_>>();
+            case_ereports
+                .sort_by_key(|e| (e.ereport.time_collected, e.ereport.id));
+            for CaseEreport { ereport, assigned_sitrep_id, comment } in
+                case_ereports
+            {
+                let ereport::Reporter::Sp {
+                    sp_type: SpType::Power,
+                    slot: psc_slot,
+                } = ereport.reporter
+                else {
+                    continue;
+                };
+                let Some(class) = &ereport.class else {
+                    slog::warn!(
+                        self.log,
+                        "skipping ereport with no class";
+                        "case_id" => %case_id,
+                        "ereport_id" => %ereport.id(),
+                        "ereport_reporter" => %ereport.reporter,
+                        "assigned_in_sitrep" => ?assigned_sitrep_id,
+                        "comment" => %comment,
+                    );
+                    continue;
+                };
+
+                let parsed_ereport: ereport_analysis::ParsedEreport<
+                    PscEreport,
+                > = match serde_json::from_value(ereport.report.clone()) {
+                    Ok(e) => e,
+                    Err(err) => {
+                        slog::warn!(
+                            self.log,
+                            "could not interpret ereport!";
+                            "case_id" => %case_id,
+                            "ereport_id" => %ereport.id(),
+                            "ereport_reporter" => %ereport.reporter,
+                            "ereport_class" => %class,
+                            "assigned_in_sitrep" => ?assigned_sitrep_id,
+                            "comment" => %comment,
+                            "error" => %InlineErrorChain::new(&err),
+                        );
+                        continue;
+                    }
+                };
+                let PscEreport { psu, class } = parsed_ereport.report;
+                if psu.slot as usize >= N_PSUS {
+                    slog::warn!(
+                        self.log,
+                        "i only know about 6 PSU slots but blah blah blah; \
+                         slot {} doesnt exist", psu.slot;
+                        "case_id" => %case_id,
+                        "ereport_id" => %ereport.id(),
+                        "ereport_reporter" => %ereport.reporter,
+                        "assigned_in_sitrep" => ?assigned_sitrep_id,
+                        "comment" => %comment,
+                    );
+                    continue;
+                }
+                match class {
+                    EreportClass::PsuInserted => {
+                        psus_present[psu.slot as usize - 1] = true;
+                        // assume that if the ereport was assigned in a previous
+                        // case, any alerts needed were already requested.
+                        //
+                        // XXX(eliza): is this actually a good heuristic in the
+                        // face of software updates potentially introducing new
+                        // alerts or new DE logic for generating them? i dunno.
+                        // on the other hand, we wouldn't want a new Nexus
+                        // version that introduces alerting for new events to
+                        // suddenly pop a bunch of alerts into existence for
+                        // something that happened ages ago. but on the other
+                        // hand, if a case was closed, we wouldn't even be
+                        // analyzing it here...i dunno. figure this out.
+                        //
+                        // TODO(eliza): debounce; check if we currently think
+                        // this PSU is in that slot already before alerting
+                        // again...
+                        if assigned_sitrep_id == sitrep.sitrep_id {
+                            case.request_alert(
+                                &alert::power_shelf::PsuInserted::V0 {
+                                    psc_psu: alert::power_shelf::PscPsu {
+                                        psc_id: parsed_ereport
+                                            .baseboard
+                                            .map(alert::VpdIdentity::from),
+                                        psc_slot,
+                                        psu_slot: Some(psu.slot as u16),
+                                        psu_id: psu.fruid.into(),
+                                    },
+                                    time: ereport.time_collected,
+                                },
+                            )?;
+                        }
+                    }
+                    EreportClass::PsuRemoved => {
+                        psus_present[psu.slot as usize - 1] = false;
+                        // assume that if the ereport was assigned in a previous
+                        // case, any alerts needed were already requested.
+                        //
+                        // XXX(eliza): is this actually a good heuristic in the
+                        // face of software updates potentially introducing new
+                        // alerts or new DE logic for generating them? i dunno.
+                        // on the other hand, we wouldn't want a new Nexus
+                        // version that introduces alerting for new events to
+                        // suddenly pop a bunch of alerts into existence for
+                        // something that happened ages ago. but on the other
+                        // hand, if a case was closed, we wouldn't even be
+                        // analyzing it here...i dunno. figure this out.
+                        if assigned_sitrep_id == sitrep.sitrep_id {
+                            case.request_alert(
+                                &alert::power_shelf::PsuRemoved::V0 {
+                                    psc_psu: alert::power_shelf::PscPsu {
+                                        psc_id: parsed_ereport
+                                            .baseboard
+                                            .map(alert::VpdIdentity::from),
+                                        psc_slot,
+                                        psu_slot: Some(psu.slot as u16),
+                                        psu_id: psu.fruid.into(),
+                                    },
+                                    time: ereport.time_collected,
+                                },
+                            )?;
+                        }
+                    }
+                    _ => {
+                        eprintln!("TODO ELIZA {class:?}");
+                    }
+                }
+            }
+
+            slog::info!(&self.log,
+                "analyzed all ereports for case {case_id}";
+                "case_id" => %case_id,
+                "shelf" => shelf,
+                "psus_present" => ?psus_present,
+                "psus_ok" => ?psus_ok,
+            );
+            // TODO(eliza): check this against inventory, expected number of
+            //              PSUs...
+            // TODO(eliza): this is where we would open/update/resolve Active
+            //              Problems...
+            if psus_present == [true; 6] && psus_ok == [true; 6] {
+                case.close();
+            }
         }
+
         Ok(())
     }
 }
@@ -334,41 +495,6 @@ fn ereport_psu_slot(ereport: &Ereport, log: &slog::Logger) -> Option<usize> {
         None
     } else {
         Some(slot)
-    }
-}
-
-fn extract_psc_psu(
-    ereport: &Ereport,
-    psc_slot: u16,
-    log: &slog::Logger,
-) -> alert::power_shelf::PscPsu {
-    let psc_id = extract_psc_id(ereport, log);
-    let psu_id = extract_psu_id(ereport, log);
-    let psu_slot = grab_json_value(ereport, "slot", &ereport.report, log);
-    alert::power_shelf::PscPsu { psc_id, psc_slot, psu_id, psu_slot }
-}
-
-fn extract_psc_id(ereport: &Ereport, log: &slog::Logger) -> alert::VpdIdentity {
-    let serial_number = ereport.serial_number.clone();
-    let revision =
-        grab_json_value(ereport, "baseboard_rev", &ereport.report, log);
-    let part_number = ereport.part_number.clone();
-    alert::VpdIdentity { serial_number, revision, part_number }
-}
-
-fn extract_psu_id(
-    ereport: &Ereport,
-    log: &slog::Logger,
-) -> alert::power_shelf::PsuIdentity {
-    let PsuFruid { mfr, mpn, serial, fw_rev } =
-        grab_json_value(ereport, "fruid", &ereport.report, log)
-            .unwrap_or_default();
-
-    alert::power_shelf::PsuIdentity {
-        serial_number: serial,
-        part_number: mpn,
-        firmware_revision: fw_rev,
-        manufacturer: mfr,
     }
 }
 
@@ -445,6 +571,18 @@ struct PsuFruid {
     fw_rev: Option<String>,
 }
 
+impl From<PsuFruid> for alert::power_shelf::PsuIdentity {
+    fn from(fruid: PsuFruid) -> Self {
+        let PsuFruid { mfr, mpn, serial, fw_rev } = fruid;
+        Self {
+            manufacturer: mfr,
+            part_number: mpn,
+            serial_number: serial,
+            firmware_revision: fw_rev,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize)]
 // TODO(eliza): bitflags types for these?
 struct PmbusStatus {
@@ -463,7 +601,7 @@ mod test {
     use crate::ereport_analysis::test as ereport_test;
     use crate::test_util::FmTest;
     use chrono::{DateTime, Utc};
-    use nexus_types::fm::ereport::Reporter;
+    use nexus_types::fm::{AlertClass, ereport::Reporter};
     use omicron_uuid_kinds::OmicronZoneUuid;
     use std::time::Duration;
 
@@ -532,6 +670,45 @@ mod test {
 
         // TODO(eliza) ACTUALLY MAKE SOME ASSERTIONS ABOUT THE SITREP
         eprintln!("{sitrep:#?}");
+
+        let case0 = {
+            let mut cases = sitrep.cases.iter();
+            let case0 = cases.next().expect("sitrep should have a case");
+            assert_eq!(
+                cases.next(),
+                None,
+                "sitrep should have exactly one case"
+            );
+            case0
+        };
+
+        let mut insert_alert = None;
+        let mut remove_alert = None;
+        for alert in &case0.alerts_requested {
+            match alert.class {
+                AlertClass::PsuInserted if insert_alert.is_none() => {
+                    insert_alert = Some(alert);
+                }
+                AlertClass::PsuInserted => {
+                    panic!(
+                        "expected only one PSU inserted alert, saw multiple:\n\
+                         1: {insert_alert:#?}\n\n2: {alert:#?}"
+                    );
+                }
+                AlertClass::PsuRemoved if remove_alert.is_none() => {
+                    remove_alert = Some(alert);
+                }
+                AlertClass::PsuRemoved => {
+                    panic!(
+                        "expected only one PSU removed alert, saw multiple:\n\
+                        1: {remove_alert:#?}\n\n2: {alert:#?}"
+                    );
+                }
+            }
+        }
+
+        assert!(insert_alert.is_some(), "no PSU inserted alert was requested!");
+        assert!(remove_alert.is_some(), "no PSU removed alert was requested!");
 
         logctx.cleanup_successful();
     }

@@ -4,6 +4,7 @@
 
 //! Alert messages.
 
+use crate::ereport_analysis::Baseboard;
 use nexus_types::fm::AlertClass;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,14 @@ pub trait Alert: Serialize + JsonSchema + std::fmt::Debug {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VpdIdentity {
-    pub part_number: Option<String>,
-    pub revision: Option<String>,
-    pub serial_number: Option<String>,
+    pub part_number: String,
+    pub revision: String,
+    pub serial_number: String,
+}
+
+impl From<Baseboard> for VpdIdentity {
+    fn from(baseboard: Baseboard) -> Self {
+        let Baseboard { part_number, serial_number, rev } = baseboard;
+        Self { part_number, revision: rev.to_string(), serial_number }
+    }
 }
