@@ -1449,6 +1449,9 @@ impl FakeIgnition {
             IgnitionCommand::PowerOff => {
                 target.power_state = ignition::SystemPowerState::Off;
             }
+            IgnitionCommand::AlwaysTransmit { .. } => {
+                // This is only used in manufacturing; do nothing.
+            }
         }
 
         Ok(())
