@@ -1,4 +1,7 @@
-#[cfg(target_os = "illumos")]
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use libc::ctid_t;
 use nix::fcntl;
 use nix::sys::stat;
@@ -10,6 +13,7 @@ use std::ffi::c_void;
 use std::os::fd::AsRawFd;
 use std::os::fd::OwnedFd;
 use std::os::fd::RawFd;
+use std::path::Path;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
@@ -54,8 +58,8 @@ pub enum ContractType {
 }
 
 impl ContractType {
-    pub fn path_prefix(self) -> PathBuf {
-        PathBuf::from(match self {
+    pub fn path_prefix(self) -> &'static Path {
+        &Path::new(match self {
             Self::Process => "/system/contract/process",
             Self::Device => "/system/contract/device",
         })
@@ -244,15 +248,11 @@ impl Drop for Template {
 fn get_tfpkt_device_path() -> Option<PathBuf> {
     let link = nix::fcntl::readlink("/dev/tfpkt0").ok()?;
     let path = PathBuf::from(link);
-    if path.starts_with("../devices/") {
+    if let Ok(path) = path.strip_prefix("../devices") {
         // Because the path is relative, the PathBuf strip_prefix()
         // operation will also return a relative path - stripping off the
-        // leading "/".  To avoid that, we have to cast the PathBuf into a
-        // string to perform the textual prefix stripping we're after.
-        let path = PathBuf::from(
-            path.to_str().unwrap().strip_prefix("../devices").unwrap(),
-        );
-        Some(path)
+        // leading "/".  Put it back.
+        Some(Path::new("/").join(path))
     } else {
         Some(path)
     }
