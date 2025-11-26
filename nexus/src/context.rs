@@ -28,8 +28,11 @@ use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
 use std::env;
+use std::future::Future;
 use std::sync::Arc;
 use uuid::Uuid;
+
+use dropshot::{HttpError, HttpResponse};
 
 /// Indicates the kind of HTTP server.
 #[derive(Clone, Copy)]
@@ -332,6 +335,39 @@ impl ServerContext {
             omdb_config: config.pkg.omdb.clone(),
         }))
     }
+}
+
+/// Execute an external API handler with audit logging and latency tracking.
+///
+/// This helper:
+/// 1. Creates an OpContext via authentication
+/// 2. Initializes an audit log entry
+/// 3. Runs the handler
+/// 4. Completes the audit log entry with result info
+/// 5. Wraps everything in latency instrumentation
+pub async fn audit_and_time<F, Fut, R>(
+    rqctx: &dropshot::RequestContext<ApiContext>,
+    handler: F,
+) -> Result<R, HttpError>
+where
+    F: FnOnce(Arc<OpContext>, Arc<Nexus>) -> Fut,
+    Fut: Future<Output = Result<R, HttpError>>,
+    R: HttpResponse,
+{
+    let apictx = rqctx.context();
+    let nexus = Arc::clone(&apictx.context.nexus);
+    let handler = async {
+        let opctx = Arc::new(op_context_for_external_api(rqctx).await?);
+        let audit = nexus.audit_log_entry_init(&opctx, rqctx).await?;
+        let result = handler(Arc::clone(&opctx), Arc::clone(&nexus)).await;
+        let _ = nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+        result
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(rqctx, handler)
+        .await
 }
 
 /// Authenticates an incoming request to the external API and produces a new

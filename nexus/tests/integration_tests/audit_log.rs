@@ -370,6 +370,133 @@ async fn test_audit_log_create_delete_ops(ctx: &ControlPlaneTestContext) {
     verify_entry(&items[5], "project_delete", project_del_url, 204, t2, t3);
 }
 
+/// Test that mutating endpoints in VERIFY_ENDPOINTS create audit log entries.
+/// This is a coverage test to catch endpoints that forget to add audit logging.
+/// The snapshot file lists endpoints that are known to not have audit logging.
+/// As audit logging is added to endpoints, they should be removed from the file.
+#[nexus_test]
+async fn test_audit_log_coverage(ctx: &ControlPlaneTestContext) {
+    use super::endpoints::{AllowedMethod, VERIFY_ENDPOINTS};
+    use expectorate::assert_contents;
+    use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
+    use openapiv3::OpenAPI;
+    use std::collections::BTreeMap;
+
+    let client = &ctx.external_client;
+
+    // Load the OpenAPI schema to get operation IDs
+    let schema_path = "../openapi/nexus/nexus-latest.json";
+    let schema_contents = std::fs::read_to_string(schema_path)
+        .expect("failed to read Nexus OpenAPI spec");
+    let spec: OpenAPI = serde_json::from_str(&schema_contents)
+        .expect("Nexus OpenAPI spec was not valid OpenAPI");
+
+    // Build a map from (method, url_regex) to (operation_id, path_template)
+    let spec_operations: BTreeMap<(String, String), (String, String)> = spec
+        .operations()
+        .map(|(path, method, op)| {
+            // Convert path template to regex pattern
+            let re = regex::Regex::new("/\\{[^}]+\\}").unwrap();
+            let regex_path = re.replace_all(path, "/[^/]+");
+            let regex = format!("^{}$", regex_path);
+            let label = op
+                .operation_id
+                .clone()
+                .unwrap_or_else(|| String::from("unknown"));
+            ((method.to_uppercase(), regex), (label, path.to_string()))
+        })
+        .collect();
+
+    // Set up resources needed by many endpoints
+    DiskTest::new(&ctx).await;
+    create_default_ip_pools(client).await;
+    let _project = create_project(client, "demo-project").await;
+
+    let t_start = Utc::now();
+
+    let mut tested = 0;
+    let mut missing_audit: BTreeMap<String, (String, String)> = BTreeMap::new();
+
+    for endpoint in &*VERIFY_ENDPOINTS {
+        for method in &endpoint.allowed_methods {
+            // Only test mutating methods
+            let is_mutating = match method {
+                AllowedMethod::Post(_)
+                | AllowedMethod::Put(_)
+                | AllowedMethod::Delete => true,
+                AllowedMethod::Get
+                | AllowedMethod::GetNonexistent
+                | AllowedMethod::GetUnimplemented
+                | AllowedMethod::GetVolatile
+                | AllowedMethod::GetWebsocket => false,
+            };
+            if !is_mutating {
+                continue;
+            }
+
+            let before = fetch_log(client, t_start, None).await.items.len();
+
+            // Make authenticated request as unprivileged user. This will fail
+            // authz but should still create an audit log entry if the endpoint
+            // has audit logging. Using unprivileged avoids actually modifying
+            // resources (e.g., removing our own permissions via fleet policy).
+            let http_method = method.http_method().clone();
+            let body = method.body().cloned();
+            let result = NexusRequest::new(
+                RequestBuilder::new(client, http_method.clone(), endpoint.url)
+                    .body(body.as_ref())
+                    .expect_status(None), // accept any status
+            )
+            .authn_as(AuthnMode::UnprivilegedUser)
+            .execute()
+            .await;
+
+            if result.is_err() {
+                // Request itself failed (connection error, etc), skip
+                continue;
+            }
+
+            let after = fetch_log(client, t_start, None).await.items.len();
+
+            if after <= before {
+                // Find the operation info from the OpenAPI spec
+                let method_str = http_method.to_string().to_uppercase();
+                let url_path = endpoint.url.split('?').next().unwrap();
+
+                let (op_id, path_template) = spec_operations
+                    .iter()
+                    .find(|((m, regex), _)| {
+                        *m == method_str
+                            && regex::Regex::new(regex)
+                                .unwrap()
+                                .is_match(url_path)
+                    })
+                    .map(|(_, (op_id, path))| (op_id.clone(), path.clone()))
+                    .unwrap_or_else(|| {
+                        (String::from("unknown"), url_path.to_string())
+                    });
+
+                missing_audit
+                    .insert(op_id, (method_str.to_lowercase(), path_template));
+            }
+            tested += 1;
+        }
+    }
+
+    println!("Tested {} mutating endpoints", tested);
+
+    let mut output =
+        String::from("Mutating endpoints without audit logging:\n");
+    for (op_id, (method, path)) in &missing_audit {
+        output.push_str(&format!("{:44} ({:6} {:?})\n", op_id, method, path));
+    }
+
+    // If you're adding audit logging to an endpoint, remove it from this file.
+    // If you're adding a new endpoint, add audit logging or add it to this file
+    // with justification.
+    assert_contents("tests/output/uncovered-audit-log-endpoints.txt", &output);
+}
+
 fn verify_entry(
     entry: &views::AuditLogEntry,
     operation_id: &str,
