@@ -67,7 +67,6 @@ use sled_agent_types::instance::{
     VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 
-use slog::Drain;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -77,9 +76,7 @@ use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
-// TODO-K: removeme
 use illumos_utils::svcs::Svcs;
-use tokio::task;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -796,16 +793,7 @@ impl SledAgent {
         Ok(addr)
     }
 
-    // TODO-K: Removeme
-    fn log() -> slog::Logger {
-        let decorator =
-            slog_term::PlainDecorator::new(slog_term::TestStdoutWriter);
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-        slog::Logger::root(drain, o!())
-    }
-
-    // TODO-K: Remove async
+    // TODO-K: Remove async?
     pub async fn inventory(
         &self,
         addr: SocketAddr,
@@ -817,15 +805,12 @@ impl SledAgent {
             SocketAddr::V6(v6) => v6,
         };
 
-        // TODO-K: removeme
-        let smf_services_in_maintenance = task::spawn_blocking(|| {
-            let log = SledAgent::log();
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(Svcs::enabled_not_running(&log))
-        })
-        .await
-        .unwrap()
-        .unwrap();
+        // TODO-K: check if this is correct, or if I should do something
+        // different for a simulated environment. The command below will only
+        // work with Illumos machines
+        let smf_services_in_maintenance =
+            Svcs::enabled_not_running(&self.log).await?;
+        //let smf_services_in_maintenance = vec![];
 
         let storage = self.storage.lock();
 
@@ -843,10 +828,6 @@ impl SledAgent {
             remove_mupdate_override: None,
             host_phase_2: HostPhase2DesiredSlots::current_contents(),
         };
-
-        // TODO-K: check if this is correct, or if I should do something
-        // different for a simulated environment
-        //let smf_services_in_maintenance = "".to_string();
 
         Ok(Inventory {
             sled_id: self.id,

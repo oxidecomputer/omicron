@@ -59,9 +59,6 @@ use sled_diagnostics::SledDiagnosticsQueryOutput;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-// TODO-K: Removeme
-use tokio::task;
-
 use super::sled_agent::SledAgent;
 
 type SledApiDescription = ApiDescription<Arc<SledAgent>>;
@@ -382,24 +379,12 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError> {
-        let sa = rqctx.context().clone();
-
-        // TODO-K: Removeme
-        let inventory = task::spawn_blocking(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(sa.inventory(rqctx.server.local_addr))
-        })
-        .await
-        .unwrap()
-        .unwrap();
-
-        Ok(HttpResponseOk(inventory))
-        // TODO-K: uncomment
-        //        Ok(HttpResponseOk(
-        //            sa.inventory(rqctx.server.local_addr).map_err(|e| {
-        //                HttpError::for_internal_error(format!("{:#}", e))
-        //            })?,
-        //        ))
+        let sa = rqctx.context();
+        Ok(HttpResponseOk(
+            sa.inventory(rqctx.server.local_addr).await.map_err(|e| {
+                HttpError::for_internal_error(format!("{:#}", e))
+            })?,
+        ))
     }
 
     async fn omicron_config_put(
