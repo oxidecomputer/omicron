@@ -29,7 +29,7 @@ impl Svcs {
         log: &Logger,
     ) -> Result<Vec<SvcNotRunning>, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
-        let cmd = cmd.args(&[SVCS, "-Zxv"]);
+        let cmd = cmd.args(&[SVCS, "-Zx"]);
         let output = execute_async(cmd).await?;
         SvcNotRunning::parse(log, &output.stdout)
     }
@@ -107,8 +107,7 @@ impl SvcNotRunning {
             additional_info: vec![],
         }
     }
-    // TODO-K: Should probably add a logger here to print out the data
-    // in case the output is not in the format we expect it to be
+
     fn parse(
         log: &Logger,
         data: &[u8],
@@ -140,6 +139,7 @@ impl SvcNotRunning {
         let mut current_svc = SvcNotRunning::new();
         let lines = s.trim().lines();
         for line in lines {
+            let line = line.trim();
             if line.starts_with("svc:") {
                 // This is a new service, wipe the slate clean
                 current_svc = SvcNotRunning::new();
@@ -168,25 +168,26 @@ impl SvcNotRunning {
                                     state_since,
                                     "%a %b %d %H:%M:%S %Y",
                                 ) {
-                                    Ok(t) => Some(t),
+                                    Ok(t) => t,
                                     Err(e) => {
+                                        // We don't return an error here because
+                                        // we want to collect as much information
+                                        // as we can, instead of bailing out
                                         info!(
                                             log,
-                                            "unable to parse service instance state since time {}: {}",
+                                            "unable to parse service instance \
+                                            state-since datetime {}: {}",
                                             state_since,
                                             e
                                         );
-                                        None
+                                        continue;
                                     }
                                 };
 
-                                if let Some(n) = naive {
-                                    current_svc.state_since = Some(
-                                        DateTime::from_naive_utc_and_offset(
-                                            n, Utc,
-                                        ),
-                                    );
-                                };
+                                current_svc.state_since =
+                                    Some(DateTime::from_naive_utc_and_offset(
+                                        naive, Utc,
+                                    ));
                             }
                         }
                         "Reason" => current_svc.reason = value.to_string(),
@@ -195,20 +196,28 @@ impl SvcNotRunning {
                         }
                         "Impact" => {
                             current_svc.impact = value.to_string();
-                            // This should be the last line for each service, add
-                            // the service to the vector.
+                            // This should be the last line for each service
+                            // https://github.com/illumos/illumos-gate/blob/master/usr/src/cmd/svc/svcs/explain.c#L2070-L2097
+                            //
+                            // Push the service to the services vector.
                             svcs.push(current_svc.clone());
                         }
-                        // TODO-K: Should this really be an error or should I just log?
                         _ => {
-                            return Err(ExecutionError::ParseFailure(format!(
-                                "{}",
-                                key
-                            )));
+                            info!(
+                                log,
+                                "unable to parse key due to unknown format: \
+                                {key}"
+                            );
                         }
                     }
+                } else {
+                    if !line.is_empty() {
+                        info!(
+                            log,
+                            "unable to parse line due to unknown format: {line}",
+                        );
+                    }
                 }
-                // TODO-K: If none, should I log the line if not empty?
             }
         }
         Ok(svcs)
@@ -256,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn test_svc_not_running_parse() {
+    fn test_svc_not_running_parse_success() {
         let output = r#"svc:/site/fake-service:default
   Zone: global
  State: maintenance since Mon Nov 24 06:57:19 2025
@@ -325,6 +334,85 @@ Impact: This service is not running."#;
                     "man -M /usr/share/man -s 7 omicron1".to_string(),
                     "/var/svc/log/system-omicron-baseline:default.log"
                         .to_string(),
+                ],
+                impact: "This service is not running.".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_svc_not_running_parse_state_since_fail() {
+        let output = r#"svc:/site/fake-service:default
+  Zone: global
+ State: maintenance since Mon Not 24 06:57:19 2025
+Reason: Restarting too quickly.
+   See: http://illumos.org/msg/SMF-8000-L5
+   See: /var/svc/log/site-fake-service:default.log
+Impact: This service is not running.
+"#;
+
+        let log = log();
+        let services = SvcNotRunning::parse(&log, output.as_bytes()).unwrap();
+
+        // We want to make sure we have an entry even if we weren't able to
+        // parse the timestamp.
+        assert_eq!(services.len(), 1);
+
+        assert_eq!(
+            services[0],
+            SvcNotRunning {
+                fmri: "svc:/site/fake-service:default".to_string(),
+                zone: "global".to_string(),
+                state: SvcState::Maintenance,
+                state_since: None,
+                reason: "Restarting too quickly.".to_string(),
+                additional_info: vec![
+                    "http://illumos.org/msg/SMF-8000-L5".to_string(),
+                    "/var/svc/log/site-fake-service:default.log".to_string(),
+                ],
+                impact: "This service is not running.".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn test_svc_not_running_parse_unknown_format_fail() {
+        let output = r#"svc:/site/fake-service:default
+  Zone: global
+ State: maintenance since Mon Nov 24 06:57:19 2025
+Reason: Restarting too quickly.
+   See: http://illumos.org/msg/SMF-8000-L5
+   See: /var/svc/log/site-fake-service:default.log
+   Bob: Barnacles!
+   What?
+Impact: This service is not running.
+"#;
+
+        let log = log();
+        let services = SvcNotRunning::parse(&log, output.as_bytes()).unwrap();
+
+        // We want to make sure we have an entry even if we weren't able to
+        // parse two lines.
+        assert_eq!(services.len(), 1);
+
+        assert_eq!(
+            services[0],
+            SvcNotRunning {
+                fmri: "svc:/site/fake-service:default".to_string(),
+                zone: "global".to_string(),
+                state: SvcState::Maintenance,
+                state_since: Some(DateTime::from_naive_utc_and_offset(
+                    NaiveDateTime::parse_from_str(
+                        "Mon Nov 24 06:57:19 2025",
+                        "%a %b %d %H:%M:%S %Y",
+                    )
+                    .unwrap(),
+                    Utc,
+                )),
+                reason: "Restarting too quickly.".to_string(),
+                additional_info: vec![
+                    "http://illumos.org/msg/SMF-8000-L5".to_string(),
+                    "/var/svc/log/site-fake-service:default.log".to_string(),
                 ],
                 impact: "This service is not running.".to_string(),
             }
