@@ -117,6 +117,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use nexus_types::deployment::PendingMgsUpdates;
+use oxide_debug_dropbox::DebugDropbox;
 pub use sim::TEST_HARDWARE_THREADS;
 pub use sim::TEST_RESERVOIR_RAM;
 
@@ -900,7 +901,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 .clone(),
         };
 
-        let nexus_internal = N::start_internal(&self.config, &log).await?;
+        let dropbox = Arc::new(DebugDropbox::for_tests_noop(log));
+        let nexus_internal =
+            N::start_internal(&self.config, &log, dropbox).await?;
         let nexus_internal_addr =
             nexus_internal.get_http_server_internal_address();
         let internal_address = match nexus_internal_addr {

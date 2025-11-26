@@ -133,7 +133,9 @@ impl BlueprintPlanner {
                     PlanError::AssemblePlanningInput(_)
                     | PlanError::MakePlanner { .. }
                     | PlanError::Plan(_)
-                    | PlanError::SaveBlueprint { .. } => {
+                    | PlanError::AssembleDebugState(_)
+                    | PlanError::SaveBlueprint { .. }
+                    | PlanError::SaveDebugState(_) => {
                         error!(
                             &opctx.log,
                             "blueprint planning failed";
@@ -479,7 +481,6 @@ mod test {
     use crate::app::background::tasks::inventory_load::InventoryLoader;
     use crate::app::{background::Activator, quiesce::NexusQuiesceHandle};
     use assert_matches::assert_matches;
-    use camino::Utf8Path;
     use chrono::DateTime;
     use nexus_inventory::now_db_precision;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -500,10 +501,8 @@ mod test {
         // Set up the test context.
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
+        let log = &cptestctx.logctx.log;
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
 
         // Spin up the blueprint loader background task.
         let (tx_loader, _) = watch::channel(None);
@@ -518,7 +517,7 @@ mod test {
 
         // Spin up the inventory collector background task.
         let resolver = internal_dns_resolver::Resolver::new_from_addrs(
-            cptestctx.logctx.log.clone(),
+            log.clone(),
             &[cptestctx.internal_dns.dns_server.local_address()],
         )
         .expect("can't start resolver");
@@ -549,9 +548,7 @@ mod test {
                 time_modified: now_db_precision(),
             }),
         );
-        let debug_dropbox = Arc::new(
-            DebugDropbox::for_tests(Utf8Path::new(".")).await.unwrap(),
-        );
+        let debug_dropbox = Arc::new(DebugDropbox::for_tests_noop(log));
 
         // Finally, spin up the planner background task.
         let mut planner = BlueprintPlanner::new(
@@ -730,9 +727,7 @@ mod test {
         // check_blueprint_limit_reached.
         let (_tx_inventory, rx_inventory) = watch::channel(None);
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
-        let debug_dropbox = Arc::new(
-            DebugDropbox::for_tests(Utf8Path::new(".")).await.unwrap(),
-        );
+        let debug_dropbox = Arc::new(DebugDropbox::for_tests_noop(&logctx.log));
 
         let mut planner = BlueprintPlanner::new(
             datastore.clone(),

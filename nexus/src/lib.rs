@@ -36,7 +36,6 @@ use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
 use nexus_types::inventory::Collection;
-use omicron_common::FileKv;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};

@@ -7377,6 +7377,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "oxide-debug-dropbox",
  "pq-sys",
  "slog",
  "tokio",

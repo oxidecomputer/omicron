@@ -10,13 +10,19 @@
 // - General networking and runtime tuning for availability and security: see
 //   omicron#2184, omicron#2414.
 
+use anyhow::Context;
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use nexus_config::NexusConfig;
+use omicron_common::FileKv;
 use omicron_common::cmd::CmdError;
 use omicron_common::cmd::fatal;
 use omicron_nexus::run_server;
+use oxide_debug_dropbox::DebugDropbox;
+use slog::debug;
+use slog::error;
+use std::sync::Arc;
 
 #[derive(Debug, Parser)]
 #[clap(name = "nexus", about = "See README.adoc for more information")]
@@ -49,17 +55,19 @@ async fn do_run() -> Result<(), CmdError> {
         .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
     use slog::Drain;
-    let (drain, registration) =
-        slog_dtrace::with_drain(
-            config.pkg.log.to_logger("nexus").map_err(|message| {
-                format!("initializing logger: {}", message)
-            })?,
-        );
+    let (drain, registration) = slog_dtrace::with_drain(
+        config
+            .pkg
+            .log
+            .to_logger("nexus")
+            .map_err(|message| anyhow!("initializing logger: {}", message))
+            .map_err(CmdError::Failure)?,
+    );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);
-        return CmdError::Failure(anyhow!(msg));
+        return Err(CmdError::Failure(anyhow!(msg)));
     } else {
         debug!(log, "registered DTrace probes");
     }
