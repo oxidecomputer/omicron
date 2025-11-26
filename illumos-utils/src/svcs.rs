@@ -9,24 +9,25 @@ use crate::PFEXEC;
 use crate::execute_async;
 use crate::zone::SVCS;
 
+use chrono::DateTime;
+use chrono::NaiveDateTime;
+use chrono::Utc;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Display;
-use std::str::FromStr;
 use tokio::process::Command;
 
 /// Wraps commands for interacting with interfaces.
 pub struct Svcs {}
 
 impl Svcs {
-    /// Lists SMF services in maintenance
+    /// Lists SMF services that are enabled but not running
     pub async fn enabled_not_running()
     -> Result<Vec<SvcNotRunning>, ExecutionError> {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Zxv"]);
         let output = execute_async(cmd).await?;
-        // TODO-K: handle stderr and acutally parse the output
         SvcNotRunning::parse(&output.stdout)
     }
 }
@@ -55,22 +56,22 @@ pub enum SvcState {
     /// Represents a legacy instance that is not managed by the service
     /// management facility.
     LegacyRun,
+    /// We were unable to determine the state of the service instance.
+    Unknown,
 }
 
-impl FromStr for SvcState {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<SvcState, Self::Err> {
-        match s {
-            "Uninitailized" | "uninitailized" => Ok(SvcState::Uninitailized),
-            "Offline" | "offline" => Ok(SvcState::Offline),
-            "Online" | "online" => Ok(SvcState::Online),
-            "Degraded" | "degraded" => Ok(SvcState::Degraded),
-            "Maintenance" | "maintenance" => Ok(SvcState::Maintenance),
-            "Disabled" | "disabled" => Ok(SvcState::Disabled),
+impl From<String> for SvcState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "Uninitailized" | "uninitailized" => SvcState::Uninitailized,
+            "Offline" | "offline" => SvcState::Offline,
+            "Online" | "online" => SvcState::Online,
+            "Degraded" | "degraded" => SvcState::Degraded,
+            "Maintenance" | "maintenance" => SvcState::Maintenance,
+            "Disabled" | "disabled" => SvcState::Disabled,
             "Legacy Run" | "legacy run" | "Legacy run" | "legacy_run"
-            | "legacy-run" => Ok(SvcState::LegacyRun),
-            _ => Err(format!("{s} is not a valid SMF service instance state")),
+            | "legacy-run" => SvcState::LegacyRun,
+            _ => SvcState::Unknown,
         }
     }
 }
@@ -82,7 +83,11 @@ pub struct SvcNotRunning {
     fmri: String,
     zone: String,
     state: SvcState,
-    // TODO-K: Add state_since or something like that
+    // TODO-K: Do I need a deserialiser like parse_cockroach_cli_timestamp?
+    // TODO-K: Should this just be a string so we don't run into the case where
+    // we are unable to parse, and block the whole thing due to that? Maybe
+    // make it into an option? Or into an enum with an Unknown variant?
+    state_since: DateTime<Utc>,
     reason: String,
     impact: String,
     additional_info: Vec<String>,
@@ -95,8 +100,9 @@ impl SvcNotRunning {
         SvcNotRunning {
             fmri: "".to_string(),
             zone: "".to_string(),
-            // TODO-K: Should this be an option?
-            state: SvcState::Uninitailized,
+            state: SvcState::Unknown,
+            // TODO-K: Make this an option?
+            state_since: Utc::now(),
             reason: "".to_string(),
             impact: "".to_string(),
             additional_info: vec![],
@@ -147,17 +153,31 @@ impl SvcNotRunning {
                 if let Some((key, value)) = line.split_once(": ") {
                     match key.trim() {
                         "Zone" => current_svc.zone = value.to_string(),
-                        // TODO-K: Only add if state is maintenance? Or add any
-                        // state and decice on a layer above if we want to only
-                        // keep maintenance ones
                         "State" => {
                             if let Some(state) = value.split_whitespace().next()
                             {
-                                // TODO-K: get rid of unwrap
                                 current_svc.state =
-                                    SvcState::from_str(state).unwrap()
+                                    SvcState::from(state.to_string())
                             };
-                            // TODO-K: Set the time this state was active
+
+                            if let Some((_, state_since)) =
+                                value.split_once("since ")
+                            {
+                                current_svc.state_since =
+                                    DateTime::from_naive_utc_and_offset(
+                                        NaiveDateTime::parse_from_str(
+                                            state_since,
+                                            "%a %b %d %H:%M:%S %Y",
+                                        )
+                                        // TODO-K: Do something differently if this fails?
+                                        .map_err(|e| {
+                                            ExecutionError::ParseFailure(
+                                                format!("{}", e),
+                                            )
+                                        })?,
+                                        Utc,
+                                    );
+                            }
                         }
                         "Reason" => current_svc.reason = value.to_string(),
                         "See" => {
@@ -172,7 +192,7 @@ impl SvcNotRunning {
                         // TODO-K: Should this really be an error or should I just log?
                         _ => {
                             return Err(ExecutionError::ParseFailure(format!(
-                                "Failed to parse: {}",
+                                "{}",
                                 key
                             )));
                         }
@@ -191,6 +211,7 @@ impl Display for SvcNotRunning {
             fmri,
             zone,
             state,
+            state_since,
             reason,
             impact,
             additional_info,
@@ -199,6 +220,7 @@ impl Display for SvcNotRunning {
         write!(f, "FMRI: {}", fmri)?;
         write!(f, "zone: {}", zone)?;
         write!(f, "state: {:?}", state)?;
+        write!(f, "state since: {:?}", state_since)?;
         write!(f, "reason: {}", reason)?;
         for info in additional_info {
             write!(f, "see: {}", info)?;
@@ -241,6 +263,14 @@ Impact: This service is not running."#;
                 fmri: "svc:/site/fake-service:default".to_string(),
                 zone: "global".to_string(),
                 state: SvcState::Maintenance,
+                state_since: DateTime::from_naive_utc_and_offset(
+                    NaiveDateTime::parse_from_str(
+                        "Mon Nov 24 06:57:19 2025",
+                        "%a %b %d %H:%M:%S %Y",
+                    )
+                    .unwrap(),
+                    Utc,
+                ),
                 reason: "Restarting too quickly.".to_string(),
                 additional_info: vec![
                     "http://illumos.org/msg/SMF-8000-L5".to_string(),
@@ -256,6 +286,15 @@ Impact: This service is not running."#;
                 fmri: "svc:/system/omicron/baseline:default".to_string(),
                 zone: "global".to_string(),
                 state: SvcState::Maintenance,
+                state_since: DateTime::from_naive_utc_and_offset(
+                    NaiveDateTime::parse_from_str(
+                        "Mon Nov 24 05:39:49 2025",
+                        "%a %b %d %H:%M:%S %Y",
+                    )
+                    // TODO-K: Do something differently if this fails
+                    .unwrap(),
+                    Utc,
+                ),
                 reason:
                     "Start method failed repeatedly, last died on Killed (9)."
                         .to_string(),

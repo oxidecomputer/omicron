@@ -15,6 +15,7 @@ bhyve_api.workspace = true
 byteorder.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
+chrono.workspace = true
 cfg-if.workspace = true
 crucible-smf.workspace = true
 debug-ignore.workspace = true
