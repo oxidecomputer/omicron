@@ -30,8 +30,7 @@ use futures::future::BoxFuture;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, CheckerSource,
     DeleteStaticRoute4Request, ImportExportPolicy as MgImportExportPolicy,
-    Prefix as MgPrefix, Prefix4, Prefix6, ShaperSource, StaticRoute4,
-    StaticRoute4List,
+    ShaperSource, StaticRoute4, StaticRoute4List,
 };
 use nexus_db_queries::{
     context::OpContext,
@@ -47,6 +46,7 @@ use omicron_common::{
         internal::shared::ParseSwitchLocationError,
     },
 };
+use rdb_types::{Prefix as MgPrefix, Prefix4, Prefix6};
 use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,

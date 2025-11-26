@@ -16325,6 +16325,13 @@
             ]
           },
           {
+            "description": "There is an ongoing Connection Collision that hasn't yet been resolved. Two connections are maintained until one connection receives an Open or is able to progress into Established.",
+            "type": "string",
+            "enum": [
+              "connection_collision"
+            ]
+          },
+          {
             "description": "Synchronizing with peer.",
             "type": "string",
             "enum": [
