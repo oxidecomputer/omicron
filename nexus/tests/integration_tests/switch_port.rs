@@ -23,6 +23,7 @@ use omicron_common::api::external::{
     LinkSpeed, NameOrId, SwitchPort, SwitchPortSettings,
 };
 use omicron_common::api::external::{ImportExportPolicy, Name};
+use oxnet::IpNet;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -229,11 +230,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
 
     let route0 = &created.routes[0];
-    assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
+    assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
     assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &created.addresses[0];
-    assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
+    assert_eq!(addr0.address, IpNet::from_str("203.0.113.10/24").unwrap());
 
     // Get the port settings back
     let roundtrip: SwitchPortSettings = NexusRequest::object_get(
@@ -271,11 +272,11 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(ifx0.kind, external::SwitchInterfaceKind::Primary);
 
     let route0 = &roundtrip.routes[0];
-    assert_eq!(route0.dst, "1.2.3.0/24".parse().unwrap());
+    assert_eq!(route0.dst, IpNet::from_str("1.2.3.0/24").unwrap());
     assert_eq!(&route0.gw.to_string(), "1.2.3.4");
 
     let addr0 = &roundtrip.addresses[0];
-    assert_eq!(addr0.address, "203.0.113.10/24".parse().unwrap());
+    assert_eq!(addr0.address, IpNet::from_str("203.0.113.10/24").unwrap());
 
     // Delete port settings
     NexusRequest::object_delete(
