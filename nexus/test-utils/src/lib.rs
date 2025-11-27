@@ -2314,6 +2314,7 @@ pub async fn start_dns_server(
             default_request_body_max_bytes: 8 * 1024,
             default_handler_task_mode: HandlerTaskMode::Detached,
             log_headers: vec![],
+            compression: dropshot::CompressionConfig::None,
         },
     )
     .await

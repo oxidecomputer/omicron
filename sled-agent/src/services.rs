@@ -2360,6 +2360,7 @@ impl ServiceManager {
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
+                            compression: dropshot::CompressionConfig::None,
                         },
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
@@ -2367,6 +2368,7 @@ impl ServiceManager {
                         default_request_body_max_bytes: 1048576,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],
+                        compression: dropshot::CompressionConfig::None,
                     },
                     dropshot_lockstep: dropshot::ConfigDropshot {
                         bind_address: SocketAddr::new(
@@ -2376,6 +2378,7 @@ impl ServiceManager {
                         default_request_body_max_bytes: 1048576,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],
+                        compression: dropshot::CompressionConfig::None,
                     },
                     internal_dns: nexus_config::InternalDns::FromSubnet {
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(

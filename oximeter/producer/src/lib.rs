@@ -7,6 +7,7 @@
 // Copyright 2024 Oxide Computer Company
 
 use dropshot::ApiDescription;
+use dropshot::CompressionConfig;
 use dropshot::ConfigDropshot;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
@@ -219,6 +220,7 @@ impl Server {
             default_request_body_max_bytes,
             default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
             log_headers: vec![],
+            compression: CompressionConfig::None,
         };
         let server = Self::build_dropshot_server(&log, &registry, &dropshot)?;
 

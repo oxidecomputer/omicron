@@ -31,6 +31,7 @@ pub use management_switch::SwitchPortConfig;
 pub use management_switch::SwitchPortDescription;
 use omicron_common::FileKv;
 
+use dropshot::CompressionConfig;
 use dropshot::ConfigDropshot;
 use dropshot::HandlerTaskMode;
 use slog::Logger;
@@ -95,6 +96,7 @@ fn start_dropshot_server(
                 default_request_body_max_bytes,
                 default_handler_task_mode: HandlerTaskMode::Detached,
                 log_headers: vec![],
+                compression: CompressionConfig::None,
             };
 
             let http_server = dropshot::ServerBuilder::new(

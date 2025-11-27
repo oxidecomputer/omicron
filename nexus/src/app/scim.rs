@@ -187,7 +187,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_get_user_by_id(
@@ -203,7 +203,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_create_user(
@@ -218,7 +218,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_replace_user(
@@ -234,7 +234,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_patch_user(
@@ -250,7 +250,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_delete_user(
@@ -265,7 +265,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_list_groups(
@@ -280,7 +280,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_get_group_by_id(
@@ -296,7 +296,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_create_group(
@@ -311,7 +311,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_replace_group(
@@ -327,7 +327,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_patch_group(
@@ -343,7 +343,7 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 
     pub async fn scim_v2_delete_group(
@@ -358,6 +358,6 @@ impl super::Nexus {
             Err(error) => error.to_http_response(),
         };
 
-        result.map_err(HttpError::from)
+        Ok(result?.map(Body::wrap))
     }
 }
