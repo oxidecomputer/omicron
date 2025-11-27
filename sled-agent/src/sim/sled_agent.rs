@@ -76,6 +76,8 @@ use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+use illumos_utils::svcs::Svcs;
+
 /// Simulates management of the control plane on a sled
 ///
 /// The current implementation simulates a server directly in this program.
@@ -791,13 +793,24 @@ impl SledAgent {
         Ok(addr)
     }
 
-    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+    // TODO-K: Remove async?
+    pub async fn inventory(
+        &self,
+        addr: SocketAddr,
+    ) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
             }
             SocketAddr::V6(v6) => v6,
         };
+
+        // TODO-K: check if this is correct, or if I should do something
+        // different for a simulated environment. The command below will only
+        // work with Illumos machines
+        let smf_services_in_maintenance =
+            Svcs::enabled_not_running(&self.log).await?;
+        //let smf_services_in_maintenance = vec![];
 
         let storage = self.storage.lock();
 
@@ -888,6 +901,7 @@ impl SledAgent {
             ),
             // TODO: simulate the zone image resolver with greater fidelity
             zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+            smf_services_in_maintenance,
         })
     }
 
