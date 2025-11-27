@@ -23,7 +23,7 @@ pub struct SitrepLoader {
     tx: watch::Sender<CurrentSitrep>,
 }
 
-type CurrentSitrep = Option<Arc<(SitrepVersion, Sitrep)>>;
+pub type CurrentSitrep = Option<Arc<(SitrepVersion, Sitrep)>>;
 
 impl BackgroundTask for SitrepLoader {
     fn activate<'a>(
@@ -224,9 +224,10 @@ mod test {
                 comment: "test sitrep 1".to_string(),
                 time_created: Utc::now(),
             },
+            cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep1)
+            .fm_sitrep_insert(&opctx, sitrep1.clone())
             .await
             .expect("sitrep should be inserted successfully");
 
@@ -288,9 +289,10 @@ mod test {
                 comment: "test sitrep 2".to_string(),
                 time_created: Utc::now(),
             },
+            cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep2)
+            .fm_sitrep_insert(&opctx, sitrep2.clone())
             .await
             .expect("sitrep2 should be inserted successfully");
 
