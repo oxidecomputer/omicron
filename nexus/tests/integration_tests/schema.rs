@@ -20,7 +20,7 @@ use nexus_test_utils::sql::ColumnValue;
 use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
 use nexus_test_utils::sql::process_rows;
-use nexus_test_utils::{ControlPlaneTestContextBuilder, load_test_config};
+use nexus_test_utils::{ControlPlaneStarter, load_test_config};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
@@ -45,26 +45,24 @@ const SCHEMA_DIR: &'static str =
 async fn test_setup<'a>(
     config: &'a mut NexusConfig,
     name: &'static str,
-) -> ControlPlaneTestContextBuilder<'a, omicron_nexus::Server> {
-    let mut builder =
-        ControlPlaneTestContextBuilder::<omicron_nexus::Server>::new(
-            name, config,
-        );
+) -> ControlPlaneStarter<'a, omicron_nexus::Server> {
+    let mut starter =
+        ControlPlaneStarter::<omicron_nexus::Server>::new(name, config);
     let populate = false;
-    builder.start_crdb(populate).await;
+    starter.start_crdb(populate).await;
     let schema_dir = Utf8PathBuf::from(SCHEMA_DIR);
-    builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
-    builder.start_internal_dns().await;
-    builder.start_external_dns().await;
+    starter.config.pkg.schema = Some(SchemaConfig { schema_dir });
+    starter.start_internal_dns().await;
+    starter.start_external_dns().await;
     let sp_conf: Utf8PathBuf = DEFAULT_SP_SIM_CONFIG.into();
-    builder.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
-    builder.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
-    builder.start_dendrite(SwitchLocation::Switch0).await;
-    builder.start_dendrite(SwitchLocation::Switch1).await;
-    builder.start_mgd(SwitchLocation::Switch0).await;
-    builder.start_mgd(SwitchLocation::Switch1).await;
-    builder.populate_internal_dns().await;
-    builder
+    starter.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
+    starter.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
+    starter.start_dendrite(SwitchLocation::Switch0).await;
+    starter.start_dendrite(SwitchLocation::Switch1).await;
+    starter.start_mgd(SwitchLocation::Switch0).await;
+    starter.start_mgd(SwitchLocation::Switch1).await;
+    starter.populate_internal_dns().await;
+    starter
 }
 
 // Attempts to apply an update as a transaction.
