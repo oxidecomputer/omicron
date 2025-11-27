@@ -62,8 +62,10 @@ hex-literal.workspace = true
 hickory-resolver.workspace = true
 internal-dns-types.workspace = true
 maplit.workspace = true
+nexus-reconfigurator-simulation.workspace = true
 omicron-common = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 proptest.workspace = true
+reconfigurator-cli.workspace = true
 semver.workspace = true
 test-strategy.workspace = true

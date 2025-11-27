@@ -85,6 +85,7 @@ use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_lib::assemble::ArtifactManifest;
 
 mod log_capture;
+pub mod test_utils;
 
 /// REPL state
 #[derive(Debug)]
@@ -1756,7 +1757,7 @@ fn cmd_sled_set(
         }
         SledSetCommand::OmicronConfig(command) => {
             let resolved_id =
-                system.resolve_blueprint_id(command.blueprint.into())?;
+                system.resolve_blueprint_id(command.blueprint.into());
             let blueprint = system.get_blueprint(&resolved_id)?;
             let sled_cfg =
                 blueprint.sleds.get(&sled_id).with_context(|| {
@@ -2236,7 +2237,7 @@ fn cmd_blueprint_blippy(
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
     let resolved_id =
-        state.system().resolve_blueprint_id(args.blueprint_id.into())?;
+        state.system().resolve_blueprint_id(args.blueprint_id.into());
     let blueprint = state.system().get_blueprint(&resolved_id)?;
     let planning_input = sim
         .planning_input(blueprint)
@@ -2255,7 +2256,7 @@ fn cmd_blueprint_plan(
     let system = state.system_mut();
 
     let parent_blueprint_id =
-        system.resolve_blueprint_id(args.parent_blueprint_id.into())?;
+        system.resolve_blueprint_id(args.parent_blueprint_id.into());
     let parent_blueprint = system.get_blueprint(&parent_blueprint_id)?;
     let collection = match args.collection_id {
         Some(collection_id) => {
@@ -2311,7 +2312,7 @@ fn cmd_blueprint_edit(
     let rng = state.rng_mut().next_planner_rng();
     let system = state.system_mut();
 
-    let resolved_id = system.resolve_blueprint_id(args.blueprint_id.into())?;
+    let resolved_id = system.resolve_blueprint_id(args.blueprint_id.into());
     let blueprint = system.get_blueprint(&resolved_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
     let planning_input = sim
@@ -2779,7 +2780,7 @@ fn cmd_blueprint_history(
 
     let state = sim.current_state();
     let system = state.system();
-    let resolved_id = system.resolve_blueprint_id(blueprint_id.into())?;
+    let resolved_id = system.resolve_blueprint_id(blueprint_id.into());
     let mut blueprint = system.get_blueprint(&resolved_id)?;
 
     // We want to print the output in logical order, but in order to construct
@@ -2852,8 +2853,7 @@ fn cmd_blueprint_save(
     let blueprint_id = args.blueprint_id;
 
     let state = sim.current_state();
-    let resolved_id =
-        state.system().resolve_blueprint_id(blueprint_id.into())?;
+    let resolved_id = state.system().resolve_blueprint_id(blueprint_id.into());
     let blueprint = state.system().get_blueprint(&resolved_id)?;
 
     let output_path = &args.filename;

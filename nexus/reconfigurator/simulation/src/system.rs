@@ -285,13 +285,13 @@ impl SimSystem {
     pub fn resolve_blueprint_id(
         &self,
         original: BlueprintId,
-    ) -> Result<ResolvedBlueprintId, KeyError> {
+    ) -> ResolvedBlueprintId {
         let resolved = match original {
             BlueprintId::Target => self.blueprints.target().target_id,
             BlueprintId::Latest => self.blueprints.latest().id,
             BlueprintId::Id(id) => id,
         };
-        Ok(ResolvedBlueprintId { original, resolved })
+        ResolvedBlueprintId { original, resolved }
     }
 
     pub fn get_blueprint(
@@ -312,7 +312,7 @@ impl SimSystem {
         &self,
         original: BlueprintId,
     ) -> Result<&Blueprint, KeyError> {
-        let id = self.resolve_blueprint_id(original)?;
+        let id = self.resolve_blueprint_id(original);
         self.get_blueprint(&id)
     }
 
@@ -421,7 +421,7 @@ impl SimSystemBuilder {
     pub fn resolve_blueprint_id(
         &self,
         original: BlueprintId,
-    ) -> Result<ResolvedBlueprintId, KeyError> {
+    ) -> ResolvedBlueprintId {
         self.inner.system.resolve_blueprint_id(original)
     }
 
