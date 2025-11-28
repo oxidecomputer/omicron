@@ -140,7 +140,7 @@ async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
     // provision disk
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disk_url)
-            .body(Some(&params::DiskCreate {
+            .body(Some(&params::DiskCreate::Crucible {
                 identity: IdentityMetadataCreateParams {
                     name: "test-disk".parse().unwrap(),
                     description: "".into(),

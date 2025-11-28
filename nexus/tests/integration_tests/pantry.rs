@@ -4,6 +4,7 @@
 
 //! Tests Nexus' interactions with Crucible's pantry
 
+use crate::integration_tests::instances::instance_simulate;
 use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::test_util::ClientTestContext;
 use http::StatusCode;
@@ -27,10 +28,8 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceState;
 use omicron_nexus::Nexus;
-use omicron_nexus::TestInterfaces as _;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
-use sled_agent_client::TestInterfaces as _;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -87,15 +86,6 @@ async fn set_instance_state(
     .unwrap()
 }
 
-async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
-    let info = nexus
-        .active_instance_info(id, None)
-        .await
-        .unwrap()
-        .expect("instance must be on a sled to simulate a state change");
-    info.sled_client.vmm_finish_transition(info.propolis_id).await;
-}
-
 async fn disk_get(client: &ClientTestContext, disk_url: &str) -> Disk {
     NexusRequest::object_get(client, disk_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -130,7 +120,7 @@ async fn create_disk_with_state_importing_blocks(client: &ClientTestContext) {
     let _disk: Disk = object_create(
         client,
         &url,
-        &params::DiskCreate {
+        &params::DiskCreate::Crucible {
             identity: IdentityMetadataCreateParams {
                 name: DISK_NAME.parse().unwrap(),
                 description: String::from("sells rainsticks"),
@@ -357,7 +347,7 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate {
+    let new_disk = params::DiskCreate::Crucible {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),

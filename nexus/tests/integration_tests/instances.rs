@@ -2607,7 +2607,7 @@ async fn test_instance_using_image_from_other_project_fails(
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
                 disks: vec![params::InstanceDiskAttachment::Create(
-                    params::DiskCreate {
+                    params::DiskCreate::Crucible {
                         identity: IdentityMetadataCreateParams {
                             name: "stolen".parse().unwrap(),
                             description: "i stole an image".into(),
@@ -4090,7 +4090,7 @@ async fn test_instance_create_attach_disks(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         boot_disk: Some(params::InstanceDiskAttachment::Create(
-            params::DiskCreate {
+            params::DiskCreate::Crucible {
                 identity: IdentityMetadataCreateParams {
                     name: Name::try_from(String::from("created-disk")).unwrap(),
                     description: String::from(
@@ -4104,19 +4104,21 @@ async fn test_instance_create_attach_disks(
             },
         )),
         disks: vec![
-            params::InstanceDiskAttachment::Create(params::DiskCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: Name::try_from(String::from("created-disk2"))
-                        .unwrap(),
-                    description: String::from(
-                        "A data disk that was created by instance create",
-                    ),
+            params::InstanceDiskAttachment::Create(
+                params::DiskCreate::Crucible {
+                    identity: IdentityMetadataCreateParams {
+                        name: Name::try_from(String::from("created-disk2"))
+                            .unwrap(),
+                        description: String::from(
+                            "A data disk that was created by instance create",
+                        ),
+                    },
+                    size: ByteCount::from_gibibytes_u32(4),
+                    disk_source: params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
                 },
-                size: ByteCount::from_gibibytes_u32(4),
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
-                },
-            }),
+            ),
             params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach {
                     name: attachable_disk.identity.name.clone(),
@@ -4205,16 +4207,19 @@ async fn test_instance_create_attach_disks_undo(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![
-            params::InstanceDiskAttachment::Create(params::DiskCreate {
-                identity: IdentityMetadataCreateParams {
-                    name: Name::try_from(String::from("probablydata")).unwrap(),
-                    description: String::from("probably data"),
+            params::InstanceDiskAttachment::Create(
+                params::DiskCreate::Crucible {
+                    identity: IdentityMetadataCreateParams {
+                        name: Name::try_from(String::from("probablydata"))
+                            .unwrap(),
+                        description: String::from("probably data"),
+                    },
+                    size: ByteCount::from_gibibytes_u32(4),
+                    disk_source: params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
                 },
-                size: ByteCount::from_gibibytes_u32(4),
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
-                },
-            }),
+            ),
             params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: regular_disk.identity.name },
             ),
@@ -7996,7 +8001,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
-async fn instance_get(
+pub async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
 ) -> Instance {

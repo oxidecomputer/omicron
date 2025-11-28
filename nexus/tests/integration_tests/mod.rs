@@ -29,6 +29,7 @@ mod instances;
 mod internet_gateway;
 mod inventory_matching;
 mod ip_pools;
+mod local_storage;
 mod metrics;
 mod metrics_querier;
 mod multicast;

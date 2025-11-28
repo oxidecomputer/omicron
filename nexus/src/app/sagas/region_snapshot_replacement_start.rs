@@ -1277,7 +1277,10 @@ pub(crate) mod test {
         let disk_id = disk.identity.id;
 
         let Disk::Crucible(db_disk) =
-            datastore.disk_get(&opctx, disk_id).await.unwrap();
+            datastore.disk_get(&opctx, disk_id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         // Create a snapshot
         let snapshot =
@@ -1858,7 +1861,10 @@ pub(crate) mod test {
 
         // Before expunging any physical disk, save some DB models
         let Disk::Crucible(db_disk) =
-            datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
+            datastore.disk_get(&opctx, disk.identity.id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
@@ -2013,7 +2019,10 @@ pub(crate) mod test {
 
         // Before expunging any physical disk, save some DB models
         let Disk::Crucible(db_disk) =
-            datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
+            datastore.disk_get(&opctx, disk.identity.id).await.unwrap()
+        else {
+            unreachable!()
+        };
 
         let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)

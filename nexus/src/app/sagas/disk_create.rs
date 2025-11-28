@@ -41,8 +41,12 @@ pub(crate) struct Params {
 
 declare_saga_actions! {
     disk_create;
-    CREATE_DISK_RECORD -> "created_disk" {
-        + sdc_create_disk_record
+    CREATE_CRUCIBLE_DISK_RECORD -> "crucible_disk" {
+        + sdc_create_crucible_disk_record
+        - sdc_create_disk_record_undo
+    }
+    CREATE_LOCAL_STORAGE_DISK_RECORD -> "local_storage_disk" {
+        + sdc_create_local_storage_disk_record
         - sdc_create_disk_record_undo
     }
     REGIONS_ALLOC -> "datasets_and_regions" {
@@ -64,7 +68,7 @@ declare_saga_actions! {
         + sdc_create_volume_record
         - sdc_create_volume_record_undo
     }
-    FINALIZE_DISK_RECORD -> "disk_runtime" {
+    FINALIZE_DISK_RECORD -> "created_disk" {
         + sdc_finalize_disk_record
     }
     GET_PANTRY_ADDRESS -> "pantry_address" {
@@ -104,21 +108,39 @@ impl NexusSaga for SagaDiskCreate {
             ACTION_GENERATE_ID.as_ref(),
         ));
 
-        builder.append(create_disk_record_action());
-        builder.append(regions_alloc_action());
         builder.append(space_account_action());
-        builder.append(regions_ensure_undo_action());
-        builder.append(regions_ensure_action());
-        builder.append(create_volume_record_action());
-        builder.append(finalize_disk_record_action());
 
-        match &params.create_params.disk_source {
-            params::DiskSource::ImportingBlocks { .. } => {
-                builder.append(get_pantry_address_action());
-                builder.append(call_pantry_attach_for_disk_action());
+        match &params.create_params {
+            params::DiskCreate::Crucible { .. } => {
+                builder.append(create_crucible_disk_record_action());
+                builder.append(regions_alloc_action());
+                builder.append(regions_ensure_undo_action());
+                builder.append(regions_ensure_action());
+                builder.append(create_volume_record_action());
             }
 
-            _ => {}
+            params::DiskCreate::LocalStorage { .. } => {
+                builder.append(create_local_storage_disk_record_action());
+            }
+        }
+
+        builder.append(finalize_disk_record_action());
+
+        match &params.create_params {
+            params::DiskCreate::Crucible { disk_source, .. } => {
+                match disk_source {
+                    params::DiskSource::ImportingBlocks { .. } => {
+                        builder.append(get_pantry_address_action());
+                        builder.append(call_pantry_attach_for_disk_action());
+                    }
+
+                    _ => {}
+                }
+            }
+
+            params::DiskCreate::LocalStorage { .. } => {
+                // nothing to do!
+            }
         }
 
         Ok(builder.build()?)
@@ -127,48 +149,43 @@ impl NexusSaga for SagaDiskCreate {
 
 // disk create saga: action implementations
 
-async fn sdc_create_disk_record(
+async fn sdc_create_crucible_disk_record(
     sagactx: NexusActionContext,
 ) -> Result<db::datastore::CrucibleDisk, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    // We admittedly reference the volume before it has been allocated,
-    // but this should be acceptable because the disk remains in a "Creating"
-    // state until the saga has completed.
-    let volume_id = sagactx.lookup::<VolumeUuid>("volume_id")?;
+
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
     );
 
-    let block_size: db::model::BlockSize =
-        match &params.create_params.disk_source {
-            params::DiskSource::Blank { block_size } => {
-                db::model::BlockSize::try_from(*block_size).map_err(|e| {
-                    ActionError::action_failed(Error::internal_error(
-                        &e.to_string(),
-                    ))
-                })?
-            }
-            params::DiskSource::Snapshot { snapshot_id } => {
-                let (.., db_snapshot) =
-                    LookupPath::new(&opctx, osagactx.datastore())
-                        .snapshot_id(*snapshot_id)
-                        .fetch()
-                        .await
-                        .map_err(|e| {
-                            ActionError::action_failed(Error::internal_error(
-                                &e.to_string(),
-                            ))
-                        })?;
+    let disk_source = match &params.create_params {
+        params::DiskCreate::Crucible { disk_source, .. } => disk_source,
 
-                db_snapshot.block_size
-            }
-            params::DiskSource::Image { image_id } => {
-                let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
-                    .image_id(*image_id)
+        params::DiskCreate::LocalStorage { .. } => {
+            // This should be unreachable given the match performed in
+            // `make_saga_dag`!
+            return Err(ActionError::action_failed(Error::internal_error(
+                "wrong DiskCreate variant!",
+            )));
+        }
+    };
+
+    let block_size: db::model::BlockSize = match &disk_source {
+        params::DiskSource::Blank { block_size } => {
+            db::model::BlockSize::try_from(*block_size).map_err(|e| {
+                ActionError::action_failed(Error::internal_error(
+                    &e.to_string(),
+                ))
+            })?
+        }
+        params::DiskSource::Snapshot { snapshot_id } => {
+            let (.., db_snapshot) =
+                LookupPath::new(&opctx, osagactx.datastore())
+                    .snapshot_id(*snapshot_id)
                     .fetch()
                     .await
                     .map_err(|e| {
@@ -177,16 +194,29 @@ async fn sdc_create_disk_record(
                         ))
                     })?;
 
-                image.block_size
-            }
-            params::DiskSource::ImportingBlocks { block_size } => {
-                db::model::BlockSize::try_from(*block_size).map_err(|e| {
+            db_snapshot.block_size
+        }
+        params::DiskSource::Image { image_id } => {
+            let (.., image) = LookupPath::new(&opctx, osagactx.datastore())
+                .image_id(*image_id)
+                .fetch()
+                .await
+                .map_err(|e| {
                     ActionError::action_failed(Error::internal_error(
                         &e.to_string(),
                     ))
-                })?
-            }
-        };
+                })?;
+
+            image.block_size
+        }
+        params::DiskSource::ImportingBlocks { block_size } => {
+            db::model::BlockSize::try_from(*block_size).map_err(|e| {
+                ActionError::action_failed(Error::internal_error(
+                    &e.to_string(),
+                ))
+            })?
+        }
+    };
 
     let disk = db::model::Disk::new(
         disk_id,
@@ -199,8 +229,11 @@ async fn sdc_create_disk_record(
 
     let disk_type_crucible = db::model::DiskTypeCrucible::new(
         disk_id,
-        volume_id,
-        &params.create_params,
+        // We admittedly reference the volume before it has been allocated, but
+        // this should be acceptable because the disk remains in a "Creating"
+        // state until the saga has completed.
+        sagactx.lookup::<VolumeUuid>("volume_id")?,
+        &disk_source,
     );
 
     let crucible_disk =
@@ -231,6 +264,7 @@ async fn sdc_create_disk_record_undo(
     let osagactx = sagactx.user_data();
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
     osagactx
         .datastore()
         .project_delete_disk_no_auth(
@@ -238,7 +272,73 @@ async fn sdc_create_disk_record_undo(
             &[DiskState::Detached, DiskState::Faulted, DiskState::Creating],
         )
         .await?;
+
     Ok(())
+}
+
+async fn sdc_create_local_storage_disk_record(
+    sagactx: NexusActionContext,
+) -> Result<db::datastore::LocalStorageDisk, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let block_size = match &params.create_params {
+        params::DiskCreate::Crucible { .. } => {
+            // This should be unreachable given the match performed in
+            // `make_saga_dag`!
+            return Err(ActionError::action_failed(Error::internal_error(
+                "wrong DiskCreate variant!",
+            )));
+        }
+
+        params::DiskCreate::LocalStorage { .. } => {
+            // All LocalStorage disks have a block size of 4k
+            db::model::BlockSize::AdvancedFormat
+        }
+    };
+
+    let disk = db::model::Disk::new(
+        disk_id,
+        params.project_id,
+        &params.create_params,
+        block_size,
+        db::model::DiskRuntimeState::new(),
+        db::model::DiskType::LocalStorage,
+    );
+
+    let disk_type_local_storage = db::model::DiskTypeLocalStorage::new(
+        disk_id,
+        params.create_params.size(),
+    )
+    .map_err(ActionError::action_failed)?;
+
+    let local_storage_disk =
+        db::datastore::LocalStorageDisk::new(disk, disk_type_local_storage);
+
+    let (.., authz_project) = LookupPath::new(&opctx, osagactx.datastore())
+        .project_id(params.project_id)
+        .lookup_for(authz::Action::CreateChild)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .project_create_disk(
+            &opctx,
+            &authz_project,
+            db::datastore::Disk::LocalStorage(local_storage_disk.clone()),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(local_storage_disk)
 }
 
 async fn sdc_alloc_regions(
@@ -266,13 +366,25 @@ async fn sdc_alloc_regions(
 
     let strategy = &osagactx.nexus().default_region_allocation_strategy;
 
+    let disk_source = match &params.create_params {
+        params::DiskCreate::Crucible { disk_source, .. } => disk_source,
+
+        params::DiskCreate::LocalStorage { .. } => {
+            // This should be unreachable given the match performed in
+            // `make_saga_dag`!
+            return Err(ActionError::action_failed(Error::internal_error(
+                "wrong DiskCreate variant!",
+            )));
+        }
+    };
+
     let datasets_and_regions = osagactx
         .datastore()
         .disk_region_allocate(
             &opctx,
             volume_id,
-            &params.create_params.disk_source,
-            params.create_params.size,
+            &disk_source,
+            params.create_params.size(),
             &strategy,
         )
         .await
@@ -304,19 +416,18 @@ async fn sdc_account_space(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let disk_created =
-        sagactx.lookup::<db::datastore::CrucibleDisk>("created_disk")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
     );
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     osagactx
         .datastore()
         .virtual_provisioning_collection_insert_disk(
             &opctx,
-            disk_created.id(),
+            disk_id,
             params.project_id,
-            disk_created.size(),
+            params.create_params.size().into(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -329,19 +440,18 @@ async fn sdc_account_space_undo(
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
-    let disk_created =
-        sagactx.lookup::<db::datastore::CrucibleDisk>("created_disk")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
     );
+    let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
     osagactx
         .datastore()
         .virtual_provisioning_collection_delete_disk(
             &opctx,
-            disk_created.id(),
+            disk_id,
             params.project_id,
-            disk_created.size(),
+            params.create_params.size().into(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -384,8 +494,20 @@ async fn sdc_regions_ensure(
         &params.serialized_authn,
     );
 
+    let disk_source = match &params.create_params {
+        params::DiskCreate::Crucible { disk_source, .. } => disk_source,
+
+        params::DiskCreate::LocalStorage { .. } => {
+            // This should be unreachable given the match performed in
+            // `make_saga_dag`!
+            return Err(ActionError::action_failed(Error::internal_error(
+                "wrong DiskCreate variant!",
+            )));
+        }
+    };
+
     let mut read_only_parent: Option<Box<VolumeConstructionRequest>> =
-        match &params.create_params.disk_source {
+        match disk_source {
             params::DiskSource::Blank { block_size: _ } => None,
             params::DiskSource::Snapshot { snapshot_id } => {
                 debug!(log, "grabbing snapshot {}", snapshot_id);
@@ -646,7 +768,7 @@ async fn sdc_create_volume_record_undo(
 
 async fn sdc_finalize_disk_record(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<db::datastore::Disk, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
@@ -656,37 +778,65 @@ async fn sdc_finalize_disk_record(
     );
 
     let disk_id = sagactx.lookup::<Uuid>("disk_id")?;
-    let disk_created =
-        sagactx.lookup::<db::datastore::CrucibleDisk>("created_disk")?;
+
     let (.., authz_disk) = LookupPath::new(&opctx, datastore)
         .disk_id(disk_id)
         .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
 
-    // TODO-security Review whether this can ever fail an authz check.  We don't
-    // want this to ever fail the authz check here -- if it did, we would have
-    // wanted to catch that a lot sooner.  It wouldn't make sense for it to fail
-    // anyway because we're modifying something that *we* just created.  Right
-    // now, it's very unlikely that it would ever fail because we checked
-    // Action::CreateChild on the Project before we created this saga.  The only
-    // role that gets that permission is "project collaborator", which also gets
-    // Action::Modify on Disks within the Project.  So this shouldn't break in
-    // practice.  However, that's brittle.  It would be better if this were
-    // better guaranteed.
-    match &params.create_params.disk_source {
-        params::DiskSource::ImportingBlocks { block_size: _ } => {
-            datastore
-                .disk_update_runtime(
-                    &opctx,
-                    &authz_disk,
-                    &disk_created.runtime().import_ready(),
-                )
-                .await
-                .map_err(ActionError::action_failed)?;
+    // TODO-security Review whether further actions in this node can ever fail
+    // an authz check.  We don't want this to ever fail the authz check here --
+    // if it did, we would have wanted to catch that a lot sooner.  It wouldn't
+    // make sense for it to fail anyway because we're modifying something that
+    // *we* just created.  Right now, it's very unlikely that it would ever fail
+    // because we checked Action::CreateChild on the Project before we created
+    // this saga.  The only role that gets that permission is "project
+    // collaborator", which also gets Action::Modify on Disks within the
+    // Project.  So this shouldn't break in practice.  However, that's brittle.
+    // It would be better if this were better guaranteed.
+
+    match params.create_params {
+        params::DiskCreate::Crucible { disk_source, .. } => {
+            let disk_created = db::datastore::Disk::Crucible(
+                sagactx
+                    .lookup::<db::datastore::CrucibleDisk>("crucible_disk")?,
+            );
+
+            match disk_source {
+                params::DiskSource::ImportingBlocks { .. } => {
+                    datastore
+                        .disk_update_runtime(
+                            &opctx,
+                            &authz_disk,
+                            &disk_created.runtime().import_ready(),
+                        )
+                        .await
+                        .map_err(ActionError::action_failed)?;
+                }
+
+                _ => {
+                    datastore
+                        .disk_update_runtime(
+                            &opctx,
+                            &authz_disk,
+                            &disk_created.runtime().detach(),
+                        )
+                        .await
+                        .map_err(ActionError::action_failed)?;
+                }
+            }
+
+            Ok(disk_created)
         }
 
-        _ => {
+        params::DiskCreate::LocalStorage { .. } => {
+            let disk_created = db::datastore::Disk::LocalStorage(
+                sagactx.lookup::<db::datastore::LocalStorageDisk>(
+                    "local_storage_disk",
+                )?,
+            );
+
             datastore
                 .disk_update_runtime(
                     &opctx,
@@ -695,10 +845,10 @@ async fn sdc_finalize_disk_record(
                 )
                 .await
                 .map_err(ActionError::action_failed)?;
+
+            Ok(disk_created)
         }
     }
-
-    Ok(())
 }
 
 async fn sdc_get_pantry_address(
@@ -749,7 +899,7 @@ async fn sdc_call_pantry_attach_for_disk(
         &params.serialized_authn,
     );
     let disk_created =
-        sagactx.lookup::<db::datastore::CrucibleDisk>("created_disk")?;
+        sagactx.lookup::<db::datastore::CrucibleDisk>("crucible_disk")?;
 
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
@@ -862,7 +1012,7 @@ pub(crate) mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     pub fn new_disk_create_params() -> params::DiskCreate {
-        params::DiskCreate {
+        params::DiskCreate::Crucible {
             identity: IdentityMetadataCreateParams {
                 name: DISK_NAME.parse().expect("Invalid disk name"),
                 description: "My disk".to_string(),
@@ -907,7 +1057,7 @@ pub(crate) mod test {
         let output =
             nexus.sagas.saga_execute::<SagaDiskCreate>(params).await.unwrap();
         let disk = output
-            .lookup_node_output::<db::datastore::CrucibleDisk>("created_disk")
+            .lookup_node_output::<db::datastore::Disk>("created_disk")
             .unwrap();
         assert_eq!(disk.project_id(), project_id);
     }
