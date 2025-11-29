@@ -5,12 +5,12 @@
 [console]
 # Directory for static assets. Absolute path or relative to CWD.
 static_dir = "out/console-assets"
-session_idle_timeout_minutes = 480 # 8 hours
+session_idle_timeout_minutes = 480      # 8 hours
 session_absolute_timeout_minutes = 1440 # 24 hours
 
 # List of authentication schemes to support.
 [authn]
-schemes_external = ["session_cookie", "access_token", "scim_token"]
+schemes_external = ["session_cookie", "access_token", "scim_token", "spoof"]
 
 [log]
 # Show log messages of this level and more severe
@@ -41,6 +41,7 @@ external_dns_servers = ["1.1.1.1", "9.9.9.9"]
 # IP Address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12220"
 default_request_body_max_bytes = 1048576
+compression = "gzip"
 # To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
 # will also need to provide an initial TLS certificate during rack
 # initialization.  If you're using this config file, you're probably running a
