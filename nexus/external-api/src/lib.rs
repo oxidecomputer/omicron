@@ -1006,8 +1006,8 @@ pub trait NexusExternalApi {
     /// Link IP pool to silo
     ///
     /// Users in linked silos can allocate external IPs from this pool for their
-    /// instances. A silo can have at most one default pool. IPs are allocated from
-    /// the default pool when users ask for one without specifying a pool.
+    /// instances. A silo can have at most one default pool. IPs are allocated
+    /// from the default pool when users ask for one without specifying a pool.
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools/{pool}/silos",
@@ -1248,22 +1248,10 @@ pub trait NexusExternalApi {
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>;
 
-    /// Create a multicast group.
-    ///
-    /// Multicast groups are fleet-scoped resources that can be joined by
-    /// instances across projects and silos. A single multicast IP serves
-    /// all group members regardless of project or silo boundaries.
-    #[endpoint {
-        method = POST,
-        path = "/v1/multicast-groups",
-        tags = ["experimental"],
-    }]
-    async fn multicast_group_create(
-        rqctx: RequestContext<Self::Context>,
-        group_params: TypedBody<params::MulticastGroupCreate>,
-    ) -> Result<HttpResponseCreated<views::MulticastGroup>, HttpError>;
-
     /// Fetch a multicast group.
+    ///
+    /// The group can be specified by name, UUID, or multicast IP address
+    /// (e.g., "224.1.2.3" or "ff38::1").
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}",
@@ -1274,41 +1262,9 @@ pub trait NexusExternalApi {
         path_params: Path<params::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
 
-    /// Update a multicast group.
-    #[endpoint {
-        method = PUT,
-        path = "/v1/multicast-groups/{multicast_group}",
-        tags = ["experimental"],
-    }]
-    async fn multicast_group_update(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::MulticastGroupPath>,
-        updated_group: TypedBody<params::MulticastGroupUpdate>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
-
-    /// Delete a multicast group.
-    #[endpoint {
-        method = DELETE,
-        path = "/v1/multicast-groups/{multicast_group}",
-        tags = ["experimental"],
-    }]
-    async fn multicast_group_delete(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::MulticastGroupPath>,
-    ) -> Result<HttpResponseDeleted, HttpError>;
-
-    /// Look up multicast group by IP address.
-    #[endpoint {
-        method = GET,
-        path = "/v1/system/multicast-groups/by-ip/{address}",
-        tags = ["experimental"],
-    }]
-    async fn lookup_multicast_group_by_ip(
-        rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::MulticastGroupIpLookupPath>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
-
     /// List members of a multicast group.
+    ///
+    /// The group can be specified by name, UUID, or multicast IP address.
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}/members",
@@ -1326,6 +1282,29 @@ pub trait NexusExternalApi {
     /// Both approaches modify the same underlying membership and trigger the same
     /// reconciliation logic.
     ///
+    /// Authorization: requires Modify on the instance specified in the request
+    /// body (checked first) and Read on the multicast group (users can only attach
+    /// instances they are authorized to modify).
+    ///
+    /// Group Identification: Groups can be referenced by name, IP address,
+    /// or UUID. All three are fleet-wide unique identifiers:
+    /// - By name: If group doesn't exist, it's implicitly created with an
+    ///   auto-allocated IP from a multicast pool linked to the caller's silo.
+    ///   Pool selection prefers the default pool; if none, selects alphabetically.
+    /// - By IP: If group doesn't exist, it's implicitly created using that
+    ///   IP. The pool is determined by which pool contains the IP.
+    /// - By UUID: Group must already exist.
+    ///
+    /// Source IP filtering (SSM):
+    /// - Duplicate IPs in the request are automatically deduplicated.
+    /// - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3).
+    /// - Creating a new SSM group: `source_ips` is required. SSM addresses
+    ///   (232.x.x.x for IPv4, FF3x:: for IPv6) require source filtering.
+    /// - Joining an existing group: If `source_ips` is omitted, the instance
+    ///   inherits the group's existing sources. If specified, they must exactly
+    ///   match the group's sources or the request fails.
+    /// - Providing `source_ips` to an ASM group (or vice versa) will fail.
+    ///
     /// Specify instance by name (requires `?project=<name>`) or UUID.
     #[endpoint {
         method = POST,
@@ -1341,9 +1320,15 @@ pub trait NexusExternalApi {
 
     /// Remove instance from a multicast group.
     ///
+    /// The group can be specified by name, UUID, or multicast IP address.
+    /// All three are fleet-wide unique identifiers.
+    ///
     /// Functionally equivalent to removing the group from the instance's
     /// `multicast_groups` field. Both approaches modify the same underlying
     /// membership and trigger reconciliation.
+    ///
+    /// Authorization: requires Modify on the instance (checked first) and Read
+    /// on the multicast group.
     ///
     /// Specify instance by name (requires `?project=<name>`) or UUID.
     #[endpoint {
@@ -2590,6 +2575,29 @@ pub trait NexusExternalApi {
     /// This is functionally equivalent to adding the instance via the group's
     /// member management endpoint or updating the instance's `multicast_groups`
     /// field. All approaches modify the same membership and trigger reconciliation.
+    ///
+    /// Authorization: requires Modify on the instance identified in the URL path
+    /// (checked first) and Read on the multicast group. Checking instance permission
+    /// first prevents creating orphaned groups when the instance check fails.
+    ///
+    /// Group Identification: Groups can be referenced by name, IP address,
+    /// or UUID. All three are fleet-wide unique identifiers:
+    /// - By name: If group doesn't exist, it's implicitly created with an
+    ///   auto-allocated IP from a multicast pool linked to the caller's silo.
+    ///   Pool selection prefers the default pool; if none, selects alphabetically.
+    /// - By IP: If group doesn't exist, it's implicitly created using that
+    ///   IP. The pool is determined by which pool contains the IP.
+    /// - By UUID: Group must already exist.
+    ///
+    /// Source IP filtering (SSM):
+    /// - Duplicate IPs in the request are automatically deduplicated.
+    /// - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3).
+    /// - Creating a new SSM group: `source_ips` is required. SSM addresses
+    ///   (232.x.x.x for IPv4, FF3x:: for IPv6) require source filtering.
+    /// - Joining an existing group: If `source_ips` is omitted, the instance
+    ///   inherits the group's existing sources. If specified, they must exactly
+    ///   match the group's sources or the request fails.
+    /// - Providing `source_ips` to an ASM group (or vice versa) will fail.
     #[endpoint {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
@@ -2599,13 +2607,20 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
+        body_params: TypedBody<params::InstanceMulticastGroupJoin>,
     ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>;
 
     /// Leave multicast group.
     ///
+    /// The group can be specified by name, UUID, or multicast IP address.
+    /// All three are fleet-wide unique identifiers.
+    ///
     /// This is functionally equivalent to removing the instance via the group's
     /// member management endpoint or updating the instance's `multicast_groups`
     /// field. All approaches modify the same membership and trigger reconciliation.
+    ///
+    /// Authorization: requires Modify on the instance (checked first) and Read
+    /// on the multicast group.
     #[endpoint {
         method = DELETE,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",

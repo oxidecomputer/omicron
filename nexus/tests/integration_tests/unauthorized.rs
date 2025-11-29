@@ -379,11 +379,11 @@ static SETUP_REQUESTS: LazyLock<Vec<SetupReq>> = LazyLock::new(|| {
                 .unwrap(),
             id_routes: vec![],
         },
-        // Create a multicast group in the Project
+        // Create a multicast group by adding a member (implicit group creation)
         SetupReq::Post {
-            url: &MULTICAST_GROUPS_URL,
-            body: serde_json::to_value(&*DEMO_MULTICAST_GROUP_CREATE).unwrap(),
-            id_routes: vec!["/v1/multicast-groups/{id}"],
+            url: &DEMO_MULTICAST_GROUP_MEMBERS_URL,
+            body: serde_json::to_value(&*DEMO_MULTICAST_MEMBER_ADD).unwrap(),
+            id_routes: vec![],
         },
         // Create an affinity group in the Project
         SetupReq::Post {

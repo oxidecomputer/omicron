@@ -701,7 +701,7 @@ pub async fn create_instance(
         Default::default(),
         None,
         // Multicast groups=
-        Vec::<NameOrId>::new(),
+        Vec::<params::MulticastGroupIdentifier>::new(),
     )
     .await
 }
@@ -719,7 +719,7 @@ pub async fn create_instance_with(
     start: bool,
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
     cpu_platform: Option<InstanceCpuPlatform>,
-    multicast_groups: Vec<NameOrId>,
+    multicast_groups: Vec<params::MulticastGroupIdentifier>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 

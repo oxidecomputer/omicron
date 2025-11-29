@@ -2,10 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Multicast integration tests and helper methods.
+//! Multicast integration tests and shared helper methods.
+//!
+//! This module provides common test infrastructure:
+//!
+//! - URL builders: `mcast_group_url`, `mcast_group_members_url`, etc.
+//! - IP pool setup: `create_multicast_ip_pool`, `create_multicast_ip_pool_with_range`
+//! - Reconciler control: `wait_for_multicast_reconciler`, `activate_multicast_reconciler`
+//! - State waiters: `wait_for_group_active`, `wait_for_member_state`, etc.
+//! - DPD verification: `verify_inventory_based_port_mapping`, `wait_for_group_deleted_from_dpd`
+//! - Instance helpers: `instance_for_multicast_groups`, `cleanup_instances`
+//! - Attach/detach: `multicast_group_attach`, `multicast_group_detach`
 
 use std::future::Future;
-use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -22,8 +31,8 @@ use nexus_test_utils::resource_helpers::{
 };
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::params::{
-    InstanceCreate, InstanceNetworkInterfaceAttachment, IpPoolCreate,
-    MulticastGroupCreate,
+    InstanceCreate, InstanceMulticastGroupJoin,
+    InstanceNetworkInterfaceAttachment, IpPoolCreate, MulticastGroupIdentifier,
 };
 use nexus_types::external_api::shared::{IpRange, Ipv4Range};
 use nexus_types::external_api::views::{
@@ -32,7 +41,7 @@ use nexus_types::external_api::views::{
 use nexus_types::identity::{Asset, Resource};
 use omicron_common::api::external::{
     ByteCount, Hostname, IdentityMetadataCreateParams, Instance,
-    InstanceAutoRestartPolicy, InstanceCpuCount, InstanceState, NameOrId,
+    InstanceCpuCount, InstanceState, NameOrId,
 };
 use omicron_nexus::TestInterfaces;
 use omicron_test_utils::dev::poll::{self, CondCheckError, wait_for_condition};
@@ -57,7 +66,7 @@ mod networking_integration;
 const POLL_INTERVAL: Duration = Duration::from_millis(80);
 const MULTICAST_OPERATION_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Build URL for listing all multicast groups (fleet-scoped).
+/// Build URL for listing multicast groups.
 pub(crate) fn mcast_groups_url() -> String {
     "/v1/multicast-groups".to_string()
 }
@@ -75,7 +84,7 @@ pub(crate) fn mcast_group_members_url(group_name: &str) -> String {
 /// Build URL for adding a member to a multicast group.
 ///
 /// The `?project=` parameter is required when using instance names (for scoping)
-/// but must NOT be provided when using instance UUIDs (causes 400 Bad Request).
+/// but must not be provided when using instance UUIDs (causes 400 Bad Request).
 pub(crate) fn mcast_group_member_add_url(
     group_name: &str,
     instance: &NameOrId,
@@ -88,15 +97,11 @@ pub(crate) fn mcast_group_member_add_url(
     }
 }
 
-/// Test helper for creating multicast groups in batch operations.
-#[derive(Clone)]
-pub(crate) struct MulticastGroupForTest {
-    pub name: &'static str,
-    pub multicast_ip: IpAddr,
-    pub description: Option<String>,
-}
-
 /// Create a multicast IP pool for ASM (Any-Source Multicast) testing.
+///
+/// Uses range 224.2.0.0 - 224.2.255.255 which avoids all reserved addresses:
+/// - 224.0.0.0/24 (link-local)
+/// - 224.0.1.1 (NTP), 224.0.1.39/40 (Cisco Auto-RP), 224.0.1.129-132 (PTP)
 pub(crate) async fn create_multicast_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
@@ -104,8 +109,8 @@ pub(crate) async fn create_multicast_ip_pool(
     create_multicast_ip_pool_with_range(
         client,
         pool_name,
-        (224, 0, 1, 10),  // Default ASM range start
-        (224, 0, 1, 255), // Default ASM range end
+        (224, 2, 0, 0),     // Default ASM range start
+        (224, 2, 255, 255), // Default ASM range end
     )
     .await
 }
@@ -162,6 +167,20 @@ pub(crate) async fn wait_for_multicast_reconciler(
     lockstep_client: &ClientTestContext,
 ) -> nexus_lockstep_client::types::BackgroundTask {
     nexus_test_utils::background::wait_background_task(
+        lockstep_client,
+        "multicast_reconciler",
+    )
+    .await
+}
+
+/// Activates the multicast reconciler and waits for it to complete.
+///
+/// Use this when you need to explicitly trigger the reconciler (e.g., after
+/// restarting DPD) rather than waiting for an already-triggered run.
+pub(crate) async fn activate_multicast_reconciler(
+    lockstep_client: &ClientTestContext,
+) -> nexus_lockstep_client::types::BackgroundTask {
+    nexus_test_utils::background::activate_background_task(
         lockstep_client,
         "multicast_reconciler",
     )
@@ -380,133 +399,6 @@ pub(crate) async fn ensure_dpd_ready(cptestctx: &ControlPlaneTestContext) {
             panic!("Failed waiting for DPD to be ready: {err}");
         }
     }
-}
-
-/// Wait for DPD multicast group state to match a condition.
-///
-/// Generic helper that polls DPD state and calls the provided predicate
-/// to determine if the expected state has been reached. This is useful when
-/// the reconciler runs sagas asynchronously and tests need to wait for DPD
-/// to reflect the changes.
-///
-/// # Usage Examples
-///
-/// Check for a specific vlan_id:
-/// ```rust,ignore
-/// wait_for_dpd_state(
-///     cptestctx,
-///     &multicast_ip,
-///     |response| match response {
-///         MulticastGroupResponse::External { external_forwarding, .. } => {
-///             if external_forwarding.vlan_id == Some(3500) {
-///                 Ok(())
-///             } else {
-///                 Err(CondCheckError::NotYet)
-///             }
-///         }
-///         _ => Err(CondCheckError::Failed("Expected external group".to_string()))
-///     },
-///     "vlan_id = Some(3500)",
-/// ).await;
-/// ```
-///
-/// Check for source IP changes:
-/// ```rust,ignore
-/// wait_for_dpd_state(
-///     cptestctx,
-///     &multicast_ip,
-///     |response| match response {
-///         MulticastGroupResponse::External { sources, .. } => {
-///             if sources.contains(&expected_source) {
-///                 Ok(())
-///             } else {
-///                 Err(CondCheckError::NotYet)
-///             }
-///         }
-///         _ => Err(CondCheckError::Failed("Expected external group".to_string()))
-///     },
-///     "sources contains expected IP",
-/// ).await;
-/// ```
-pub(crate) async fn wait_for_dpd_state<F>(
-    cptestctx: &ControlPlaneTestContext,
-    multicast_ip: &IpAddr,
-    predicate: F,
-    description: &str,
-) where
-    F: Fn(
-        &dpd_client::types::MulticastGroupResponse,
-    ) -> Result<(), CondCheckError<String>>,
-{
-    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
-
-    match wait_for_condition(
-        || async {
-            match dpd_client.multicast_group_get(multicast_ip).await {
-                Ok(response) => predicate(&response.into_inner()),
-                Err(e) => Err(CondCheckError::Failed(format!(
-                    "DPD query failed: {e}"
-                ))),
-            }
-        },
-        &POLL_INTERVAL,
-        &MULTICAST_OPERATION_TIMEOUT,
-    )
-    .await
-    {
-        Ok(_) => {}
-        Err(poll::Error::TimedOut(elapsed)) => panic!(
-            "DPD state for {multicast_ip} did not reach expected condition '{description}' within {elapsed:?}"
-        ),
-        Err(poll::Error::PermanentError(err)) => {
-            panic!("Failed waiting for DPD state '{description}': {err}")
-        }
-    }
-}
-
-/// Wait for a multicast group DPD update to complete.
-///
-/// This is a composite helper that combines activating the reconciler
-/// and waiting for DPD state to match a condition. Use this instead of
-/// calling `wait_for_multicast_reconciler()` + `wait_for_dpd_state()`
-/// separately.
-///
-/// # Usage Examples
-///
-/// After a metadata-only update (name/description):
-/// ```rust,ignore
-/// wait_for_group_dpd_update(
-///     cptestctx,
-///     &multicast_ip,
-///     dpd_predicates::expect_external_group(),
-///     "name update saga completed",
-/// ).await;
-/// ```
-///
-/// After an mvlan update:
-/// ```rust,ignore
-/// wait_for_group_dpd_update(
-///     cptestctx,
-///     &multicast_ip,
-///     dpd_predicates::expect_vlan_id(3500),
-///     "vlan_id updated to 3500",
-/// ).await;
-/// ```
-pub(crate) async fn wait_for_group_dpd_update<F>(
-    cptestctx: &ControlPlaneTestContext,
-    multicast_ip: &IpAddr,
-    predicate: F,
-    description: &str,
-) where
-    F: Fn(
-        &dpd_client::types::MulticastGroupResponse,
-    ) -> Result<(), CondCheckError<String>>,
-{
-    // Activate reconciler to ensure saga is launched
-    wait_for_multicast_reconciler(&cptestctx.lockstep_client).await;
-
-    // Wait for DPD to reflect the changes (saga completion)
-    wait_for_dpd_state(cptestctx, multicast_ip, predicate, description).await;
 }
 
 /// Get a single multicast group by name.
@@ -809,7 +701,7 @@ pub(crate) async fn verify_inventory_based_port_mapping(
 
     // Get the multicast member for this instance to find its external_group_id
     let members = datastore
-        .multicast_group_members_list_by_instance(&opctx, *instance_uuid, false)
+        .multicast_group_members_list_by_instance(&opctx, *instance_uuid)
         .await
         .map_err(|e| format!("list members failed: {e}"))?;
 
@@ -915,6 +807,9 @@ pub(crate) async fn verify_inventory_based_port_mapping(
 }
 
 /// Wait for a multicast group to have a specific number of members.
+///
+/// Note: For expected_count=0 (last member removed), use `wait_for_group_deleted`
+/// instead since the implicit deletion deletes the group when empty.
 pub(crate) async fn wait_for_member_count(
     client: &ClientTestContext,
     group_name: &str,
@@ -989,6 +884,80 @@ pub(crate) async fn wait_for_group_deleted(
     }
 }
 
+/// Verify a group is either deleted or in one of the expected states.
+///
+/// Useful when DPD is unavailable and groups can't complete state transitions.
+/// For example, when DPD is down during deletion, groups may be stuck in
+/// "Creating" or "Deleting" state rather than being fully deleted.
+pub(crate) async fn verify_group_deleted_or_in_states(
+    client: &ClientTestContext,
+    group_name: &str,
+    expected_states: &[&str],
+) {
+    let groups_result =
+        nexus_test_utils::resource_helpers::objects_list_page_authz::<
+            MulticastGroup,
+        >(client, "/v1/multicast-groups")
+        .await;
+
+    let matching_groups: Vec<_> = groups_result
+        .items
+        .into_iter()
+        .filter(|g| g.identity.name == group_name)
+        .collect();
+
+    if !matching_groups.is_empty() {
+        // Group still exists - should be in one of the expected states
+        let actual_state = &matching_groups[0].state;
+        assert!(
+            expected_states.contains(&actual_state.as_str()),
+            "Group {group_name} should be in one of {expected_states:?} states, found: \"{actual_state}\""
+        );
+    }
+    // If group is gone, that's also valid - operation completed
+}
+
+/// Wait for a multicast group to be deleted from DPD (dataplane) with reconciler activation.
+///
+/// This function waits for the DPD to report that the multicast group no longer exists
+/// (returns 404), while periodically activating the reconciler to drive the cleanup process.
+pub(crate) async fn wait_for_group_deleted_from_dpd(
+    cptestctx: &ControlPlaneTestContext,
+    multicast_ip: std::net::IpAddr,
+) {
+    let lockstep_client = &cptestctx.lockstep_client;
+    let dpd_client = nexus_test_utils::dpd_client(cptestctx);
+
+    match wait_for_condition_with_reconciler(
+        lockstep_client,
+        || async {
+            match dpd_client.multicast_group_get(&multicast_ip).await {
+                Ok(_) => {
+                    // Group still exists in DPD - not yet deleted
+                    Err(CondCheckError::<()>::NotYet)
+                }
+                Err(_) => Ok(()), // Group doesn't exist - deleted
+            }
+        },
+        &POLL_INTERVAL,
+        &MULTICAST_OPERATION_TIMEOUT,
+    )
+    .await
+    {
+        Ok(_) => {}
+        Err(poll::Error::TimedOut(elapsed)) => {
+            panic!(
+                "group with IP {multicast_ip} was not deleted from DPD within {elapsed:?}",
+            );
+        }
+        Err(poll::Error::PermanentError(err)) => {
+            panic!(
+                "failed waiting for group with IP {multicast_ip} to be deleted from DPD: {err:?}",
+            );
+        }
+    }
+}
+
 /// Create an instance with multicast groups.
 pub(crate) async fn instance_for_multicast_groups(
     cptestctx: &ControlPlaneTestContext,
@@ -1005,9 +974,9 @@ pub(crate) async fn instance_for_multicast_groups(
     }
 
     let client = &cptestctx.external_client;
-    let multicast_groups: Vec<NameOrId> = multicast_group_names
+    let multicast_groups: Vec<_> = multicast_group_names
         .iter()
-        .map(|name| NameOrId::Name(name.parse().unwrap()))
+        .map(|name| MulticastGroupIdentifier::Name(name.parse().unwrap()))
         .collect();
 
     let url = format!("/v1/instances?project={project_name}");
@@ -1041,110 +1010,58 @@ pub(crate) async fn instance_for_multicast_groups(
     .await
 }
 
-/// Create multiple instances with multicast groups attached at creation time.
-pub(crate) async fn create_instances_with_multicast_groups(
-    client: &ClientTestContext,
-    project_name: &str,
-    instance_specs: &[(&str, &[&str])], // (instance_name, group_names)
-    start: bool,
-) -> Vec<Instance> {
-    let create_futures =
-        instance_specs.iter().map(|(instance_name, group_names)| {
-            let url = format!("/v1/instances?project={project_name}");
-            let multicast_groups: Vec<NameOrId> = group_names
-                .iter()
-                .map(|name| NameOrId::Name(name.parse().unwrap()))
-                .collect();
-
-            async move {
-                object_create::<_, Instance>(
-                    client,
-                    &url,
-                    &InstanceCreate {
-                        identity: IdentityMetadataCreateParams {
-                            name: instance_name.parse().unwrap(),
-                            description: format!(
-                                "multicast test instance {instance_name}"
-                            ),
-                        },
-                        ncpus: InstanceCpuCount::try_from(2).unwrap(),
-                        memory: ByteCount::from_gibibytes_u32(4),
-                        hostname: instance_name.parse().unwrap(),
-                        user_data: b"#cloud-config".to_vec(),
-                        ssh_public_keys: None,
-                        network_interfaces:
-                            InstanceNetworkInterfaceAttachment::Default,
-                        external_ips: vec![],
-                        disks: vec![],
-                        boot_disk: None,
-                        cpu_platform: None,
-                        start,
-                        auto_restart_policy: Some(
-                            InstanceAutoRestartPolicy::Never,
-                        ),
-                        anti_affinity_groups: Vec::new(),
-                        multicast_groups,
-                    },
-                )
-                .await
-            }
-        });
-
-    ops::join_all(create_futures).await
-}
-
 /// Attach an instance to a multicast group.
+///
+/// If the group doesn't exist and is referenced by name, it will be implicitly created
+/// using the specified pool (required for implicit creation).
 pub(crate) async fn multicast_group_attach(
     cptestctx: &ControlPlaneTestContext,
     project_name: &str,
     instance_name: &str,
     group_name: &str,
 ) {
+    multicast_group_attach_with_pool(
+        cptestctx,
+        project_name,
+        instance_name,
+        group_name,
+        None,
+    )
+    .await
+}
+
+/// Attach an instance to a multicast group, specifying a pool for implicit creation.
+///
+/// If the group doesn't exist and is referenced by name, it will be implicitly created
+/// using the specified pool.
+pub(crate) async fn multicast_group_attach_with_pool(
+    cptestctx: &ControlPlaneTestContext,
+    project_name: &str,
+    instance_name: &str,
+    group_name: &str,
+    _pool: Option<&str>,
+) {
     let client = &cptestctx.external_client;
     let url = format!(
         "/v1/instances/{instance_name}/multicast-groups/{group_name}?project={project_name}"
     );
 
+    let body = InstanceMulticastGroupJoin { source_ips: None };
+
     // Use PUT to attach instance to multicast group
-    NexusRequest::new(
+    let response = NexusRequest::new(
         RequestBuilder::new(client, Method::PUT, &url)
+            .body(Some(&body))
             .expect_status(Some(StatusCode::CREATED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
     .execute()
     .await
     .expect("Should attach instance to multicast group");
-}
 
-/// Create multiple multicast groups from the same pool.
-pub(crate) async fn create_multicast_groups(
-    client: &ClientTestContext,
-    pool: &IpPool,
-    group_specs: &[MulticastGroupForTest],
-) -> Vec<MulticastGroup> {
-    let create_futures = group_specs.iter().map(|spec| {
-        let group_url = mcast_groups_url();
-        let params = MulticastGroupCreate {
-            identity: IdentityMetadataCreateParams {
-                name: spec.name.parse().unwrap(),
-                description: spec
-                    .description
-                    .clone()
-                    .unwrap_or_else(|| format!("Test group {}", spec.name)),
-            },
-            multicast_ip: Some(spec.multicast_ip),
-            source_ips: None,
-            pool: Some(NameOrId::Name(pool.identity.name.clone())),
-            mvlan: None,
-        };
-
-        async move {
-            object_create::<_, MulticastGroup>(client, &group_url, &params)
-                .await
-        }
-    });
-
-    ops::join_all(create_futures).await
+    response
+        .parsed_body::<MulticastGroupMember>()
+        .expect("Should parse member");
 }
 
 /// Wait for multiple groups to become "Active".
@@ -1156,19 +1073,6 @@ pub(crate) async fn wait_for_groups_active(
         group_names.iter().map(|name| wait_for_group_active(client, name));
 
     ops::join_all(wait_futures).await
-}
-
-/// Clean up multiple groups.
-pub(crate) async fn cleanup_multicast_groups(
-    client: &ClientTestContext,
-    group_names: &[&str],
-) {
-    let delete_futures = group_names.iter().map(|name| {
-        let url = mcast_group_url(name);
-        async move { object_delete(client, &url).await }
-    });
-
-    ops::join_all(delete_futures).await;
 }
 
 /// Clean up multiple instances, handling various states properly.
@@ -1275,7 +1179,6 @@ pub(crate) async fn stop_instances(
 ) {
     let nexus = &cptestctx.server.server_context().nexus;
 
-    // First, fetch all instances in parallel
     let fetch_futures = instance_names.iter().map(|name| {
         let url = format!("/v1/instances/{name}?project={project_name}");
         async move {
@@ -1457,56 +1360,5 @@ pub(crate) mod ops {
         op4: impl Future<Output = T4>,
     ) -> (T1, T2, T3, T4) {
         tokio::join!(op1, op2, op3, op4)
-    }
-}
-
-/// Common DPD state predicates for use with `wait_for_dpd_state()`.
-///
-/// These predicates provide pre-built conditions for common DPD state checks.
-pub(crate) mod dpd_predicates {
-    use super::*;
-
-    /// Predicate that checks if a group exists in DPD as an external group.
-    ///
-    /// Used for metadata-only updates (name, description) where DPD state
-    /// doesn't change but we need to verify the saga completed without errors.
-    pub fn expect_external_group() -> impl Fn(
-        &dpd_client::types::MulticastGroupResponse,
-    )
-        -> Result<(), CondCheckError<String>> {
-        |response| match response {
-            dpd_client::types::MulticastGroupResponse::External { .. } => {
-                Ok(())
-            }
-            dpd_client::types::MulticastGroupResponse::Underlay { .. } => Err(
-                CondCheckError::Failed("Expected external group".to_string()),
-            ),
-        }
-    }
-
-    /// Predicate that checks if a group has a specific vlan_id in DPD.
-    ///
-    /// Used for mvlan updates where we need to verify the vlan_id was
-    /// applied to the dataplane.
-    pub fn expect_vlan_id(
-        vlan: u16,
-    ) -> impl Fn(
-        &dpd_client::types::MulticastGroupResponse,
-    ) -> Result<(), CondCheckError<String>> {
-        move |response| match response {
-            dpd_client::types::MulticastGroupResponse::External {
-                external_forwarding,
-                ..
-            } => {
-                if external_forwarding.vlan_id == Some(vlan) {
-                    Ok(())
-                } else {
-                    Err(CondCheckError::NotYet)
-                }
-            }
-            dpd_client::types::MulticastGroupResponse::Underlay { .. } => Err(
-                CondCheckError::Failed("Expected external group".to_string()),
-            ),
-        }
     }
 }

@@ -8,8 +8,8 @@ use super::{
     console_api, params,
     views::{
         self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
-        IpPoolRange, MulticastGroup, PhysicalDisk, Project, Rack, Silo,
-        SiloQuotas, SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
+        IpPoolRange, PhysicalDisk, Project, Rack, Silo, SiloQuotas,
+        SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
         Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
@@ -2390,28 +2390,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn multicast_group_create(
-        rqctx: RequestContext<ApiContext>,
-        group_params: TypedBody<params::MulticastGroupCreate>,
-    ) -> Result<HttpResponseCreated<views::MulticastGroup>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let create_params = group_params.into_inner();
-
-            let group =
-                nexus.multicast_group_create(&opctx, &create_params).await?;
-            Ok(HttpResponseCreated(views::MulticastGroup::try_from(group)?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
     async fn multicast_group_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::MulticastGroupPath>,
@@ -2425,95 +2403,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let group_selector = params::MulticastGroupSelector {
                 multicast_group: path.multicast_group.clone(),
             };
-            let group_lookup =
-                nexus.multicast_group_lookup(&opctx, &group_selector)?;
             let group =
-                nexus.multicast_group_fetch(&opctx, &group_lookup).await?;
-            Ok(HttpResponseOk(views::MulticastGroup::try_from(group)?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn multicast_group_update(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::MulticastGroupPath>,
-        updated_group: TypedBody<params::MulticastGroupUpdate>,
-    ) -> Result<HttpResponseOk<MulticastGroup>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let updated_group_params = updated_group.into_inner();
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let group_selector = params::MulticastGroupSelector {
-                multicast_group: path.multicast_group.clone(),
-            };
-            let group_lookup =
-                nexus.multicast_group_lookup(&opctx, &group_selector)?;
-            let group = nexus
-                .multicast_group_update(
-                    &opctx,
-                    &group_lookup,
-                    &updated_group_params,
-                )
-                .await?;
-            Ok(HttpResponseOk(views::MulticastGroup::try_from(group)?))
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn multicast_group_delete(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::MulticastGroupPath>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-            let group_selector = params::MulticastGroupSelector {
-                multicast_group: path.multicast_group.clone(),
-            };
-            let group_lookup =
-                nexus.multicast_group_lookup(&opctx, &group_selector)?;
-            nexus.multicast_group_delete(&opctx, &group_lookup).await?;
-            Ok(HttpResponseDeleted())
-        };
-        apictx
-            .context
-            .external_latencies
-            .instrument_dropshot_handler(&rqctx, handler)
-            .await
-    }
-
-    async fn lookup_multicast_group_by_ip(
-        rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::MulticastGroupIpLookupPath>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError> {
-        let apictx = rqctx.context();
-        let handler = async {
-            let opctx =
-                crate::context::op_context_for_external_api(&rqctx).await?;
-            let nexus = &apictx.context.nexus;
-            let path = path_params.into_inner();
-
-            let ip_addr = path.address;
-
-            // System endpoint requires fleet-level read authorization
-            opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-            let group =
-                nexus.multicast_group_lookup_by_ip(&opctx, ip_addr).await?;
+                nexus.multicast_group_view(&opctx, &group_selector).await?;
             Ok(HttpResponseOk(views::MulticastGroup::try_from(group)?))
         };
         apictx
@@ -2546,7 +2437,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 multicast_group: path.multicast_group,
             };
             let group_lookup =
-                nexus.multicast_group_lookup(&opctx, &group_selector)?;
+                nexus.multicast_group_lookup(&opctx, &group_selector).await?;
 
             let members = nexus
                 .multicast_group_members_list(
@@ -2590,25 +2481,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
             let member_params = member_params.into_inner();
 
-            let group_selector = params::MulticastGroupSelector {
-                multicast_group: path.multicast_group,
-            };
-            let group_lookup =
-                nexus.multicast_group_lookup(&opctx, &group_selector)?;
-
+            // Note: When instance is specified by UUID, project should be `None`
+            // (UUIDs are globally unique). Project is only needed for name-based lookup.
             let instance_lookup = nexus.instance_lookup(
                 &opctx,
                 params::InstanceSelector {
-                    project: query.project,
-                    instance: member_params.instance,
+                    project: match &member_params.instance {
+                        NameOrId::Name(_) => query.project.clone(),
+                        NameOrId::Id(_) => None,
+                    },
+                    instance: member_params.instance.clone(),
                 },
             )?;
 
             let member = nexus
-                .multicast_group_member_attach(
+                .instance_join_multicast_group(
                     &opctx,
-                    &group_lookup,
+                    &path.multicast_group,
                     &instance_lookup,
+                    &member_params.source_ips,
                 )
                 .await?;
 
@@ -2636,22 +2527,25 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let path = path_params.into_inner();
             let query = query_params.into_inner();
 
+            let instance_lookup = nexus.instance_lookup(
+                &opctx,
+                params::InstanceSelector {
+                    project: match &path.instance {
+                        NameOrId::Name(_) => query.project,
+                        NameOrId::Id(_) => None,
+                    },
+                    instance: path.instance.clone(),
+                },
+            )?;
+
             let group_selector = params::MulticastGroupSelector {
                 multicast_group: path.multicast_group,
             };
             let group_lookup =
-                nexus.multicast_group_lookup(&opctx, &group_selector)?;
-
-            let instance_lookup = nexus.instance_lookup(
-                &opctx,
-                params::InstanceSelector {
-                    project: query.project,
-                    instance: path.instance,
-                },
-            )?;
+                nexus.multicast_group_lookup(&opctx, &group_selector).await?;
 
             nexus
-                .multicast_group_member_detach(
+                .instance_leave_multicast_group(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,
@@ -5744,8 +5638,14 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
+
+            // Note: When instance is specified by UUID, project should be `None`
+            // (UUIDs are globally unique). Project is only needed for name-based lookup.
             let instance_selector = params::InstanceSelector {
-                project: query.project,
+                project: match &path.instance {
+                    NameOrId::Name(_) => query.project,
+                    NameOrId::Id(_) => None,
+                },
                 instance: path.instance,
             };
             let instance_lookup =
@@ -5769,6 +5669,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
+        body_params: TypedBody<params::InstanceMulticastGroupJoin>,
     ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>
     {
         let apictx = rqctx.context();
@@ -5778,25 +5679,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let path = path_params.into_inner();
             let query = query_params.into_inner();
+            let body = body_params.into_inner();
 
             let instance_selector = params::InstanceSelector {
-                project: query.project.clone(),
-                instance: path.instance,
+                project: match &path.instance {
+                    NameOrId::Name(_) => query.project.clone(),
+                    NameOrId::Id(_) => None,
+                },
+                instance: path.instance.clone(),
             };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
 
-            let group_selector = params::MulticastGroupSelector {
-                multicast_group: path.multicast_group,
-            };
-            let group_lookup =
-                nexus.multicast_group_lookup(&opctx, &group_selector)?;
-
             let member = nexus
-                .multicast_group_member_attach(
+                .instance_join_multicast_group(
                     &opctx,
-                    &group_lookup,
+                    &path.multicast_group,
                     &instance_lookup,
+                    &body.source_ips,
                 )
                 .await?;
 
@@ -5825,8 +5725,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let query = query_params.into_inner();
 
             let instance_selector = params::InstanceSelector {
-                project: query.project.clone(),
-                instance: path.instance,
+                project: match &path.instance {
+                    NameOrId::Name(_) => query.project.clone(),
+                    NameOrId::Id(_) => None,
+                },
+                instance: path.instance.clone(),
             };
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
@@ -5835,10 +5738,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 multicast_group: path.multicast_group,
             };
             let group_lookup =
-                nexus.multicast_group_lookup(&opctx, &group_selector)?;
+                nexus.multicast_group_lookup(&opctx, &group_selector).await?;
 
             nexus
-                .multicast_group_member_detach(
+                .instance_leave_multicast_group(
                     &opctx,
                     &group_lookup,
                     &instance_lookup,

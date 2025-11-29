@@ -37,7 +37,6 @@ pub mod instance_migrate;
 pub mod instance_start;
 pub mod instance_update;
 pub mod multicast_group_dpd_ensure;
-pub mod multicast_group_dpd_update;
 pub mod project_create;
 pub mod region_replacement_drive;
 pub mod region_replacement_finish;
@@ -187,8 +186,7 @@ fn make_action_registry() -> ActionRegistry {
         region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect,
         region_snapshot_replacement_finish::SagaRegionSnapshotReplacementFinish,
         image_create::SagaImageCreate,
-        multicast_group_dpd_ensure::SagaMulticastGroupDpdEnsure,
-        multicast_group_dpd_update::SagaMulticastGroupDpdUpdate
+        multicast_group_dpd_ensure::SagaMulticastGroupDpdEnsure
     ];
 
     #[cfg(test)]

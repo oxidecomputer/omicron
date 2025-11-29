@@ -217,6 +217,39 @@ impl NextExternalMulticastGroup {
         out.push_sql(" AND time_deleted IS NULL");
         Ok(())
     }
+
+    /// Push a subquery to update the `ip_pool_range` table's rcgen, if we've
+    /// successfully allocated a multicast group from that range.
+    ///
+    /// This prevents race conditions where a range is deleted while a
+    /// multicast group allocation is in progress. The range deletion checks
+    /// the rcgen value, and this increment ensures it changes when an
+    /// allocation occurs.
+    fn push_update_ip_pool_range_subquery<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> QueryResult<()> {
+        use schema::ip_pool_range::dsl;
+        out.push_sql("UPDATE ");
+        schema::ip_pool_range::table.walk_ast(out.reborrow())?;
+        out.push_sql(" SET ");
+        out.push_identifier(dsl::time_modified::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
+            &self.now,
+        )?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::rcgen::NAME)?;
+        out.push_sql(" = ");
+        out.push_identifier(dsl::rcgen::NAME)?;
+        out.push_sql(" + 1 WHERE ");
+        out.push_identifier(dsl::id::NAME)?;
+        out.push_sql(" = (SELECT ip_pool_range_id FROM next_external_multicast_group) AND ");
+        out.push_identifier(dsl::time_deleted::NAME)?;
+        out.push_sql(" IS NULL RETURNING ");
+        out.push_identifier(dsl::id::NAME)?;
+        Ok(())
+    }
 }
 
 impl QueryFragment<Pg> for NextExternalMulticastGroup {
@@ -246,6 +279,11 @@ impl QueryFragment<Pg> for NextExternalMulticastGroup {
                 WHERE NOT EXISTS (SELECT 1 FROM previously_allocated_group)
                 RETURNING id, name, description, time_created, time_modified, time_deleted, ip_pool_id, ip_pool_range_id, vni, multicast_ip, source_ips, mvlan, underlay_group_id, tag, state, version_added, version_removed",
         );
+        out.push_sql("), ");
+
+        // Update the IP pool range's rcgen to prevent race conditions with range deletion
+        out.push_sql("updated_pool_range AS (");
+        self.push_update_ip_pool_range_subquery(out.reborrow())?;
         out.push_sql(") ");
 
         // Return either the newly inserted or previously allocated group

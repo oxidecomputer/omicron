@@ -56,11 +56,32 @@ impl DataStore {
         group_id: MulticastGroupUuid,
         instance_id: InstanceUuid,
     ) -> CreateResult<MulticastGroupMember> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
         let conn = self.pool_connection_authorized(opctx).await?;
+
+        // Fetch the group's multicast_ip
+        let group_multicast_ip: ipnetwork::IpNetwork = dsl::multicast_group
+            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
+            .filter(dsl::time_deleted.is_null())
+            .select(dsl::multicast_ip)
+            .first_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::MulticastGroup,
+                        LookupType::ById(group_id.into_untyped_uuid()),
+                    ),
+                )
+            })?;
+
         self.multicast_group_member_add_with_conn(
             opctx,
             &conn,
             group_id.into_untyped_uuid(),
+            group_multicast_ip,
             instance_id.into_untyped_uuid(),
         )
         .await
@@ -83,6 +104,7 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<nexus_db_lookup::DbConnection>,
         group_id: Uuid,
+        multicast_ip: ipnetwork::IpNetwork,
         instance_id: Uuid,
     ) -> CreateResult<MulticastGroupMember> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
@@ -123,6 +145,7 @@ impl DataStore {
             id: Uuid::new_v4(),
             parent_id: instance_id,
             external_group_id: group_id,
+            multicast_ip,
             sled_id,
             state: MulticastGroupMemberState::Joining,
             time_created: Utc::now(),
@@ -331,24 +354,16 @@ impl DataStore {
 
     /// List multicast group memberships for a specific instance.
     ///
-    /// If `include_removed` is true, includes memberships that have been
-    /// marked removed (i.e., rows with `time_deleted` set). Otherwise only
-    /// returns active memberships.
+    /// Only returns active (non-deleted) memberships.
     pub async fn multicast_group_members_list_by_instance(
         &self,
         opctx: &OpContext,
         instance_id: InstanceUuid,
-        include_removed: bool,
     ) -> ListResultVec<MulticastGroupMember> {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
-        let mut query = dsl::multicast_group_member.into_boxed();
-
-        if !include_removed {
-            query = query.filter(dsl::time_deleted.is_null());
-        }
-
-        query
+        dsl::multicast_group_member
+            .filter(dsl::time_deleted.is_null())
             .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .order(dsl::id.asc())
             .select(MulticastGroupMember::as_select())
@@ -762,7 +777,11 @@ impl DataStore {
             .map(|_| ())
     }
 
-    /// Permanently delete a multicast group member by ID.
+    /// Mark a multicast group member for deletion by ID.
+    ///
+    /// This performs a soft delete by setting the member to "Left" state and
+    /// setting `time_deleted`. The RPW reconciler will remove the member from
+    /// DPD, and later cleanup will hard-delete the database record.
     pub async fn multicast_group_member_delete_by_id(
         &self,
         opctx: &OpContext,
@@ -770,13 +789,22 @@ impl DataStore {
     ) -> DeleteResult {
         use nexus_db_schema::schema::multicast_group_member::dsl;
 
-        let deleted_rows = diesel::delete(dsl::multicast_group_member)
+        let now = Utc::now();
+
+        let updated_rows = diesel::update(dsl::multicast_group_member)
             .filter(dsl::id.eq(member_id))
+            .filter(dsl::time_deleted.is_null())
+            .set((
+                dsl::state.eq(MulticastGroupMemberState::Left),
+                dsl::sled_id.eq(Option::<DbTypedUuid<SledKind>>::None),
+                dsl::time_deleted.eq(Some(now)),
+                dsl::time_modified.eq(now),
+            ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        if deleted_rows == 0 {
+        if updated_rows == 0 {
             return Err(external::Error::not_found_by_id(
                 ResourceType::MulticastGroupMember,
                 &member_id,
@@ -785,9 +813,9 @@ impl DataStore {
 
         debug!(
             opctx.log,
-            "multicast group member deletion completed";
+            "multicast group member marked for deletion";
             "member_id" => %member_id,
-            "rows_deleted" => deleted_rows
+            "rows_updated" => updated_rows
         );
 
         Ok(())
@@ -825,8 +853,8 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
+    use nexus_types::multicast::MulticastGroupCreate;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::SledUuid;
@@ -890,7 +918,7 @@ mod tests {
         .await;
 
         // Create creating group manually (needs to stay in "Creating" state)
-        let creating_group_params = params::MulticastGroupCreate {
+        let creating_group_params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "creating-group".parse().unwrap(),
                 description: "Creating test group".to_string(),
@@ -898,7 +926,6 @@ mod tests {
             multicast_ip: Some("224.10.1.6".parse().unwrap()),
             source_ips: None,
             // Pool resolved via authz_pool argument to datastore call
-            pool: None,
             mvlan: None,
         };
 
@@ -1227,7 +1254,7 @@ mod tests {
         assert_eq!(member1_2.parent_id, *instance1_id);
         assert_eq!(member2_1.parent_id, *instance2_id);
 
-        // Detach all memberships for instance1 (transitions to Left, does NOT set time_deleted)
+        // Detach all memberships for instance1 (transitions to "Left", does not set time_deleted)
         datastore
             .multicast_group_members_detach_by_instance(
                 &opctx,
@@ -1236,7 +1263,7 @@ mod tests {
             .await
             .expect("Should detach all memberships for instance1");
 
-        // Verify time_deleted was NOT set (members still exist, just in Left state)
+        // Verify time_deleted was not set (members still exist, just in "Left" state)
         let detached_member1 = datastore
             .multicast_group_member_get_by_id(&opctx, member1_1.id, false)
             .await
@@ -1245,7 +1272,7 @@ mod tests {
         assert_eq!(detached_member1.state, MulticastGroupMemberState::Left);
         assert!(
             detached_member1.time_deleted.is_none(),
-            "detach_by_instance should NOT set time_deleted"
+            "detach_by_instance should not set time_deleted"
         );
         assert!(
             detached_member1.sled_id.is_none(),
@@ -1378,7 +1405,6 @@ mod tests {
             .multicast_group_members_list_by_instance(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(*instance_id),
-                false,
             )
             .await
             .expect("Should list memberships for instance");
@@ -1753,6 +1779,7 @@ mod tests {
                     time_modified: Utc::now(),
                     time_deleted: Some(Utc::now()),
                     external_group_id: group.id(),
+                    multicast_ip: group.multicast_ip,
                     parent_id: instance1_id,
                     sled_id: Some(setup.sled_id.into()),
                     state: MulticastGroupMemberState::Left,
@@ -1762,7 +1789,7 @@ mod tests {
                 .await
                 .expect("Should create member1 record");
 
-        // Member 2: "Left" but no `time_deleted` (should NOT be deleted)
+        // Member 2: "Left" but no `time_deleted` (should not be deleted)
         let member2: MulticastGroupMember =
             diesel::insert_into(dsl::multicast_group_member)
                 .values(MulticastGroupMemberValues {
@@ -1771,6 +1798,7 @@ mod tests {
                     time_modified: Utc::now(),
                     time_deleted: None,
                     external_group_id: group.id(),
+                    multicast_ip: group.multicast_ip,
                     parent_id: instance2_id,
                     sled_id: Some(setup.sled_id.into()),
                     state: MulticastGroupMemberState::Left,
@@ -1780,7 +1808,7 @@ mod tests {
                 .await
                 .expect("Should create member2 record");
 
-        // Member 3: "Joined" state (should NOT be deleted, even if it had time_deleted)
+        // Member 3: "Joined" state (should not be deleted, even if it had time_deleted)
         let member3: MulticastGroupMember =
             diesel::insert_into(dsl::multicast_group_member)
                 .values(MulticastGroupMemberValues {
@@ -1789,6 +1817,7 @@ mod tests {
                     time_modified: Utc::now(),
                     time_deleted: Some(Utc::now()), // Has time_deleted but is Joined, so won't be cleaned up
                     external_group_id: group.id(),
+                    multicast_ip: group.multicast_ip,
                     parent_id: instance3_id,
                     sled_id: Some(setup.sled_id.into()),
                     state: MulticastGroupMemberState::Joined,
@@ -2398,7 +2427,7 @@ mod tests {
             .expect("Member1_2 should exist");
         assert!(marked_member1_2.time_deleted.is_some());
 
-        // Verify instance2 membership is NOT marked for removal
+        // Verify instance2 membership is not marked for removal
         let unmarked_member2_1 = datastore
             .multicast_group_member_get_by_id(&opctx, member2_1.id, true)
             .await
@@ -3036,7 +3065,7 @@ mod tests {
             .expect("First attach should succeed");
 
         // Transition member to "Left" state and clear sled_id (simulating instance stop)
-        // This does NOT set time_deleted - only stopped instances can be reactivated
+        // This does not set time_deleted - only stopped instances can be reactivated
         datastore
             .multicast_group_members_detach_by_instance(
                 &opctx,
@@ -3054,7 +3083,7 @@ mod tests {
         assert_eq!(member_stopped.state, MulticastGroupMemberState::Left);
         assert!(
             member_stopped.time_deleted.is_none(),
-            "time_deleted should NOT be set for stopped instances"
+            "time_deleted should not be set for stopped instances"
         );
         assert!(member_stopped.sled_id.is_none(), "sled_id should be cleared");
 
@@ -3182,7 +3211,6 @@ mod tests {
             .multicast_group_members_list_by_instance(
                 &opctx,
                 InstanceUuid::from_untyped_uuid(instance_id),
-                false, // include_removed = false
             )
             .await
             .expect("List members should succeed");

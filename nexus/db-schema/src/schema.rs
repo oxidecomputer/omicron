@@ -2789,6 +2789,7 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         external_group_id -> Uuid,
+        multicast_ip -> Inet,
         parent_id -> Uuid,
         sled_id -> Nullable<Uuid>,
         state -> crate::enums::MulticastGroupMemberStateEnum,
@@ -2809,6 +2810,9 @@ table! {
         version_removed -> Nullable<Int8>,
     }
 }
+
+// Allow multicast tables to appear together for NOT EXISTS subqueries
+allow_tables_to_appear_in_same_query!(multicast_group, multicast_group_member);
 
 allow_tables_to_appear_in_same_query!(user_data_export, snapshot, image);
 

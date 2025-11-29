@@ -168,6 +168,14 @@ async fn sid_leave_multicast_groups(
         .await
         .map_err(ActionError::action_failed)?;
 
+    // Activate the multicast reconciler to process the member cleanup chain:
+    // cleanup deleted members → find empty groups → mark them "Deleting" →
+    // process "Deleting" groups (DPD cleanup) → hard-delete from DB
+    let nexus = osagactx.nexus();
+    nexus
+        .background_tasks
+        .activate(&nexus.background_tasks.task_multicast_reconciler);
+
     info!(
         osagactx.log(),
         "Marked multicast members for removal";

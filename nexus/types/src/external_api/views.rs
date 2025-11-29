@@ -552,6 +552,7 @@ pub struct MulticastGroup {
     pub source_ips: Vec<IpAddr>,
     /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
     /// None means no VLAN tagging on egress.
+    // TODO(multicast): Remove mvlan field - being deprecated from multicast groups
     pub mvlan: Option<VlanID>,
     /// The ID of the IP pool this resource belongs to.
     pub ip_pool_id: Uuid,
@@ -568,6 +569,8 @@ pub struct MulticastGroupMember {
     pub identity: IdentityMetadata,
     /// The ID of the multicast group this member belongs to.
     pub multicast_group_id: Uuid,
+    /// The multicast IP address of the group this member belongs to.
+    pub multicast_ip: IpAddr,
     /// The ID of the instance that is a member of this group.
     pub instance_id: Uuid,
     /// Current state of the multicast group membership.

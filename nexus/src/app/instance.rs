@@ -363,7 +363,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        multicast_groups: &[NameOrId],
+        multicast_groups: &[params::MulticastGroupIdentifier],
     ) -> Result<(), Error> {
         let instance_id = authz_instance.id();
 
@@ -390,7 +390,6 @@ impl super::Nexus {
             .multicast_group_members_list_by_instance(
                 opctx,
                 InstanceUuid::from_untyped_uuid(instance_id),
-                false,
             )
             .await?;
         let current_group_ids: HashSet<_> =
@@ -410,8 +409,9 @@ impl super::Nexus {
             let multicast_group_selector = params::MulticastGroupSelector {
                 multicast_group: group_name_or_id.clone(),
             };
-            let multicast_group_lookup =
-                self.multicast_group_lookup(opctx, &multicast_group_selector)?;
+            let multicast_group_lookup = self
+                .multicast_group_lookup(opctx, &multicast_group_selector)
+                .await?;
             let (.., db_group) =
                 multicast_group_lookup.fetch_for(authz::Action::Read).await?;
             let id = db_group.id();
@@ -1462,7 +1462,6 @@ impl super::Nexus {
                 .multicast_group_members_list_by_instance(
                     opctx,
                     InstanceUuid::from_untyped_uuid(authz_instance.id()),
-                    false, // include_removed
                 )
                 .await
                 .map_err(|e| {

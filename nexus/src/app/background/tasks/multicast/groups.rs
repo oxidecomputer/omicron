@@ -18,7 +18,7 @@
 //!
 //! ## Operations Handled
 //! - **"Creating" state**: Initiate DPD "ensure" to apply configuration
-//! - **"Active" state**: Detect DPD drift and launch UPDATE saga when DB state differs
+//! - **"Active" state**: Detect DPD drift and sync directly
 //! - **"Deleting" state**: Switch cleanup and database removal
 //! - **Extensible processing**: Support for different group types
 //!
@@ -47,8 +47,8 @@
 //! | Condition | DPD State | Action | Next State |
 //! |-----------|-----------|---------|------------|
 //! | 1 | Matches DB | No action | "Active" (NoChange) |
-//! | 2 | Differs from DB | Launch UPDATE saga to fix drift | "Active" (StateChanged) |
-//! | 3 | Missing/error | Launch UPDATE saga to fix drift | "Active" (StateChanged) |
+//! | 2 | Differs from DB | Direct dataplane call to fix drift | "Active" (StateChanged) |
+//! | 3 | Missing/error | Direct dataplane call to fix drift | "Active" (StateChanged) |
 //!
 //! ### DELETING State Transitions
 //! | Condition | DPD cleanup (external+underlay) | DB cleanup (row) | Action | Next State |
@@ -75,7 +75,7 @@
 
 use anyhow::Context;
 use futures::stream::{self, StreamExt};
-use slog::{debug, error, trace, warn};
+use slog::{debug, error, info, trace, warn};
 
 use nexus_db_model::{MulticastGroup, MulticastGroupState};
 use nexus_db_queries::context::OpContext;
@@ -84,16 +84,23 @@ use omicron_common::api::external::DataPageParams;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use super::{MulticastGroupReconciler, StateTransition};
-use crate::app::multicast::dataplane::MulticastDataplaneClient;
+use crate::app::multicast::dataplane::{
+    GroupUpdateParams, MulticastDataplaneClient,
+};
 use crate::app::saga::create_saga_dag;
 use crate::app::sagas;
 
-/// Check if DPD tag matches database name.
-fn dpd_state_matches_name(
+/// Check if DPD tag matches database UUID.
+///
+/// Tags are UUID-based to prevent collision when group names are reused.
+fn dpd_state_matches_tag(
     dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
     db_group: &MulticastGroup,
 ) -> bool {
-    dpd_group.tag.as_ref().map_or(false, |tag| tag == db_group.name().as_str())
+    dpd_group
+        .tag
+        .as_ref()
+        .map_or(false, |tag| tag == &db_group.id().to_string())
 }
 
 /// Check if DPD sources match database sources.
@@ -484,8 +491,7 @@ impl MulticastGroupReconciler {
     /// External group handler for groups in "Active" state.
     ///
     /// Checks if the group's DPD state matches the database state. If not,
-    /// launches the UPDATE saga to sync. This handles updates triggered by
-    /// the UPDATE API endpoint and self-corrects any DPD drift.
+    /// we make a dataplane calls to sync. This self-corrects any DPD drift.
     async fn handle_active_external_group(
         &self,
         opctx: &OpContext,
@@ -504,20 +510,20 @@ impl MulticastGroupReconciler {
             .await
         {
             Ok(Some(dpd_group)) => {
-                let name_matches = dpd_state_matches_name(&dpd_group, group);
+                let tag_matches = dpd_state_matches_tag(&dpd_group, group);
                 let sources_match =
                     dpd_state_matches_sources(&dpd_group, group);
                 let mvlan_matches = dpd_state_matches_mvlan(&dpd_group, group);
 
                 let needs_update =
-                    !name_matches || !sources_match || !mvlan_matches;
+                    !tag_matches || !sources_match || !mvlan_matches;
 
                 if needs_update {
                     debug!(
                         opctx.log,
                         "detected DPD state mismatch for active group";
                         "group_id" => %group.id(),
-                        "name_matches" => name_matches,
+                        "tag_matches" => tag_matches,
                         "sources_match" => sources_match,
                         "mvlan_matches" => mvlan_matches
                     );
@@ -554,32 +560,46 @@ impl MulticastGroupReconciler {
                 "multicast_ip" => %group.multicast_ip
             );
 
-            let saga_params = sagas::multicast_group_dpd_update::Params {
-                serialized_authn:
-                    nexus_db_queries::authn::saga::Serialized::for_opctx(opctx),
-                external_group_id: group.id(),
-                underlay_group_id,
-            };
-
-            let dag = create_saga_dag::<
-                sagas::multicast_group_dpd_update::SagaMulticastGroupDpdUpdate,
-            >(saga_params)
-            .context("failed to create multicast group update saga")?;
-
-            let saga_id = self
-                .sagas
-                .saga_start(dag)
+            // Fetch underlay group for the update
+            let underlay_group = self
+                .datastore
+                .underlay_multicast_group_fetch(opctx, underlay_group_id)
                 .await
-                .context("failed to start multicast group update saga")?;
+                .context(
+                    "failed to fetch underlay group for drift correction",
+                )?;
 
-            debug!(
-                opctx.log,
-                "DPD update saga initiated for active group";
-                "external_group_id" => %group.id(),
-                "saga_id" => %saga_id,
-            );
-
-            Ok(StateTransition::StateChanged)
+            // Direct dataplane call for drift correction
+            // If update fails, we leave existing state and retry on next RPW cycle.
+            match dataplane_client
+                .update_groups(GroupUpdateParams {
+                    external_group: group,
+                    underlay_group: &underlay_group,
+                    new_name: group.name().as_str(),
+                    new_sources: &group.source_ips,
+                })
+                .await
+            {
+                Ok(_) => {
+                    info!(
+                        opctx.log,
+                        "drift correction completed for active group";
+                        "group_id" => %group.id(),
+                        "multicast_ip" => %group.multicast_ip
+                    );
+                    Ok(StateTransition::StateChanged)
+                }
+                Err(e) => {
+                    warn!(
+                        opctx.log,
+                        "drift correction failed, will retry on next cycle";
+                        "group_id" => %group.id(),
+                        "error" => %e
+                    );
+                    // Return NoChange so RPW retries on next activation
+                    Ok(StateTransition::NoChange)
+                }
+            }
         } else {
             Ok(StateTransition::NoChange)
         }
@@ -623,7 +643,8 @@ impl MulticastGroupReconciler {
                     "group" => ?group
                 );
 
-                // Generate underlay multicast IP using IPv6 admin-local scope (RFC 7346)
+                // Generate underlay multicast IP using our ff04::/64 prefix
+                // (part of the RFC 7346 admin-local scope ff04::/16)
                 let underlay_ip = self
                     .map_external_to_underlay_ip(group.multicast_ip.ip())
                     .context(
@@ -722,6 +743,15 @@ impl MulticastGroupReconciler {
                 .await
                 .context("failed to delete underlay group from database")?;
         }
+
+        // Delete all membership records for this group
+        self.datastore
+            .multicast_group_members_delete_by_group(
+                opctx,
+                MulticastGroupUuid::from_untyped_uuid(group.id()),
+            )
+            .await
+            .context("failed to delete group members from database")?;
 
         // Delete of external group record
         self.datastore

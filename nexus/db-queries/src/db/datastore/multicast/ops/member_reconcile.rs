@@ -118,7 +118,6 @@ pub async fn reconcile_joining_member(
     instance_valid: bool,
     current_sled_id: Option<DbTypedUuid<SledKind>>,
 ) -> Result<ReconcileJoiningResult, ReconcileMemberError> {
-    // First, read the current member state
     let member_opt: Option<MulticastGroupMember> = dsl::multicast_group_member
         .filter(dsl::external_group_id.eq(group_id))
         .filter(dsl::parent_id.eq(instance_id))

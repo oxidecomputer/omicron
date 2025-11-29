@@ -8,7 +8,6 @@ use std::net::Ipv4Addr;
 
 use uuid::Uuid;
 
-use nexus_db_model::MulticastGroupState;
 use nexus_db_model::{
     IncompleteVpc, IpPool, IpPoolReservationType, IpPoolResource,
     IpPoolResourceType, IpVersion,
@@ -16,6 +15,7 @@ use nexus_db_model::{
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::{IpRange, Ipv4Range};
 use nexus_types::identity::Resource;
+use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::api::external::{IdentityMetadataCreateParams, LookupType};
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid, SledUuid};
 
@@ -187,14 +187,13 @@ pub async fn create_test_group_with_state(
     multicast_ip: &str,
     make_active: bool,
 ) -> nexus_db_model::ExternalMulticastGroup {
-    let params = params::MulticastGroupCreate {
+    let params = MulticastGroupCreate {
         identity: IdentityMetadataCreateParams {
             name: group_name.parse().unwrap(),
             description: format!("Test group: {}", group_name),
         },
         multicast_ip: Some(multicast_ip.parse().unwrap()),
         source_ips: None,
-        pool: None,
         mvlan: None,
     };
 
@@ -205,10 +204,9 @@ pub async fn create_test_group_with_state(
 
     if make_active {
         datastore
-            .multicast_group_set_state(
+            .multicast_group_set_active(
                 opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MulticastGroupState::Active,
             )
             .await
             .expect("Should transition group to 'Active' state");

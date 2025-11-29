@@ -16,7 +16,7 @@
 //! - Support Source-Specific Multicast (SSM) with configurable source IPs
 //! - Follow the Resource trait pattern for user-facing identity management
 //! - **Fleet-scoped** (not project-scoped) to enable cross-project multicast
-//! - All use `DEFAULT_MULTICAST_VNI` (77) for consistent fleet-wide behavior
+//! - All use `DEFAULT_MULTICAST_VNI` (77) for consistent fleet-scoped behavior
 //!
 //! ### VNI and Security Model
 //!
@@ -25,7 +25,7 @@
 //! traffic where each VPC receives its own VNI for tenant isolation.
 //!
 //! The shared VNI design reflects multicast's fleet-scoped authorization model:
-//! groups are fleet resources (like IP pools) that can span projects and silos.
+//! groups are fleet-scoped resources that can span projects and silos.
 //! Forwarding occurs through Dendrite's bifurcated NAT architecture, which
 //! translates external multicast addresses to underlay IPv6 groups at the switch.
 //!
@@ -36,8 +36,9 @@
 //! multicast VNIs if VPC-isolated multicast groups become necessary.
 //!
 //! Security happens at two layers:
-//! - **Control plane**: Fleet admins create groups; users attach instances via API
-//! - **Dataplane**: Switch hardware validates underlay group membership
+//! - **Control plane**: groups created implicitly via member-add; pool linking
+//!   controls access
+//! - **Dataplane**: switch dataplane validates underlay group membership
 //!
 //! This allows cross-project and cross-silo multicast while maintaining explicit
 //! membership control through underlay forwarding tables.
@@ -45,11 +46,12 @@
 //! ## Underlay Multicast Groups
 //!
 //! System-generated admin-scoped IPv6 multicast groups for internal forwarding:
-//! - Use IPv6 admin-local multicast scope (ff04::/16) per RFC 7346
-//!   <https://www.rfc-editor.org/rfc/rfc7346>
+//! - Use IPv6 admin-local multicast scope (ff04::/16) per [RFC 7346]
 //! - Paired 1:1 with external groups for NAT-based forwarding
 //! - Handle rack-internal multicast traffic between switches
 //! - Use individual field pattern for system resources
+//!
+//! [RFC 7346]: https://www.rfc-editor.org/rfc/rfc7346
 //!
 //! ## Member Lifecycle (handled by RPW)
 //!
@@ -76,9 +78,7 @@
 use std::net::IpAddr;
 
 use chrono::{DateTime, Utc};
-use diesel::{
-    AsChangeset, AsExpression, FromSqlRow, Insertable, Queryable, Selectable,
-};
+use diesel::{AsExpression, FromSqlRow, Insertable, Queryable, Selectable};
 use ipnetwork::IpNetwork;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -199,6 +199,8 @@ pub struct ExternalMulticastGroup {
     /// efficiency, unlike other VLAN columns in the schema which use `SqlU16`
     /// (forcing INT4). Direct `i16` is appropriate here since VLANs fit in
     /// INT2's range.
+    ///
+    /// TODO(multicast): Remove mvlan field - being deprecated from multicast groups
     pub mvlan: Option<i16>,
     /// Associated underlay group for NAT.
     /// Initially None in ["Creating"](MulticastGroupState::Creating) state,
@@ -223,6 +225,18 @@ pub struct ExternalMulticastGroup {
     pub version_removed: Option<Generation>,
 }
 
+impl ExternalMulticastGroup {
+    /// DPD tag for switch configuration.
+    ///
+    /// Uses the group's UUID to ensure uniqueness across the group's lifecycle.
+    /// This prevents tag collision when a group name is reused after deletion
+    /// (important given implicit create/delete semantics). Both external and
+    /// underlay groups use the same tag for pairing.
+    pub fn dpd_tag(&self) -> String {
+        self.id().to_string()
+    }
+}
+
 /// Values used to create a [MulticastGroupMember] in the database.
 ///
 /// This struct is used for database insertions and omits fields that are
@@ -237,6 +251,7 @@ pub struct MulticastGroupMemberValues {
     pub time_modified: DateTime<Utc>,
     pub time_deleted: Option<DateTime<Utc>>,
     pub external_group_id: Uuid,
+    pub multicast_ip: IpNetwork,
     pub parent_id: Uuid,
     pub sled_id: Option<DbTypedUuid<SledKind>>,
     pub state: MulticastGroupMemberState,
@@ -268,6 +283,8 @@ pub struct MulticastGroupMember {
     pub time_deleted: Option<DateTime<Utc>>,
     /// External multicast group this member belongs to.
     pub external_group_id: Uuid,
+    /// The multicast IP address of the group this member belongs to.
+    pub multicast_ip: IpNetwork,
     /// Parent instance or service that receives multicast traffic.
     pub parent_id: Uuid,
     /// Sled hosting the parent.
@@ -329,6 +346,7 @@ impl TryFrom<MulticastGroupMember> for views::MulticastGroupMember {
                 time_modified: member.time_modified,
             },
             multicast_group_id: member.external_group_id,
+            multicast_ip: member.multicast_ip.ip(),
             instance_id: member.parent_id,
             state: member.state.to_string(),
         })
@@ -393,6 +411,7 @@ impl MulticastGroupMember {
     pub fn new(
         id: Uuid,
         external_group_id: Uuid,
+        multicast_ip: IpNetwork,
         parent_id: Uuid,
         sled_id: Option<DbTypedUuid<SledKind>>,
     ) -> Self {
@@ -402,6 +421,7 @@ impl MulticastGroupMember {
             time_modified: Utc::now(),
             time_deleted: None,
             external_group_id,
+            multicast_ip,
             parent_id,
             sled_id,
             state: MulticastGroupMemberState::Joining,
@@ -455,36 +475,4 @@ pub struct UnderlayMulticastGroup {
     pub version_added: Generation,
     /// Version when this group was removed.
     pub version_removed: Option<Generation>,
-}
-
-/// Update data for a multicast group.
-#[derive(AsChangeset, Debug, PartialEq, Eq)]
-#[diesel(table_name = multicast_group)]
-pub struct ExternalMulticastGroupUpdate {
-    pub name: Option<Name>,
-    pub description: Option<String>,
-    pub source_ips: Option<Vec<IpNetwork>>,
-    // Needs to be double Option so we can set a value of null in the DB by
-    // passing Some(None). None by itself is ignored by Diesel.
-    pub mvlan: Option<Option<i16>>,
-    pub time_modified: DateTime<Utc>,
-}
-
-impl From<nexus_types::external_api::params::MulticastGroupUpdate>
-    for ExternalMulticastGroupUpdate
-{
-    fn from(
-        params: nexus_types::external_api::params::MulticastGroupUpdate,
-    ) -> Self {
-        Self {
-            name: params.identity.name.map(Name),
-            description: params.identity.description,
-            source_ips: params
-                .source_ips
-                .map(|ips| ips.into_iter().map(IpNetwork::from).collect()),
-            // mvlan is always None here - handled manually in datastore
-            mvlan: None,
-            time_modified: Utc::now(),
-        }
-    }
 }

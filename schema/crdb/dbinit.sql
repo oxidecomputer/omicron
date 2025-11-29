@@ -7157,7 +7157,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
 
     /* Sync versioning */
     version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
-    version_removed INT8
+    version_removed INT8,
+
+    /* Denormalized multicast IP from the group (for API convenience) */
+    /* Note: Column added via migration, must be at end for schema compatibility */
+    multicast_ip INET NOT NULL
 );
 
 /* External Multicast Group Indexes */
@@ -7203,23 +7207,26 @@ CREATE INDEX IF NOT EXISTS external_multicast_by_underlay ON omicron.public.mult
     underlay_group_id
 ) WHERE time_deleted IS NULL AND underlay_group_id IS NOT NULL;
 
--- State-based filtering for RPW reconciler
--- Supports: SELECT ... WHERE state = ? AND time_deleted IS NULL
-CREATE INDEX IF NOT EXISTS multicast_group_by_state ON omicron.public.multicast_group (
-    state
-) WHERE time_deleted IS NULL;
-
--- RPW reconciler composite queries (state + pool filtering)
--- Supports: SELECT ... WHERE state = ? AND ip_pool_id = ? AND time_deleted IS NULL
-CREATE INDEX IF NOT EXISTS multicast_group_reconciler_query ON omicron.public.multicast_group (
-    state,
-    ip_pool_id
-) WHERE time_deleted IS NULL;
-
 -- Fleet-wide unique name constraint (groups are fleet-scoped like IP pools)
 -- Supports: SELECT ... WHERE name = ? AND time_deleted IS NULL
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_multicast_group_by_name ON omicron.public.multicast_group (
     name
+) WHERE time_deleted IS NULL;
+
+-- RPW cleanup of soft-deleted groups
+-- Supports: SELECT ... WHERE state = 'deleting' (includes rows with time_deleted set)
+-- Without WHERE clause to allow queries on Deleting state regardless of time_deleted
+CREATE INDEX IF NOT EXISTS multicast_group_cleanup ON omicron.public.multicast_group (
+    state,
+    id
+);
+
+-- RPW queries for active groups (Creating, Active states)
+-- Supports: SELECT ... WHERE state = ? AND time_deleted IS NULL ORDER BY id
+-- Optimizes the common case of querying non-deleted groups by state with pagination
+CREATE INDEX IF NOT EXISTS multicast_group_active ON omicron.public.multicast_group (
+    state,
+    id
 ) WHERE time_deleted IS NULL;
 
 /* Underlay Multicast Group Indexes */
@@ -7361,7 +7368,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '211.0.0', NULL)
+    (TRUE, NOW(), NOW(), '212.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

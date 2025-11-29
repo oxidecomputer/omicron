@@ -305,6 +305,59 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         }
     }
 
+    /// Restart a Dendrite instance for testing drift correction scenarios.
+    ///
+    /// Simulates a switch restart where DPD loses its programmed state.
+    /// Restarts on the same port so test DNS stays valid.
+    pub async fn restart_dendrite(
+        &self,
+        switch_location: omicron_common::api::external::SwitchLocation,
+    ) {
+        let mut old = self
+            .dendrite
+            .write()
+            .unwrap()
+            .remove(&switch_location)
+            .expect("Dendrite should be running");
+        let port = old.port;
+        old.cleanup().await.unwrap();
+
+        let mgs = self.gateway.get(&switch_location).unwrap();
+        let mgs_addr =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, mgs.port, 0, 0).into();
+
+        let dendrite = dev::dendrite::DendriteInstance::start(
+            port,
+            Some(self.internal_client.bind_address),
+            Some(mgs_addr),
+        )
+        .await
+        .unwrap();
+
+        // Wait for Dendrite to be ready before returning.
+        // We check `switch_identifiers()` rather than just `dpd_uptime()`
+        // because Nexus needs switch_identifiers to work to determine which
+        // switch to program.
+        let dpd_client = dpd_client::Client::new(
+            &format!("http://[::1]:{port}"),
+            dpd_client::ClientState {
+                tag: String::from("test-restart-wait"),
+                log: self.logctx.log.clone(),
+            },
+        );
+        loop {
+            match dpd_client.switch_identifiers().await {
+                Ok(_) => break,
+                Err(_) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(50))
+                        .await;
+                }
+            }
+        }
+
+        self.dendrite.write().unwrap().insert(switch_location, dendrite);
+    }
+
     pub async fn teardown(mut self) {
         self.server.close().await;
         self.database.cleanup().await.unwrap();

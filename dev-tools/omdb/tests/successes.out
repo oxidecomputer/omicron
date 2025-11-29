@@ -713,7 +713,7 @@ task: "multicast_reconciler"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "multicast_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "errors": Array [], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
+warning: unknown background task: "multicast_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "empty_groups_marked": Number(0), "errors": Array [], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
@@ -1281,7 +1281,7 @@ task: "multicast_reconciler"
   configured period: every <REDACTED_DURATION>m
   last completed activation: <REDACTED ITERATIONS>, triggered by <TRIGGERED_BY_REDACTED>
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "multicast_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "errors": Array [], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
+warning: unknown background task: "multicast_reconciler" (don't know how to interpret details: Object {"disabled": Bool(false), "empty_groups_marked": Number(0), "errors": Array [], "groups_created": Number(0), "groups_deleted": Number(0), "groups_verified": Number(0), "members_deleted": Number(0), "members_processed": Number(0)})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
