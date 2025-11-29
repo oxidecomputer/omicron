@@ -16,6 +16,7 @@ use super::cte_utils::{
     BoxableTable, BoxableUpdateStatement, BoxedQuery, ExprSqlType, FilterBy,
     QueryFromClause, QuerySqlType, TableDefaultWhereClause,
 };
+use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
@@ -270,6 +271,411 @@ pub trait DatastoreAttachTarget<ResourceType>:
 impl<T, R> DatastoreAttachTarget<R> for T where T: DatastoreAttachTargetConfig<R>
 {}
 
+/// A database object which may have one or more [`Resource`]s attached to it.
+pub struct Collection {
+    table_name: &'static str,
+    id_column: &'static str,
+    time_deleted_column: &'static str,
+}
+
+impl Collection {
+    /// Describes a collection, within which a [`Resource`] will be inserted.
+    ///
+    /// - `table_name`: Name of the collection table
+    /// - `id_column`: Name of the primary key column
+    /// - `time_deleted_column`: Name of the column indicating if the collection
+    /// has been soft-deleted.
+    pub const fn new(
+        table_name: &'static str,
+        id_column: &'static str,
+        time_deleted_column: &'static str,
+    ) -> Self {
+        Self { table_name, id_column, time_deleted_column }
+    }
+}
+
+/// A database object which may belong to one or more [`Collection`]s.
+pub struct Resource {
+    table_name: &'static str,
+    id_column: &'static str,
+    collection_id_column: &'static str,
+    time_deleted_column: &'static str,
+}
+
+impl Resource {
+    /// Describes a resource, which may be inserted within a [`Collection`].
+    ///
+    /// - `table_name`: Name of the collection table
+    /// - `id_column`: Name of the primary key column
+    /// - `collection_id_column`: Name of the column referencing the collection
+    /// by primary key.
+    /// - `time_deleted_column`: Name of the column indicating if the collection
+    /// has been soft-deleted.
+    pub const fn new(
+        table_name: &'static str,
+        id_column: &'static str,
+        collection_id_column: &'static str,
+        time_deleted_column: &'static str,
+    ) -> Self {
+        Self {
+            table_name,
+            id_column,
+            collection_id_column,
+            time_deleted_column,
+        }
+    }
+}
+
+/// Type alias for the SET clause builder function in AttachQueryTemplate.
+type SetClauseBuilder = Box<
+    dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder, uuid::Uuid)
+        + Send,
+>;
+
+/// Type alias for optional filter functions in AttachQueryTemplate.
+type FilterBuilder = Option<
+    Box<dyn FnOnce(&mut crate::db::raw_query_builder::QueryBuilder) + Send>,
+>;
+
+/// Creates a statement for attaching a [`Resource`] object to a [`Collection`].
+///
+/// This query allows callers to atomically check the state of a
+/// collection and a resource while attaching a resource to a collection.
+///
+/// This provides a two-phase API:
+/// - [`AttachQueryTemplate::new`] - Constructs the query structure with all SQL logic
+/// - [`AttachQueryTemplate::build`] - Supplies runtime bind parameter values (UUIDs, max count)
+pub struct AttachQueryTemplate {
+    collection: Collection,
+    resource: Resource,
+    allow_from_attached: bool,
+    build_set_clause: SetClauseBuilder,
+    collection_filter: FilterBuilder,
+    resource_filter: FilterBuilder,
+}
+
+impl AttachQueryTemplate {
+    /// Creates a new attach query template with the full query structure.
+    ///
+    /// This captures all the SQL logic for the attach operation:
+    /// - Table and column names
+    /// - SET clause structure for the UPDATE
+    /// - Optional additional filters for collection and resource validation
+    ///
+    /// `allow_from_attached` answers the question: "Can we attach a resource to
+    /// this collection, even if it's currently attached to a different
+    /// collection"?
+    ///
+    /// The closures receive a QueryBuilder and should construct the SQL structure,
+    /// calling `.param()` for bind parameters and `.bind()` for values. Later,
+    /// the `.bind()` calls will be separated out.
+    ///
+    /// Example:
+    /// ```ignore
+    /// AttachQueryTemplate::new(
+    ///     collection,
+    ///     resource,
+    ///     false,
+    ///     |builder| {
+    ///         builder.sql("attach_instance_id = ");
+    ///         builder.param().bind::<sql_types::Uuid, _>(instance_id);
+    ///         builder.sql(", disk_state = ");
+    ///         builder.param().bind::<sql_types::Text, _>(attached_label);
+    ///     },
+    ///     Some(|builder| {
+    ///         builder.sql(" AND state = ANY(");
+    ///         builder.param().bind::<sql_types::Array<Text>, _>(states);
+    ///         builder.sql(")");
+    ///     }),
+    ///     None,
+    /// )
+    /// ```
+    pub fn new(
+        collection: Collection,
+        resource: Resource,
+        allow_from_attached: bool,
+        build_set_clause: impl FnOnce(
+            &mut crate::db::raw_query_builder::QueryBuilder,
+            uuid::Uuid,
+        ) + Send
+        + 'static,
+        collection_filter: Option<
+            impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder)
+            + Send
+            + 'static,
+        >,
+        resource_filter: Option<
+            impl FnOnce(&mut crate::db::raw_query_builder::QueryBuilder)
+            + Send
+            + 'static,
+        >,
+    ) -> Self {
+        Self {
+            collection,
+            resource,
+            allow_from_attached,
+            build_set_clause: Box::new(build_set_clause),
+            collection_filter: collection_filter.map(|f| {
+                Box::new(f)
+                    as Box<
+                        dyn FnOnce(
+                                &mut crate::db::raw_query_builder::QueryBuilder,
+                            ) + Send,
+                    >
+            }),
+            resource_filter: resource_filter.map(|f| {
+                Box::new(f)
+                    as Box<
+                        dyn FnOnce(
+                                &mut crate::db::raw_query_builder::QueryBuilder,
+                            ) + Send,
+                    >
+            }),
+        }
+    }
+
+    /// Builds the attach query with runtime bind parameter values.
+    ///
+    /// Takes only the runtime values needed for execution:
+    /// - `collection_id`: UUID of the collection to attach to
+    /// - `resource_id`: UUID of the resource being attached
+    /// - `max_attached_resources`: Maximum number of resources allowed in the collection
+    ///
+    /// The SQL structure and bind parameter positions were defined when creating
+    /// the template via `new()`.
+    ///
+    /// Example:
+    /// ```ignore
+    /// let query = template.build::<Disk, Instance>(
+    ///     instance_id,
+    ///     disk_id,
+    ///     MAX_DISKS_PER_INSTANCE,
+    /// );
+    /// ```
+    pub fn build<ResourceType, CollectionType>(
+        self,
+        collection_id: uuid::Uuid,
+        resource_id: uuid::Uuid,
+        max_attached_resources: u32,
+    ) -> AttachQuery<ResourceType, CollectionType>
+    where
+        ResourceType: Selectable<Pg> + Send + 'static,
+        CollectionType: Selectable<Pg> + Send + 'static,
+        <ResourceType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
+        <CollectionType as Selectable<Pg>>::SelectExpression: QueryFragment<Pg>,
+    {
+        use crate::db::raw_query_builder::QueryBuilder;
+        use diesel::sql_types;
+
+        let mut builder = QueryBuilder::new();
+
+        // Build the CTE query structure matching the QueryFragment implementation
+
+        // WITH collection_by_id AS (...)
+        // This is just existence check - NO user filters here
+        builder.sql("WITH collection_by_id AS (SELECT ");
+        builder.fragment_unqualified(&CollectionType::as_select());
+        builder.sql(" FROM ");
+        builder.sql(self.collection.table_name);
+        builder.sql(" WHERE ");
+        builder.sql(self.collection.id_column);
+        builder.sql(" = ");
+        builder.param().bind::<sql_types::Uuid, _>(collection_id);
+        builder.sql(" AND ");
+        builder.sql(self.collection.time_deleted_column);
+        builder.sql(" IS NULL");
+        builder.sql(" FOR UPDATE), ");
+
+        // resource_by_id AS (...)
+        // This is just existence check - NO user filters here
+        builder.sql("resource_by_id AS (SELECT ");
+        builder.fragment_unqualified(&ResourceType::as_select());
+        builder.sql(" FROM ");
+        builder.sql(self.resource.table_name);
+        builder.sql(" WHERE ");
+        builder.sql(self.resource.id_column);
+        builder.sql(" = ");
+        builder.param().bind::<sql_types::Uuid, _>(resource_id);
+        builder.sql(" AND ");
+        builder.sql(self.resource.time_deleted_column);
+        builder.sql(" IS NULL");
+        builder.sql(" FOR UPDATE), ");
+
+        // resource_count AS (...)
+        builder.sql("resource_count AS (");
+        builder.sql("SELECT COUNT(*) FROM ");
+        builder.sql(self.resource.table_name);
+        builder.sql(" WHERE ");
+        builder.sql(self.resource.collection_id_column);
+        builder.sql(" = ");
+        builder.param().bind::<sql_types::Uuid, _>(collection_id);
+        builder.sql(" AND ");
+        builder.sql(self.resource.time_deleted_column);
+        builder.sql(" IS NULL), ");
+
+        // collection_info AS (...)
+        // This includes user-supplied constraints (filters)
+        builder.sql("collection_info AS (SELECT ");
+        builder.fragment_unqualified(&CollectionType::as_select());
+        builder.sql(" FROM ");
+        builder.sql(self.collection.table_name);
+        builder.sql(" WHERE ");
+        builder.sql(self.collection.id_column);
+        builder.sql(" = ");
+        builder.param().bind::<sql_types::Uuid, _>(collection_id);
+        builder.sql(" AND ");
+        builder.sql(self.collection.time_deleted_column);
+        builder.sql(" IS NULL");
+        if let Some(filter) = self.collection_filter {
+            filter(&mut builder);
+        }
+        builder.sql(" FOR UPDATE), ");
+
+        // resource_info AS (...)
+        // This includes user-supplied constraints (filters) and FK check
+        builder.sql("resource_info AS (SELECT ");
+        builder.fragment_unqualified(&ResourceType::as_select());
+        builder.sql(" FROM ");
+        builder.sql(self.resource.table_name);
+        builder.sql(" WHERE ");
+        builder.sql(self.resource.id_column);
+        builder.sql(" = ");
+        builder.param().bind::<sql_types::Uuid, _>(resource_id);
+        builder.sql(" AND ");
+        builder.sql(self.resource.time_deleted_column);
+        builder.sql(" IS NULL");
+        if !self.allow_from_attached {
+            builder.sql(" AND ");
+            builder.sql(self.resource.collection_id_column);
+            builder.sql(" IS NULL");
+        }
+        if let Some(filter) = self.resource_filter {
+            filter(&mut builder);
+        }
+        builder.sql(" FOR UPDATE), ");
+
+        // do_update AS (...)
+        builder.sql("do_update AS (SELECT IF(EXISTS(SELECT ");
+        builder.sql(self.collection.id_column);
+        builder.sql(" FROM collection_info) AND EXISTS(SELECT ");
+        builder.sql(self.resource.id_column);
+        builder
+            .sql(" FROM resource_info) AND (SELECT * FROM resource_count) < ");
+        builder.sql(crate::db::raw_query_builder::TrustedStr::from_u32(
+            max_attached_resources,
+        ));
+        builder.sql(", TRUE, FALSE)), ");
+
+        // updated_resource AS (...)
+        builder.sql("updated_resource AS (UPDATE ");
+        builder.sql(self.resource.table_name);
+        builder.sql(" SET ");
+
+        // Call the SET clause builder (consumes it since it's FnOnce)
+        (self.build_set_clause)(&mut builder, collection_id);
+
+        builder.sql(" WHERE ");
+        builder.sql(self.resource.id_column);
+        builder.sql(" = ");
+        builder.param().bind::<sql_types::Uuid, _>(resource_id);
+        builder.sql(" AND (SELECT * FROM do_update) RETURNING *) ");
+
+        builder.sql(
+            "SELECT * FROM \
+            (SELECT * FROM resource_count) \
+            LEFT JOIN (SELECT ",
+        );
+        builder.fragment_unqualified(&CollectionType::as_select());
+        builder.sql(" FROM collection_by_id) ON TRUE LEFT JOIN (SELECT ");
+        builder.fragment_unqualified(&ResourceType::as_select());
+        builder.sql(" FROM resource_by_id) ON TRUE LEFT JOIN (SELECT ");
+        builder.fragment_unqualified(&ResourceType::as_select());
+        builder.sql(" FROM updated_resource) ON TRUE");
+
+        AttachQuery { query: builder.query() }
+    }
+}
+
+pub type RawSqlOutput<ResourceType, CollectionType> = (
+    BigInt,
+    Nullable<SelectableSqlType<CollectionType>>,
+    Nullable<SelectableSqlType<ResourceType>>,
+    Nullable<SelectableSqlType<ResourceType>>,
+);
+
+/// A query built by AttachQueryTemplate that can be executed to attach
+/// a resource to a collection.
+///
+/// This wraps the underlying TypedSqlQuery and provides an execution
+/// interface similar to AttachToCollectionStatement.
+pub struct AttachQuery<ResourceType, CollectionType>
+where
+    ResourceType: Selectable<Pg> + Send + 'static,
+    CollectionType: Selectable<Pg> + Send + 'static,
+{
+    query: crate::db::raw_query_builder::TypedSqlQuery<
+        RawSqlOutput<ResourceType, CollectionType>,
+    >,
+}
+
+impl<ResourceType, CollectionType> AttachQuery<ResourceType, CollectionType>
+where
+    ResourceType: Send + 'static + Selectable<Pg>,
+    CollectionType: Send + 'static + Selectable<Pg>,
+{
+    /// Executes the attach query and parses the result.
+    ///
+    /// Returns the collection and updated resource on success, or an
+    /// AttachError describing why the operation failed.
+    pub async fn attach_and_get_result_async(
+        self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> AsyncAttachToCollectionResult<ResourceType, CollectionType>
+    where
+        TypedSqlQuery<RawSqlOutput<ResourceType, CollectionType>>:
+            query_methods::LoadQuery<
+                    'static,
+                    DbConnection,
+                    RawOutput<ResourceType, CollectionType>,
+                >,
+    {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+
+        // Execute the query and get the raw tuple result
+        let (
+            attached_count,
+            collection_before_update,
+            resource_before_update,
+            resource_after_update,
+        ): (
+            i64,
+            Option<CollectionType>,
+            Option<ResourceType>,
+            Option<ResourceType>,
+        ) = self
+            .query
+            .get_result_async::<RawOutput<ResourceType, CollectionType>>(conn)
+            .await
+            .map_err(|e| AttachError::DatabaseError(e))?;
+
+        // Parse the result using the same logic as AttachToCollectionStatement
+        let collection_before_update = collection_before_update
+            .ok_or_else(|| AttachError::CollectionNotFound)?;
+
+        let resource_before_update = resource_before_update
+            .ok_or_else(|| AttachError::ResourceNotFound)?;
+
+        match resource_after_update {
+            Some(resource) => Ok((collection_before_update, resource)),
+            None => Err(AttachError::NoUpdate {
+                attached_count,
+                resource: resource_before_update,
+                collection: collection_before_update,
+            }),
+        }
+    }
+}
+
 /// The CTE described in the module docs
 #[must_use = "Queries must be executed"]
 pub struct AttachToCollectionStatement<ResourceType, V, C>
@@ -309,8 +715,10 @@ where
 }
 
 /// Result of [`AttachToCollectionStatement`] when executed asynchronously
-pub type AsyncAttachToCollectionResult<ResourceType, C> =
-    Result<(C, ResourceType), AttachError<ResourceType, C, DieselError>>;
+pub type AsyncAttachToCollectionResult<ResourceType, CollectionType> = Result<
+    (CollectionType, ResourceType),
+    AttachError<ResourceType, CollectionType, DieselError>,
+>;
 
 /// Errors returned by [`AttachToCollectionStatement`].
 #[derive(Debug)]

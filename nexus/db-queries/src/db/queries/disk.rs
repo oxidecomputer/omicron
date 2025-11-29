@@ -33,15 +33,8 @@ pub const MAX_DISKS_PER_INSTANCE: u32 = 8;
 /// enforces this at the database level).
 ///
 /// See the `NextItem` documentation for more details.
-#[derive(Debug, Clone, Copy)]
 struct NextDiskSlot {
-    inner: NextItem<
-        nexus_db_schema::schema::disk::table,
-        i16,
-        nexus_db_schema::schema::disk::dsl::slot,
-        Uuid,
-        nexus_db_schema::schema::disk::dsl::attach_instance_id,
-    >,
+    inner: NextItem<i16, DefaultShiftGenerator<i16>>,
 }
 
 impl NextDiskSlot {
@@ -52,7 +45,15 @@ impl NextDiskSlot {
             0,
         )
         .expect("invalid min/max shift");
-        Self { inner: NextItem::new_scoped(generator, instance_id) }
+        Self {
+            inner: NextItem::new_scoped(
+                "disk",
+                "slot",
+                "attach_instance_id",
+                instance_id,
+                generator,
+            ),
+        }
     }
 }
 
@@ -90,7 +91,6 @@ impl QueryFragment<Pg> for NextDiskSlot {
 /// This fragment can be passed to an `attach_resource` operation by supplying
 /// it as the argument to a `set`, e.g.
 /// `diesel::update(disk::dsl::disk).set(DiskSetClauseForAttach::new(instance_id))`.
-#[derive(Debug, Clone)]
 pub struct DiskSetClauseForAttach {
     attach_instance_id: Uuid,
     next_slot: NextDiskSlot,
@@ -170,4 +170,39 @@ impl diesel::query_builder::AsChangeset for DiskSetClauseForAttach {
     fn as_changeset(self) -> Self::Changeset {
         self
     }
+}
+
+/// Builds the next disk slot subquery using QueryBuilder.
+///
+/// This is equivalent to NextDiskSlot but uses the QueryBuilder API.
+/// It generates a query that selects the next available disk slot for an instance.
+pub(crate) fn build_next_disk_slot_subquery(
+    builder: &mut crate::db::raw_query_builder::QueryBuilder,
+    instance_id: Uuid,
+) {
+    // SELECT 0 + shift AS slot FROM
+    builder.sql("SELECT 0 + shift AS slot FROM (");
+
+    // (SELECT generate_series(0, 8) AS shift
+    builder.sql("SELECT generate_series(0, ");
+    builder.param().bind::<sql_types::BigInt, i64>(
+        i64::try_from(MAX_DISKS_PER_INSTANCE).unwrap(),
+    );
+    builder.sql(") AS shift");
+
+    // UNION ALL SELECT generate_series(0, -1) AS shift)
+    builder.sql(" UNION ALL SELECT generate_series(0, -1) AS shift");
+    builder.sql(") ");
+
+    // LEFT OUTER JOIN disk
+    builder.sql("LEFT OUTER JOIN disk ");
+
+    // ON (attach_instance_id, slot, time_deleted IS NULL) =
+    //    (instance_id, 0 + shift, TRUE)
+    builder.sql("ON (attach_instance_id, slot, time_deleted IS NULL) = (");
+    builder.param().bind::<sql_types::Uuid, Uuid>(instance_id);
+    builder.sql(", 0 + shift, TRUE) ");
+
+    // WHERE slot IS NULL LIMIT 1
+    builder.sql("WHERE slot IS NULL ORDER BY shift LIMIT 1");
 }
