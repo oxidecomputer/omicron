@@ -91,7 +91,6 @@ use nexus_db_schema::schema::{
 use nexus_types::external_api::views;
 use nexus_types::identity::Resource as IdentityResource;
 use omicron_common::api::external::{self, IdentityMetadata};
-use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::SledKind;
 
 use crate::typed_uuid::DbTypedUuid;
@@ -180,28 +179,6 @@ pub struct ExternalMulticastGroup {
     /// Source IP addresses for Source-Specific Multicast (SSM).
     /// Empty array means any source is allowed.
     pub source_ips: Vec<IpNetwork>,
-    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
-    ///
-    /// When specified, this VLAN ID is passed to switches (via DPD) as part of
-    /// the `ExternalForwarding` configuration to tag multicast packets leaving
-    /// the rack. This enables multicast traffic to traverse VLAN-segmented
-    /// upstream networks (e.g., peering with external multicast sources/receivers
-    /// on specific VLANs).
-    ///
-    /// The MVLAN value is sent to switches during group creation/updates and
-    /// controls VLAN tagging for egress traffic only; it does not affect ingress
-    /// multicast traffic received by the rack. Switch port selection for egress
-    /// traffic remains pending (see TODOs in `nexus/src/app/multicast/dataplane.rs`).
-    ///
-    /// Valid range when specified: 2-4094 (IEEE 802.1Q; Dendrite requires >= 2).
-    ///
-    /// Database Type: i16 (INT2) - this field uses `i16` (INT2) for storage
-    /// efficiency, unlike other VLAN columns in the schema which use `SqlU16`
-    /// (forcing INT4). Direct `i16` is appropriate here since VLANs fit in
-    /// INT2's range.
-    ///
-    /// TODO(multicast): Remove mvlan field - being deprecated from multicast groups
-    pub mvlan: Option<i16>,
     /// Associated underlay group for NAT.
     /// Initially None in ["Creating"](MulticastGroupState::Creating) state,
     /// populated by reconciler when group becomes ["Active"](MulticastGroupState::Active).
@@ -300,21 +277,9 @@ pub struct MulticastGroupMember {
 
 // Conversions to external API views
 
-impl TryFrom<ExternalMulticastGroup> for views::MulticastGroup {
-    type Error = external::Error;
-
-    fn try_from(group: ExternalMulticastGroup) -> Result<Self, Self::Error> {
-        let mvlan = group
-            .mvlan
-            .map(|vlan| VlanID::new(vlan as u16))
-            .transpose()
-            .map_err(|e| {
-                external::Error::internal_error(&format!(
-                    "invalid VLAN ID: {e:#}"
-                ))
-            })?;
-
-        Ok(views::MulticastGroup {
+impl From<ExternalMulticastGroup> for views::MulticastGroup {
+    fn from(group: ExternalMulticastGroup) -> Self {
+        views::MulticastGroup {
             identity: group.identity(),
             multicast_ip: group.multicast_ip.ip(),
             source_ips: group
@@ -322,10 +287,9 @@ impl TryFrom<ExternalMulticastGroup> for views::MulticastGroup {
                 .into_iter()
                 .map(|ip| ip.ip())
                 .collect(),
-            mvlan,
             ip_pool_id: group.ip_pool_id,
             state: group.state.to_string(),
-        })
+        }
     }
 }
 
@@ -367,7 +331,6 @@ pub struct IncompleteExternalMulticastGroup {
     // Optional address requesting that a specific multicast IP address be
     // allocated or provided
     pub explicit_address: Option<IpNetwork>,
-    pub mvlan: Option<i16>,
     pub vni: Vni,
     pub tag: Option<String>,
 }
@@ -381,7 +344,6 @@ pub struct IncompleteExternalMulticastGroupParams {
     pub ip_pool_id: Uuid,
     pub explicit_address: Option<IpAddr>,
     pub source_ips: Vec<IpNetwork>,
-    pub mvlan: Option<i16>,
     pub vni: Vni,
     pub tag: Option<String>,
 }
@@ -397,7 +359,6 @@ impl IncompleteExternalMulticastGroup {
             ip_pool_id: params.ip_pool_id,
             source_ips: params.source_ips,
             explicit_address: params.explicit_address.map(|ip| ip.into()),
-            mvlan: params.mvlan,
             vni: params.vni,
             tag: params.tag,
         }

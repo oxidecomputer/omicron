@@ -2375,10 +2375,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 nexus.multicast_groups_list(&opctx, &paginated_by).await?;
             let results_page = ScanByNameOrId::results_page(
                 &query,
-                groups
-                    .into_iter()
-                    .map(views::MulticastGroup::try_from)
-                    .collect::<Result<Vec<_>, _>>()?,
+                groups.into_iter().map(views::MulticastGroup::from).collect(),
                 &marker_for_name_or_id,
             )?;
             Ok(HttpResponseOk(results_page))
@@ -2405,7 +2402,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let group =
                 nexus.multicast_group_view(&opctx, &group_selector).await?;
-            Ok(HttpResponseOk(views::MulticastGroup::try_from(group)?))
+            Ok(HttpResponseOk(views::MulticastGroup::from(group)))
         };
         apictx
             .context

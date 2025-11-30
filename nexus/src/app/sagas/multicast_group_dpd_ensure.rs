@@ -475,7 +475,6 @@ mod test {
             },
             multicast_ip: Some(IpAddr::V4(Ipv4Addr::new(224, 70, 0, 100))),
             source_ips: None,
-            mvlan: None,
         };
 
         let external_group = datastore

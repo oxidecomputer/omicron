@@ -22861,13 +22861,6 @@
             "type": "string",
             "format": "ip"
           },
-          "mvlan": {
-            "nullable": true,
-            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. None means no VLAN tagging on egress.",
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
