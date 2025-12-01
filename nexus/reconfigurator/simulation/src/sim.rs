@@ -8,7 +8,9 @@
 use std::{collections::HashMap, sync::Arc};
 
 use indexmap::IndexSet;
-use omicron_uuid_kinds::{ReconfiguratorSimKind, ReconfiguratorSimUuid};
+use omicron_uuid_kinds::{
+    ReconfiguratorSimStateKind, ReconfiguratorSimStateUuid,
+};
 use typed_rng::TypedUuidRng;
 
 use crate::{
@@ -48,8 +50,8 @@ pub struct Simulator {
     // In the future, it would be interesting to store a chain of every set of
     // heads over time, similar to `jj op log`. That would let us implement undo
     // and restore operations.
-    heads: IndexSet<ReconfiguratorSimUuid>,
-    states: HashMap<ReconfiguratorSimUuid, Arc<SimState>>,
+    heads: IndexSet<ReconfiguratorSimStateUuid>,
+    states: HashMap<ReconfiguratorSimStateUuid, Arc<SimState>>,
     // This state corresponds to `ROOT_ID`.
     //
     // Storing it in the Arc is extremely important! `SimStateBuilder` stores a
@@ -59,7 +61,7 @@ pub struct Simulator {
     // points to the same memory address.
     root_state: Arc<SimState>,
     // Top-level (unversioned) RNG.
-    sim_uuid_rng: TypedUuidRng<ReconfiguratorSimKind>,
+    sim_uuid_rng: TypedUuidRng<ReconfiguratorSimStateKind>,
 }
 
 impl Simulator {
@@ -67,7 +69,8 @@ impl Simulator {
     ///
     /// This is always defined to be the nil UUID, and if queried will always
     /// have a state associated with it.
-    pub const ROOT_ID: ReconfiguratorSimUuid = ReconfiguratorSimUuid::nil();
+    pub const ROOT_ID: ReconfiguratorSimStateUuid =
+        ReconfiguratorSimStateUuid::nil();
 
     /// Create a new simulator with the given initial seed.
     pub fn new(log: &slog::Logger, seed: Option<String>) -> Self {
@@ -77,6 +80,8 @@ impl Simulator {
 
     fn new_inner(log: &slog::Logger, seed: String) -> Self {
         let log = log.new(slog::o!("component" => "SimStore"));
+        // The ReconfiguratorSimStateUuid type used to be ReconfiguratorSimUuid.
+        // Retain the old name in the seed for generated ID compatibility.
         let sim_uuid_rng =
             TypedUuidRng::from_seed(&seed, "ReconfiguratorSimUuid");
         let root_state = SimState::new_root(seed);
@@ -99,12 +104,15 @@ impl Simulator {
 
     /// Get the current heads of the store.
     #[inline]
-    pub fn heads(&self) -> &IndexSet<ReconfiguratorSimUuid> {
+    pub fn heads(&self) -> &IndexSet<ReconfiguratorSimStateUuid> {
         &self.heads
     }
 
     /// Get the state for the given UUID.
-    pub fn get_state(&self, id: ReconfiguratorSimUuid) -> Option<&SimState> {
+    pub fn get_state(
+        &self,
+        id: ReconfiguratorSimStateUuid,
+    ) -> Option<&SimState> {
         if id == Self::ROOT_ID {
             return Some(&self.root_state);
         }
@@ -126,7 +134,7 @@ impl Simulator {
     fn get_state_by_prefix(
         &self,
         prefix: &str,
-    ) -> Result<ReconfiguratorSimUuid, StateIdResolveError> {
+    ) -> Result<ReconfiguratorSimStateUuid, StateIdResolveError> {
         let mut matching_ids = Vec::new();
 
         if Self::ROOT_ID.to_string().starts_with(prefix) {
@@ -169,11 +177,11 @@ impl Simulator {
         }
     }
 
-    /// Resolve a [`ReconfiguratorSimId`] to a [`ReconfiguratorSimUuid`].
+    /// Resolve a [`ReconfiguratorSimId`] to a [`ReconfiguratorSimStateUuid`].
     pub fn resolve_state_id(
         &self,
         id: ReconfiguratorSimId,
-    ) -> Result<ReconfiguratorSimUuid, StateIdResolveError> {
+    ) -> Result<ReconfiguratorSimStateUuid, StateIdResolveError> {
         match id {
             ReconfiguratorSimId::Id(id) => Ok(id),
             ReconfiguratorSimId::Prefix(prefix) => {
@@ -192,7 +200,7 @@ impl Simulator {
     }
 
     #[inline]
-    pub(crate) fn next_sim_uuid(&mut self) -> ReconfiguratorSimUuid {
+    pub(crate) fn next_sim_uuid(&mut self) -> ReconfiguratorSimStateUuid {
         self.sim_uuid_rng.next()
     }
 
