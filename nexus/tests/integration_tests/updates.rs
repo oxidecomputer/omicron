@@ -216,7 +216,7 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload() -> Result<()> {
     let cptestctx =
-        nexus_test_utils::ControlPlaneBuilder::new("test_update_end_to_end")
+        nexus_test_utils::ControlPlaneBuilder::new("test_repo_upload")
             .extra_sled_agents(3)
             .start::<omicron_nexus::Server>()
             .await;
