@@ -17,6 +17,7 @@ use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronSledConfig, SledRole,
 };
 use omicron_common::{
+    api::external::ByteCount,
     api::external::Generation,
     api::internal::{
         nexus::{DiskRuntimeState, SledVmmState},
@@ -29,18 +30,20 @@ use omicron_common::{
     ledger::Ledgerable,
 };
 use omicron_uuid_kinds::{
-    DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
+    DatasetUuid, ExternalZpoolUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::inventory::v9;
+use sled_agent_types::probes;
 use sled_agent_types::{
     bootstore::BootstoreStatus,
     disk::DiskEnsureBody,
     early_networking::EarlyNetworkConfig,
     firewall_rules::VpcFirewallRulesEnsureBody,
     instance::{
-        InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
-        VmmPutStateResponse, VmmUnregisterResponse,
+        InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
+        VmmPutStateBody, VmmPutStateResponse, VmmUnregisterResponse,
     },
     sled::AddSledRequest,
     zone_bundle::{
@@ -54,6 +57,10 @@ use uuid::Uuid;
 
 /// Copies of data types that changed between v3 and v4.
 mod v3;
+/// Copies of data types that changed between v6 and v7.
+mod v6;
+/// Copies of data types that changed between v8 and v9.
+mod v8;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -67,6 +74,11 @@ api_versions!([
     // |  example for the next person.
     // v
     // (next_int, IDENT),
+    (10, ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES),
+    (9, DELEGATE_ZVOL_TO_PROPOLIS),
+    (8, REMOVE_SLED_ROLE),
+    (7, MULTICAST_SUPPORT),
+    (6, ADD_PROBE_PUT_ENDPOINT),
     (5, NEWTYPE_UUID_BUMP),
     (4, ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY),
     (3, ADD_SWITCH_ZONE_OPERATOR_POLICY),
@@ -326,12 +338,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/omicron-config",
-        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/omicron-config",
+        versions =
+            VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+    }]
+    async fn v9_omicron_config_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<v9::OmicronSledConfig>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(OmicronSledConfig::try_from)?;
+        Self::omicron_config_put(rqctx, body).await
+    }
 
     #[endpoint {
         operation_id = "omicron_config_put",
@@ -343,20 +369,23 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<v3::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::omicron_config_put(rqctx, body.map(Into::into)).await
+        Self::v9_omicron_config_put(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {
         method = GET,
         path = "/sled-role",
+        versions = ..VERSION_REMOVE_SLED_ROLE,
     }]
     async fn sled_role_get(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<SledRole>, HttpError>;
 
     #[endpoint {
+        operation_id = "vmm_register",
         method = PUT,
         path = "/vmms/{propolis_id}",
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
@@ -365,8 +394,54 @@ pub trait SledAgentApi {
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
 
     #[endpoint {
-        method = DELETE,
+        method = PUT,
         path = "/vmms/{propolis_id}",
+        operation_id = "vmm_register",
+        versions =
+            VERSION_DELEGATE_ZVOL_TO_PROPOLIS..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES
+    }]
+    async fn v9_vmm_register(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<v9::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        let body = body.try_map(
+            sled_agent_types::instance::InstanceEnsureBody::try_from,
+        )?;
+        Self::vmm_register(rqctx, path_params, body).await
+    }
+
+    #[endpoint {
+        operation_id = "vmm_register",
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        versions = VERSION_MULTICAST_SUPPORT..VERSION_DELEGATE_ZVOL_TO_PROPOLIS
+    }]
+    async fn v8_vmm_register(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<v8::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        Self::v9_vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}",
+        operation_id = "vmm_register",
+        versions = ..VERSION_MULTICAST_SUPPORT
+    }]
+    async fn v6_vmm_register(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<v6::InstanceEnsureBody>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
+        Self::v8_vmm_register(rqctx, path_params, body.map(Into::into)).await
+    }
+
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}"
     }]
     async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
@@ -410,6 +485,28 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceExternalIpBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = PUT,
+        path = "/vmms/{propolis_id}/multicast-group",
+        versions = VERSION_MULTICAST_SUPPORT..,
+    }]
+    async fn vmm_join_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        method = DELETE,
+        path = "/vmms/{propolis_id}/multicast-group",
+        versions = VERSION_MULTICAST_SUPPORT..,
+    }]
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -484,12 +581,28 @@ pub trait SledAgentApi {
     #[endpoint {
         method = PUT,
         path = "/vpc/{vpc_id}/firewall/rules",
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
     }]
     async fn vpc_firewall_rules_put(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VpcPathParam>,
         body: TypedBody<VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    #[endpoint {
+        operation_id = "vpc_firewall_rules_put",
+        method = PUT,
+        path = "/vpc/{vpc_id}/firewall/rules",
+        versions = ..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+    }]
+    async fn v9_vpc_firewall_rules_put(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VpcPathParam>,
+        body: TypedBody<v9::VpcFirewallRulesEnsureBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(VpcFirewallRulesEnsureBody::try_from)?;
+        Self::vpc_firewall_rules_put(rqctx, path_params, body).await
+    }
 
     /// Create a mapping from a virtual NIC to a physical host
     // Keep interface_id to maintain parity with the simulated sled agent, which
@@ -568,11 +681,26 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..,
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError>;
+
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions =
+            VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+    }]
+    async fn v9_inventory(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v9::Inventory>, HttpError> {
+        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
+        inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
+    }
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -584,8 +712,9 @@ pub trait SledAgentApi {
     async fn v3_inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v3::Inventory>, HttpError> {
-        let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
-        Ok(HttpResponseOk(inventory.into()))
+        Self::v9_inventory(rqctx)
+            .await
+            .map(|HttpResponseOk(inv)| HttpResponseOk(v3::Inventory::from(inv)))
     }
 
     /// Fetch sled identifiers
@@ -791,6 +920,63 @@ pub trait SledAgentApi {
     async fn debug_operator_switch_zone_policy_put(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<OperatorSwitchZonePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the entire set of probe zones on this sled.
+    ///
+    /// Probe zones are used to debug networking configuration. They look
+    /// similar to instances, in that they have an OPTE port on a VPC subnet and
+    /// external addresses, but no actual VM.
+    #[endpoint {
+        method = PUT,
+        path = "/probes",
+        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
+    }]
+    async fn probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<probes::ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update the entire set of probe zones on this sled.
+    ///
+    /// Probe zones are used to debug networking configuration. They look
+    /// similar to instances, in that they have an OPTE port on a VPC subnet and
+    /// external addresses, but no actual VM.
+    #[endpoint {
+        method = PUT,
+        path = "/probes",
+        versions =
+            VERSION_ADD_PROBE_PUT_ENDPOINT..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
+    }]
+    async fn v9_probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<probes::v1::ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let body = body.try_map(TryInto::try_into)?;
+        Self::probes_put(request_context, body).await
+    }
+
+    /// Create a local storage dataset
+    #[endpoint {
+        method = POST,
+        path = "/local-storage/{zpool_id}/{dataset_id}",
+        versions = VERSION_DELEGATE_ZVOL_TO_PROPOLIS..,
+    }]
+    async fn local_storage_dataset_ensure(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Delete a local storage dataset
+    #[endpoint {
+        method = DELETE,
+        path = "/local-storage/{zpool_id}/{dataset_id}",
+        versions = VERSION_DELEGATE_ZVOL_TO_PROPOLIS..,
+    }]
+    async fn local_storage_dataset_delete(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
@@ -1035,4 +1221,21 @@ pub enum OperatorSwitchZonePolicy {
 
     /// Even if a switch zone is present, stop the switch zone.
     StopDespiteSwitchPresence,
+}
+
+/// Path parameters for Local Storage dataset related requests
+#[derive(Serialize, Deserialize, JsonSchema)]
+pub struct LocalStoragePathParam {
+    pub zpool_id: ExternalZpoolUuid,
+    pub dataset_id: DatasetUuid,
+}
+
+/// Dataset and Volume details for a Local Storage dataset ensure request
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
+pub struct LocalStorageDatasetEnsureRequest {
+    /// Size of the parent dataset
+    pub dataset_size: ByteCount,
+
+    /// Size of the zvol
+    pub volume_size: ByteCount,
 }

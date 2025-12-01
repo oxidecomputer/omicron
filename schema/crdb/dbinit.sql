@@ -1475,6 +1475,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.block_size AS ENUM (
   '4096'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.disk_type AS ENUM (
+  'crucible'
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.disk (
     /* Identity metadata (resource) */
     id UUID PRIMARY KEY,
@@ -1492,13 +1496,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk (
     /* Every Disk is in exactly one Project at a time. */
     project_id UUID NOT NULL,
 
-    /* Every disk consists of a root volume */
-    volume_id UUID NOT NULL,
-
-    /*
-     * TODO Would it make sense for the runtime state to live in a separate
-     * table?
-     */
     /* Runtime state */
     -- disk_state omicron.public.DiskState NOT NULL, /* TODO see above */
     disk_state STRING(32) NOT NULL,
@@ -1514,10 +1511,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.disk (
     /* Disk configuration */
     size_bytes INT NOT NULL,
     block_size omicron.public.block_size NOT NULL,
-    origin_snapshot UUID,
-    origin_image UUID,
 
-    pantry_address TEXT
+    disk_type omicron.public.disk_type NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_project ON omicron.public.disk (
@@ -1537,10 +1532,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_deleted_disk ON omicron.public.disk (
 ) WHERE
     time_deleted IS NOT NULL;
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_volume_id ON omicron.public.disk (
+CREATE TABLE IF NOT EXISTS omicron.public.disk_type_crucible (
+    disk_id UUID PRIMARY KEY,
+
+    /* Every Crucible disk consists of a root volume */
+    volume_id UUID NOT NULL,
+
+    origin_snapshot UUID,
+    origin_image UUID,
+
+    pantry_address TEXT
+);
+
+/* Multiple disks cannot share volumes */
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_disk_by_volume_id ON omicron.public.disk_type_crucible (
     volume_id
-) WHERE
-    time_deleted IS NULL;
+);
 
 CREATE TABLE IF NOT EXISTS omicron.public.image (
     /* Identity metadata (resource) */
@@ -2206,6 +2213,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_version AS ENUM (
     'v6'
 );
 
+
 /* Indicates what an IP Pool is reserved for. */
 CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_reservation_type AS ENUM (
     'external_silos',
@@ -2334,7 +2342,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_range_by_last_address ON omicron.p
 )
 STORING (first_address)
 WHERE time_deleted IS NULL;
-
 
 /* The kind of external IP address. */
 CREATE TYPE IF NOT EXISTS omicron.public.ip_kind AS ENUM (
@@ -4628,7 +4635,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_config (
     time_modified TIMESTAMPTZ NOT NULL,
 
     -- Whether to add zones while the system has detected a mupdate override.
-    add_zones_with_mupdate_override BOOL NOT NULL
+    add_zones_with_mupdate_override BOOL NOT NULL,
+
+    -- Enable the TUF repo pruner background task
+    tuf_repo_pruner_enabled BOOL NOT NULL
 );
 
 /*
@@ -4780,6 +4790,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_metadata (
     -- `BlueprintHostPhase2DesiredContents::CurrentContents`
     host_phase_2_desired_slot_a STRING(64),
     host_phase_2_desired_slot_b STRING(64),
+
+    -- the sled's /64 subnet on the underlay address
+    subnet INET NOT NULL,
 
     PRIMARY KEY (blueprint_id, sled_id)
 );
@@ -5794,10 +5807,6 @@ CREATE INDEX IF NOT EXISTS step_time_order on omicron.public.region_replacement_
 
 CREATE INDEX IF NOT EXISTS search_for_repair_notifications ON omicron.public.upstairs_repair_notification (region_id, notification_type);
 
-CREATE INDEX IF NOT EXISTS lookup_any_disk_by_volume_id ON omicron.public.disk (
-    volume_id
-);
-
 CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS ENUM (
   'requested',
   'allocating',
@@ -6618,8 +6627,12 @@ ON omicron.public.user_data_export (state);
  * https://rfd.shared.oxide.computer/rfd/520
  */
 
-/* Ereports from service processors */
-CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
+ CREATE TYPE IF NOT EXISTS omicron.public.ereporter_type AS ENUM (
+    'sp',
+    'host'
+);
+
+ CREATE TABLE IF NOT EXISTS omicron.public.ereport (
     /*
      * the primary key for an ereport is formed from the tuple of the
      * reporter's restart ID (a randomly generated UUID) and the ereport's ENA
@@ -6638,24 +6651,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
     collector_id UUID NOT NULL,
 
     /*
-     * physical location of the reporting SP
+     * VPD identity of the reporter.
      *
-     * these fields are always present, as they are how requests to collect
-     * ereports are indexed by MGS.
-     */
-    sp_type omicron.public.sp_type NOT NULL,
-    sp_slot INT4 NOT NULL,
-
-    /*
-     * VPD identity of the reporting SP.
-     *
-     * unlike the physical location, these fields are nullable, as an ereport
-     * may be generated in a state where the SP doesn't know who or what it is.
+     * unlike the SP location and sled UUID, these fields are always nullable,
+     * regardless of whether the ereport was reported by a SP or the host OS.
+     * this is necessary because an ereport may be generated in a state where
+     * the SP doesn't know who or what it is.
      * consider that "i don't know my own identity" is a reasonable condition
      * to want to generate an ereport about!
      */
-    serial_number STRING,
     part_number STRING,
+    serial_number STRING,
 
     /*
      * The ereport class, which indicates the category of event reported.
@@ -6682,103 +6688,86 @@ CREATE TABLE IF NOT EXISTS omicron.public.sp_ereport (
      */
     report JSONB NOT NULL,
 
+    /*
+     * whether this ereport was generated by SP firmware or the host OS.
+     *
+     * this determines the key used to identify the reporter:
+     * - for SP ereports, the reporter is identified by its SP type and slot,
+     *   which is how the SP is indexed when requesting ereports from MGS.
+     * - for host OS ereports, the reporter is identified by the sled UUID.
+     *
+     * depending on the reporter type, either the SP location or sled UUID
+     * fields will be non-NULL.
+     */
+    reporter omicron.public.ereporter_type NOT NULL,
+
+    /*  physical location for SP reporters. */
+    sp_type omicron.public.sp_type,
+    sp_slot INT4,
+
+    /* sled UUID for host OS reporters. */
+    sled_id UUID,
+
+    CONSTRAINT reporter_identity_validity CHECK (
+    (
+        -- ereports from SPs must have a SP type and slot,
+        -- and must not have a sled ID.
+        reporter = 'sp'
+            AND sp_type IS NOT NULL
+            AND sp_slot IS NOT NULL
+            AND sled_id IS NULL
+    ) OR (
+        -- ereports from the sled host OS must have a sled ID,
+        -- and must not have a SP type or slot.
+        reporter = 'host'
+            AND sled_id IS NOT NULL
+            AND sp_type IS NULL
+            AND sp_slot IS NULL
+    )
+    ),
+
     PRIMARY KEY (restart_id, ena)
 );
 
-CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_slot
-ON omicron.public.sp_ereport (
+CREATE INDEX IF NOT EXISTS lookup_ereports_by_sp_slot
+ON omicron.public.ereport (
     sp_type,
     sp_slot,
     time_collected
 )
-where
-    time_deleted IS NULL;
-
-CREATE INDEX IF NOT EXISTS order_sp_ereports_by_timestamp
-ON omicron.public.sp_ereport(
-    time_collected
-)
 WHERE
-    time_deleted IS NULL;
+    time_deleted IS NULL
+    AND sp_type IS NOT NULL
+    AND sp_slot IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS lookup_sp_ereports_by_serial
-ON omicron.public.sp_ereport (
-    serial_number
-) WHERE
-    time_deleted IS NULL;
-
-/* Ereports from the host operating system */
-CREATE TABLE IF NOT EXISTS omicron.public.host_ereport (
-    /*
-    * the primary key for an ereport is formed from the tuple of the
-    * reporter's restart ID (a randomly generated UUID) and the ereport's ENA
-    * (a 64-bit integer that uniquely identifies the ereport within that
-    * restart of the reporter).
-    *
-    * see: https://rfd.shared.oxide.computer/rfd/520#ereport-metadata
-    */
-    restart_id UUID NOT NULL,
-    ena INT8 NOT NULL,
-    time_deleted TIMESTAMPTZ,
-
-    /* time at which the ereport was collected */
-    time_collected TIMESTAMPTZ NOT NULL,
-    /* UUID of the Nexus instance that collected the ereport */
-    collector_id UUID NOT NULL,
-
-    /* identity of the reporting sled */
-    sled_id UUID NOT NULL,
-    sled_serial TEXT NOT NULL,
-
-    /*
-     * The ereport class, which indicates the category of event reported.
-     *
-     * This is nullable, as it is extracted from the report JSON, and reports
-     * missing class information must still be ingested.
-     */
-    class STRING,
-
-    /*
-     * JSON representation of the ereport as received from the sled-agent.
-     *
-     * the raw JSON representation of the ereport is always stored, alongside
-     * any more structured data that we extract from it, as extracting data
-     * from the received ereport requires additional knowledge of the ereport
-     * formats generated by the host OS' fault management system. as these may
-     * change, and new ereports may be added which Nexus may not yet be aware
-     * of, we always store the raw JSON representation of the ereport. as Nexus
-     * becomes aware of new ereport schemas, it can go back and extract
-     * structured data from previously collected ereports with those schemas,
-     * but this is only possible if the JSON blob is persisted.
-     *
-     * see also: https://rfd.shared.oxide.computer/rfd/520#data-model
-     */
-    report JSONB NOT NULL,
-
-    part_number STRING(63),
-
-    PRIMARY KEY (restart_id, ena)
-);
-
-CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_sled
-ON omicron.public.host_ereport (
+CREATE INDEX IF NOT EXISTS lookup_ereports_by_sled
+ON omicron.public.ereport (
     sled_id,
     time_collected
 )
 WHERE
-    time_deleted IS NULL;
+    sled_id IS NOT NULL
+    AND time_deleted IS NULL;
 
-CREATE INDEX IF NOT EXISTS order_host_ereports_by_timestamp
-ON omicron.public.host_ereport (
-    time_collected
+CREATE INDEX IF NOT EXISTS lookup_ereports_by_serial
+ON omicron.public.ereport (
+    serial_number
+)
+STORING (
+    time_collected,
+    reporter,
+    sp_type,
+    sp_slot,
+    sled_id
 )
 WHERE
-    time_deleted IS NULL;
+     time_deleted IS NULL;
 
-CREATE INDEX IF NOT EXISTS lookup_host_ereports_by_serial
-ON omicron.public.host_ereport (
-    sled_serial
-) WHERE
+CREATE INDEX IF NOT EXISTS lookup_ereports_by_class
+ON omicron.public.ereport (
+    class
+)
+WHERE
     time_deleted IS NULL;
 
 /*
@@ -6826,6 +6815,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_sitrep (
     -- sitrep.
     comment TEXT NOT NULL
 );
+
+-- Index for looking up all potential children of a given parent sitrep.
+CREATE INDEX IF NOT EXISTS
+    lookup_sitreps_by_parent_id
+ON omicron.public.fm_sitrep (parent_sitrep_id);
 
 -- The history of current sitreps.
 --
@@ -7014,6 +7008,350 @@ ON
 WHERE
     time_deleted IS NULL;
 
+-- RFD 488: Multicast
+
+/* Create versioning sequence for multicast group changes */
+CREATE SEQUENCE IF NOT EXISTS omicron.public.multicast_group_version START 1 INCREMENT 1;
+
+-- Multicast group state for RPW
+CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_state AS ENUM (
+    'creating',
+    'active',
+    'deleting',
+    'deleted'
+);
+
+-- Multicast group member state for RPW pattern
+CREATE TYPE IF NOT EXISTS omicron.public.multicast_group_member_state AS ENUM (
+    'joining',
+    'joined',
+    'left'
+);
+
+/*
+ * External multicast groups (customer-facing, allocated from IP pools)
+ * Following the bifurcated design from RFD 488
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.multicast_group (
+    /* Identity metadata (following Resource pattern) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* VNI for multicast group (derived or random) */
+    vni INT4 NOT NULL,
+
+    /* IP allocation from pools */
+    ip_pool_id UUID NOT NULL,
+    ip_pool_range_id UUID NOT NULL,
+    multicast_ip INET NOT NULL,
+
+    /* Source-Specific Multicast (SSM) support */
+    source_ips INET[] DEFAULT ARRAY[]::INET[],
+
+    /* Multicast VLAN (MVLAN) for egress to upstream networks */
+    /* Tags packets leaving the rack to traverse VLAN-segmented upstream networks */
+    /* Internal rack traffic uses VNI-based underlay forwarding */
+    mvlan INT2,
+
+    /* Associated underlay group for NAT */
+    /* We fill this as part of the RPW */
+    underlay_group_id UUID,
+
+    /* DPD tag to couple external/underlay state for this group */
+    tag STRING(63),
+
+    /* Current state of the multicast group (for RPW) */
+    state omicron.public.multicast_group_state NOT NULL DEFAULT 'creating',
+
+    /* Sync versioning */
+    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
+    version_removed INT8,
+
+    /* Constraints */
+    -- External groups: IPv4 multicast or non-admin-scoped IPv6
+    CONSTRAINT external_multicast_ip_valid CHECK (
+        (family(multicast_ip) = 4 AND multicast_ip << '224.0.0.0/4') OR
+        (family(multicast_ip) = 6 AND multicast_ip << 'ff00::/8' AND
+         NOT multicast_ip << 'ff04::/16' AND
+         NOT multicast_ip << 'ff05::/16' AND
+         NOT multicast_ip << 'ff08::/16')
+    ),
+
+    -- Reserved range validation for IPv4
+    CONSTRAINT external_ipv4_not_reserved CHECK (
+        family(multicast_ip) != 4 OR (
+            family(multicast_ip) = 4 AND
+            NOT multicast_ip << '224.0.0.0/24' AND     -- Link-local control block
+            NOT multicast_ip << '233.0.0.0/8' AND      -- GLOP addressing
+            NOT multicast_ip << '239.0.0.0/8'          -- Administratively scoped
+        )
+    ),
+
+    -- Reserved range validation for IPv6
+    CONSTRAINT external_ipv6_not_reserved CHECK (
+        family(multicast_ip) != 6 OR (
+            family(multicast_ip) = 6 AND
+            NOT multicast_ip << 'ff01::/16' AND         -- Interface-local scope
+            NOT multicast_ip << 'ff02::/16'             -- Link-local scope
+        )
+    ),
+
+    -- MVLAN validation (Dendrite requires >= 2)
+    CONSTRAINT mvlan_valid_range CHECK (
+        mvlan IS NULL OR (mvlan >= 2 AND mvlan <= 4094)
+    )
+);
+
+/*
+ * Underlay multicast groups (admin-scoped IPv6 for VPC internal forwarding)
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.underlay_multicast_group (
+    /* Identity */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* Admin-scoped IPv6 multicast address (NAT target) */
+    multicast_ip INET NOT NULL,
+
+    /* DPD tag to couple external/underlay state for this group */
+    tag STRING(63),
+
+    /* Sync versioning */
+    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
+    version_removed INT8,
+
+    /* Constraints */
+    -- Underlay groups: admin-local scoped IPv6 only (ff04::/16)
+    CONSTRAINT underlay_ipv6_admin_scoped CHECK (
+        family(multicast_ip) = 6 AND multicast_ip << 'ff04::/16'
+    )
+);
+
+/*
+ * Multicast group membership (external groups)
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.multicast_group_member (
+    /* Identity */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+
+    /* External group for customer/external membership */
+    external_group_id UUID NOT NULL,
+
+    /* Parent instance or service (following external_ip pattern) */
+    parent_id UUID NOT NULL,
+
+    /* Sled hosting the parent instance (NULL when stopped) */
+    sled_id UUID,
+
+    /* RPW state for reliable operations */
+    state omicron.public.multicast_group_member_state NOT NULL,
+
+    /* Sync versioning */
+    version_added INT8 NOT NULL DEFAULT nextval('omicron.public.multicast_group_version'),
+    version_removed INT8
+);
+
+/* External Multicast Group Indexes */
+
+-- Version tracking for Omicron internal change detection
+-- Supports: SELECT ... WHERE version_added >= ? ORDER BY version_added
+CREATE UNIQUE INDEX IF NOT EXISTS multicast_group_version_added ON omicron.public.multicast_group (
+    version_added
+) STORING (
+    name,
+    multicast_ip,
+    time_created,
+    time_deleted
+);
+
+-- Version tracking for Omicron internal change detection
+-- Supports: SELECT ... WHERE version_removed >= ? ORDER BY version_removed
+CREATE UNIQUE INDEX IF NOT EXISTS multicast_group_version_removed ON omicron.public.multicast_group (
+    version_removed
+) STORING (
+    name,
+    multicast_ip,
+    time_created,
+    time_deleted
+);
+
+-- IP address uniqueness and conflict detection
+-- Supports: SELECT ... WHERE multicast_ip = ? AND time_deleted IS NULL
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_multicast_by_ip ON omicron.public.multicast_group (
+    multicast_ip
+) WHERE time_deleted IS NULL;
+
+-- Pool management and allocation queries
+-- Supports: SELECT ... WHERE ip_pool_id = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS external_multicast_by_pool ON omicron.public.multicast_group (
+    ip_pool_id,
+    ip_pool_range_id
+) WHERE time_deleted IS NULL;
+
+-- Underlay NAT group association
+-- Supports: SELECT ... WHERE underlay_group_id = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS external_multicast_by_underlay ON omicron.public.multicast_group (
+    underlay_group_id
+) WHERE time_deleted IS NULL AND underlay_group_id IS NOT NULL;
+
+-- State-based filtering for RPW reconciler
+-- Supports: SELECT ... WHERE state = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS multicast_group_by_state ON omicron.public.multicast_group (
+    state
+) WHERE time_deleted IS NULL;
+
+-- RPW reconciler composite queries (state + pool filtering)
+-- Supports: SELECT ... WHERE state = ? AND ip_pool_id = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS multicast_group_reconciler_query ON omicron.public.multicast_group (
+    state,
+    ip_pool_id
+) WHERE time_deleted IS NULL;
+
+-- Fleet-wide unique name constraint (groups are fleet-scoped like IP pools)
+-- Supports: SELECT ... WHERE name = ? AND time_deleted IS NULL
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_multicast_group_by_name ON omicron.public.multicast_group (
+    name
+) WHERE time_deleted IS NULL;
+
+/* Underlay Multicast Group Indexes */
+
+-- Version tracking for Omicron internal change detection
+-- Supports: SELECT ... WHERE version_added >= ? ORDER BY version_added
+CREATE UNIQUE INDEX IF NOT EXISTS underlay_multicast_group_version_added ON omicron.public.underlay_multicast_group (
+    version_added
+) STORING (
+    multicast_ip,
+    time_created,
+    time_deleted
+);
+
+-- Version tracking for Omicron internal change detection
+-- Supports: SELECT ... WHERE version_removed >= ? ORDER BY version_removed
+CREATE UNIQUE INDEX IF NOT EXISTS underlay_multicast_group_version_removed ON omicron.public.underlay_multicast_group (
+    version_removed
+) STORING (
+    multicast_ip,
+    time_created,
+    time_deleted
+);
+
+-- Admin-scoped IPv6 address uniqueness
+-- Supports: SELECT ... WHERE multicast_ip = ? AND time_deleted IS NULL
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_underlay_multicast_by_ip ON omicron.public.underlay_multicast_group (
+    multicast_ip
+) WHERE time_deleted IS NULL;
+
+-- Lifecycle management via group tags
+-- Supports: SELECT ... WHERE tag = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS underlay_multicast_by_tag ON omicron.public.underlay_multicast_group (
+    tag
+) WHERE time_deleted IS NULL AND tag IS NOT NULL;
+
+/* Multicast Group Member Indexes */
+
+-- Version tracking for Omicron internal change detection
+-- Supports: SELECT ... WHERE version_added >= ? ORDER BY version_added
+CREATE UNIQUE INDEX IF NOT EXISTS multicast_member_version_added ON omicron.public.multicast_group_member (
+    version_added
+) STORING (
+    external_group_id,
+    parent_id,
+    time_created,
+    time_deleted
+);
+
+-- Version tracking for Omicron internal change detection
+-- Supports: SELECT ... WHERE version_removed >= ? ORDER BY version_removed
+CREATE UNIQUE INDEX IF NOT EXISTS multicast_member_version_removed ON omicron.public.multicast_group_member (
+    version_removed
+) STORING (
+    external_group_id,
+    parent_id,
+    time_created,
+    time_deleted
+);
+
+-- Group membership listing and pagination
+-- Supports: SELECT ... WHERE external_group_id = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS multicast_member_by_external_group ON omicron.public.multicast_group_member (
+    external_group_id
+) WHERE time_deleted IS NULL;
+
+-- Instance membership queries (all groups for an instance)
+-- Supports: SELECT ... WHERE parent_id = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS multicast_member_by_parent ON omicron.public.multicast_group_member (
+    parent_id
+) WHERE time_deleted IS NULL;
+
+-- RPW reconciler sled-based switch port resolution
+-- Supports: SELECT ... WHERE sled_id = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS multicast_member_by_sled ON omicron.public.multicast_group_member (
+    sled_id
+) WHERE time_deleted IS NULL;
+
+-- Instance-focused composite queries with group filtering
+-- Supports: SELECT ... WHERE parent_id = ? AND external_group_id = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS multicast_member_by_parent_and_group ON omicron.public.multicast_group_member (
+    parent_id,
+    external_group_id
+) WHERE time_deleted IS NULL;
+
+-- Business logic constraint: one instance per group (also serves queries)
+-- Supports: SELECT ... WHERE external_group_id = ? AND parent_id = ? AND time_deleted IS NULL
+CREATE UNIQUE INDEX IF NOT EXISTS multicast_member_unique_parent_per_group ON omicron.public.multicast_group_member (
+    external_group_id,
+    parent_id
+) WHERE time_deleted IS NULL;
+
+-- RPW reconciler state processing by group
+-- Supports: SELECT ... WHERE external_group_id = ? AND state = ? AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS multicast_member_group_state ON omicron.public.multicast_group_member (
+    external_group_id,
+    state
+) WHERE time_deleted IS NULL;
+
+-- RPW cleanup of soft-deleted members
+-- Supports: DELETE FROM multicast_group_member WHERE state = 'Left' AND time_deleted IS NOT NULL
+CREATE INDEX IF NOT EXISTS multicast_member_cleanup ON omicron.public.multicast_group_member (
+    state
+) WHERE time_deleted IS NOT NULL;
+
+-- Saga unwinding hard deletion by group
+-- Supports: DELETE FROM multicast_group_member WHERE external_group_id = ?
+CREATE INDEX IF NOT EXISTS multicast_member_hard_delete_by_group ON omicron.public.multicast_group_member (
+    external_group_id
+);
+
+-- Pagination optimization for group member listing
+-- Supports: SELECT ... WHERE external_group_id = ? ORDER BY id LIMIT ? OFFSET ?
+CREATE INDEX IF NOT EXISTS multicast_member_group_id_order ON omicron.public.multicast_group_member (
+    external_group_id,
+    id
+) WHERE time_deleted IS NULL;
+
+-- Pagination optimization for instance member listing
+-- Supports: SELECT ... WHERE parent_id = ? ORDER BY id LIMIT ? OFFSET ?
+CREATE INDEX IF NOT EXISTS multicast_member_parent_id_order ON omicron.public.multicast_group_member (
+    parent_id,
+    id
+) WHERE time_deleted IS NULL;
+
+-- Instance lifecycle state transitions optimization
+-- Supports: UPDATE ... WHERE parent_id = ? AND state IN (?, ?) AND time_deleted IS NULL
+CREATE INDEX IF NOT EXISTS multicast_member_parent_state ON omicron.public.multicast_group_member (
+    parent_id,
+    state
+) WHERE time_deleted IS NULL;
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -7023,7 +7361,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '205.0.0', NULL)
+    (TRUE, NOW(), NOW(), '211.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

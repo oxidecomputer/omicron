@@ -3,8 +3,8 @@ baseboards:
     part "FAKE_SIM_SIDECAR" serial "SimSidecar1"
     part "i86pc" serial "SimGimlet00"
     part "i86pc" serial "SimGimlet01"
-    part "sim-gimlet" serial "sim-03265caf-da7d-46c7-b1c2-39fa90ce5c65"
-    part "sim-gimlet" serial "sim-9cb9b78f-5614-440c-b66d-e8e81fab69b0"
+    part "i86pc" serial "sim-03265caf-da7d-46c7-b1c2-39fa90ce5c65"
+    part "i86pc" serial "sim-9cb9b78f-5614-440c-b66d-e8e81fab69b0"
 
 cabooses:
     board "SimGimletSp" name "SimGimlet" version "0.0.1" git_commit "fefefefe" sign None
@@ -84,7 +84,7 @@ rot pages found:
 
 sled agents found:
   sled 03265caf-da7d-46c7-b1c2-39fa90ce5c65 (Scrimlet)
-    baseboard Some(BaseboardId { part_number: "sim-gimlet", serial_number: "sim-03265caf-da7d-46c7-b1c2-39fa90ce5c65" })
+    baseboard Some(BaseboardId { part_number: "i86pc", serial_number: "sim-03265caf-da7d-46c7-b1c2-39fa90ce5c65" })
     ledgered sled config:
         generation: 3
         remove_mupdate_override: None
@@ -100,7 +100,7 @@ sled agents found:
     result for zone 8b88a56f-3eb6-4d80-ba42-75d867bc427d: Ok
     reconciler task idle
   sled 9cb9b78f-5614-440c-b66d-e8e81fab69b0 (Scrimlet)
-    baseboard Some(BaseboardId { part_number: "sim-gimlet", serial_number: "sim-9cb9b78f-5614-440c-b66d-e8e81fab69b0" })
+    baseboard Some(BaseboardId { part_number: "i86pc", serial_number: "sim-9cb9b78f-5614-440c-b66d-e8e81fab69b0" })
     ledgered sled config:
         generation: 3
         remove_mupdate_override: None

@@ -7,7 +7,7 @@ use crate::app::sagas::declare_saga_actions;
 use crate::app::sagas::disk_create::{self, SagaDiskCreate};
 use crate::app::{
     MAX_DISKS_PER_INSTANCE, MAX_EXTERNAL_IPS_PER_INSTANCE,
-    MAX_NICS_PER_INSTANCE,
+    MAX_MULTICAST_GROUPS_PER_INSTANCE, MAX_NICS_PER_INSTANCE,
 };
 use crate::external_api::params;
 use nexus_db_lookup::LookupPath;
@@ -18,6 +18,7 @@ use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicEr
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
@@ -25,11 +26,12 @@ use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::{
     AffinityGroupUuid, AntiAffinityGroupUuid, GenericUuid, InstanceUuid,
+    MulticastGroupUuid,
 };
 use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
-use slog::warn;
+use slog::{info, warn};
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::fmt::Debug;
@@ -125,6 +127,10 @@ declare_saga_actions! {
     SET_BOOT_DISK -> "set_boot_disk" {
         + sic_set_boot_disk
         - sic_set_boot_disk_undo
+    }
+    JOIN_MULTICAST_GROUP -> "joining multicast group" {
+        + sic_join_instance_multicast_group
+        - sic_join_instance_multicast_group_undo
     }
     MOVE_TO_STOPPED -> "stopped_instance" {
         + sic_move_to_stopped
@@ -299,6 +305,32 @@ impl NexusSaga for SagaInstanceCreate {
             ));
             subsaga_append(
                 "external_ip".into(),
+                subsaga_builder.build()?,
+                &mut builder,
+                repeat_params,
+                i,
+            )?;
+        }
+
+        // Add the instance to multicast groups, following the same pattern as external IPs
+        for i in 0..MAX_MULTICAST_GROUPS_PER_INSTANCE {
+            let repeat_params = NetParams {
+                saga_params: params.clone(),
+                which: i,
+                instance_id,
+                new_id: Uuid::new_v4(),
+            };
+            let subsaga_name =
+                SagaName::new(&format!("instance-create-multicast-group{i}"));
+
+            let mut subsaga_builder = DagBuilder::new(subsaga_name);
+            subsaga_builder.append(Node::action(
+                format!("multicast-group-{i}").as_str(),
+                format!("JoinMulticastGroup{i}").as_str(),
+                JOIN_MULTICAST_GROUP.as_ref(),
+            ));
+            subsaga_append(
+                "multicast_group".into(),
                 subsaga_builder.build()?,
                 &mut builder,
                 repeat_params,
@@ -492,21 +524,21 @@ async fn sic_create_network_interface(
             )
             .await
         }
-        params::InstanceNetworkInterfaceAttachment::Create(
-            ref create_params,
-        ) => match create_params.get(nic_index) {
-            None => Ok(()),
-            Some(ref prs) => {
-                create_custom_network_interface(
-                    &sagactx,
-                    &saga_params,
-                    instance_id,
-                    interface_id,
-                    prs,
-                )
-                .await
+        params::InstanceNetworkInterfaceAttachment::Create(create_params) => {
+            match create_params.get(nic_index) {
+                None => Ok(()),
+                Some(ref prs) => {
+                    create_custom_network_interface(
+                        &sagactx,
+                        &saga_params,
+                        instance_id,
+                        interface_id,
+                        prs,
+                    )
+                    .await
+                }
             }
-        },
+        }
     }
 }
 
@@ -1011,6 +1043,136 @@ async fn sic_allocate_instance_external_ip_undo(
     Ok(())
 }
 
+/// Add the instance to a multicast group using the request parameters at
+/// index `group_index`, returning Some(()) if a group is joined (or None if
+/// no group is specified).
+async fn sic_join_instance_multicast_group(
+    sagactx: NexusActionContext,
+) -> Result<Option<()>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
+    let saga_params = repeat_saga_params.saga_params;
+    let group_index = repeat_saga_params.which;
+    let Some(group_name_or_id) =
+        saga_params.create_params.multicast_groups.get(group_index)
+    else {
+        return Ok(None);
+    };
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+    let instance_id = repeat_saga_params.instance_id;
+
+    // Check if multicast is enabled
+    if !osagactx.nexus().multicast_enabled() {
+        debug!(osagactx.log(),
+               "multicast not enabled, skipping multicast group member attachment";
+               "instance_id" => %instance_id,
+               "group_name_or_id" => ?group_name_or_id);
+        return Ok(Some(()));
+    }
+
+    // Look up the multicast group by name or ID using the existing nexus method
+    let multicast_group_selector = params::MulticastGroupSelector {
+        multicast_group: group_name_or_id.clone(),
+    };
+    let multicast_group_lookup = osagactx
+        .nexus()
+        .multicast_group_lookup(&opctx, &multicast_group_selector)
+        .map_err(ActionError::action_failed)?;
+
+    // Multicast groups are fleet-scoped - users only need Read permission on the group
+    // (and implicit permission on the instance being created)
+    let (.., db_group) = multicast_group_lookup
+        .fetch_for(authz::Action::Read)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    // Add the instance as a member of the multicast group in "Joining" state
+    if let Err(e) = datastore
+        .multicast_group_member_attach_to_instance(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(db_group.id()),
+            instance_id,
+        )
+        .await
+    {
+        match e {
+            Error::ObjectAlreadyExists { .. } => {
+                debug!(
+                    opctx.log,
+                    "multicast member alredy exists";
+                    "instance_id" => %instance_id,
+                );
+                return Ok(Some(()));
+            }
+            e => return Err(ActionError::action_failed(e)),
+        }
+    }
+
+    info!(
+        osagactx.log(),
+        "successfully joined instance to multicast group";
+        "external_group_id" => %db_group.id(),
+        "external_group_ip" => %db_group.multicast_ip,
+        "instance_id" => %instance_id
+    );
+
+    Ok(Some(()))
+}
+
+async fn sic_join_instance_multicast_group_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
+    let saga_params = repeat_saga_params.saga_params;
+    let group_index = repeat_saga_params.which;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+
+    // Check if we actually joined a group and get the group name/ID using chain
+    let Some(group_name_or_id) =
+        saga_params.create_params.multicast_groups.get(group_index)
+    else {
+        return Ok(());
+    };
+
+    // Check if multicast is enabled - if not, no cleanup needed since we didn't attach
+    if !osagactx.nexus().multicast_enabled() {
+        debug!(osagactx.log(),
+               "multicast not enabled, skipping multicast group member undo";
+               "group_name_or_id" => ?group_name_or_id);
+        return Ok(());
+    }
+
+    // Look up the multicast group by name or ID using the existing nexus method
+    let multicast_group_selector = params::MulticastGroupSelector {
+        multicast_group: group_name_or_id.clone(),
+    };
+    let multicast_group_lookup = osagactx
+        .nexus()
+        .multicast_group_lookup(&opctx, &multicast_group_selector)?;
+    // Undo uses same permission as forward action (Read on multicast group)
+    let (.., db_group) =
+        multicast_group_lookup.fetch_for(authz::Action::Read).await?;
+
+    // Delete the record outright.
+    datastore
+        .multicast_group_members_delete_by_group(
+            &opctx,
+            MulticastGroupUuid::from_untyped_uuid(db_group.id()),
+        )
+        .await?;
+
+    Ok(())
+}
+
 async fn sic_attach_disk_to_instance(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -1267,8 +1429,8 @@ async fn sic_move_to_stopped(
     // of date.
     let new_state = db::model::InstanceRuntimeState {
         nexus_state: db::model::InstanceState::NoVmm,
-        gen: db::model::Generation::from(
-            instance_record.runtime_state.gen.next(),
+        generation: db::model::Generation::from(
+            instance_record.runtime_state.generation.next(),
         ),
         ..instance_record.runtime_state
     };
@@ -1361,6 +1523,7 @@ pub mod test {
                 start: false,
                 auto_restart_policy: Default::default(),
                 anti_affinity_groups: Vec::new(),
+                multicast_groups: Vec::new(),
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }

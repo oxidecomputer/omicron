@@ -20,7 +20,7 @@ use nexus_test_utils::sql::ColumnValue;
 use nexus_test_utils::sql::Row;
 use nexus_test_utils::sql::SqlEnum;
 use nexus_test_utils::sql::process_rows;
-use nexus_test_utils::{ControlPlaneTestContextBuilder, load_test_config};
+use nexus_test_utils::{ControlPlaneStarter, load_test_config};
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
@@ -45,26 +45,24 @@ const SCHEMA_DIR: &'static str =
 async fn test_setup<'a>(
     config: &'a mut NexusConfig,
     name: &'static str,
-) -> ControlPlaneTestContextBuilder<'a, omicron_nexus::Server> {
-    let mut builder =
-        ControlPlaneTestContextBuilder::<omicron_nexus::Server>::new(
-            name, config,
-        );
+) -> ControlPlaneStarter<'a, omicron_nexus::Server> {
+    let mut starter =
+        ControlPlaneStarter::<omicron_nexus::Server>::new(name, config);
     let populate = false;
-    builder.start_crdb(populate).await;
+    starter.start_crdb(populate).await;
     let schema_dir = Utf8PathBuf::from(SCHEMA_DIR);
-    builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
-    builder.start_internal_dns().await;
-    builder.start_external_dns().await;
+    starter.config.pkg.schema = Some(SchemaConfig { schema_dir });
+    starter.start_internal_dns().await;
+    starter.start_external_dns().await;
     let sp_conf: Utf8PathBuf = DEFAULT_SP_SIM_CONFIG.into();
-    builder.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
-    builder.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
-    builder.start_dendrite(SwitchLocation::Switch0).await;
-    builder.start_dendrite(SwitchLocation::Switch1).await;
-    builder.start_mgd(SwitchLocation::Switch0).await;
-    builder.start_mgd(SwitchLocation::Switch1).await;
-    builder.populate_internal_dns().await;
-    builder
+    starter.start_gateway(SwitchLocation::Switch0, None, sp_conf.clone()).await;
+    starter.start_gateway(SwitchLocation::Switch1, None, sp_conf).await;
+    starter.start_dendrite(SwitchLocation::Switch0).await;
+    starter.start_dendrite(SwitchLocation::Switch1).await;
+    starter.start_mgd(SwitchLocation::Switch0).await;
+    starter.start_mgd(SwitchLocation::Switch1).await;
+    starter.populate_internal_dns().await;
+    starter
 }
 
 // Attempts to apply an update as a transaction.
@@ -1400,6 +1398,7 @@ fn at_current_101_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ))
                 .execute_async(&*pool_and_conn.conn)
@@ -3127,6 +3126,661 @@ fn after_188_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
     })
 }
 
+fn before_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .execute(
+                "INSERT INTO omicron.public.disk (
+                    id,
+                    name,
+                    description,
+                    time_created,
+                    time_modified,
+                    time_deleted,
+
+                    rcgen,
+                    project_id,
+
+                    volume_id,
+
+                    disk_state,
+                    attach_instance_id,
+                    state_generation,
+                    slot,
+                    time_state_updated,
+
+                    size_bytes,
+                    block_size,
+                    origin_snapshot,
+                    origin_image,
+
+                    pantry_address
+                  )
+                  VALUES
+                  (
+                    'd8b7ba02-4bd5-417d-84d3-67b4e65bec70',
+                    'regular',
+                    'just a disk',
+                    '2025-10-21T20:26:25+0000',
+                    '2025-10-21T20:26:25+0000',
+                    NULL,
+
+                    0,
+                    'd904d22e-cc45-4b2e-b37f-5864d8eba323',
+
+                    '1e17286f-107d-494c-8b2d-904b70d5b706',
+
+                    'attached',
+                    '9c1f6ee5-478f-4e6a-b481-be8b69f1daab',
+                    75,
+                    0,
+                    '2025-10-21T20:27:11+0000',
+
+                    1073741824,
+                    '512',
+                    'b017fe60-9a4a-4fe6-a7d3-4a7c3ab23a98',
+                    NULL,
+
+                    '[fd00:1122:3344:101::7]:4567'
+                  ),
+                  (
+                    '336ed8ca-9bbf-4db9-9f2d-627f8d156f91',
+                    'deleted',
+                    'should migrate deleted disks too, even if they are old',
+                    '2024-10-21T20:26:25+0000',
+                    '2024-10-21T20:26:25+0000',
+                    '2025-10-15T21:38:05+0000',
+
+                    2,
+                    'c9cfb288-a39e-4ebb-ac27-b26c9248a46a',
+
+                    '0a1d0a38-f927-4260-ad23-7f9c04277a23',
+
+                    'detached',
+                    NULL,
+                    75786,
+                    1,
+                    '2025-10-14T20:27:11+0000',
+
+                    1073741824,
+                    '4096',
+                    NULL,
+                    '971395a7-4206-4dc4-ba58-e2402724270a',
+
+                    NULL
+                  );",
+                &[],
+            )
+            .await
+            .expect("inserted disks");
+    })
+}
+
+fn after_207_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        // first disk
+
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   id,
+                   name,
+                   description,
+                   time_created,
+                   time_modified,
+                   time_deleted,
+
+                   rcgen,
+                   project_id,
+
+                   disk_state,
+                   attach_instance_id,
+                   state_generation,
+                   slot,
+                   time_state_updated,
+
+                   size_bytes,
+                   block_size
+                 FROM
+                   omicron.public.disk
+                 WHERE
+                   id = 'd8b7ba02-4bd5-417d-84d3-67b4e65bec70'
+                 ;",
+                &[],
+            )
+            .await
+            .expect("queried disk");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        assert!(row.values[5].expect("time_deleted").is_none());
+
+        assert_eq!(
+            vec![
+                row.values[0].expect("id").unwrap(),
+                row.values[1].expect("name").unwrap(),
+                row.values[2].expect("description").unwrap(),
+                row.values[3].expect("time_created").unwrap(),
+                row.values[4].expect("time_modified").unwrap(),
+                row.values[6].expect("rcgen").unwrap(),
+                row.values[7].expect("project_id").unwrap(),
+                row.values[8].expect("disk_state").unwrap(),
+                row.values[9].expect("attach_instance_id").unwrap(),
+                row.values[10].expect("state_generation").unwrap(),
+                row.values[11].expect("slot").unwrap(),
+                row.values[12].expect("time_state_updated").unwrap(),
+                row.values[13].expect("size_bytes").unwrap(),
+                row.values[14].expect("block_size").unwrap(),
+            ],
+            vec![
+                &AnySqlType::Uuid(
+                    "d8b7ba02-4bd5-417d-84d3-67b4e65bec70".parse().unwrap()
+                ),
+                &AnySqlType::String("regular".to_string()),
+                &AnySqlType::String("just a disk".to_string()),
+                &AnySqlType::DateTime,
+                &AnySqlType::DateTime,
+                &AnySqlType::Int8(0),
+                &AnySqlType::Uuid(
+                    "d904d22e-cc45-4b2e-b37f-5864d8eba323".parse().unwrap()
+                ),
+                &AnySqlType::String("attached".to_string()),
+                &AnySqlType::Uuid(
+                    "9c1f6ee5-478f-4e6a-b481-be8b69f1daab".parse().unwrap()
+                ),
+                &AnySqlType::Int8(75),
+                &AnySqlType::Int2(0),
+                &AnySqlType::DateTime,
+                &AnySqlType::Int8(1073741824),
+                &AnySqlType::Enum(SqlEnum::from(("block_size", "512"))),
+            ],
+        );
+
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   disk_id,
+                   volume_id,
+                   origin_snapshot,
+                   origin_image,
+                   pantry_address
+                 FROM
+                   omicron.public.disk_type_crucible
+                 WHERE
+                   disk_id = 'd8b7ba02-4bd5-417d-84d3-67b4e65bec70'
+                 ;",
+                &[],
+            )
+            .await
+            .expect("queried disk_type_crucible");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        assert!(row.values[3].expect("origin_image").is_none());
+
+        assert_eq!(
+            vec![
+                row.values[0].expect("disk_id").unwrap(),
+                row.values[1].expect("volume_id").unwrap(),
+                row.values[2].expect("origin_snapshot").unwrap(),
+                row.values[4].expect("pantry_address").unwrap(),
+            ],
+            vec![
+                &AnySqlType::Uuid(
+                    "d8b7ba02-4bd5-417d-84d3-67b4e65bec70".parse().unwrap()
+                ),
+                &AnySqlType::Uuid(
+                    "1e17286f-107d-494c-8b2d-904b70d5b706".parse().unwrap()
+                ),
+                &AnySqlType::Uuid(
+                    "b017fe60-9a4a-4fe6-a7d3-4a7c3ab23a98".parse().unwrap()
+                ),
+                &AnySqlType::String("[fd00:1122:3344:101::7]:4567".to_string()),
+            ]
+        );
+
+        // second disk
+
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   id,
+                   name,
+                   description,
+                   time_created,
+                   time_modified,
+                   time_deleted,
+
+                   rcgen,
+                   project_id,
+
+                   disk_state,
+                   attach_instance_id,
+                   state_generation,
+                   slot,
+                   time_state_updated,
+
+                   size_bytes,
+                   block_size
+                 FROM
+                   omicron.public.disk
+                 WHERE
+                   id = '336ed8ca-9bbf-4db9-9f2d-627f8d156f91'
+                 ;",
+                &[],
+            )
+            .await
+            .expect("queried disk");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        assert!(row.values[9].expect("attach_instance_id").is_none());
+
+        assert_eq!(
+            vec![
+                row.values[0].expect("id").unwrap(),
+                row.values[1].expect("name").unwrap(),
+                row.values[2].expect("description").unwrap(),
+                row.values[3].expect("time_created").unwrap(),
+                row.values[4].expect("time_modified").unwrap(),
+                row.values[5].expect("time_deleted").unwrap(),
+                row.values[6].expect("rcgen").unwrap(),
+                row.values[7].expect("project_id").unwrap(),
+                row.values[8].expect("disk_state").unwrap(),
+                row.values[10].expect("state_generation").unwrap(),
+                row.values[11].expect("slot").unwrap(),
+                row.values[12].expect("time_state_updated").unwrap(),
+                row.values[13].expect("size_bytes").unwrap(),
+                row.values[14].expect("block_size").unwrap(),
+            ],
+            vec![
+                &AnySqlType::Uuid(
+                    "336ed8ca-9bbf-4db9-9f2d-627f8d156f91".parse().unwrap()
+                ),
+                &AnySqlType::String("deleted".to_string()),
+                &AnySqlType::String(
+                    "should migrate deleted disks too, even if they are old"
+                        .to_string()
+                ),
+                &AnySqlType::DateTime,
+                &AnySqlType::DateTime,
+                &AnySqlType::DateTime,
+                &AnySqlType::Int8(2),
+                &AnySqlType::Uuid(
+                    "c9cfb288-a39e-4ebb-ac27-b26c9248a46a".parse().unwrap()
+                ),
+                &AnySqlType::String("detached".to_string()),
+                &AnySqlType::Int8(75786),
+                &AnySqlType::Int2(1),
+                &AnySqlType::DateTime,
+                &AnySqlType::Int8(1073741824),
+                &AnySqlType::Enum(SqlEnum::from(("block_size", "4096"))),
+            ],
+        );
+
+        let rows = ctx
+            .client
+            .query(
+                "SELECT
+                   disk_id,
+                   volume_id,
+                   origin_snapshot,
+                   origin_image,
+                   pantry_address
+                 FROM
+                   omicron.public.disk_type_crucible
+                 WHERE
+                   disk_id = '336ed8ca-9bbf-4db9-9f2d-627f8d156f91'
+                 ;",
+                &[],
+            )
+            .await
+            .expect("queried disk_type_crucible");
+
+        let rows = process_rows(&rows);
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+
+        assert!(row.values[2].expect("origin_snapshot").is_none());
+        assert!(row.values[4].expect("pantry_address").is_none());
+
+        assert_eq!(
+            vec![
+                row.values[0].expect("disk_id").unwrap(),
+                row.values[1].expect("volume_id").unwrap(),
+                row.values[3].expect("origin_image").unwrap(),
+            ],
+            vec![
+                &AnySqlType::Uuid(
+                    "336ed8ca-9bbf-4db9-9f2d-627f8d156f91".parse().unwrap()
+                ),
+                &AnySqlType::Uuid(
+                    "0a1d0a38-f927-4260-ad23-7f9c04277a23".parse().unwrap()
+                ),
+                &AnySqlType::Uuid(
+                    "971395a7-4206-4dc4-ba58-e2402724270a".parse().unwrap()
+                ),
+            ]
+        );
+    })
+}
+
+const SP_RESTART_ID: Uuid =
+    Uuid::from_u128(0x0358a488_3dd1_4da2_a783_570f3a149058);
+const HOST_RESTART_ID: Uuid =
+    Uuid::from_u128(0x786d5a82_da41_4d28_9901_650bf168e0f3);
+const HOST_EREPORT_SLED_ID: Uuid =
+    Uuid::from_u128(0xdf221406_85db_414b_bb3f_5b1323592bbe);
+const EREPORT_SLED_SERIAL: &str = "BRM6900420";
+const GIMLET_PART_NUMBER: &str = "913-0000019";
+
+fn before_210_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.sp_ereport (
+                        restart_id,
+                        ena,
+                        time_deleted,
+                        time_collected,
+                        collector_id,
+                        sp_type,
+                        sp_slot,
+                        serial_number,
+                        part_number,
+                        class,
+                        report
+                    )
+                     VALUES (
+                         '{SP_RESTART_ID}',
+                         1,
+                         NULL,
+                         now(),
+                         gen_random_uuid(),
+                         'sled',
+                         19,
+                         '{EREPORT_SLED_SERIAL}',
+                         '{GIMLET_PART_NUMBER}',
+                         'my.cool.sp.ereport',
+                         '{{}}'
+                     );"
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted sp_ereport");
+        ctx.client
+            .execute(
+                &format!(
+                    "INSERT INTO omicron.public.host_ereport (
+                        restart_id,
+                        ena,
+                        time_deleted,
+                        time_collected,
+                        collector_id,
+                        sled_id,
+                        sled_serial,
+                        class,
+                        report,
+                        part_number
+                    )
+                     VALUES (
+                         '{HOST_RESTART_ID}',
+                         1,
+                         NULL,
+                         now(),
+                         gen_random_uuid(),
+                         '{HOST_EREPORT_SLED_ID}',
+                         '{EREPORT_SLED_SERIAL}',
+                         'my.cool.host.ereport',
+                         '{{}}',
+                         '{GIMLET_PART_NUMBER}'
+                     );"
+                ),
+                &[],
+            )
+            .await
+            .expect("inserted host_ereport");
+    })
+}
+
+fn after_210_0_0<'a>(ctx: &'a MigrationContext<'a>) -> BoxFuture<'a, ()> {
+    Box::pin(async move {
+        let host_rows = ctx
+            .client
+            .query(
+                "SELECT
+                   restart_id,
+                   ena,
+                   reporter,
+                   sled_id,
+                   sp_type,
+                   sp_slot,
+                   serial_number,
+                   part_number
+                 FROM omicron.public.ereport
+                 WHERE
+                    reporter = 'host';",
+                &[],
+            )
+            .await
+            .expect("queried post-migration host ereports");
+        let rows = process_rows(&host_rows);
+        assert_eq!(rows.len(), 1);
+        check_row(
+            &rows[0],
+            HOST_RESTART_ID,
+            1,
+            "host",
+            Some(HOST_EREPORT_SLED_ID),
+            None,
+            None,
+        );
+
+        let sp_rows = ctx
+            .client
+            .query(
+                "SELECT
+                   restart_id,
+                   ena,
+                   reporter,
+                   sled_id,
+                   sp_type,
+                   sp_slot,
+                   serial_number,
+                   part_number
+                 FROM omicron.public.ereport
+                 WHERE
+                    reporter = 'sp';",
+                &[],
+            )
+            .await
+            .expect("queried post-migration sp ereports");
+        let rows = process_rows(&sp_rows);
+        assert_eq!(rows.len(), 1);
+        check_row(
+            &rows[0],
+            SP_RESTART_ID,
+            1,
+            "sp",
+            None,
+            Some("sled"),
+            Some(19),
+        );
+
+        fn check_row(
+            row: &Row,
+            restart_id: Uuid,
+            ena: i64,
+            reporter: &str,
+            sled_id: Option<Uuid>,
+            sp_type: Option<&str>,
+            sp_slot: Option<i32>,
+        ) {
+            assert_eq!(
+                row.values[0].expect("restart_id").unwrap(),
+                &AnySqlType::Uuid(restart_id)
+            );
+            assert_eq!(
+                row.values[1].expect("ena").unwrap(),
+                &AnySqlType::Int8(ena)
+            );
+            assert_eq!(
+                row.values[2].expect("reporter").unwrap(),
+                &AnySqlType::Enum(SqlEnum::from(("ereporter_type", reporter))),
+            );
+            assert_eq!(
+                row.values[3].expect("sled_id"),
+                sled_id.map(AnySqlType::Uuid).as_ref(),
+            );
+            assert_eq!(
+                row.values[4].expect("sp_type"),
+                sp_type
+                    .map(|t| AnySqlType::Enum(SqlEnum::from(("sp_type", t))))
+                    .as_ref(),
+            );
+            assert_eq!(
+                row.values[5].expect("sp_slot"),
+                sp_slot.map(AnySqlType::Int4).as_ref(),
+            );
+            assert_eq!(
+                row.values[6].expect("serial_number").unwrap(),
+                &AnySqlType::String(EREPORT_SLED_SERIAL.to_string()),
+            );
+            assert_eq!(
+                row.values[7].expect("part_number").unwrap(),
+                &AnySqlType::String(GIMLET_PART_NUMBER.to_string()),
+            );
+        }
+    })
+}
+
+mod migration_211 {
+    use super::*;
+    use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::SLED_PREFIX;
+    use pretty_assertions::assert_eq;
+    use std::collections::BTreeSet;
+
+    // randomly-generated IDs
+    const SLED_ID_1: &str = "48e1d10b-3ec8-4abd-95e2-5f37f79da546";
+    const SLED_ID_2: &str = "2144219e-d989-4929-b0b3-db895f51b7b5";
+    const SLED_ID_3: &str = "d2de378b-c788-4940-9a11-60ac4e633f0c";
+
+    // randomly-generated IPs
+    const SLED_IP_1: &str = "445c:212f:f2bc:f202:2b90:5b0e:2d6c:585e";
+    const SLED_IP_2: &str = "05fb:7e45:22b1:8dfb:9a06:0dbf:22ab:3eb4";
+    const SLED_IP_3: &str = "92a6:42c8:0cf2:7556:5ace:5bab:26e4:4dd1";
+
+    async fn before_impl(ctx: &MigrationContext<'_>) {
+        ctx.client
+            .batch_execute(&format!(
+                "
+        INSERT INTO omicron.public.sled (
+            id, time_created, time_modified, rcgen, rack_id, is_scrimlet,
+            serial_number, part_number, revision, usable_hardware_threads,
+            usable_physical_ram, reservoir_size, ip, port, last_used_address,
+            sled_policy, sled_state, repo_depot_port, cpu_family
+        )
+        VALUES
+        ('{SLED_ID_1}', now(), now(), 1, gen_random_uuid(), false,
+         'migration-210-serial1', 'part1', 1, 64, 12345678, 123456,
+         '{SLED_IP_1}', 12345, '{SLED_IP_1}', 'in_service', 'active',
+         12346, 'unknown'),
+        ('{SLED_ID_2}', now(), now(), 1, gen_random_uuid(), false,
+         'migration-210-serial2', 'part1', 1, 64, 12345678, 123456,
+         '{SLED_IP_2}', 12345, '{SLED_IP_2}', 'no_provision', 'active',
+         12346, 'unknown'),
+        ('{SLED_ID_3}', now(), now(), 1, gen_random_uuid(), false,
+         'migration-210-serial3', 'part1', 1, 64, 12345678, 123456,
+         '{SLED_IP_3}', 12345, '{SLED_IP_3}', 'expunged', 'decommissioned',
+         12346, 'unknown');
+
+        INSERT INTO omicron.public.bp_sled_metadata (
+            blueprint_id, sled_id, sled_state, sled_agent_generation,
+            remove_mupdate_override, host_phase_2_desired_slot_a,
+            host_phase_2_desired_slot_b
+        )
+        VALUES
+        (gen_random_uuid(), '{SLED_ID_1}', 'active', 1, NULL, NULL, NULL),
+        (gen_random_uuid(), '{SLED_ID_2}', 'active', 1, NULL, NULL, NULL),
+        (gen_random_uuid(), '{SLED_ID_3}', 'decommissioned', 1,
+         NULL, NULL, NULL);
+                "
+            ))
+            .await
+            .expect("inserted pre-migration data");
+    }
+
+    async fn after_impl(ctx: &MigrationContext<'_>) {
+        let sled_id_1: Uuid = SLED_ID_1.parse().unwrap();
+        let sled_id_2: Uuid = SLED_ID_2.parse().unwrap();
+        let sled_id_3: Uuid = SLED_ID_3.parse().unwrap();
+
+        let expected = [
+            (
+                sled_id_1,
+                Ipv6Subnet::<SLED_PREFIX>::new(SLED_IP_1.parse().unwrap())
+                    .to_string(),
+            ),
+            (
+                sled_id_2,
+                Ipv6Subnet::<SLED_PREFIX>::new(SLED_IP_2.parse().unwrap())
+                    .to_string(),
+            ),
+            (
+                sled_id_3,
+                Ipv6Subnet::<SLED_PREFIX>::new(SLED_IP_3.parse().unwrap())
+                    .to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+
+        let rows = ctx
+            .client
+            .query(
+                "
+                SELECT sled_id, subnet::text
+                FROM omicron.public.bp_sled_metadata
+                WHERE sled_id IN ($1, $2, $3)
+                ",
+                &[&sled_id_1, &sled_id_2, &sled_id_3],
+            )
+            .await
+            .expect("queried post-migration data");
+        let got = rows
+            .into_iter()
+            .map(|row| {
+                (row.get::<_, Uuid>("sled_id"), row.get::<_, String>("subnet"))
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(expected, got);
+    }
+
+    pub(super) fn before<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(before_impl(ctx))
+    }
+
+    pub(super) fn after<'a>(
+        ctx: &'a MigrationContext<'a>,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(after_impl(ctx))
+    }
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -3232,6 +3886,20 @@ fn get_migration_checks() -> BTreeMap<Version, DataMigrationFns> {
     map.insert(
         Version::new(188, 0, 0),
         DataMigrationFns::new().before(before_188_0_0).after(after_188_0_0),
+    );
+    map.insert(
+        Version::new(207, 0, 0),
+        DataMigrationFns::new().before(before_207_0_0).after(after_207_0_0),
+    );
+    map.insert(
+        Version::new(210, 0, 0),
+        DataMigrationFns::new().before(before_210_0_0).after(after_210_0_0),
+    );
+    map.insert(
+        Version::new(211, 0, 0),
+        DataMigrationFns::new()
+            .before(migration_211::before)
+            .after(migration_211::after),
     );
     map
 }

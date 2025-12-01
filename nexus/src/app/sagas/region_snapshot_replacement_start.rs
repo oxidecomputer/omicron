@@ -876,7 +876,7 @@ async fn rsrss_new_region_volume_create(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            generation: 0,
             opts: CrucibleOpts {
                 id: new_region_volume_id.into_untyped_uuid(),
                 target: vec![new_region_address],
@@ -967,7 +967,7 @@ async fn rsrss_create_fake_volume(
             block_size: 0,
             blocks_per_extent: 0,
             extent_count: 0,
-            gen: 0,
+            generation: 0,
             opts: CrucibleOpts {
                 id: *new_volume_id.as_untyped_uuid(),
                 // Do not put the new region ID here: it will be deleted during
@@ -1219,7 +1219,7 @@ async fn rsrss_update_request_record(
 pub(crate) mod test {
     use crate::{
         app::RegionAllocationStrategy, app::db::DataStore,
-        app::saga::create_saga_dag,
+        app::db::datastore::Disk, app::saga::create_saga_dag,
         app::sagas::region_snapshot_replacement_start::*,
         app::sagas::test_helpers::test_opctx,
     };
@@ -1275,11 +1275,9 @@ pub(crate) mod test {
         assert_eq!(region_allocations(&datastore).await, 3);
 
         let disk_id = disk.identity.id;
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk_id)
-            .fetch()
-            .await
-            .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+        let Disk::Crucible(db_disk) =
+            datastore.disk_get(&opctx, disk_id).await.unwrap();
 
         // Create a snapshot
         let snapshot =
@@ -1301,7 +1299,7 @@ pub(crate) mod test {
     }
 
     struct PrepareResult<'a> {
-        db_disk: nexus_db_model::Disk,
+        db_disk: db::datastore::CrucibleDisk,
         snapshot: views::Snapshot,
         db_snapshot: nexus_db_model::Snapshot,
         disk_test: DiskTest<'a, crate::Server>,
@@ -1859,11 +1857,8 @@ pub(crate) mod test {
             create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk.identity.id)
-            .fetch()
-            .await
-            .unwrap();
+        let Disk::Crucible(db_disk) =
+            datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
         let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)
@@ -2017,11 +2012,8 @@ pub(crate) mod test {
             create_snapshot(&client, PROJECT_NAME, "disk", "snap").await;
 
         // Before expunging any physical disk, save some DB models
-        let (.., db_disk) = LookupPath::new(&opctx, datastore)
-            .disk_id(disk.identity.id)
-            .fetch()
-            .await
-            .unwrap();
+        let Disk::Crucible(db_disk) =
+            datastore.disk_get(&opctx, disk.identity.id).await.unwrap();
 
         let (.., db_snapshot) = LookupPath::new(&opctx, datastore)
             .snapshot_id(snapshot.identity.id)

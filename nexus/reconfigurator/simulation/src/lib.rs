@@ -49,6 +49,7 @@
 
 mod config;
 pub mod errors;
+mod render_graph;
 mod rng;
 mod sim;
 mod state;
@@ -57,6 +58,7 @@ mod utils;
 mod zone_images;
 
 pub use config::*;
+pub use render_graph::*;
 pub use rng::*;
 pub use sim::*;
 pub use state::*;

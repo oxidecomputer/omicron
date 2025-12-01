@@ -2,24 +2,33 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{BlockSize, ByteCount, DiskState, Generation};
-use crate::typed_uuid::DbTypedUuid;
+use super::BlockSize;
+use super::ByteCount;
+use super::DiskState;
+use super::Generation;
+use super::impl_enum_type;
 use crate::unsigned::SqlU8;
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_db_schema::schema::disk;
 use nexus_types::external_api::params;
-use nexus_types::identity::Resource;
 use omicron_common::api::external;
 use omicron_common::api::internal;
-use omicron_uuid_kinds::VolumeKind;
-use omicron_uuid_kinds::VolumeUuid;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
-use std::net::SocketAddrV6;
 use uuid::Uuid;
 
-/// A Disk (network block device).
+impl_enum_type!(
+    DiskTypeEnum:
+
+    #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    pub enum DiskType;
+
+    // Enum values
+    Crucible => b"crucible"
+);
+
+/// A Disk, where how the blocks are stored depend on the disk_type.
 #[derive(
     Queryable,
     Insertable,
@@ -40,9 +49,6 @@ pub struct Disk {
 
     /// id for the project containing this Disk
     pub project_id: Uuid,
-
-    /// Root volume of the disk
-    volume_id: DbTypedUuid<VolumeKind>,
 
     /// runtime state of the Disk
     #[diesel(embed)]
@@ -65,57 +71,35 @@ pub struct Disk {
     /// size of blocks (512, 2048, or 4096)
     pub block_size: BlockSize,
 
-    /// id for the snapshot from which this Disk was created (None means a blank
-    /// disk)
-    #[diesel(column_name = origin_snapshot)]
-    pub create_snapshot_id: Option<Uuid>,
-
-    /// id for the image from which this Disk was created (None means a blank
-    /// disk)
-    #[diesel(column_name = origin_image)]
-    pub create_image_id: Option<Uuid>,
-
-    /// If this disk is attached to a Pantry for longer than the lifetime of a
-    /// saga, then this field will contain the serialized SocketAddrV6 of that
-    /// Pantry.
-    pub pantry_address: Option<String>,
+    /// Information unique to each type of disk is stored in a separate table
+    /// (where rows are matched based on the disk_id field in that table) and
+    /// combined into a higher level `datastore::Disk` enum.
+    ///
+    /// For `Crucible` disks, see the DiskTypeCrucible model.
+    pub disk_type: DiskType,
 }
 
 impl Disk {
     pub fn new(
         disk_id: Uuid,
         project_id: Uuid,
-        volume_id: VolumeUuid,
-        params: params::DiskCreate,
+        params: &params::DiskCreate,
         block_size: BlockSize,
         runtime_initial: DiskRuntimeState,
-    ) -> Result<Self, anyhow::Error> {
-        let identity = DiskIdentity::new(disk_id, params.identity);
+        disk_type: DiskType,
+    ) -> Self {
+        let identity = DiskIdentity::new(disk_id, params.identity.clone());
 
-        let create_snapshot_id = match params.disk_source {
-            params::DiskSource::Snapshot { snapshot_id } => Some(snapshot_id),
-            _ => None,
-        };
-
-        // XXX further enum here for different image types?
-        let create_image_id = match params.disk_source {
-            params::DiskSource::Image { image_id } => Some(image_id),
-            _ => None,
-        };
-
-        Ok(Self {
+        Self {
             identity,
             rcgen: external::Generation::new().into(),
             project_id,
-            volume_id: volume_id.into(),
             runtime_state: runtime_initial,
             slot: None,
             size: params.size.into(),
             block_size,
-            create_snapshot_id,
-            create_image_id,
-            pantry_address: None,
-        })
+            disk_type,
+        }
     }
 
     pub fn state(&self) -> DiskState {
@@ -130,29 +114,8 @@ impl Disk {
         self.identity.id
     }
 
-    pub fn pantry_address(&self) -> Option<SocketAddrV6> {
-        self.pantry_address.as_ref().map(|x| x.parse().unwrap())
-    }
-
-    pub fn volume_id(&self) -> VolumeUuid {
-        self.volume_id.into()
-    }
-}
-
-/// Conversion to the external API type.
-impl Into<external::Disk> for Disk {
-    fn into(self) -> external::Disk {
-        let device_path = format!("/mnt/{}", self.name().as_str());
-        external::Disk {
-            identity: self.identity(),
-            project_id: self.project_id,
-            snapshot_id: self.create_snapshot_id,
-            image_id: self.create_image_id,
-            size: self.size.into(),
-            block_size: self.block_size.into(),
-            state: self.state().into(),
-            device_path,
-        }
+    pub fn slot(&self) -> Option<u8> {
+        self.slot.map(Into::into)
     }
 }
 
@@ -176,7 +139,8 @@ pub struct DiskRuntimeState {
     pub attach_instance_id: Option<Uuid>,
     /// generation number for this state
     #[diesel(column_name = state_generation)]
-    pub gen: Generation,
+    #[serde(rename = "gen")]
+    pub generation: Generation,
     /// timestamp for this information
     #[diesel(column_name = time_state_updated)]
     pub time_updated: DateTime<Utc>,
@@ -187,7 +151,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Creating.label().to_string(),
             attach_instance_id: None,
-            gen: external::Generation::new().into(),
+            generation: external::Generation::new().into(),
             time_updated: Utc::now(),
         }
     }
@@ -198,7 +162,7 @@ impl DiskRuntimeState {
                 .label()
                 .to_string(),
             attach_instance_id: Some(instance_id),
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -207,7 +171,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Detached.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -216,7 +180,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Maintenance.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -225,7 +189,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::ImportReady.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -236,7 +200,7 @@ impl DiskRuntimeState {
                 .label()
                 .to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -247,7 +211,7 @@ impl DiskRuntimeState {
                 .label()
                 .to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -256,7 +220,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Finalizing.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -277,7 +241,7 @@ impl DiskRuntimeState {
         Self {
             disk_state: external::DiskState::Faulted.label().to_string(),
             attach_instance_id: None,
-            gen: self.gen.next().into(),
+            generation: self.generation.next().into(),
             time_updated: Utc::now(),
         }
     }
@@ -292,7 +256,7 @@ impl From<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
                 .disk_state
                 .attached_instance_id()
                 .map(|id| *id),
-            gen: runtime.gen.into(),
+            generation: runtime.generation.into(),
             time_updated: runtime.time_updated,
         }
     }
@@ -303,15 +267,8 @@ impl Into<internal::nexus::DiskRuntimeState> for DiskRuntimeState {
     fn into(self) -> internal::nexus::DiskRuntimeState {
         internal::nexus::DiskRuntimeState {
             disk_state: self.state().into(),
-            gen: self.gen.into(),
+            generation: self.generation.into(),
             time_updated: self.time_updated,
         }
     }
-}
-
-#[derive(AsChangeset)]
-#[diesel(table_name = disk)]
-#[diesel(treat_none_as_null = true)]
-pub struct DiskUpdate {
-    pub pantry_address: Option<String>,
 }

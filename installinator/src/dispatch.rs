@@ -25,7 +25,7 @@ use update_engine::StepResult;
 
 use crate::{
     ArtifactWriter, WriteDestination,
-    artifact::{ArtifactIdOpts, ArtifactsToDownload, LookupIdKind},
+    artifact::{ArtifactIdOpts, ArtifactsToDownload},
     fetch::{FetchArtifactBackend, FetchedArtifact, HttpFetchBackend},
     peers::DiscoveryMechanism,
     reporter::{HttpProgressBackend, ProgressReporter, ReportProgressBackend},
@@ -209,121 +209,102 @@ impl InstallOpts {
 
         let engine = UpdateEngine::new(log, event_sender);
 
-        let to_download = match lookup_id.kind {
-            LookupIdKind::Document(hash) => {
-                engine
-                    .new_step(
-                        InstallinatorComponent::InstallinatorDocument,
-                        InstallinatorStepId::Download,
-                        "Downloading installinator document",
-                        async move |cx| {
-                            let installinator_doc_id = ArtifactHashId {
-                                kind: KnownArtifactKind::InstallinatorDocument
-                                    .into(),
-                                hash,
-                            };
-                            let installinator_doc = fetch_artifact(
-                                &cx,
-                                &installinator_doc_id,
-                                discovery,
-                                log,
-                            )
-                            .await?;
-
-                            // Check that the sha256 of the data we got from
-                            // wicket matches the data we asked for.
-                            //
-                            // If this fails, we fail the entire installation
-                            // rather than trying to fetch the artifact again,
-                            // because we're fetching data from wicketd (cached
-                            // in a temp dir) over TCP to ourselves (in memory),
-                            // so the only cases where this could fail are
-                            // disturbing enough (memory corruption, corruption
-                            // under TCP, or wicketd gave us something other
-                            // than what we requested) we want to know
-                            // immediately and not retry: it's likely an
-                            // operator could miss any warnings we emit if a
-                            // retry succeeds.
-                            check_downloaded_artifact_hash(
-                                "installinator document",
-                                installinator_doc.artifact.clone(),
-                                installinator_doc_id.hash,
-                            )
-                            .await?;
-
-                            // Read the document as JSON.
-                            //
-                            // Going via the reader is slightly less efficient
-                            // than operating purely in-memory, but serde_json
-                            // doesn't have a good way to pass in a BufList
-                            // directly.
-                            let json: InstallinatorDocument =
-                                serde_json::from_reader(buf_list::Cursor::new(
-                                    &installinator_doc.artifact,
-                                ))
-                                .context(
-                                    "error deserializing \
-                                     installinator document",
-                                )?;
-
-                            // Every valid installinator document must have the
-                            // host phase 2 and control plane hashes.
-                            let mut host_phase_2_hash = None;
-                            let mut control_plane_hash = None;
-                            for artifact in &json.artifacts {
-                                match artifact.kind {
-                                    InstallinatorArtifactKind::HostPhase2 => {
-                                        host_phase_2_hash = Some(artifact.hash);
-                                    }
-                                    InstallinatorArtifactKind::ControlPlane => {
-                                        control_plane_hash =
-                                            Some(artifact.hash);
-                                    }
-                                }
-                            }
-
-                            // Return an error if either the host phase 2 or the
-                            // control plane artifacts are missing.
-                            let mut missing = Vec::new();
-                            if host_phase_2_hash.is_none() {
-                                missing.push(
-                                    InstallinatorArtifactKind::HostPhase2,
-                                );
-                            }
-                            if control_plane_hash.is_none() {
-                                missing.push(
-                                    InstallinatorArtifactKind::ControlPlane,
-                                );
-                            }
-                            if !missing.is_empty() {
-                                bail!(
-                                    "installinator document missing \
-                                     required artifacts: {:?}",
-                                    missing
-                                );
-                            }
-
-                            StepSuccess::new(ArtifactsToDownload {
-                                host_phase_2: host_phase_2_hash.expect(
-                                    "host phase 2 is Some, checked above",
-                                ),
-                                control_plane: control_plane_hash.expect(
-                                    "control plane is Some, checked above",
-                                ),
-                            })
-                            .into()
-                        },
+        let to_download = engine
+            .new_step(
+                InstallinatorComponent::InstallinatorDocument,
+                InstallinatorStepId::Download,
+                "Downloading installinator document",
+                async move |cx| {
+                    let installinator_doc_id = ArtifactHashId {
+                        kind: KnownArtifactKind::InstallinatorDocument.into(),
+                        hash: lookup_id.document,
+                    };
+                    let installinator_doc = fetch_artifact(
+                        &cx,
+                        &installinator_doc_id,
+                        discovery,
+                        log,
                     )
-                    .register()
-            }
-            LookupIdKind::Hashes { host_phase_2, control_plane } => {
-                StepHandle::ready(ArtifactsToDownload {
-                    host_phase_2,
-                    control_plane,
-                })
-            }
-        }
-        .into_shared();
+                    .await?;
+
+                    // Check that the sha256 of the data we got from
+                    // wicket matches the data we asked for.
+                    //
+                    // If this fails, we fail the entire installation
+                    // rather than trying to fetch the artifact again,
+                    // because we're fetching data from wicketd (cached
+                    // in a temp dir) over TCP to ourselves (in memory),
+                    // so the only cases where this could fail are
+                    // disturbing enough (memory corruption, corruption
+                    // under TCP, or wicketd gave us something other
+                    // than what we requested) we want to know
+                    // immediately and not retry: it's likely an
+                    // operator could miss any warnings we emit if a
+                    // retry succeeds.
+                    check_downloaded_artifact_hash(
+                        "installinator document",
+                        installinator_doc.artifact.clone(),
+                        installinator_doc_id.hash,
+                    )
+                    .await?;
+
+                    // Read the document as JSON.
+                    //
+                    // Going via the reader is slightly less efficient
+                    // than operating purely in-memory, but serde_json
+                    // doesn't have a good way to pass in a BufList
+                    // directly.
+                    let json: InstallinatorDocument = serde_json::from_reader(
+                        buf_list::Cursor::new(&installinator_doc.artifact),
+                    )
+                    .context(
+                        "error deserializing \
+                                     installinator document",
+                    )?;
+
+                    // Every valid installinator document must have the
+                    // host phase 2 and control plane hashes.
+                    let mut host_phase_2_hash = None;
+                    let mut control_plane_hash = None;
+                    for artifact in &json.artifacts {
+                        match artifact.kind {
+                            InstallinatorArtifactKind::HostPhase2 => {
+                                host_phase_2_hash = Some(artifact.hash);
+                            }
+                            InstallinatorArtifactKind::ControlPlane => {
+                                control_plane_hash = Some(artifact.hash);
+                            }
+                        }
+                    }
+
+                    // Return an error if either the host phase 2 or the
+                    // control plane artifacts are missing.
+                    let mut missing = Vec::new();
+                    if host_phase_2_hash.is_none() {
+                        missing.push(InstallinatorArtifactKind::HostPhase2);
+                    }
+                    if control_plane_hash.is_none() {
+                        missing.push(InstallinatorArtifactKind::ControlPlane);
+                    }
+                    if !missing.is_empty() {
+                        bail!(
+                            "installinator document missing \
+                                     required artifacts: {:?}",
+                            missing
+                        );
+                    }
+
+                    StepSuccess::new(ArtifactsToDownload {
+                        host_phase_2: host_phase_2_hash
+                            .expect("host phase 2 is Some, checked above"),
+                        control_plane: control_plane_hash
+                            .expect("control plane is Some, checked above"),
+                    })
+                    .into()
+                },
+            )
+            .register()
+            .into_shared();
 
         let to_download_2 = to_download.clone();
         let to_download_3 = to_download_2.clone();
@@ -643,7 +624,7 @@ async fn fetch_artifact(
 
 pub(crate) fn stderr_env_drain(
     env_var: &str,
-) -> impl Drain<Ok = (), Err = slog::Never> {
+) -> impl Drain<Ok = (), Err = slog::Never> + use<> {
     let stderr_decorator = slog_term::TermDecorator::new().build();
     let stderr_drain =
         slog_term::FullFormat::new(stderr_decorator).build().fuse();

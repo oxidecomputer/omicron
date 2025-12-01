@@ -60,6 +60,7 @@ use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionReplacementStatus;
@@ -67,6 +68,7 @@ use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
+use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
@@ -1192,6 +1194,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
+        "probe_distributor" => {
+            print_task_probe_distributor(details);
+        }
         "read_only_region_replacement_start" => {
             print_task_read_only_region_replacement_start(details);
         }
@@ -1239,6 +1244,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         }
         "fm_sitrep_loader" => {
             print_task_fm_sitrep_loader(details);
+        }
+        "fm_sitrep_gc" => {
+            print_task_fm_sitrep_gc(details);
         }
         _ => {
             println!(
@@ -2127,6 +2135,32 @@ fn print_task_phantom_disks(details: &serde_json::Value) {
     };
 }
 
+fn print_task_probe_distributor(details: &serde_json::Value) {
+    match serde_json::from_value::<ProbeDistributorStatus>(details.clone()) {
+        Err(error) => eprintln!(
+            "warning: failed to interpret task details: {:?}: {:?}",
+            error, details
+        ),
+        Ok(ProbeDistributorStatus { probes_by_sled, errors }) => {
+            let n_total_probes: usize = probes_by_sled.values().sum();
+            println!("    succesfully-pushed probes: {} total", n_total_probes);
+            for (sled_id, count) in probes_by_sled {
+                if count == 0 {
+                    continue;
+                }
+                println!("      sled_id={} n_probes={}", sled_id, count);
+            }
+            println!("    errors while pushing probes: {} total", errors.len());
+            for err in errors {
+                println!(
+                    "      sled_id={} sled_ip={} error={}",
+                    err.sled_id, err.sled_ip, err.error,
+                );
+            }
+        }
+    };
+}
+
 fn print_task_read_only_region_replacement_start(details: &serde_json::Value) {
     match serde_json::from_value::<ReadOnlyRegionReplacementStartStatus>(
         details.clone(),
@@ -2578,8 +2612,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 listed_in_service_sleds,
                 listed_sps,
                 activated_in_db_ok,
-                sp_ereports,
-                host_ereports,
+                ereports,
             }) = collection_report
             {
                 println!("    Support Bundle Collection Report:");
@@ -2593,26 +2626,35 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
-                print_ereport_status("SP", &sp_ereports);
-                print_ereport_status("Host OS", &host_ereports);
-            }
-        }
-    }
-
-    fn print_ereport_status(which: &str, status: &SupportBundleEreportStatus) {
-        match status {
-            SupportBundleEreportStatus::NotRequested => {
-                println!("      {which} ereport collection was not requested");
-            }
-            SupportBundleEreportStatus::Failed { error, n_collected } => {
-                println!("      {which} ereport collection failed:");
-                println!(
-                    "        ereports collected successfully: {n_collected}"
-                );
-                println!("        error: {error}");
-            }
-            SupportBundleEreportStatus::Collected { n_collected } => {
-                println!("      {which} ereports collected: {n_collected}");
+                match ereports {
+                    None => {
+                        println!("      ereport collection was not requested");
+                    }
+                    Some(SupportBundleEreportStatus {
+                        errors,
+                        n_collected,
+                        n_found,
+                    }) if !errors.is_empty() => {
+                        println!("      ereport collection failed:");
+                        println!(
+                            "        total matching ereports found: {n_found}"
+                        );
+                        println!(
+                            "        ereports collected successfully: {n_collected}"
+                        );
+                        println!("        errors:");
+                        for error in errors {
+                            println!("          {error}");
+                        }
+                    }
+                    Some(SupportBundleEreportStatus {
+                        n_collected, ..
+                    }) => {
+                        // If ereport collection succeeded, n_found should be
+                        // equal to n_collected.
+                        println!("      ereports collected: {n_collected}");
+                    }
+                }
             }
         }
     }
@@ -3140,6 +3182,41 @@ fn print_task_fm_sitrep_loader(details: &serde_json::Value) {
             );
         }
     };
+}
+
+fn print_task_fm_sitrep_gc(details: &serde_json::Value) {
+    let SitrepGcStatus {
+        orphaned_sitreps_found,
+        orphaned_sitreps_deleted,
+        errors,
+    } = match serde_json::from_value::<SitrepGcStatus>(details.clone()) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    pub const ORPHANS_FOUND: &str = "orphaned sitreps found:";
+    pub const ORPHANS_DELETED: &str = "orphaned sitreps deleted:";
+    pub const ERRORS: &str = "errors:";
+    pub const WIDTH: usize =
+        const_max_len(&[ERRORS, ORPHANS_FOUND, ORPHANS_DELETED]) + 1;
+    pub const NUM_WIDTH: usize = 4;
+    if !errors.is_empty() {
+        println!("{ERRICON}   {ERRORS:<WIDTH$}{:>NUM_WIDTH$}", errors.len());
+        for error in errors {
+            println!("      > {error}")
+        }
+    }
+
+    println!("    {ORPHANS_FOUND:<WIDTH$}{orphaned_sitreps_found:>NUM_WIDTH$}");
+    println!(
+        "    {ORPHANS_DELETED:<WIDTH$}{orphaned_sitreps_deleted:>NUM_WIDTH$}"
+    );
 }
 
 const ERRICON: &str = "/!\\";
@@ -4367,7 +4444,9 @@ async fn support_bundle_download_range(
     client: &nexus_lockstep_client::Client,
     id: SupportBundleUuid,
     range: (u64, u64),
-) -> anyhow::Result<impl futures::Stream<Item = anyhow::Result<bytes::Bytes>>> {
+) -> anyhow::Result<
+    impl futures::Stream<Item = anyhow::Result<bytes::Bytes>> + use<>,
+> {
     let range = format!("bytes={}-{}", range.0, range.1);
     Ok(client
         .support_bundle_download(id.as_untyped_uuid(), Some(&range))
@@ -4431,13 +4510,18 @@ async fn cmd_nexus_support_bundles_download(
     let stream =
         support_bundle_download_ranges(client, args.id, start, total_length);
 
+    let mut open_opts = OpenOptions::new();
+    open_opts.create(true);
+
     let sink: Box<dyn std::io::Write> = match &args.output {
         Some(path) => Box::new(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .truncate(!args.resume)
-                .open(path)?,
+            if args.resume {
+                open_opts.append(true)
+            } else {
+                open_opts.write(true).truncate(true)
+            }
+            .open(path)
+            .with_context(|| format!("failed to create {path}"))?,
         ),
         None => Box::new(std::io::stdout()),
     };

@@ -5,7 +5,7 @@
 [package]
 name = "omicron-workspace-hack"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 description = "workspace-hack package, managed by hakari"
 # You can choose to publish this crate: see https://docs.rs/cargo-hakari/latest/cargo_hakari/publishing.
 publish = false
@@ -60,8 +60,8 @@ futures-io = { version = "0.3.31" }
 futures-sink = { version = "0.3.31" }
 futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", default-features = false, features = ["debug-impls", "serde"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", features = ["std"] }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", default-features = false, features = ["debug-impls", "serde"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
@@ -70,7 +70,7 @@ heck = { version = "0.4.1", features = ["unicode"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
-iddqd = { version = "0.3.13", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.3.16", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.0.3" }
 indexmap = { version = "2.11.4", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
@@ -83,7 +83,7 @@ libc = { version = "0.2.174", features = ["extra_traits"] }
 log = { version = "0.4.27", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.4" }
-newtype-uuid = { version = "1.3.1", features = ["proptest1"] }
+newtype-uuid = { version = "1.3.2", features = ["proptest1"] }
 nix = { version = "0.29.0", features = ["feature", "net", "uio"] }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
@@ -135,7 +135,7 @@ strum-754bda37e0fb3874 = { package = "strum", version = "0.27.2", features = ["d
 subtle = { version = "2.6.1" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.106", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.43", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1.47.0", features = ["full", "test-util"] }
+tokio = { version = "1.48.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.13", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = { version = "0.1.17", features = ["net", "sync"] }
@@ -154,7 +154,7 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.27", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
-zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }
+zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "jiff-02", "zstd"] }
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [build-dependencies]
@@ -201,8 +201,8 @@ futures-io = { version = "0.3.31" }
 futures-sink = { version = "0.3.31" }
 futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
-gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", default-features = false, features = ["debug-impls", "serde"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "669fe557b66f44aed3c622bd17bc092f08797e0c", features = ["std"] }
+gateway-ereport-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", default-features = false, features = ["debug-impls", "serde"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
@@ -211,7 +211,7 @@ heck = { version = "0.4.1", features = ["unicode"] }
 hickory-proto = { version = "0.25.2", features = ["serde", "text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "1.7.0", features = ["full"] }
-iddqd = { version = "0.3.13", features = ["daft", "proptest", "schemars08"] }
+iddqd = { version = "0.3.16", features = ["daft", "proptest", "schemars08"] }
 idna = { version = "1.0.3" }
 indexmap = { version = "2.11.4", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
@@ -224,7 +224,7 @@ libc = { version = "0.2.174", features = ["extra_traits"] }
 log = { version = "0.4.27", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.4" }
-newtype-uuid = { version = "1.3.1", features = ["proptest1"] }
+newtype-uuid = { version = "1.3.2", features = ["proptest1"] }
 nix = { version = "0.29.0", features = ["feature", "net", "uio"] }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
@@ -278,7 +278,7 @@ syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extr
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.106", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.43", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.24", default-features = false, features = ["formatting", "parsing"] }
-tokio = { version = "1.47.0", features = ["full", "test-util"] }
+tokio = { version = "1.48.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.13", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = { version = "0.1.17", features = ["net", "sync"] }
@@ -299,7 +299,7 @@ x509-cert = { version = "0.2.5" }
 zerocopy-c38e5c1d305a1b54 = { package = "zerocopy", version = "0.8.27", default-features = false, features = ["derive", "simd"] }
 zerocopy-ca01ad9e24f5d932 = { package = "zerocopy", version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
-zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "zstd"] }
+zip-164d15cefe24d7eb = { package = "zip", version = "4.2.0", default-features = false, features = ["bzip2", "deflate", "jiff-02", "zstd"] }
 zip-3b31131e45eafb45 = { package = "zip", version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]

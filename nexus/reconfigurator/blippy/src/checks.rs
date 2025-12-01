@@ -193,17 +193,34 @@ fn check_external_networking(blippy: &mut Blippy<'_>) {
             }
         }
 
-        // There should be no duplicate NIC IPs or MACs.
-        if let Some(prev_zone) = used_nic_ips.insert(nic.ip, zone) {
-            blippy.push_sled_note(
-                sled_id,
-                Severity::Fatal,
-                SledKind::DuplicateNicIp {
-                    zone1: prev_zone.clone(),
-                    zone2: zone.clone(),
-                    ip: nic.ip,
-                },
-            );
+        // There should be no duplicate NIC IPs (of either version) or MACs.
+        if let Some(ipv4) = nic.ip_config.ipv4_addr() {
+            let ip = std::net::IpAddr::V4(*ipv4);
+            if let Some(prev_zone) = used_nic_ips.insert(ip, zone) {
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::Fatal,
+                    SledKind::DuplicateNicIp {
+                        zone1: prev_zone.clone(),
+                        zone2: zone.clone(),
+                        ip,
+                    },
+                );
+            }
+        }
+        if let Some(ipv6) = nic.ip_config.ipv6_addr() {
+            let ip = std::net::IpAddr::V6(*ipv6);
+            if let Some(prev_zone) = used_nic_ips.insert(ip, zone) {
+                blippy.push_sled_note(
+                    sled_id,
+                    Severity::Fatal,
+                    SledKind::DuplicateNicIp {
+                        zone1: prev_zone.clone(),
+                        zone2: zone.clone(),
+                        ip,
+                    },
+                );
+            }
         }
         if let Some(prev_zone) = used_nic_macs.insert(nic.mac, zone) {
             blippy.push_sled_note(
@@ -1047,18 +1064,18 @@ mod tests {
             nexus_iter.next().expect("at least two Nexus zones");
         assert_ne!(nexus0_sled_id, nexus1_sled_id);
 
-        let dup_ip = nexus0
+        let dup_ip = &nexus0
             .zone_type
             .external_networking()
             .expect("Nexus has external networking")
             .1
-            .ip;
+            .ip_config;
         match &mut nexus1.zone_type {
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 nic,
                 ..
             }) => {
-                nic.ip = dup_ip;
+                nic.ip_config = dup_ip.clone();
             }
             _ => unreachable!("this is a Nexus zone"),
         };
@@ -1070,7 +1087,11 @@ mod tests {
                 kind: Box::new(SledKind::DuplicateNicIp {
                     zone1: nexus0.clone(),
                     zone2: nexus1.clone(),
-                    ip: dup_ip,
+                    ip: dup_ip
+                        .ipv4_addr()
+                        .copied()
+                        .expect("an IPv4 address")
+                        .into(),
                 }),
             },
         }];
@@ -2127,13 +2148,28 @@ fn check_planning_input_network_records_appear_in_blueprint(
         let zone_type = &z.zone_type;
         match zone_type {
             BlueprintZoneType::BoundaryNtp(ntp) => {
-                all_boundary_ntp_nic_ips.insert(ntp.nic.ip);
+                if let Some(ip) = ntp.nic.ip_config.ipv4_addr().copied() {
+                    all_boundary_ntp_nic_ips.insert(ip.into());
+                }
+                if let Some(ip) = ntp.nic.ip_config.ipv6_addr().copied() {
+                    all_boundary_ntp_nic_ips.insert(ip.into());
+                }
             }
             BlueprintZoneType::Nexus(nexus) => {
-                all_nexus_nic_ips.insert(nexus.nic.ip);
+                if let Some(ip) = nexus.nic.ip_config.ipv4_addr().copied() {
+                    all_nexus_nic_ips.insert(ip.into());
+                }
+                if let Some(ip) = nexus.nic.ip_config.ipv6_addr().copied() {
+                    all_nexus_nic_ips.insert(ip.into());
+                }
             }
             BlueprintZoneType::ExternalDns(dns) => {
-                all_external_dns_nic_ips.insert(dns.nic.ip);
+                if let Some(ip) = dns.nic.ip_config.ipv4_addr().copied() {
+                    all_external_dns_nic_ips.insert(ip.into());
+                }
+                if let Some(ip) = dns.nic.ip_config.ipv6_addr().copied() {
+                    all_external_dns_nic_ips.insert(ip.into());
+                }
             }
             _ => (),
         }

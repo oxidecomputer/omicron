@@ -68,7 +68,7 @@ const HOST_IMAGE_PACKAGES: [(&PackageName, InstallMethod); 8] = [
     (&PackageName::new_const("oxlog"), InstallMethod::Install),
     (&PackageName::new_const("propolis-server"), InstallMethod::Bundle),
     (&PackageName::new_const("pumpkind-gz"), InstallMethod::Install),
-    (&PackageName::new_const("crucible-dtrace"), InstallMethod::Install),
+    (&PackageName::new_const("crucible-utils"), InstallMethod::Install),
     (&PackageName::new_const("switch-asic"), InstallMethod::Bundle),
 ];
 /// Packages to install or bundle in the recovery (trampoline) OS image.
@@ -715,9 +715,17 @@ async fn main() -> Result<()> {
     .after("host-package")
     .after("recovery-package");
 
-    for (name, base_url) in [
-        ("staging", "https://permslip-staging.corp.oxide.computer"),
-        ("production", "https://signer-us-west.corp.oxide.computer"),
+    for (name, base_url, name_check) in [
+        (
+            "staging",
+            "https://permslip-staging.corp.oxide.computer",
+            "staging-devel",
+        ),
+        (
+            "production",
+            "https://signer-us-west.corp.oxide.computer",
+            "production-release",
+        ),
     ] {
         jobs.push(
             format!("hubris-{}", name),
@@ -727,6 +735,7 @@ async fn main() -> Result<()> {
                 client.clone(),
                 WORKSPACE_DIR.join(format!("tools/permslip_{}", name)),
                 args.output_dir.join(format!("hubris-{}", name)),
+                name_check,
             ),
         );
     }

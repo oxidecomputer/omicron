@@ -103,6 +103,7 @@ use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::ereport_ingester;
 use super::tasks::external_endpoints;
+use super::tasks::fm_sitrep_gc;
 use super::tasks::fm_sitrep_load;
 use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
@@ -111,9 +112,11 @@ use super::tasks::inventory_collection;
 use super::tasks::inventory_load;
 use super::tasks::lookup_region_port;
 use super::tasks::metrics_producer_gc;
+use super::tasks::multicast::MulticastGroupReconciler;
 use super::tasks::nat_cleanup;
 use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
+use super::tasks::probe_distributor;
 use super::tasks::read_only_region_replacement_start::*;
 use super::tasks::reconfigurator_config::ReconfiguratorConfigLoader;
 use super::tasks::region_replacement;
@@ -152,6 +155,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use update_common::artifacts::ArtifactsWithPlan;
@@ -165,6 +169,8 @@ pub(crate) struct BackgroundTasksInternal {
     pub(crate) external_endpoints:
         watch::Receiver<Option<external_endpoints::ExternalEndpoints>>,
     inventory_load_rx: watch::Receiver<Option<Arc<Collection>>>,
+    /// Flag to signal cache invalidation for multicast reconciler
+    pub(crate) multicast_invalidate_cache: Option<Arc<AtomicBool>>,
 }
 
 impl BackgroundTasksInternal {
@@ -187,6 +193,7 @@ pub struct BackgroundTasksInitializer {
     external_endpoints_tx:
         watch::Sender<Option<external_endpoints::ExternalEndpoints>>,
     inventory_load_tx: watch::Sender<Option<Arc<Collection>>>,
+    multicast_invalidate_flag: Arc<AtomicBool>,
 }
 
 impl BackgroundTasksInitializer {
@@ -205,10 +212,15 @@ impl BackgroundTasksInitializer {
             watch::channel(None);
         let (inventory_load_tx, inventory_load_rx) = watch::channel(None);
 
+        // Create the multicast cache invalidation flag that will be shared
+        // between the reconciler and Nexus (via `BackgroundTasksInternal`)
+        let multicast_invalidate_flag = Arc::new(AtomicBool::new(false));
+
         let initializer = BackgroundTasksInitializer {
             driver: Driver::new(),
             external_endpoints_tx,
             inventory_load_tx,
+            multicast_invalidate_flag: multicast_invalidate_flag.clone(),
         };
 
         let background_tasks = BackgroundTasks {
@@ -257,7 +269,14 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester: Activator::new(),
             task_reconfigurator_config_loader: Activator::new(),
             task_fm_sitrep_loader: Activator::new(),
+            task_fm_sitrep_gc: Activator::new(),
+            task_probe_distributor: Activator::new(),
+            task_multicast_reconciler: Activator::new(),
 
+            // Handles to activate background tasks that do not get used by Nexus
+            // at-large.  These background tasks are implementation details as far as
+            // the rest of Nexus is concerned.  These handles don't even really need to
+            // be here, but it's convenient.
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
         };
@@ -265,6 +284,7 @@ impl BackgroundTasksInitializer {
         let internal = BackgroundTasksInternal {
             external_endpoints: external_endpoints_rx,
             inventory_load_rx,
+            multicast_invalidate_cache: Some(multicast_invalidate_flag),
         };
 
         (initializer, background_tasks, internal)
@@ -338,6 +358,9 @@ impl BackgroundTasksInitializer {
             task_sp_ereport_ingester,
             task_reconfigurator_config_loader,
             task_fm_sitrep_loader,
+            task_fm_sitrep_gc,
+            task_probe_distributor,
+            task_multicast_reconciler,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -523,7 +546,7 @@ impl BackgroundTasksInitializer {
             period: config.inventory.period_secs_load,
             task_impl: Box::new(inventory_loader),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![Box::new(inventory_collect_watcher)],
+            watchers: vec![Box::new(inventory_collect_watcher.clone())],
             activator: task_inventory_loader,
         });
 
@@ -562,7 +585,7 @@ impl BackgroundTasksInitializer {
             watchers: vec![
                 Box::new(inventory_load_watcher.clone()),
                 Box::new(rx_blueprint.clone()),
-                Box::new(reconfigurator_config_watcher),
+                Box::new(reconfigurator_config_watcher.clone()),
             ],
             activator: task_blueprint_planner,
         });
@@ -826,6 +849,12 @@ impl BackgroundTasksInitializer {
         });
 
         // Background task: OPTE port route propagation
+        //
+        // This task is activated whenever we have new networking probe zones.
+        // Note that there's no real _data_ communicated between these tasks, so
+        // we're just using () to have the driver wake up the VPC route task
+        // when the probe task is activated.
+        let (vpc_route_manager_tx, vpc_route_manager_rx) = watch::channel(());
         {
             let watcher = vpc_routes::VpcRouteManager::new(datastore.clone());
             driver.register(TaskDefinition {
@@ -834,7 +863,7 @@ impl BackgroundTasksInitializer {
                 period: config.switch_port_settings_manager.period_secs,
                 task_impl: Box::new(watcher),
                 opctx: opctx.child(BTreeMap::new()),
-                watchers: vec![],
+                watchers: vec![Box::new(vpc_route_manager_rx)],
                 activator: task_vpc_route_manager,
             })
         };
@@ -939,7 +968,7 @@ impl BackgroundTasksInitializer {
             period: config.region_snapshot_replacement_finish.period_secs,
             task_impl: Box::new(RegionSnapshotReplacementFinishDetector::new(
                 datastore.clone(),
-                sagas,
+                sagas.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
@@ -969,9 +998,10 @@ impl BackgroundTasksInitializer {
             task_impl: Box::new(tuf_repo_pruner::TufRepoPruner::new(
                 datastore.clone(),
                 config.tuf_repo_pruner.clone(),
+                reconfigurator_config_watcher.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
-            watchers: vec![],
+            watchers: vec![Box::new(reconfigurator_config_watcher)],
             activator: task_tuf_repo_pruner,
         });
 
@@ -1045,6 +1075,27 @@ impl BackgroundTasksInitializer {
         });
 
         driver.register(TaskDefinition {
+            name: "multicast_reconciler",
+            description: "reconciles multicast group and member state with dendrite switch configuration",
+            period: config.multicast_reconciler.period_secs,
+            task_impl: Box::new(MulticastGroupReconciler::new(
+                datastore.clone(),
+                resolver.clone(),
+                sagas.clone(),
+                args.multicast_enabled,
+                config.multicast_reconciler.sled_cache_ttl_secs,
+                config.multicast_reconciler.backplane_cache_ttl_secs,
+                self.multicast_invalidate_flag.clone(),
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![
+                Box::new(inventory_collect_watcher.clone()),
+                Box::new(inventory_load_watcher.clone()),
+            ],
+            activator: task_multicast_reconciler,
+        });
+
+        driver.register(TaskDefinition {
             name: "sp_ereport_ingester",
             description: "collects error reports from service processors",
             period: config.sp_ereport_ingester.period_secs,
@@ -1059,19 +1110,44 @@ impl BackgroundTasksInitializer {
             activator: task_sp_ereport_ingester,
         });
 
+        let sitrep_loader = fm_sitrep_load::SitrepLoader::new(
+            datastore.clone(),
+            args.sitrep_load_tx,
+        );
+        let sitrep_watcher = sitrep_loader.watcher();
         driver.register(TaskDefinition {
             name: "fm_sitrep_loader",
             description:
                 "loads the current fault management situation report from \
                  the database",
             period: config.fm.sitrep_load_period_secs,
-            task_impl: Box::new(fm_sitrep_load::SitrepLoader::new(
-                datastore,
-                args.sitrep_load_tx,
-            )),
+            task_impl: Box::new(sitrep_loader),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_fm_sitrep_loader,
+        });
+
+        driver.register(TaskDefinition {
+            name: "fm_sitrep_gc",
+            description: "garbage collects fault management situation reports",
+            period: config.fm.sitrep_load_period_secs,
+            task_impl: Box::new(fm_sitrep_gc::SitrepGc::new(datastore.clone())),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![Box::new(sitrep_watcher)],
+            activator: task_fm_sitrep_gc,
+        });
+
+        driver.register(TaskDefinition {
+            name: "probe_distributor",
+            description: "distributes networking probe zones to sleds",
+            period: config.probe_distributor.period_secs,
+            task_impl: Box::new(probe_distributor::ProbeDistributor::new(
+                datastore,
+                vpc_route_manager_tx,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_probe_distributor,
         });
 
         driver
@@ -1085,6 +1161,8 @@ pub struct BackgroundTasksData {
     pub datastore: Arc<DataStore>,
     /// background task configuration
     pub config: BackgroundTaskConfig,
+    /// whether multicast functionality is enabled (or not)
+    pub multicast_enabled: bool,
     /// rack identifier
     pub rack_id: Uuid,
     /// nexus identifier

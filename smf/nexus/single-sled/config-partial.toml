@@ -94,10 +94,27 @@ read_only_region_replacement_start.period_secs = 30
 alert_dispatcher.period_secs = 60
 webhook_deliverator.period_secs = 60
 sp_ereport_ingester.period_secs = 30
+# Disabled in R16, as the Hubris task that handles ereport ingestion requests
+# has not merged yet, and trying to ingest them will just result in Nexus
+# logging a bunch of errors.
+sp_ereport_ingester.disable = true
 # How frequently to check for a new fault management sitrep (made by any
 # Nexus).
 # This is cheap, so we should check frequently.
 fm.sitrep_load_period_secs = 15
+# Sitrep GC, on the other hand, does not need to be activated very frequently,
+# as it does not impact the responsiveness of the fault management system, and
+# is activated every time the current sitrep changes. Periodic activations are
+# only necessary to ensure that it always happens eventually.
+fm.sitrep_gc_period_secs = 600
+probe_distributor.period_secs = 60
+multicast_reconciler.period_secs = 60
+# TTL for sled-to-backplane-port mapping cache
+# Default: 3600 seconds (1 hour) - detects new sleds and inventory changes
+# multicast_reconciler.sled_cache_ttl_secs = 3600
+# TTL for backplane topology cache (static platform configuration)
+# Default: 86400 seconds (24 hours) - refreshed on-demand when validation fails
+# multicast_reconciler.backplane_cache_ttl_secs = 86400
 
 [default_region_allocation_strategy]
 # by default, allocate without requirement for distinct sleds.

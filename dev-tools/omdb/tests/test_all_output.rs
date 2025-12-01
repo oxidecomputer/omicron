@@ -680,6 +680,7 @@ fn clear_omdb_env() {
     for (env_var, _) in std::env::vars().filter(|(k, _)| k.starts_with("OMDB_"))
     {
         eprintln!("removing {:?} from environment", env_var);
-        std::env::remove_var(env_var);
+        // SAFETY: https://nexte.st/docs/configuration/env-vars/#altering-the-environment-within-tests
+        unsafe { std::env::remove_var(env_var) };
     }
 }

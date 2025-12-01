@@ -87,7 +87,7 @@ impl From<NatChange> for NatEntryView {
             sled_address: value.sled_address.addr(),
             vni: value.vni.0,
             mac: *value.mac,
-            gen: value.version,
+            generation: value.version,
             deleted: value.deleted,
         }
     }

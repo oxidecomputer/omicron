@@ -7,9 +7,11 @@
 use anyhow::{Context, Result, bail};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
+use indent_write::indentable::Indentable;
 use omicron_ls_apis::{
-    AllApiMetadata, ApiDependencyFilter, ApiMetadata, LoadArgs,
-    ServerComponentName, SystemApis, VersionedHow,
+    AllApiMetadata, ApiConsumerStatus, ApiDependencyFilter, ApiMetadata,
+    FailedConsumerCheck, LoadArgs, ServerComponentName, SystemApis,
+    VersionedHow, plural,
 };
 use parse_display::{Display, FromStr};
 
@@ -119,11 +121,11 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
         println!("|{}", apis.adoc_label(&api.client_package_name)?);
 
         println!("|");
-        for (c, _) in apis.api_consumers(
+        for consumer in apis.api_consumers(
             &api.client_package_name,
             ApiDependencyFilter::default(),
         )? {
-            println!("* {}", apis.adoc_label(c)?);
+            println!("* {}", apis.adoc_label(&consumer.server_pkgname)?);
         }
 
         match &api.versioned_how {
@@ -145,24 +147,25 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
 }
 
 fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
+    let mut error_count = 0;
+
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
         println!("{} (client: {})", api.label, api.client_package_name);
-        for (s, dep_paths) in
-            apis.api_consumers(&api.client_package_name, args.filter)?
-        {
-            let (repo_name, package_path) = apis.package_label(s)?;
+        for c in apis.api_consumers(&api.client_package_name, args.filter)? {
+            let (repo_name, package_path) =
+                apis.package_label(c.server_pkgname)?;
             println!(
                 "    consumed by: {} ({}/{}) via {} path{}",
-                s,
+                c.server_pkgname,
                 repo_name,
                 package_path,
-                dep_paths.len(),
-                if dep_paths.len() == 1 { "" } else { "s" },
+                c.dep_paths.len(),
+                if c.dep_paths.len() == 1 { "" } else { "s" },
             );
             if args.show_deps {
-                for (i, dep_path) in dep_paths.iter().enumerate() {
-                    let label = if dep_paths.len() > 1 {
+                for (i, dep_path) in c.dep_paths.iter().enumerate() {
+                    let label = if c.dep_paths.len() > 1 {
                         format!(" path {}", i + 1)
                     } else {
                         String::new()
@@ -173,8 +176,33 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
                     }
                 }
             }
+            match c.status {
+                ApiConsumerStatus::NoAssertion => {
+                    // We don't know whether it's okay for this API to be
+                    // present.
+                }
+                ApiConsumerStatus::Expected { reason } => {
+                    println!("        status: expected, reason: {reason}");
+                }
+                ApiConsumerStatus::Unexpected => {
+                    println!("        error: unexpected dependency");
+                    error_count += 1;
+                }
+            }
         }
-        println!("");
+        if let Some(missing) =
+            apis.missing_expected_consumers(&api.client_package_name)
+        {
+            println!("{}", missing.display(apis).indented("    "));
+            error_count += missing.error_count();
+        }
+        println!();
+    }
+    if error_count > 0 {
+        bail!(
+            "{error_count} {} reported (see above)",
+            plural::errors_str(error_count)
+        );
     }
     Ok(())
 }
@@ -311,6 +339,32 @@ fn run_check(apis: &SystemApis) -> Result<()> {
         println!(")");
     }
 
+    fn print_failed_consumer_check(
+        api: &ApiMetadata,
+        check: &FailedConsumerCheck,
+        apis: &SystemApis,
+    ) {
+        println!("    {} ({}):", api.label, api.client_package_name);
+        for consumer in &check.unexpected {
+            let deployment_unit =
+                apis.server_component_unit(consumer).unwrap_or_else(|| {
+                    panic!(
+                        "consumer {consumer} doesn't have an associated \
+                         deployment unit (this is checked at load time, so \
+                         if you're seeing this message, there's a bug in that \
+                         check)"
+                    );
+                });
+            println!(
+                "        error: unexpected dependency on {consumer} (part of {deployment_unit})"
+            );
+        }
+
+        if let Some(missing) = check.missing {
+            println!("{}", missing.display(apis).indented("        "));
+        }
+    }
+
     println!("\n");
     println!("Server-managed APIs:\n");
     for api in apis
@@ -330,6 +384,8 @@ fn run_check(apis: &SystemApis) -> Result<()> {
         }
     }
 
+    let mut error_count = 0;
+
     println!("\n");
     print!("APIs with unknown version management:");
     let unknown: Vec<_> = apis
@@ -343,8 +399,37 @@ fn run_check(apis: &SystemApis) -> Result<()> {
         println!("\n");
         for api in unknown {
             print_api_and_producers(api, apis);
+            error_count += 1;
         }
-        bail!("at least one API has unknown version strategy (see above)");
+    }
+
+    println!("\n");
+    print!("APIs that failed consumer checks:");
+    if dag_check.failed_consumers().is_empty() {
+        println!(" none");
+    } else {
+        println!("\n");
+        for c in dag_check.failed_consumers() {
+            let api = apis
+                .api_metadata()
+                .client_pkgname_lookup(c.client_pkgname)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "client package name {} not found in API metadata",
+                        c.client_pkgname
+                    )
+                });
+            print_failed_consumer_check(api, c, apis);
+            error_count += c.error_count();
+        }
+    }
+
+    if error_count > 0 {
+        println!("\n");
+        bail!(
+            "{error_count} {} reported (see above)",
+            plural::errors_str(error_count)
+        );
     }
 
     Ok(())

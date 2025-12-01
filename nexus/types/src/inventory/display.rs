@@ -56,7 +56,7 @@ impl<'a> CollectionDisplay<'a> {
         Self {
             collection,
             // Display all items by default.
-            include_sps: CollectionDisplayIncludeSps::None,
+            include_sps: CollectionDisplayIncludeSps::All,
             include_sleds: true,
             include_orphaned_datasets: true,
             include_clickhouse_keeper_membership: true,
@@ -871,7 +871,7 @@ fn display_sleds(
                     indented,
                     "running for {running_for:?} (since {started_at})"
                 )?;
-                if Some(config) == ledgered_sled_config.as_ref() {
+                if Some(&**config) == ledgered_sled_config.as_ref() {
                     writeln!(
                         indented,
                         "reconciling currently-ledgered config"

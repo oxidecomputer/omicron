@@ -10,9 +10,14 @@ use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
+use ipnet::Ipv6Net;
 use nexus_types::deployment::ReconfiguratorConfig;
+use omicron_common::address::IPV6_ADMIN_SCOPED_MULTICAST_PREFIX;
 use omicron_common::address::Ipv6Subnet;
+pub use omicron_common::address::MAX_VPC_IPV4_SUBNET_PREFIX;
+pub use omicron_common::address::MIN_VPC_IPV4_SUBNET_PREFIX;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
+pub use omicron_common::address::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -26,6 +31,7 @@ use serde_with::serde_as;
 use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
@@ -316,14 +322,6 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
     }
 }
 
-/// Minimum prefix size supported in IPv4 VPC Subnets.
-///
-/// NOTE: This is the minimum _prefix_, which sets the maximum subnet size.
-pub const MIN_VPC_IPV4_SUBNET_PREFIX: u8 = 8;
-
-/// The number of reserved addresses at the beginning of a subnet range.
-pub const NUM_INITIAL_RESERVED_IP_ADDRESSES: usize = 5;
-
 impl Tunables {
     fn validate_ipv4_prefix(prefix: u8) -> Result<(), InvalidTunable> {
         let absolute_max: u8 = 32_u8
@@ -349,14 +347,6 @@ impl Tunables {
         }
     }
 }
-
-/// The maximum prefix size by default.
-///
-/// There are 6 Oxide reserved IP addresses, 5 at the beginning for DNS and the
-/// like, and the broadcast address at the end of the subnet. This size provides
-/// room for 2 ** 6 - 6 = 58 IP addresses, which seems like a reasonable size
-/// for the smallest subnet that's still useful in many contexts.
-pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
 
 impl Default for Tunables {
     fn default() -> Self {
@@ -443,6 +433,10 @@ pub struct BackgroundTaskConfig {
     pub sp_ereport_ingester: SpEreportIngesterConfig,
     /// configuration for fault management background tasks
     pub fm: FmTasksConfig,
+    /// configuration for networking probe distributor
+    pub probe_distributor: ProbeDistributorConfig,
+    /// configuration for multicast reconciler (group+members) task
+    pub multicast_reconciler: MulticastGroupReconcilerConfig,
 }
 
 #[serde_as]
@@ -874,17 +868,113 @@ impl Default for SpEreportIngesterConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MulticastGroupReconcilerConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reconciles multicast group state with dendrite switch configuration
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// TTL (in seconds) for the sled-to-switch-port mapping cache.
+    ///
+    /// This cache maps sled IDs to their physical switch ports. It changes when
+    /// sleds are added/removed or inventory is updated.
+    ///
+    /// Default: 3600 seconds (1 hour)
+    #[serde(
+        default = "MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs"
+    )]
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sled_cache_ttl_secs: Duration,
+
+    /// TTL (in seconds) for the backplane hardware topology cache.
+    ///
+    /// This cache stores the hardware platform's port mapping. It effectively
+    /// never changes during normal operation.
+    ///
+    /// Default: 86400 seconds (24 hours) with smart invalidation
+    #[serde(
+        default = "MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs"
+    )]
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub backplane_cache_ttl_secs: Duration,
+}
+
+impl MulticastGroupReconcilerConfig {
+    const fn default_sled_cache_ttl_secs() -> Duration {
+        Duration::from_secs(3600) // 1 hour
+    }
+
+    const fn default_backplane_cache_ttl_secs() -> Duration {
+        Duration::from_secs(86400) // 24 hours
+    }
+}
+
+impl Default for MulticastGroupReconcilerConfig {
+    fn default() -> Self {
+        Self {
+            period_secs: Duration::from_secs(60),
+            sled_cache_ttl_secs: Self::default_sled_cache_ttl_secs(),
+            backplane_cache_ttl_secs: Self::default_backplane_cache_ttl_secs(),
+        }
+    }
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct FmTasksConfig {
     /// period (in seconds) for periodic activations of the background task that
     /// reads the latest fault management sitrep from the database.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub sitrep_load_period_secs: Duration,
+    /// period (in seconds) for periodic activations of the background task that
+    /// garbage collects unneeded fault management sitreps in the database.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub sitrep_gc_period_secs: Duration,
 }
 
 impl Default for FmTasksConfig {
     fn default() -> Self {
-        Self { sitrep_load_period_secs: Duration::from_secs(15) }
+        Self {
+            sitrep_load_period_secs: Duration::from_secs(15),
+            // This need not be activated very frequently, as it's triggered any
+            // time the current sitrep changes, and activating it more
+            // frequently won't make things more responsive.
+            sitrep_gc_period_secs: Duration::from_secs(600),
+        }
     }
+}
+
+/// Fixed underlay admin-scoped IPv6 multicast network (ff04::/64) used for
+/// internal multicast group allocation and external→underlay mapping.
+/// This /64 subnet within the admin-scoped space provides 2^64 host addresses
+/// (ample for collision resistance) and is not configurable.
+pub const DEFAULT_UNDERLAY_MULTICAST_NET: Ipv6Net = Ipv6Net::new_assert(
+    Ipv6Addr::new(IPV6_ADMIN_SCOPED_MULTICAST_PREFIX, 0, 0, 0, 0, 0, 0, 0),
+    64,
+);
+
+/// Configuration for multicast options.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MulticastConfig {
+    /// Whether multicast functionality is enabled or not.
+    ///
+    /// When false, multicast API calls remain accessible but no actual
+    /// multicast operations occur (no switch programming, reconciler disabled).
+    /// Instance sagas will skip multicast operations. This allows gradual
+    /// rollout and testing of multicast configuration.
+    ///
+    /// Default: false (experimental feature, disabled by default)
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProbeDistributorConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// distributes networking probe zones to sled-agents.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 /// Configuration for a nexus server
@@ -923,6 +1013,9 @@ pub struct PackageConfig {
     pub initial_reconfigurator_config: Option<ReconfiguratorConfig>,
     /// Background task configuration
     pub background_tasks: BackgroundTaskConfig,
+    /// Multicast feature configuration
+    #[serde(default)]
+    pub multicast: MulticastConfig,
     /// Default Crucible region allocation strategy
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
@@ -1058,10 +1151,7 @@ mod test {
             //     "unexpected eof encountered at line 1 column 6"
             // );
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
@@ -1075,10 +1165,7 @@ mod test {
             assert_eq!(error.span(), Some(0..0));
             assert_eq!(error.message(), "missing field `deployment`");
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
@@ -1133,6 +1220,7 @@ mod test {
             [initial_reconfigurator_config]
             planner_enabled = true
             planner_config.add_zones_with_mupdate_override = true
+            tuf_repo_pruner_enabled = false
             [background_tasks]
             dns_internal.period_secs_config = 1
             dns_internal.period_secs_servers = 2
@@ -1190,6 +1278,9 @@ mod test {
             webhook_deliverator.second_retry_backoff_secs = 46
             sp_ereport_ingester.period_secs = 47
             fm.sitrep_load_period_secs = 48
+            fm.sitrep_gc_period_secs = 49
+            probe_distributor.period_secs = 50
+            multicast_reconciler.period_secs = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1291,6 +1382,7 @@ mod test {
                         planner_config: PlannerConfig {
                             add_zones_with_mupdate_override: true,
                         },
+                        tuf_repo_pruner_enabled: false,
                     }),
                     background_tasks: BackgroundTaskConfig {
                         dns_internal: DnsTasksConfig {
@@ -1436,8 +1528,18 @@ mod test {
                         },
                         fm: FmTasksConfig {
                             sitrep_load_period_secs: Duration::from_secs(48),
-                        }
+                            sitrep_gc_period_secs: Duration::from_secs(49),
+                        },
+                        probe_distributor: ProbeDistributorConfig {
+                            period_secs: Duration::from_secs(50),
+                        },
+                        multicast_reconciler: MulticastGroupReconcilerConfig {
+                            period_secs: Duration::from_secs(60),
+                            sled_cache_ttl_secs: MulticastGroupReconcilerConfig::default_sled_cache_ttl_secs(),
+                            backplane_cache_ttl_secs: MulticastGroupReconcilerConfig::default_backplane_cache_ttl_secs(),
+                        },
                     },
+                    multicast: MulticastConfig { enabled: false },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
                             seed: Some(0)
@@ -1536,6 +1638,9 @@ mod test {
             webhook_deliverator.period_secs = 43
             sp_ereport_ingester.period_secs = 44
             fm.sitrep_load_period_secs = 45
+            fm.sitrep_gc_period_secs = 46
+            probe_distributor.period_secs = 47
+            multicast_reconciler.period_secs = 60
 
             [default_region_allocation_strategy]
             type = "random"
@@ -1603,10 +1708,7 @@ mod test {
                 error
             );
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
@@ -1658,10 +1760,7 @@ mod test {
                 r#"invalid "max_vpc_ipv4_subnet_prefix": "IPv4 subnet prefix must"#,
             ));
         } else {
-            panic!(
-                "Got an unexpected error, expected Parse but got {:?}",
-                error
-            );
+            panic!("Got an unexpected error, expected Parse but got {error:?}");
         }
     }
 
