@@ -49,7 +49,7 @@ pub struct ControlPlaneBuilder<'a> {
 }
 
 impl<'a> ControlPlaneBuilder<'a> {
-    pub fn new(test_name: &'a str) -> ControlPlaneBuilder<'a> {
+    pub fn new(test_name: &'a str) -> Self {
         ControlPlaneBuilder {
             test_name,
             nextra_sled_agents: 0,
@@ -58,18 +58,12 @@ impl<'a> ControlPlaneBuilder<'a> {
         }
     }
 
-    pub fn with_extra_sled_agents(
-        mut self,
-        nextra: u16,
-    ) -> ControlPlaneBuilder<'a> {
+    pub fn with_extra_sled_agents(mut self, nextra: u16) -> Self {
         self.nextra_sled_agents = nextra;
         self
     }
 
-    pub fn with_tls_cert(
-        mut self,
-        tls_cert: Option<Certificate>,
-    ) -> ControlPlaneBuilder<'a> {
+    pub fn with_tls_cert(mut self, tls_cert: Option<Certificate>) -> Self {
         self.tls_cert = tls_cert;
         self
     }
@@ -77,7 +71,7 @@ impl<'a> ControlPlaneBuilder<'a> {
     pub fn customize_nexus_config(
         mut self,
         f: &dyn Fn(&mut NexusConfig) -> (),
-    ) -> ControlPlaneBuilder<'a> {
+    ) -> Self {
         f(&mut self.nexus_config);
         self
     }
