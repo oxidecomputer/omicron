@@ -386,7 +386,7 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 async fn test_absolute_static_dir() {
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_absolute_static_dir")
-            .with_modified_default_config(&|config| {
+            .customize_nexus_config(&|config| {
                 config.pkg.console.static_dir =
                     Utf8PathBuf::try_from(current_dir().unwrap())
                         .unwrap()
@@ -937,7 +937,7 @@ async fn test_session_idle_timeout_deletes_session() {
     let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_session_idle_timeout_deletes_session",
     )
-    .with_modified_default_config(&|config| {
+    .customize_nexus_config(&|config| {
         // set idle timeout to 0 so we can test expiration
         config.pkg.console.session_idle_timeout_minutes = 0;
     })

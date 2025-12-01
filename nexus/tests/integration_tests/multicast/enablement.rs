@@ -33,7 +33,7 @@ const GROUP_NAME: &str = "test-group";
 async fn test_multicast_enablement() {
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_multicast_enablement")
-            .with_modified_default_config(&|config| {
+            .customize_nexus_config(&|config| {
                 // Create custom config with multicast disabled (simulating
                 // PROD, for now)
                 config.pkg.multicast.enabled = false;

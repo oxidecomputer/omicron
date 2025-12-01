@@ -345,7 +345,7 @@ async fn test_silo_certificates() {
     // Start Nexus with a TLS server instead of its usual HTTP server.
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_silo_certificates")
-            .with_modified_default_config(&|config| {
+            .customize_nexus_config(&|config| {
                 config.deployment.dropshot_external.tls = true;
             })
             .tls_cert(Some(silo1.cert.clone()))

@@ -1021,7 +1021,7 @@ async fn test_session_list_with_config(
     let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_session_list_excludes_expired",
     )
-    .with_modified_default_config(modify_config)
+    .customize_nexus_config(modify_config)
     .start::<omicron_nexus::Server>()
     .await;
     let testctx = &cptestctx.external_client;

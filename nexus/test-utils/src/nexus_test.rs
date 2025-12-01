@@ -42,14 +42,12 @@ pub struct ControlPlaneBuilder<'a> {
     // required
     test_name: &'a str,
 
-    // fields with defaults that are cheap to construct
+    // defaults provided by the builder
     nextra_sled_agents: u16,
     sim_mode: sim::SimMode,
     tls_cert: Option<Certificate>,
     gateway_config_file: Utf8PathBuf,
-
-    // fields with defaults that need to be constructed lazily
-    nexus_config: Option<NexusConfig>,
+    nexus_config: NexusConfig,
 }
 
 impl<'a> ControlPlaneBuilder<'a> {
@@ -60,7 +58,7 @@ impl<'a> ControlPlaneBuilder<'a> {
             sim_mode: sim::SimMode::Explicit,
             tls_cert: None,
             gateway_config_file: DEFAULT_SP_SIM_CONFIG.into(),
-            nexus_config: None,
+            nexus_config: load_test_config(),
         }
     }
 
@@ -93,27 +91,16 @@ impl<'a> ControlPlaneBuilder<'a> {
         self
     }
 
-    pub fn nexus_config(
-        mut self,
-        config: NexusConfig,
-    ) -> ControlPlaneBuilder<'a> {
-        self.nexus_config = Some(config);
-        self
-    }
-
-    pub fn with_modified_default_config(
+    pub fn customize_nexus_config(
         mut self,
         f: &dyn Fn(&mut NexusConfig) -> (),
     ) -> ControlPlaneBuilder<'a> {
-        let mut config = load_test_config();
-        f(&mut config);
-        self.nexus_config = Some(config);
+        f(&mut self.nexus_config);
         self
     }
 
     pub async fn start<N: NexusServer>(self) -> ControlPlaneTestContext<N> {
-        let mut nexus_config =
-            self.nexus_config.unwrap_or_else(|| load_test_config());
+        let mut nexus_config = self.nexus_config;
         let starter =
             ControlPlaneStarter::<N>::new(self.test_name, &mut nexus_config);
         setup_with_config_impl(

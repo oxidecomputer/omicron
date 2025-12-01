@@ -291,7 +291,7 @@ async fn test_cache_ttl_driven_refresh() {
     let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_cache_ttl_driven_refresh",
     )
-    .with_modified_default_config(&|config| {
+    .customize_nexus_config(&|config| {
         // Set short cache TTLs for testing (2 seconds for sled cache)
         config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
             chrono::TimeDelta::seconds(2).to_std().unwrap();
@@ -504,7 +504,7 @@ async fn test_backplane_cache_ttl_expiry() {
     let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
         "test_backplane_cache_ttl_expiry",
     )
-    .with_modified_default_config(&|config| {
+    .customize_nexus_config(&|config| {
         // Set backplane cache TTL to 1 second (shorter than sled cache to test
         // independently)
         config
