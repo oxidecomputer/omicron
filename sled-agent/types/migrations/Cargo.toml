@@ -1,0 +1,20 @@
+[package]
+name = "sled-agent-types-migrations"
+version = "0.1.0"
+edition.workspace = true
+license = "MPL-2.0"
+
+[dependencies]
+newtype-uuid.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+oxnet.workspace = true
+propolis-client.workspace = true
+schemars.workspace = true
+serde.workspace = true
+sled-hardware-types.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

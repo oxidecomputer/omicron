@@ -55,13 +55,6 @@ use sled_diagnostics::SledDiagnosticsQueryOutput;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
-/// Copies of data types that changed between v3 and v4.
-mod v3;
-/// Copies of data types that changed between v6 and v7.
-mod v6;
-/// Copies of data types that changed between v8 and v9.
-mod v8;
-
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
     //

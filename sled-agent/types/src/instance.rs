@@ -26,83 +26,11 @@ use propolis_client::instance_spec::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types_migrations as migrations;
 use uuid::Uuid;
 
-/// The body of a request to ensure that a instance and VMM are known to a sled
-/// agent.
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct InstanceEnsureBody {
-    /// The virtual hardware configuration this virtual machine should have when
-    /// it is started.
-    pub vmm_spec: VmmSpec,
-
-    /// Information about the sled-local configuration that needs to be
-    /// established to make the VM's virtual hardware fully functional.
-    pub local_config: InstanceSledLocalConfig,
-
-    /// The initial VMM runtime state for the VMM being registered.
-    pub vmm_runtime: VmmRuntimeState,
-
-    /// The ID of the instance for which this VMM is being created.
-    pub instance_id: InstanceUuid,
-
-    /// The ID of the migration in to this VMM, if this VMM is being
-    /// ensured is part of a migration in. If this is `None`, the VMM is not
-    /// being created due to a migration.
-    pub migration_id: Option<Uuid>,
-
-    /// The address at which this VMM should serve a Propolis server API.
-    pub propolis_addr: SocketAddr,
-
-    /// Metadata used to track instance statistics.
-    pub metadata: InstanceMetadata,
-}
-
-/// Describes sled-local configuration that a sled-agent must establish to make
-/// the instance's virtual hardware fully functional.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct InstanceSledLocalConfig {
-    pub hostname: Hostname,
-    pub nics: Vec<NetworkInterface>,
-    pub source_nat: SourceNatConfig,
-    /// Zero or more external IP addresses (either floating or ephemeral),
-    /// provided to an instance to allow inbound connectivity.
-    pub ephemeral_ip: Option<IpAddr>,
-    pub floating_ips: Vec<IpAddr>,
-    pub multicast_groups: Vec<InstanceMulticastMembership>,
-    pub firewall_rules: Vec<ResolvedVpcFirewallRule>,
-    pub dhcp_config: DhcpConfig,
-    pub delegated_zvols: Vec<DelegatedZvol>,
-}
-
-/// Represents a multicast group membership for an instance.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct InstanceMulticastMembership {
-    pub group_ip: IpAddr,
-    // For Source-Specific Multicast (SSM)
-    pub sources: Vec<IpAddr>,
-}
-
-/// Request body for multicast group operations.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum InstanceMulticastBody {
-    Join(InstanceMulticastMembership),
-    Leave(InstanceMulticastMembership),
-}
-
-/// Metadata used to track statistics about an instance.
-///
-// NOTE: The instance ID is not here, since it's already provided in other
-// pieces of the instance-related requests. It is pulled from there when
-// publishing metrics for the instance.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct InstanceMetadata {
-    pub silo_id: Uuid,
-    pub project_id: Uuid,
-}
+// These types must be updated when a new version is introduced
+pub type InstanceEnsureBody = migrations::latest::InstanceEnsureBody;
 
 /// The body of a request to move a previously-ensured instance into a specific
 /// runtime state.
@@ -193,49 +121,4 @@ pub struct InstanceMigrationTargetParams {
 pub enum InstanceExternalIpBody {
     Ephemeral(IpAddr),
     Floating(IpAddr),
-}
-
-/// Specifies the virtual hardware configuration of a new Propolis VMM in the
-/// form of a Propolis instance specification.
-///
-/// Sled-agent expects that when an instance spec is provided alongside an
-/// `InstanceSledLocalConfig` to initialize a new instance, the NIC IDs in that
-/// config's network interface list will match the IDs of the virtio network
-/// backends in the instance spec.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct VmmSpec(pub propolis_client::instance_spec::InstanceSpecV0);
-
-impl VmmSpec {
-    pub fn crucible_backends(
-        &self,
-    ) -> impl Iterator<Item = (&SpecKey, &CrucibleStorageBackend)> {
-        self.0.components.iter().filter_map(
-            |(key, component)| match component {
-                ComponentV0::CrucibleStorageBackend(be) => Some((key, be)),
-                _ => None,
-            },
-        )
-    }
-
-    pub fn viona_backends(
-        &self,
-    ) -> impl Iterator<Item = (&SpecKey, &VirtioNetworkBackend)> {
-        self.0.components.iter().filter_map(
-            |(key, component)| match component {
-                ComponentV0::VirtioNetworkBackend(be) => Some((key, be)),
-                _ => None,
-            },
-        )
-    }
-
-    pub fn file_backends(
-        &self,
-    ) -> impl Iterator<Item = (&SpecKey, &FileStorageBackend)> {
-        self.0.components.iter().filter_map(
-            |(key, component)| match component {
-                ComponentV0::FileStorageBackend(be) => Some((key, be)),
-                _ => None,
-            },
-        )
-    }
 }

@@ -74,6 +74,7 @@ members = [
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
+    "nexus-sled-agent-shared/migrations",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -131,6 +132,7 @@ members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/types/migrations",
     "sled-agent/zone-images",
     "sled-agent/zone-images-examples",
     "sled-diagnostics",
@@ -236,6 +238,7 @@ default-members = [
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
+    "nexus-sled-agent-shared/migrations",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -293,6 +296,7 @@ default-members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/types/migrations",
     "sled-agent/zone-images",
     "sled-agent/zone-images-examples",
     "sled-diagnostics",
@@ -569,6 +573,7 @@ nexus-reconfigurator-rendezvous = { path = "nexus/reconfigurator/rendezvous" }
 nexus-reconfigurator-simulation = { path = "nexus/reconfigurator/simulation" }
 nexus-saga-recovery = { path = "nexus/saga-recovery" }
 nexus-sled-agent-shared = { path = "nexus-sled-agent-shared" }
+nexus-sled-agent-shared-migrations = { path = "nexus-sled-agent-shared/migrations" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
@@ -712,6 +717,7 @@ sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
+sled-agent-types-migrations = { path = "sled-agent/types/migrations" }
 sled-agent-zone-images = { path = "sled-agent/zone-images" }
 sled-agent-zone-images-examples = { path = "sled-agent/zone-images-examples" }
 sled-diagnostics = { path = "sled-diagnostics" }

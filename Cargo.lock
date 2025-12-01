@@ -7356,6 +7356,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-sled-agent-shared-migrations"
+version = "0.1.0"
+
+[[package]]
 name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
@@ -12945,6 +12949,7 @@ dependencies = [
  "serde_human_bytes",
  "serde_json",
  "sha3",
+ "sled-agent-types-migrations",
  "sled-hardware-types",
  "slog",
  "slog-error-chain",
@@ -12953,6 +12958,25 @@ dependencies = [
  "thiserror 2.0.17",
  "toml 0.8.23",
  "tufaceous-artifact",
+ "uuid",
+]
+
+[[package]]
+name = "sled-agent-types-migrations"
+version = "0.1.0"
+dependencies = [
+ "newtype-uuid",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "oxnet",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=3f1752e6cee9a2f8ecdce6e2ad3326781182e2d9)",
+ "schemars 0.8.22",
+ "serde",
+ "sled-hardware-types",
+ "slog",
+ "slog-error-chain",
+ "thiserror 2.0.17",
  "uuid",
 ]
 

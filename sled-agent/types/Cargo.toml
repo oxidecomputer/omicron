@@ -29,6 +29,7 @@ serde.workspace = true
 serde_human_bytes.workspace = true
 serde_json.workspace = true
 sha3.workspace = true
+sled-agent-types-migrations.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
