@@ -4740,10 +4740,16 @@ mod tests {
         let query =
             insert_target_query(BlueprintUuid::nil(), false, Utc::now());
 
-        let _ = query
+        let explanation = query
             .explain_async(&conn)
             .await
             .expect("Failed to explain query - is it valid SQL?");
+        assert!(
+            !explanation.contains("FULL SCAN"),
+            "Found an unexpected FULL SCAN: {}",
+            explanation
+        );
+        eprintln!("{explanation}");
 
         db.terminate().await;
         logctx.cleanup_successful();
