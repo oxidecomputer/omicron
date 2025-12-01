@@ -430,20 +430,20 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.inventory_load_rx()
     }
 
-    async fn get_http_server_external_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_external_server_address().await.unwrap()
+    fn get_http_server_external_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_external_server_address().unwrap()
     }
 
-    async fn get_http_server_techport_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_techport_server_address().await.unwrap()
+    fn get_http_server_techport_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_techport_server_address().unwrap()
     }
 
-    async fn get_http_server_internal_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_internal_server_address().await.unwrap()
+    fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_internal_server_address().unwrap()
     }
 
-    async fn get_http_server_lockstep_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_lockstep_server_address().await.unwrap()
+    fn get_http_server_lockstep_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_lockstep_server_address().unwrap()
     }
 
     async fn upsert_test_dataset(

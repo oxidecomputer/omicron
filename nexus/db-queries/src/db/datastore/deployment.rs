@@ -3149,6 +3149,7 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::planner::Planner;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_types::deployment::BlueprintArtifactVersion;
     use nexus_types::deployment::BlueprintHostPhase2DesiredContents;
@@ -3159,7 +3160,6 @@ mod tests {
     use nexus_types::deployment::ExpectedActiveRotSlot;
     use nexus_types::deployment::PendingMgsUpdate;
     use nexus_types::deployment::PlanningInput;
-    use nexus_types::deployment::PlanningInputBuilder;
     use nexus_types::deployment::SledDetails;
     use nexus_types::deployment::SledDisk;
     use nexus_types::deployment::SledFilter;
@@ -3191,15 +3191,11 @@ mod tests {
     use std::mem;
     use std::net::Ipv6Addr;
     use std::sync::Arc;
-    use std::sync::LazyLock;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tufaceous_artifact::ArtifactHash;
     use tufaceous_artifact::ArtifactVersion;
-
-    static EMPTY_PLANNING_INPUT: LazyLock<PlanningInput> =
-        LazyLock::new(|| PlanningInputBuilder::empty_input());
 
     #[derive(Default)]
     pub struct NetworkResourceControlFlow {
@@ -3448,11 +3444,18 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &planning_input,
             "test",
             PlannerRng::from_entropy(),
         )
         .expect("failed to create builder");
+
+        // We made changes to the planning input we want to be reflected in the
+        // new blueprint; reuse the `Planner`'s method for replicating those
+        // changes.
+        Planner::update_builder_from_planning_input(
+            &mut builder,
+            &planning_input,
+        );
 
         // Ensure disks on our sled
         assert_eq!(
@@ -3795,7 +3798,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            &planning_input,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3851,7 +3853,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
-            &planning_input,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3904,7 +3905,6 @@ mod tests {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint4,
-            &planning_input,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -3961,7 +3961,6 @@ mod tests {
         let blueprint6 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint5,
-            &planning_input,
             "dummy",
             PlannerRng::from_entropy(),
         )
@@ -4032,7 +4031,6 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -4041,7 +4039,6 @@ mod tests {
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4141,7 +4138,6 @@ mod tests {
         let blueprint4 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint3,
-            &EMPTY_PLANNING_INPUT,
             "test3",
             PlannerRng::from_entropy(),
         )
@@ -4180,7 +4176,6 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &EMPTY_PLANNING_INPUT,
             "test2",
             PlannerRng::from_entropy(),
         )
@@ -4365,7 +4360,6 @@ mod tests {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &example_system.input,
             &format!("{test_name}-2"),
             PlannerRng::from_entropy(),
         )

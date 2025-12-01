@@ -456,7 +456,17 @@ impl RackInitRequestBuilder {
     }
 }
 
-pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
+/// Starts the control plane for tests and tools
+///
+/// This helper manges the configuration and startup of all the control plane
+/// components in a way where:
+///
+/// - control planes started in this way are isolated from each other (in that
+///   they don't know about each other, have separate data/databases, etc.)
+/// - components are generally listening on localhost and pointed at each other
+/// - most components are the real deal, though a few are simulated (notably
+///   sled agent and SPs)
+pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub config: &'a mut NexusConfig,
     test_name: &'a str,
     rack_init_builder: RackInitRequestBuilder,
@@ -505,12 +515,10 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 }
 
 type StepInitFn<'a, N> = Box<
-    dyn for<'b> FnOnce(
-        &'b mut ControlPlaneTestContextBuilder<'a, N>,
-    ) -> BoxFuture<'b, ()>,
+    dyn for<'b> FnOnce(&'b mut ControlPlaneStarter<'a, N>) -> BoxFuture<'b, ()>,
 >;
 
-impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
+impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub fn new(test_name: &'a str, config: &'a mut NexusConfig) -> Self {
         let start_time = chrono::Utc::now();
         let logctx = LogContext::new(test_name, &config.pkg.log);
@@ -1171,14 +1179,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         )
         .await;
 
-        let external_server_addr =
-            server.get_http_server_external_address().await;
+        let external_server_addr = server.get_http_server_external_address();
         let techport_external_server_addr =
-            server.get_http_server_techport_address().await;
-        let internal_server_addr =
-            server.get_http_server_internal_address().await;
-        let lockstep_server_addr =
-            server.get_http_server_lockstep_address().await;
+            server.get_http_server_techport_address();
+        let internal_server_addr = server.get_http_server_internal_address();
+        let lockstep_server_addr = server.get_http_server_lockstep_address();
         let testctx_external = ClientTestContext::new(
             external_server_addr,
             self.logctx
@@ -1776,10 +1781,9 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
 ) -> Result<ControlPlaneTestContext<N>> {
-    let builder =
-        ControlPlaneTestContextBuilder::<N>::new("omicron-dev", config);
+    let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
 
-    let log = &builder.logctx.log;
+    let log = &starter.logctx.log;
     debug!(log, "Ensuring seed tarball exists");
 
     // Start up a ControlPlaneTestContext, which tautologically sets up
@@ -1796,7 +1800,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     status.log(log, &seed_tar);
 
     Ok(setup_with_config_impl(
-        builder,
+        starter,
         PopulateCrdb::FromSeed { input_tar: seed_tar },
         sim::SimMode::Auto,
         None,
@@ -1816,9 +1820,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
 ) -> ControlPlaneTestContext<N> {
-    let builder = ControlPlaneTestContextBuilder::<N>::new(test_name, config);
+    let starter = ControlPlaneStarter::<N>::new(test_name, config);
     setup_with_config_impl(
-        builder,
+        starter,
         PopulateCrdb::FromEnvironmentSeed,
         sim_mode,
         initial_cert,
@@ -1830,7 +1834,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
 }
 
 async fn setup_with_config_impl<N: NexusServer>(
-    mut builder: ControlPlaneTestContextBuilder<'_, N>,
+    mut starter: ControlPlaneStarter<'_, N>,
     populate: PopulateCrdb,
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
@@ -1841,7 +1845,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     const STEP_TIMEOUT: Duration = Duration::from_secs(600);
 
     // All setups will start with CRDB and clickhouse
-    builder
+    starter
         .init_with_steps(
             vec![
                 (
@@ -1863,7 +1867,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // DNS and Nexus, but we currently don't use SMF to manage the services used in
     // the test context so we need to make the Nexus / DNS information available
     // to get the switch services working.
-    builder
+    starter
         .init_with_steps(
             vec![
                 (
@@ -1889,7 +1893,7 @@ async fn setup_with_config_impl<N: NexusServer>(
         .await;
 
     if second_nexus {
-        builder
+        starter
             .init_with_steps(
                 vec![(
                     "configure_second_nexus",
@@ -1907,7 +1911,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // agent will be for switch1.
 
     let mgs_config = gateway_config_file.clone();
-    builder
+    starter
         .init_with_steps(
             vec![
                 (
@@ -1951,7 +1955,7 @@ async fn setup_with_config_impl<N: NexusServer>(
         .await;
 
     if extra_sled_agents > 0 {
-        builder
+        starter
             .init_with_steps(
                 vec![
                     (
@@ -2000,7 +2004,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // The first and second sled agents have special UUIDs, and any extra ones
     // after that are random.
 
-    builder
+    starter
         .init_with_steps(
             vec![(
                 "start_sled1",
@@ -2019,7 +2023,7 @@ async fn setup_with_config_impl<N: NexusServer>(
         .await;
 
     if extra_sled_agents > 0 {
-        builder
+        starter
             .init_with_steps(
                 vec![(
                     "start_sled2",
@@ -2039,7 +2043,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     }
 
     for index in 1..extra_sled_agents {
-        builder
+        starter
             .init_with_steps(
                 vec![(
                     "add_extra_sled_agent",
@@ -2062,7 +2066,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // agent. Afterwards, configure the sled agents and start the rest of the
     // the required services.
 
-    builder
+    starter
         .init_with_steps(
             vec![
                 (
@@ -2106,7 +2110,7 @@ async fn setup_with_config_impl<N: NexusServer>(
         )
         .await;
 
-    builder.build()
+    starter.build()
 }
 
 /// Starts a simulated sled agent

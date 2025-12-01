@@ -322,7 +322,6 @@ mod test {
     use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
     use internal_dns_types::names::DNS_ZONE;
     use internal_dns_types::names::ServiceName;
-    use nexus_db_model::DbMetadataNexusState;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
@@ -334,7 +333,6 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
-    use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -352,18 +350,13 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
-    use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
-    use nexus_types::deployment::CockroachDbSettings;
+    use nexus_types::deployment::ExternalIpPolicy;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     pub use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     pub use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::deployment::OximeterReadMode;
-    use nexus_types::deployment::OximeterReadPolicy;
     use nexus_types::deployment::PendingMgsUpdates;
-    use nexus_types::deployment::PlannerConfig;
-    use nexus_types::deployment::SledFilter;
-    use nexus_types::deployment::TufRepoPolicy;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::external_api::params;
     use nexus_types::external_api::shared;
@@ -376,6 +369,7 @@ mod test {
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::internal_api::params::Srv;
     use nexus_types::silo::silo_dns_name;
+    use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::REPO_DEPOT_PORT;
@@ -384,12 +378,6 @@ mod test {
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
-    use omicron_common::policy::COCKROACHDB_REDUNDANCY;
-    use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
-    use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
-    use omicron_common::policy::NEXUS_REDUNDANCY;
-    use omicron_common::policy::OXIMETER_REDUNDANCY;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::BlueprintUuid;
@@ -1514,60 +1502,19 @@ mod test {
         // Now, go through the motions of provisioning a new Nexus zone.
         // We do this directly with BlueprintBuilder to avoid the planner
         // deciding to make other unrelated changes.
-        let sled_rows = datastore
-            .sled_list_all_batched(&opctx, SledFilter::Commissioned)
-            .await
-            .unwrap();
-        let zpool_rows =
-            datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
         let ip_pool_range_rows =
             fetch_all_service_ip_pool_ranges(&datastore, &opctx).await;
-        let active_nexus_zones = datastore
-            .get_db_metadata_nexus_in_state(
-                &opctx,
-                vec![DbMetadataNexusState::Active],
-            )
-            .await
-            .internal_context("fetching active nexuses")
-            .unwrap()
-            .into_iter()
-            .map(|z| z.nexus_id())
-            .collect();
-        let planning_input = PlanningInputFromDb {
-            sled_rows: &sled_rows,
-            zpool_rows: &zpool_rows,
-            ip_pool_range_rows: &ip_pool_range_rows,
-            external_dns_external_ips: BTreeSet::new(),
-            internal_dns_version: dns_initial_internal.generation.into(),
-            external_dns_version: dns_latest_external.generation.into(),
-            // These are not used because we're not actually going through
-            // the planner.
-            cockroachdb_settings: &CockroachDbSettings::empty(),
-            external_ip_rows: &[],
-            service_nic_rows: &[],
-            target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
-            target_nexus_zone_count: NEXUS_REDUNDANCY,
-            target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
-            target_oximeter_zone_count: OXIMETER_REDUNDANCY,
-            target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
-            target_cockroachdb_cluster_version:
-                CockroachDbClusterVersion::POLICY,
-            target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
-            clickhouse_policy: None,
-            oximeter_read_policy: OximeterReadPolicy::new(1),
-            tuf_repo: TufRepoPolicy::initial(),
-            old_repo: TufRepoPolicy::initial(),
-            planner_config: PlannerConfig::default(),
-            active_nexus_zones,
-            not_yet_nexus_zones: BTreeSet::new(),
-            log,
-        }
-        .build()
-        .unwrap();
+        let external_ip_policy = {
+            let mut builder = ExternalIpPolicy::builder();
+            for range in ip_pool_range_rows {
+                let range = IpRange::try_from(&range).unwrap();
+                builder.push_service_pool_range(range).unwrap();
+            }
+            builder.build()
+        };
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
-            &planning_input,
             "test suite",
             PlannerRng::from_entropy(),
         )
@@ -1590,7 +1537,7 @@ mod test {
         let new_nexus_external_ip =
             ExternalNetworkingAllocator::from_current_zones(
                 &builder,
-                planning_input.external_ip_policy(),
+                &external_ip_policy,
             )
             .expect("constructed ExternalNetworkingAllocator")
             .for_new_nexus()

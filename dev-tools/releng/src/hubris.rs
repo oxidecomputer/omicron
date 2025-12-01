@@ -29,6 +29,7 @@ pub(crate) async fn fetch_hubris_artifacts(
     client: reqwest::Client,
     manifest_list: Utf8PathBuf,
     output_dir: Utf8PathBuf,
+    name_check: &'static str,
 ) -> Result<()> {
     macro_rules! zip {
         ($expr:expr) => {
@@ -109,11 +110,72 @@ pub(crate) async fn fetch_hubris_artifacts(
         }
     }
 
+    workaround_check(&manifest, name_check)?;
     fs::write(
         output_dir.join("manifest.toml"),
         toml::to_string_pretty(&manifest)?.into_bytes(),
     )
     .await?;
+    Ok(())
+}
+
+// omicron#9437 fixed an issue where an incorrect RoT image could be chosen.
+// Because the RoT is upgraded before any omicron components, the risk is
+// the incorrect RoT gets chosen and blocks the update with the fix in it.
+// For the purposes of working around the bug and making sure we can deploy
+// the fix, ensure our images are in the "correct" order
+fn workaround_check(
+    manifest: &DeserializedManifest,
+    name_check: &'static str,
+) -> Result<()> {
+    // This bug only affects `gimlet_rot` and `gimlet_rot_bootloader`
+    // We search for these by name. This is ugly but temporary.
+    let gimlet_artifacts =
+        manifest.artifacts.get(&KnownArtifactKind::GimletRot).unwrap();
+
+    let gimlet = gimlet_artifacts
+        .iter()
+        .position(|x| x.name == format!("oxide-rot-1-{}-gimlet", name_check))
+        .expect("failed to find gimlet");
+
+    let cosmo = gimlet_artifacts
+        .iter()
+        .position(|x| x.name == format!("oxide-rot-1-{}-cosmo", name_check))
+        .expect("failed to find cosmo");
+
+    // We need the indicies to be relative for each key set
+    if gimlet > cosmo {
+        anyhow::bail!(
+            "The gimlet entry for `GimletRot` comes after cosmo. This may cause problems."
+        );
+    }
+
+    let gimlet_artifacts = manifest
+        .artifacts
+        .get(&KnownArtifactKind::GimletRotBootloader)
+        .unwrap();
+
+    let gimlet = gimlet_artifacts
+        .iter()
+        .position(|x| {
+            x.name == format!("gimlet_rot_bootloader-{}-gimlet", name_check)
+        })
+        .expect("failed to find gimlet");
+
+    let cosmo = gimlet_artifacts
+        .iter()
+        .position(|x| {
+            x.name == format!("gimlet_rot_bootloader-{}-cosmo", name_check)
+        })
+        .expect("failed to find cosmo");
+
+    // We need the indicies to be relative for each key set
+    if gimlet > cosmo {
+        anyhow::bail!(
+            "The gimlet entry for `GimletRotBootloader` comes after cosmo. This may cause problems."
+        );
+    }
+
     Ok(())
 }
 

@@ -12,7 +12,7 @@ use nexus_lockstep_client::types::{
 };
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::PlannerRng;
-use nexus_types::deployment::{Blueprint, BlueprintSource, PlanningInput};
+use nexus_types::deployment::{Blueprint, BlueprintSource};
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
@@ -80,7 +80,6 @@ pub async fn blueprint_load_target_enabled(
 /// their test environment.
 pub async fn blueprint_edit_current_target(
     log: &slog::Logger,
-    planning_input: &PlanningInput,
     nexus: &nexus_lockstep_client::Client,
     edit_fn: &dyn Fn(&mut BlueprintBuilder) -> Result<(), anyhow::Error>,
 ) -> Result<(Blueprint, Blueprint), anyhow::Error> {
@@ -92,7 +91,6 @@ pub async fn blueprint_edit_current_target(
     let mut builder = BlueprintBuilder::new_based_on(
         log,
         &blueprint1,
-        &planning_input,
         "test-suite",
         PlannerRng::from_entropy(),
     )
