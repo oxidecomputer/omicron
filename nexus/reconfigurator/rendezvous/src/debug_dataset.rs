@@ -10,7 +10,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_db_queries::db::model::RendezvousDebugDataset;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
-use nexus_types::internal_api::background::DebugDatasetsRendezvousStats;
+use nexus_types::internal_api::background::DatasetsRendezvousStats;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
@@ -24,7 +24,7 @@ pub(crate) async fn reconcile_debug_datasets(
     blueprint_id: BlueprintUuid,
     blueprint_datasets: impl Iterator<Item = &BlueprintDatasetConfig>,
     inventory_datasets: &BTreeSet<DatasetUuid>,
-) -> anyhow::Result<DebugDatasetsRendezvousStats> {
+) -> anyhow::Result<DatasetsRendezvousStats> {
     // We expect basically all executions of this task to do nothing: we're
     // activated periodically, and only do work when a dataset has been
     // newly-added or newly-expunged.
@@ -40,7 +40,7 @@ pub(crate) async fn reconcile_debug_datasets(
         .map(|d| (d.id(), d))
         .collect::<BTreeMap<_, _>>();
 
-    let mut stats = DebugDatasetsRendezvousStats::default();
+    let mut stats = DatasetsRendezvousStats::default();
 
     for dataset in blueprint_datasets.filter(|d| d.kind == DatasetKind::Debug) {
         match dataset.disposition {
@@ -266,7 +266,7 @@ mod tests {
                  (result_stats, datastore_datasets)
             });
 
-            let mut expected_stats = DebugDatasetsRendezvousStats::default();
+            let mut expected_stats = DatasetsRendezvousStats::default();
 
             for (id, prep) in prep {
                 let id: DatasetUuid = usize_to_id(id);
@@ -275,7 +275,7 @@ mod tests {
                 let in_db_tombstoned = datastore_datasets
                     .get(&id)
                     .map(|d| d.is_tombstoned());
-                let in_db_after = in_db_tombstoned.is_some();
+                let in_db_after = datastore_datasets.contains_key(&id);
                 let in_service =
                     prep.disposition == ArbitraryDisposition::InService;
                 let in_inventory = prep.in_inventory;

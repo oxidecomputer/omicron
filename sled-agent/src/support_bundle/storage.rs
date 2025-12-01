@@ -14,7 +14,8 @@ use dropshot::HttpError;
 use futures::Stream;
 use futures::StreamExt;
 use illumos_utils::zfs::DatasetProperties;
-use omicron_common::api::external::Error as ExternalError;
+use illumos_utils::zfs::DestroyDatasetError;
+use illumos_utils::zfs::DestroyDatasetErrorVariant;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
@@ -35,9 +36,10 @@ use sled_agent_config_reconciler::NestedDatasetListError;
 use sled_agent_config_reconciler::NestedDatasetMountError;
 use sled_agent_types::support_bundle::BUNDLE_FILE_NAME;
 use sled_agent_types::support_bundle::BUNDLE_TMP_FILE_NAME;
-use sled_storage::manager::NestedDatasetConfig;
-use sled_storage::manager::NestedDatasetListOptions;
-use sled_storage::manager::NestedDatasetLocation;
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
+use sled_storage::nested_dataset::NestedDatasetConfig;
+use sled_storage::nested_dataset::NestedDatasetListOptions;
+use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::io::Write;
@@ -85,9 +87,6 @@ pub enum Error {
     TryFromInt(#[from] std::num::TryFromIntError),
 
     #[error(transparent)]
-    Storage(#[from] sled_storage::error::Error),
-
-    #[error(transparent)]
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
@@ -129,10 +128,18 @@ impl From<Error> for HttpError {
             Error::DatasetNotFound => {
                 HttpError::for_not_found(None, "Dataset not found".to_string())
             }
+            Error::NestedDatasetDestroyError(
+                NestedDatasetDestroyError::DestroyFailed(DestroyDatasetError {
+                    err: DestroyDatasetErrorVariant::NotFound,
+                    ..
+                }),
+            ) => HttpError::for_not_found(
+                Some(NESTED_DATASET_NOT_FOUND.to_string()),
+                NESTED_DATASET_NOT_FOUND.to_string(),
+            ),
             Error::NotAFile => {
                 HttpError::for_bad_request(None, "Not a file".to_string())
             }
-            Error::Storage(err) => HttpError::from(ExternalError::from(err)),
             Error::Zip(err) => match err {
                 ZipError::FileNotFound => HttpError::for_not_found(
                     None,
@@ -872,8 +879,12 @@ impl<'a> SupportBundleManager<'a> {
             "bundle_id" => support_bundle_id.to_string(),
         ));
         info!(log, "Destroying support bundle");
+
         let root =
             self.get_mounted_dataset_config(zpool_id, dataset_id).await?.name;
+
+        // If we get a "not found" error destroying this dataset, it may have
+        // already been deleted.
         self.storage
             .dyn_nested_dataset_destroy(NestedDatasetLocation {
                 path: support_bundle_id.to_string(),

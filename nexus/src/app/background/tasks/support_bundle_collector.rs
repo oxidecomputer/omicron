@@ -23,7 +23,6 @@ use gateway_client::types::SpIgnition;
 use gateway_types::component::SpType;
 use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
-use nexus_db_model::Ereport;
 use nexus_db_model::Sled;
 use nexus_db_model::SupportBundle;
 use nexus_db_model::SupportBundleState;
@@ -35,6 +34,7 @@ use nexus_db_queries::db::datastore::EreportFilters;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_reconfigurator_preparation::reconfigurator_state_load;
 use nexus_types::deployment::SledFilter;
+use nexus_types::fm::Ereport;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
@@ -53,6 +53,7 @@ use parallel_task_set::ParallelTaskSet;
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
@@ -233,12 +234,16 @@ impl SupportBundleCollector {
                 return Ok(SledAgentBundleCleanupResult::Deleted);
             }
             Err(progenitor_client::Error::ErrorResponse(err))
-                if err.status() == http::StatusCode::NOT_FOUND =>
+                if err.status() == http::StatusCode::NOT_FOUND
+                    && err.error_code.as_ref().is_some_and(|code| {
+                        code.contains(NESTED_DATASET_NOT_FOUND)
+                    }) =>
             {
                 warn!(
                     &opctx.log,
                     "SupportBundleCollector could not delete bundle (not found)";
-                    "id" => %bundle.id
+                    "id" => %bundle.id,
+                    "err" => ?err
                 );
 
                 return Ok(SledAgentBundleCleanupResult::NotFound);
@@ -532,6 +537,14 @@ struct BundleCollection {
     transfer_chunk_size: NonZeroU64,
 }
 
+// This type describes a single step in the Support Bundle collection.
+//
+// - All steps have access to the "BundleCollection", which includes
+// tools for actually acquiring data.
+// - All steps have access to an output directory where they can store
+// serialized data to a file.
+// - Finally, all steps can emit a "CollectionStepOutput", which can either
+// update the collection report, or generate more steps.
 type CollectionStepFn = Box<
     dyn for<'b> FnOnce(
             &'b Arc<BundleCollection>,
@@ -542,10 +555,9 @@ type CollectionStepFn = Box<
 >;
 
 enum CollectionStepOutput {
-    HostEreports(SupportBundleEreportStatus),
-    SpEreports(SupportBundleEreportStatus),
+    Ereports(SupportBundleEreportStatus),
     SavingSpDumps { listed_sps: bool },
-    // NOTE: The ditinction between this and "Spawn" is pretty artificial -
+    // NOTE: The distinction between this and "Spawn" is pretty artificial -
     // it's just to preserve a part of the report which says "we tried to
     // list in-service sleds".
     //
@@ -565,11 +577,8 @@ impl CollectionStepOutput {
         steps: &mut Vec<(&'static str, CollectionStepFn)>,
     ) {
         match self {
-            CollectionStepOutput::HostEreports(status) => {
-                report.host_ereports = status;
-            }
-            CollectionStepOutput::SpEreports(status) => {
-                report.sp_ereports = status;
+            CollectionStepOutput::Ereports(status) => {
+                report.ereports = Some(status);
             }
             CollectionStepOutput::SavingSpDumps { listed_sps } => {
                 report.listed_sps = listed_sps;
@@ -609,51 +618,64 @@ impl BundleCollection {
         self: &Arc<Self>,
         dir: &Utf8TempDir,
     ) -> anyhow::Result<SupportBundleCollectionReport> {
-        let mut collection = Box::pin(self.collect_bundle_as_file(&dir));
+        // TL;DR: This `tokio::select` is allowed to poll multiple futures, but
+        // should not do any async work within the body of any chosen branch. A
+        // previous iteration of this code polled the "collection" as "&mut
+        // collection", and checked the status of the support bundle within a
+        // branch of the "select" polling "yield_interval.tick()".
+        //
+        // We organize this work to "check for cancellation" as a whole future
+        // for a critical, but subtle reason: After the tick timer yields,
+        // we may then try to `await` a database function.
+        //
+        // This, at a surface-level glance seems innocent enough. However, there
+        // is something potentially insidious here: if calling a datastore
+        // function - such as "support_bundle_get" - awaits acquiring access
+        // to a connection from the connection pool, while creating the
+        // collection ALSO potentially awaits acquiring access to the
+        // connection pool, it is possible for:
+        //
+        // 1. The `&mut collection` arm to have created a future, currently
+        //    yielded, which wants access to this underlying resource.
+        // 2. The current operation executing in `support_bundle_get` to
+        //    be awaiting access to this same underlying resource.
+        //
+        // In this specific case, the connection pool would be attempting to
+        // yield to the `&mut collection` arm, which cannot run, if we were
+        // awaiting in the body of a different async select arm. This would
+        // result in a deadlock.
+        //
+        // In the future, we may attempt to make access to the connection pool
+        // safer from concurrent asynchronous access - it is unsettling that
+        // multiple concurrent `.claim()` functions can cause this behavior -
+        // but in the meantime, we perform this cancellation check in a single
+        // future that always is polled concurrently with the collection work.
+        // Because of this separation, each future is polled until one
+        // completes, at which point we deterministically exit.
+        //
+        // For more details, see:
+        // https://github.com/oxidecomputer/omicron/issues/9259
 
-        // We periodically check the state of the support bundle - if a user
-        // explicitly cancels it, we should stop the collection process and
-        // return.
-        let work_duration = tokio::time::Duration::from_secs(5);
-        let mut yield_interval = tokio::time::interval_at(
-            tokio::time::Instant::now() + work_duration,
-            work_duration,
-        );
-
-        loop {
-            tokio::select! {
-                // Timer fired mid-collection - let's check if we should stop.
-                _ = yield_interval.tick() => {
-                    trace!(
-                        &self.log,
-                        "Checking if Bundle Collection cancelled";
-                        "bundle" => %self.bundle.id
-                    );
-
-                    let bundle = self.datastore.support_bundle_get(
-                        &self.opctx,
-                        self.bundle.id.into()
-                    ).await?;
-                    if !matches!(bundle.state, SupportBundleState::Collecting) {
-                        warn!(
-                            &self.log,
-                            "Support Bundle cancelled - stopping collection";
-                            "bundle" => %self.bundle.id,
-                            "state" => ?self.bundle.state
-                        );
-                        anyhow::bail!("Support Bundle Cancelled");
-                    }
-                },
-                // Otherwise, keep making progress on the collection itself.
-                report = &mut collection => {
-                    info!(
-                        &self.log,
-                        "Bundle Collection completed";
-                        "bundle" => %self.bundle.id
-                    );
-                    return report;
-                },
-            }
+        tokio::select! {
+            // Returns if the bundle should no longer be collected.
+            why = self.check_for_cancellation() => {
+                warn!(
+                    &self.log,
+                    "Support Bundle cancelled - stopping collection";
+                    "bundle" => %self.bundle.id,
+                    "state" => ?self.bundle.state
+                );
+                return Err(why);
+            },
+            // Otherwise, keep making progress on the collection itself.
+            report = self.collect_bundle_as_file(&dir) => {
+                info!(
+                    &self.log,
+                    "Bundle Collection completed";
+                    "bundle" => %self.bundle.id
+                );
+                return report;
+            },
         }
     }
 
@@ -763,6 +785,65 @@ impl BundleCollection {
         Ok(())
     }
 
+    // Indefinitely perform periodic checks about whether or not we should
+    // cancel the bundle.
+    //
+    // Returns an error if:
+    // - The bundle state is no longer SupportBundleState::Collecting
+    // (which happens if the bundle has been explicitly cancelled, or
+    // if the backing storage has been expunged).
+    // - The bundle has been deleted
+    //
+    // Otherwise, keeps checking indefinitely while polled.
+    async fn check_for_cancellation(&self) -> anyhow::Error {
+        let work_duration = tokio::time::Duration::from_secs(5);
+        let mut yield_interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + work_duration,
+            work_duration,
+        );
+
+        loop {
+            // Timer fired mid-collection - check if we should stop.
+            yield_interval.tick().await;
+            trace!(
+                self.log,
+                "Checking if Bundle Collection cancelled";
+                "bundle" => %self.bundle.id
+            );
+
+            match self
+                .datastore
+                .support_bundle_get(&self.opctx, self.bundle.id.into())
+                .await
+            {
+                Ok(SupportBundle {
+                    state: SupportBundleState::Collecting,
+                    ..
+                }) => {
+                    // Bundle still collecting; continue...
+                    continue;
+                }
+                Ok(_) => {
+                    // Not collecting, for any reason: Time to exit
+                    return anyhow::anyhow!("Support Bundle Cancelled");
+                }
+                Err(Error::ObjectNotFound { .. } | Error::NotFound { .. }) => {
+                    return anyhow::anyhow!("Support Bundle Deleted");
+                }
+                Err(err) => {
+                    warn!(
+                        self.log,
+                        "Database error checking bundle cancellation";
+                        InlineErrorChain::new(&err)
+                    );
+
+                    // If we cannot contact the database, retry later
+                    continue;
+                }
+            }
+        }
+    }
+
     async fn run_collect_bundle_steps(
         self: &Arc<Self>,
         output: &Utf8TempDir,
@@ -799,11 +880,17 @@ impl BundleCollection {
                 };
             }
 
-            // If we've run out of tasks to spawn, join all the existing steps.
-            while let Some(previous_result) = tasks.join_next().await {
+            // If we've run out of tasks to spawn, join any of the previously
+            // spawned tasks, if any exist.
+            if let Some(previous_result) = tasks.join_next().await {
                 if let Ok(output) = previous_result {
                     output.process(&mut report, &mut steps);
                 };
+
+                // As soon as any task completes, see if we can spawn more work
+                // immediately. This ensures that the ParallelTaskSet is
+                // saturated as much as it can be.
+                continue;
             }
 
             // Executing steps may create additional steps, as follow-up work.
@@ -876,74 +963,6 @@ impl BundleCollection {
         };
 
         Ok(CollectionStepOutput::None)
-    }
-
-    async fn collect_host_ereports(
-        self: &Arc<Self>,
-        dir: &Utf8Path,
-    ) -> anyhow::Result<CollectionStepOutput> {
-        let Some(ref ereport_filters) = self.request.ereport_query else {
-            debug!(self.log, "Support bundle: ereports not requested");
-            return Ok(CollectionStepOutput::None);
-        };
-        let ereports_dir = dir.join("ereports");
-        let status = match self
-            .save_host_ereports(ereport_filters.clone(), ereports_dir.clone())
-            .await
-        {
-            Ok(n_collected) => {
-                SupportBundleEreportStatus::Collected { n_collected }
-            }
-            Err((n_collected, err)) => {
-                warn!(
-                    &self.log,
-                    "Support bundle: host ereport collection failed \
-                     ({n_collected} collected successfully)";
-                    InlineErrorChain::new(err.as_ref()),
-                );
-
-                SupportBundleEreportStatus::Failed {
-                    n_collected,
-                    error: err.to_string(),
-                }
-            }
-        };
-
-        Ok(CollectionStepOutput::HostEreports(status))
-    }
-
-    async fn collect_sp_ereports(
-        self: &Arc<Self>,
-        dir: &Utf8Path,
-    ) -> anyhow::Result<CollectionStepOutput> {
-        let Some(ref ereport_filters) = self.request.ereport_query else {
-            debug!(self.log, "Support bundle: ereports not requested");
-            return Ok(CollectionStepOutput::None);
-        };
-        let ereports_dir = dir.join("ereports");
-        let status = match self
-            .save_sp_ereports(ereport_filters.clone(), ereports_dir.clone())
-            .await
-        {
-            Ok(n_collected) => {
-                SupportBundleEreportStatus::Collected { n_collected }
-            }
-            Err((n_collected, err)) => {
-                warn!(
-                    &self.log,
-                    "Support bundle: sp ereport collection failed \
-                     ({n_collected} collected successfully)";
-                    InlineErrorChain::new(err.as_ref()),
-                );
-
-                SupportBundleEreportStatus::Failed {
-                    n_collected,
-                    error: err.to_string(),
-                }
-            }
-        };
-
-        Ok(CollectionStepOutput::SpEreports(status))
     }
 
     async fn get_or_initialize_mgs_client<'a>(
@@ -1030,7 +1049,7 @@ impl BundleCollection {
         let mut extra_steps: Vec<(&'static str, CollectionStepFn)> = vec![];
         for sp in get_available_sps(&mgs_client).await? {
             extra_steps.push((
-                "sp dump",
+                "SP dump",
                 Box::new({
                     let mgs_client = mgs_client.clone();
                     move |collection, dir| {
@@ -1058,17 +1077,16 @@ impl BundleCollection {
             return Ok(CollectionStepOutput::None);
         }
 
-        save_sp_dumps(mgs_client, sp, dir)
-            .await
-            .with_context(|| format!("SP {} {}", sp.type_, sp.slot))?;
+        save_sp_dumps(mgs_client, sp, dir).await.with_context(|| {
+            format!("failed to save SP dump from: {} {}", sp.type_, sp.slot)
+        })?;
 
         Ok(CollectionStepOutput::SavingSpDumps { listed_sps: true })
     }
 
     // Perform the work of collecting the support bundle into a temporary directory
     //
-    // - "dir" is a directory where data can be stored.
-    // - "bundle" is metadata about the bundle being collected.
+    // "dir" is a directory where data can be stored.
     //
     // If a partial bundle can be collected, it should be returned as
     // an Ok(SupportBundleCollectionReport). Any failures from this function
@@ -1080,6 +1098,10 @@ impl BundleCollection {
     //
     // As a result, it is important that this function be implemented as
     // cancel-safe.
+    //
+    // The "steps" used within this function - passed to
+    // [`Self::run_collect_bundle_steps`] - are run on a [`ParallelTaskSet`],
+    // which automatically aborts tasks when it is dropped.
     async fn collect_bundle_as_file(
         self: &Arc<Self>,
         dir: &Utf8TempDir,
@@ -1107,15 +1129,9 @@ impl BundleCollection {
                 }),
             ),
             (
-                "host ereports",
+                "ereports",
                 Box::new(|collection, dir| {
-                    collection.collect_host_ereports(dir).boxed()
-                }),
-            ),
-            (
-                "sp ereports",
-                Box::new(|collection, dir| {
-                    collection.collect_sp_ereports(dir).boxed()
+                    collection.collect_ereports(dir).boxed()
                 }),
             ),
             (
@@ -1138,7 +1154,7 @@ impl BundleCollection {
                 }),
             ),
             (
-                "spawn steps to query all sp dumps",
+                "spawn steps to query all SP dumps",
                 Box::new({
                     let mgs_client = mgs_client.clone();
                     move |collection, dir| {
@@ -1355,12 +1371,39 @@ impl BundleCollection {
         return Ok(CollectionStepOutput::None);
     }
 
-    async fn save_host_ereports(
+    async fn collect_ereports(
+        self: &Arc<Self>,
+        dir: &Utf8Path,
+    ) -> anyhow::Result<CollectionStepOutput> {
+        let Some(ref ereport_filters) = self.request.ereport_query else {
+            debug!(self.log, "Support bundle: ereports not requested");
+            return Ok(CollectionStepOutput::None);
+        };
+        let ereports_dir = dir.join("ereports");
+        let mut status = SupportBundleEreportStatus::default();
+        if let Err(err) = self
+            .save_ereports(ereport_filters.clone(), ereports_dir, &mut status)
+            .await
+        {
+            warn!(
+                &self.log,
+                "Support bundle: ereport collection failed \
+                 ({} collected successfully)",
+                 status.n_collected;
+                InlineErrorChain::new(err.as_ref())
+            );
+            status.errors.push(InlineErrorChain::new(err.as_ref()).to_string());
+        };
+
+        Ok(CollectionStepOutput::Ereports(status))
+    }
+
+    async fn save_ereports(
         self: &Arc<Self>,
         filters: EreportFilters,
         dir: Utf8PathBuf,
-    ) -> Result<usize, (usize, anyhow::Error)> {
-        let mut reports = 0;
+        status: &mut SupportBundleEreportStatus,
+    ) -> anyhow::Result<()> {
         let mut paginator = Paginator::new(
             datastore::SQL_BATCH_SIZE,
             dropshot::PaginationOrder::Ascending,
@@ -1368,88 +1411,48 @@ impl BundleCollection {
         while let Some(p) = paginator.next() {
             let ereports = self
                 .datastore
-                .host_ereports_fetch_matching(
+                .ereport_fetch_matching(
                     &self.opctx,
                     &filters,
                     &p.current_pagparams(),
                 )
                 .await
                 .map_err(|e| {
-                    (
-                        reports,
-                        e.internal_context(
-                            "failed to query for host OS ereports",
-                        )
-                        .into(),
-                    )
+                    e.internal_context("failed to query for ereports")
                 })?;
             paginator = p.found_batch(&ereports, &|ereport| {
                 (ereport.restart_id.into_untyped_uuid(), ereport.ena)
             });
+
+            let prev_n_collected = status.n_collected;
             let n_ereports = ereports.len();
+            status.n_found += n_ereports;
+
             for ereport in ereports {
-                write_ereport(ereport.into(), &dir)
-                    .await
-                    .map_err(|e| (reports, e))?;
-                reports += 1;
+                match ereport.try_into() {
+                    Ok(ereport) => {
+                        write_ereport(ereport, &dir).await?;
+                        status.n_collected += 1;
+                    }
+                    Err(err) => {
+                        warn!(&self.log, "invalid ereport"; "error" => %err);
+                        status.errors.push(err.to_string());
+                    }
+                }
             }
             debug!(
                 self.log,
-                "Support bundle: added {n_ereports} host OS ereports"
+                "Support bundle: added {} ereports ({} found)",
+                status.n_collected - prev_n_collected,
+                n_ereports
             );
         }
 
         info!(
             self.log,
-            "Support bundle: collected {} total host ereports", reports
+            "Support bundle: collected {} total ereports", status.n_collected
         );
-        Ok(reports)
-    }
-
-    async fn save_sp_ereports(
-        self: &Arc<Self>,
-        filters: EreportFilters,
-        dir: Utf8PathBuf,
-    ) -> Result<usize, (usize, anyhow::Error)> {
-        let mut reports = 0;
-        let mut paginator = Paginator::new(
-            datastore::SQL_BATCH_SIZE,
-            dropshot::PaginationOrder::Ascending,
-        );
-        while let Some(p) = paginator.next() {
-            let ereports = self
-                .datastore
-                .sp_ereports_fetch_matching(
-                    &self.opctx,
-                    &filters,
-                    &p.current_pagparams(),
-                )
-                .await
-                .map_err(|e| {
-                    (
-                        reports,
-                        e.internal_context("failed to query for SP ereports")
-                            .into(),
-                    )
-                })?;
-            paginator = p.found_batch(&ereports, &|ereport| {
-                (ereport.restart_id.into_untyped_uuid(), ereport.ena)
-            });
-            let n_ereports = ereports.len();
-            for ereport in ereports {
-                write_ereport(ereport.into(), &dir)
-                    .await
-                    .map_err(|e| (reports, e))?;
-                reports += 1;
-            }
-            debug!(self.log, "Support bundle: added {n_ereports} SP ereports");
-        }
-
-        info!(
-            self.log,
-            "Support bundle: collected {} total SP ereports", reports
-        );
-        Ok(reports)
+        Ok(())
     }
 
     async fn create_mgs_client(&self) -> anyhow::Result<MgsClient> {
@@ -1527,7 +1530,7 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
     // metadata --- we must check that it doesn't contain any characters
     // unsuitable for use in a filesystem path.
     let pn = ereport
-        .metadata
+        .data
         .part_number
         .as_deref()
         // If the part or serial numbers contain any unsavoury characters, it
@@ -1538,24 +1541,25 @@ async fn write_ereport(ereport: Ereport, dir: &Utf8Path) -> anyhow::Result<()> {
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_part");
     let sn = ereport
-        .metadata
+        .data
         .serial_number
         .as_deref()
         .filter(|&s| is_fs_safe_single_path_component(s))
         .unwrap_or("unknown_serial");
+    let id = &ereport.data.id;
 
     let dir = dir
         .join(format!("{pn}-{sn}"))
         // N.B. that we call `into_untyped_uuid()` here, as the `Display`
         // implementation for a typed UUID appends " (ereporter_restart)", which
         // we don't want.
-        .join(ereport.id.restart_id.into_untyped_uuid().to_string());
+        .join(id.restart_id.into_untyped_uuid().to_string());
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("failed to create directory '{dir}'"))?;
-    let file_path = dir.join(format!("{}.json", ereport.id.ena));
+    let file_path = dir.join(format!("{}.json", id.ena));
     let json = serde_json::to_vec(&ereport).with_context(|| {
-        format!("failed to serialize ereport {pn}:{sn}/{}", ereport.id)
+        format!("failed to serialize ereport {pn}:{sn}/{id}")
     })?;
     tokio::fs::write(&file_path, json)
         .await
@@ -1592,10 +1596,23 @@ fn recursively_add_directory_to_zipfile(
 
         let file_type = entry.file_type()?;
         if file_type.is_file() {
+            let src = entry.path();
+
+            let zip_time = entry
+                .path()
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|sys_time| jiff::Zoned::try_from(sys_time).ok())
+                .and_then(|zoned| {
+                    zip::DateTime::try_from(zoned.datetime()).ok()
+                })
+                .unwrap_or_else(zip::DateTime::default);
+
             let opts = FullFileOptions::default()
+                .last_modified_time(zip_time)
                 .compression_method(zip::CompressionMethod::Deflated)
                 .large_file(true);
-            let src = entry.path();
 
             zip.start_file_from_path(dst, opts)?;
             let mut file = std::fs::File::open(&src)?;
@@ -1783,7 +1800,9 @@ async fn save_sp_dumps(
         .into_inner();
 
     let output_dir = sp_dumps_dir.join(format!("{}_{}", sp.type_, sp.slot));
-    tokio::fs::create_dir_all(&output_dir).await?;
+    tokio::fs::create_dir_all(&output_dir).await.with_context(|| {
+        format!("Failed to create output directory {output_dir}")
+    })?;
 
     for i in 0..dump_count {
         let task_dump = mgs_client
@@ -1933,6 +1952,8 @@ mod test {
     use nexus_db_model::Zpool;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::fm::ereport::{EreportData, EreportId, Reporter};
+    use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DatasetConfig;
@@ -2083,48 +2104,34 @@ mod test {
     }
 
     async fn make_fake_ereports(datastore: &DataStore, opctx: &OpContext) {
-        use crate::db;
-
         const SP_SERIAL: &str = "BRM42000069";
         const HOST_SERIAL: &str = "BRM66600042";
         const GIMLET_PN: &str = "9130000019";
         // Make some SP ereports...
         let sp_restart_id = EreporterRestartUuid::new_v4();
-        datastore.sp_ereports_insert(&opctx, db::model::SpType::Sled, 8, vec![
-            db::model::SpEreport {
-                restart_id: sp_restart_id.into(),
-                ena: ereport_types::Ena(1).into(),
+        datastore.ereports_insert(&opctx, Reporter::Sp { sp_type: SpType::Sled, slot: 8}, vec![
+            EreportData {
+                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
-                time_deleted: None,
-                collector_id: OmicronZoneUuid::new_v4().into(),
-                sp_type: db::model::SpType::Sled,
-                sp_slot: 8.into(),
+                collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.fake.whatever".to_string()),
                 report: serde_json::json!({"hello world": true})
             },
-            db::model::SpEreport {
-                restart_id: sp_restart_id.into(),
-                ena: ereport_types::Ena(2).into(),
+            EreportData {
+                id: EreportId { restart_id: sp_restart_id, ena: ereport_types::Ena(2) },
                 time_collected: chrono::Utc::now(),
-                time_deleted: None,
-                collector_id: OmicronZoneUuid::new_v4().into(),
-                sp_type: db::model::SpType::Sled,
-                sp_slot: 8.into(),
+                collector_id: OmicronZoneUuid::new_v4(),
                 part_number: Some(GIMLET_PN.to_string()),
                 serial_number: Some(SP_SERIAL.to_string()),
                 class: Some("ereport.something.blah".to_string()),
                 report: serde_json::json!({"system_working": "seems to be",})
             },
-            db::model::SpEreport {
-                restart_id: EreporterRestartUuid::new_v4().into(),
-                ena: ereport_types::Ena(1).into(),
+            EreportData {
+                id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena: ereport_types::Ena(1) },
                 time_collected: chrono::Utc::now(),
-                time_deleted: None,
-                collector_id: OmicronZoneUuid::new_v4().into(),
-                sp_type: db::model::SpType::Sled,
-                sp_slot: 8.into(),
+                collector_id: OmicronZoneUuid::new_v4(),
                 // Let's do a silly one! No VPD, to make sure that's also
                 // handled correctly.
                 part_number: None,
@@ -2137,18 +2144,16 @@ mod test {
         // host-OS and SP ereports are different for when we make assertions
         // about the bundle report.
         datastore
-            .sp_ereports_insert(
+            .ereports_insert(
                 &opctx,
-                db::model::SpType::Switch,
-                1,
-                vec![db::model::SpEreport {
-                    restart_id: EreporterRestartUuid::new_v4().into(),
-                    ena: ereport_types::Ena(1).into(),
+                Reporter::Sp { sp_type: SpType::Switch, slot: 1 },
+                vec![EreportData {
+                    id: EreportId {
+                        restart_id: EreporterRestartUuid::new_v4(),
+                        ena: ereport_types::Ena(1),
+                    },
                     time_collected: chrono::Utc::now(),
-                    time_deleted: None,
-                    collector_id: OmicronZoneUuid::new_v4().into(),
-                    sp_type: db::model::SpType::Switch,
-                    sp_slot: 1.into(),
+                    collector_id: OmicronZoneUuid::new_v4(),
                     part_number: Some("9130000006".to_string()),
                     serial_number: Some("BRM41000555".to_string()),
                     class: Some("ereport.fake.whatever".to_string()),
@@ -2158,33 +2163,32 @@ mod test {
             .await
             .expect("failed to insert another fake SP ereport");
         // And some host OS ones...
-        let sled_id = SledUuid::new_v4();
-        let restart_id = EreporterRestartUuid::new_v4().into();
+        let restart_id = EreporterRestartUuid::new_v4();
         datastore
-            .host_ereports_insert(
+            .ereports_insert(
                 &opctx,
-                sled_id,
+                Reporter::HostOs { sled: SledUuid::new_v4() },
                 vec![
-                    db::model::HostEreport {
-                        restart_id,
-                        ena: ereport_types::Ena(1).into(),
+                    EreportData {
+                        id: EreportId {
+                            restart_id,
+                            ena: ereport_types::Ena(1),
+                        },
                         time_collected: chrono::Utc::now(),
-                        time_deleted: None,
-                        collector_id: OmicronZoneUuid::new_v4().into(),
-                        sled_id: sled_id.into(),
-                        sled_serial: HOST_SERIAL.to_string(),
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever".to_string()),
                         report: serde_json::json!({"hello_world": true}),
                     },
-                    db::model::HostEreport {
-                        restart_id,
-                        ena: ereport_types::Ena(2).into(),
+                    EreportData {
+                        id: EreportId {
+                            restart_id,
+                            ena: ereport_types::Ena(2),
+                        },
                         time_collected: chrono::Utc::now(),
-                        time_deleted: None,
-                        collector_id: OmicronZoneUuid::new_v4().into(),
-                        sled_id: sled_id.into(),
-                        sled_serial: HOST_SERIAL.to_string(),
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.fake.whatever.thingy".to_string()),
                         report: serde_json::json!({"goodbye_world": false}),
@@ -2193,21 +2197,16 @@ mod test {
             )
             .await
             .expect("failed to insert fake host OS ereports");
-        // And another one with the same serial but different restart/sled IDs
-        let sled_id = SledUuid::new_v4();
         datastore
-            .host_ereports_insert(
+            .ereports_insert(
                 &opctx,
-                sled_id,
+                Reporter::HostOs { sled: SledUuid::new_v4() },
                 vec![
-                    db::model::HostEreport {
-                        restart_id: EreporterRestartUuid::new_v4().into(),
-                        ena: ereport_types::Ena(1).into(),
+                    EreportData {
+                        id: EreportId { restart_id: EreporterRestartUuid::new_v4(), ena:  ereport_types::Ena(1) },
                         time_collected: chrono::Utc::now(),
-                        time_deleted: None,
-                        collector_id: OmicronZoneUuid::new_v4().into(),
-                        sled_id: sled_id.into(),
-                        sled_serial: HOST_SERIAL.to_string(),
+                        collector_id: OmicronZoneUuid::new_v4(),
+                        serial_number: Some(HOST_SERIAL.to_string()),
                         part_number: Some(GIMLET_PN.to_string()),
                         class: Some("ereport.something.hostos_related".to_string()),
                         report: serde_json::json!({"illumos": "very yes", "whatever": 42}),
@@ -2363,12 +2362,12 @@ mod test {
         assert!(report.listed_sps);
         assert!(report.activated_in_db_ok);
         assert_eq!(
-            report.host_ereports,
-            SupportBundleEreportStatus::Collected { n_collected: 3 }
-        );
-        assert_eq!(
-            report.sp_ereports,
-            SupportBundleEreportStatus::Collected { n_collected: 4 }
+            report.ereports,
+            Some(SupportBundleEreportStatus {
+                n_collected: 7,
+                n_found: 7,
+                errors: Vec::new()
+            })
         );
 
         let observed_bundle = datastore

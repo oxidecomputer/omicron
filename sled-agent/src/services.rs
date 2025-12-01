@@ -81,7 +81,7 @@ use omicron_common::address::{
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig, SledIdentifiers,
+    HostPortConfig, PrivateIpConfig, RackNetworkConfig, SledIdentifiers,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify, retry_policy_internal_service_aggressive,
@@ -443,6 +443,7 @@ struct SwitchZoneConfig {
     id: Uuid,
     addresses: Vec<Ipv6Addr>,
     services: Vec<SwitchService>,
+    underlay_info: Option<UnderlayInfo>,
 }
 
 /// Describes one of several services that may be deployed in a switch zone
@@ -1305,8 +1306,11 @@ impl ServiceManager {
         })?;
 
         let opte_interface = port.name();
-        let opte_gateway = port.gateway().ip().to_string();
-        let opte_ip = port.ip().to_string();
+
+        // TODO-completeness: This needs to support dual-stack OPTE ports.
+        // See https://github.com/oxidecomputer/omicron/issues/9309.
+        let opte_gateway = port.gateway().ipv4_or_ipv6_addr().to_string();
+        let opte_ip = port.ipv4_or_ipv6_addr().to_string();
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
@@ -1972,8 +1976,16 @@ impl ServiceManager {
                 // We need to tell external_dns to listen on its OPTE port IP
                 // address, which comes from `nic`. Attach the port from its
                 // true external DNS address (`dns_address`).
-                let dns_address =
-                    SocketAddr::new(nic.ip, dns_address.port()).to_string();
+                //
+                // Make sure we take the VPC-private IP address with the same
+                // version as the external address.
+                let private_ip = Self::private_ip_for_external_address(
+                    dns_address.ip(),
+                    &nic.ip_config,
+                    config.zone_type.kind(),
+                )?;
+                let private_dns_address =
+                    SocketAddr::new(private_ip, dns_address.port()).to_string();
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1981,7 +1993,11 @@ impl ServiceManager {
                         "astring",
                         http_address.to_string(),
                     )
-                    .add_property("dns_address", "astring", dns_address);
+                    .add_property(
+                        "dns_address",
+                        "astring",
+                        private_dns_address,
+                    );
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -2281,6 +2297,8 @@ impl ServiceManager {
                         lockstep_port,
                         external_tls,
                         external_dns_servers,
+                        external_ip,
+                        nic,
                         ..
                     },
                 id,
@@ -2302,7 +2320,6 @@ impl ServiceManager {
                 // external IP automatically.
                 let opte_interface_setup =
                     Self::opte_interface_set_up_install(&installed_zone)?;
-
                 let port_idx = 0;
                 let port = installed_zone
                     .opte_ports()
@@ -2315,8 +2332,15 @@ impl ServiceManager {
                             },
                         )
                     })?;
-                let opte_ip = port.ip();
                 let opte_iface_name = port.name();
+
+                // Fetch the private IP of the same IP version as the external
+                // IP address.
+                let private_ip = Self::private_ip_for_external_address(
+                    *external_ip,
+                    &nic.ip_config,
+                    config.zone_type.kind(),
+                )?;
 
                 // Nexus takes a separate config file for parameters
                 // which cannot be known at packaging time.
@@ -2329,7 +2353,9 @@ impl ServiceManager {
                     dropshot_external: ConfigDropshotWithTls {
                         tls: *external_tls,
                         dropshot: dropshot::ConfigDropshot {
-                            bind_address: SocketAddr::new(*opte_ip, nexus_port),
+                            bind_address: SocketAddr::new(
+                                private_ip, nexus_port,
+                            ),
                             default_request_body_max_bytes: 1048576,
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
@@ -2444,7 +2470,7 @@ impl ServiceManager {
         bootstrap_name_and_address: Option<(String, Ipv6Addr)>,
         device_names: &[String],
     ) -> Result<RunningZone, Error> {
-        let SwitchZoneConfig { id, services, addresses } = config;
+        let SwitchZoneConfig { id, services, addresses, .. } = config;
 
         let disabled_dns_client_service =
             ServiceBuilder::new("network/dns/client")
@@ -3265,16 +3291,14 @@ impl ServiceManager {
         };
         addresses.push(Ipv6Addr::LOCALHOST);
 
-        let request =
-            SwitchZoneConfig { id: Uuid::new_v4(), addresses, services };
-
-        self.ensure_switch_zone(
-            Some(request),
-            filesystems,
-            data_links,
+        let request = SwitchZoneConfig {
+            id: Uuid::new_v4(),
+            addresses,
+            services,
             underlay_info,
-        )
-        .await?;
+        };
+
+        self.ensure_switch_zone(Some(request), filesystems, data_links).await?;
 
         Ok(())
     }
@@ -3494,8 +3518,6 @@ impl ServiceManager {
             vec![],
             // data_links=
             vec![],
-            // underlay_info=
-            None,
         )
         .await
     }
@@ -3514,7 +3536,6 @@ impl ServiceManager {
         request: SwitchZoneConfig,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
-        underlay_info: Option<UnderlayInfo>,
     ) {
         let (exit_tx, exit_rx) = oneshot::channel();
         *zone = SwitchZoneState::Initializing {
@@ -3524,8 +3545,7 @@ impl ServiceManager {
             worker: Some(Task {
                 exit_tx,
                 initializer: tokio::task::spawn(async move {
-                    self.initialize_switch_zone_loop(underlay_info, exit_rx)
-                        .await
+                    self.initialize_switch_zone_loop(exit_rx).await
                 }),
             }),
         };
@@ -3537,7 +3557,6 @@ impl ServiceManager {
         request: Option<SwitchZoneConfig>,
         filesystems: Vec<zone::Fs>,
         data_links: Vec<String>,
-        underlay_info: Option<UnderlayInfo>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -3552,7 +3571,6 @@ impl ServiceManager {
                     request,
                     filesystems,
                     data_links,
-                    underlay_info,
                 );
             }
             (
@@ -3918,7 +3936,7 @@ impl ServiceManager {
 
                 // We also need to ensure any uplinks are configured. Spawn a
                 // task that goes into an infinite retry loop until it succeeds.
-                if let Some(underlay_info) = underlay_info {
+                if let Some(underlay_info) = request.underlay_info.clone() {
                     if let Some(old_worker) = worker.take() {
                         old_worker.stop().await;
                     }
@@ -3978,15 +3996,15 @@ impl ServiceManager {
     async fn try_initialize_switch_zone(
         &self,
         sled_zone: &mut SwitchZoneState,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<UnderlayInfo>, Error> {
         let SwitchZoneState::Initializing {
             request,
             filesystems,
             data_links,
-            ..
-        } = &*sled_zone
+            worker,
+        } = sled_zone
         else {
-            return Ok(());
+            return Ok(None);
         };
 
         // The switch zone must use the ramdisk in order to receive requests
@@ -4003,19 +4021,28 @@ impl ServiceManager {
         let zone = self
             .initialize_zone(zone_args, zone_root_path, filesystems, data_links)
             .await?;
+        let underlay_info = request.underlay_info.clone();
+
+        // Even though we've initialized the zone, the `worker` task may still
+        // be running to configure uplinks. If we drop `worker` now it will
+        // cause that task to exit before it gets a chance to do so. This is all
+        // very unsatisfying and needs some serious rework:
+        // https://github.com/oxidecomputer/omicron/issues/8970 and
+        // https://github.com/oxidecomputer/omicron/issues/9182 are strongly
+        // related.
+        let worker = worker.take();
         *sled_zone = SwitchZoneState::Running {
             request: request.clone(),
             zone: Box::new(zone),
-            worker: None,
+            worker,
         };
-        Ok(())
+        Ok(underlay_info)
     }
 
     // Body of a tokio task responsible for running until the switch zone is
     // inititalized, or it has been told to stop.
     async fn initialize_switch_zone_loop(
         &self,
-        underlay_info: Option<UnderlayInfo>,
         mut exit_rx: oneshot::Receiver<()>,
     ) {
         // We don't really expect failures trying to initialize the switch zone
@@ -4025,13 +4052,25 @@ impl ServiceManager {
 
         // First, go into a loop to bring up the switch zone; retry until we
         // succeed or are told to give up via `exit_rx`.
-        loop {
+        let underlay_info = loop {
             {
                 let mut sled_zone = self.inner.switch_zone.lock().await;
                 match self.try_initialize_switch_zone(&mut sled_zone).await {
-                    Ok(()) => {
-                        info!(self.inner.log, "initialized switch zone");
-                        break;
+                    Ok(None) => {
+                        info!(
+                            self.inner.log,
+                            "initialized switch zone \
+                             (no underlay info available yet)",
+                        );
+                        return;
+                    }
+                    Ok(Some(underlay_info)) => {
+                        info!(
+                            self.inner.log,
+                            "initialized switch zone (underlay info \
+                             available: will attempt uplink configuration)",
+                        );
+                        break underlay_info;
                     }
                     Err(e) => {
                         warn!(
@@ -4060,17 +4099,46 @@ impl ServiceManager {
                     continue;
                 }
             };
-        }
+        };
 
-        // Then, if we have underlay info, go into a loop trying to configure
-        // our uplinks. As above, retry until we succeed or are told to stop.
-        if let Some(underlay_info) = underlay_info {
-            self.ensure_switch_zone_uplinks_configured_loop(
-                &underlay_info,
-                exit_rx,
-            )
-            .await;
-        }
+        // Then go into a loop trying to configure our uplinks. As above, retry
+        // until we succeed or are told to stop.
+        self.ensure_switch_zone_uplinks_configured_loop(
+            &underlay_info,
+            exit_rx,
+        )
+        .await;
+    }
+
+    fn private_ip_for_external_address(
+        external_ip: IpAddr,
+        ip_config: &PrivateIpConfig,
+        kind: ZoneKind,
+    ) -> Result<IpAddr, Error> {
+        let maybe_private_ip = if external_ip.is_ipv6() {
+            ip_config.ipv6_addr().copied().map(IpAddr::V6)
+        } else {
+            ip_config.ipv4_addr().copied().map(IpAddr::V4)
+        };
+        maybe_private_ip.ok_or_else(|| {
+            let external_ip_version =
+                if external_ip.is_ipv6() { "6" } else { "4" };
+            let private_ip_stack = if ip_config.is_ipv4_only() {
+                "IPv4"
+            } else if ip_config.is_ipv6_only() {
+                "IPv6"
+            } else {
+                "dual-stack"
+            };
+            Error::BadServiceRequest {
+                service: kind.report_str().to_string(),
+                message: format!(
+                    "External IP address is IPv{}, but VPC-private \
+                    IP configuration is {}",
+                    external_ip_version, private_ip_stack,
+                ),
+            }
+        })
     }
 }
 

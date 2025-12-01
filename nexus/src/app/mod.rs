@@ -30,6 +30,7 @@ use nexus_mgs_updates::ArtifactCache;
 use nexus_mgs_updates::MgsUpdateDriver;
 use nexus_types::deployment::PendingMgsUpdates;
 use nexus_types::deployment::ReconfiguratorConfigParam;
+use nexus_types::fm;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::ByteCount;
@@ -79,6 +80,7 @@ mod ip_pool;
 mod lldp;
 mod login;
 mod metrics;
+pub(crate) mod multicast;
 mod network_interface;
 pub(crate) mod oximeter;
 mod probe;
@@ -130,8 +132,9 @@ pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
     nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
         as usize;
 pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
+pub(crate) const MAX_MULTICAST_GROUPS_PER_INSTANCE: usize = 32;
 
-pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
+pub const MAX_VCPU_PER_INSTANCE: u16 = 254;
 
 pub const MIN_MEMORY_BYTES_PER_INSTANCE: u32 = 1 << 30; // 1 GiB
 // This is larger than total memory (let alone reservoir) on some sleds; it is
@@ -223,6 +226,9 @@ pub struct Nexus {
     /// The tunable parameters from a configuration file
     tunables: Tunables,
 
+    /// Whether multicast functionality is enabled - used by sagas and API endpoints to check if multicast operations should proceed
+    multicast_enabled: bool,
+
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
 
@@ -285,6 +291,11 @@ pub struct Nexus {
     // while Nexus is running.
     #[allow(dead_code)]
     repo_depot_resolver: Box<dyn qorb::resolver::Resolver>,
+
+    /// Watch channel containing the currently-loaded fault management sitrep.
+    #[allow(dead_code)]
+    sitrep_load_rx:
+        watch::Receiver<Option<Arc<(fm::SitrepVersion, fm::Sitrep)>>>,
 
     /// handle to pull update status data
     update_status: UpdateStatusHandle,
@@ -485,6 +496,8 @@ impl Nexus {
         let mgs_update_status_rx = mgs_update_driver.status_rx();
         let _mgs_driver_task = tokio::spawn(mgs_update_driver.run());
 
+        let (sitrep_load_tx, sitrep_load_rx) = watch::channel(None);
+
         let nexus = Nexus {
             id: config.deployment.id,
             rack_id,
@@ -502,6 +515,13 @@ impl Nexus {
             timeseries_client,
             webhook_delivery_client,
             tunables: config.pkg.tunables.clone(),
+            // Whether multicast functionality is enabled.
+            // This is used by instance-related sagas and API endpoints to check
+            // if multicast operations should proceed.
+            //
+            // NOTE: This is separate from the RPW reconciler timing config, which
+            // only controls how often the background task runs.
+            multicast_enabled: config.pkg.multicast.enabled,
             opctx_alloc: OpContext::for_background(
                 log.new(o!("component" => "InstanceAllocator")),
                 Arc::clone(&authz),
@@ -540,6 +560,7 @@ impl Nexus {
             repo_depot_resolver,
             update_status: UpdateStatusHandle::new(blueprint_load_rx),
             quiesce,
+            sitrep_load_rx,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong
@@ -603,6 +624,7 @@ impl Nexus {
                     opctx: background_ctx,
                     datastore: db_datastore,
                     config: task_config.pkg.background_tasks,
+                    multicast_enabled: task_config.pkg.multicast.enabled,
                     rack_id,
                     nexus_id: task_config.deployment.id,
                     resolver,
@@ -624,6 +646,7 @@ impl Nexus {
                     tuf_artifact_replication_rx,
                     mgs_updates_tx,
                     blueprint_load_tx,
+                    sitrep_load_tx,
                 },
             );
 
@@ -652,6 +675,10 @@ impl Nexus {
 
     pub fn authz(&self) -> &Arc<authz::Authz> {
         &self.authz
+    }
+
+    pub fn multicast_enabled(&self) -> bool {
+        self.multicast_enabled
     }
 
     pub(crate) async fn wait_for_populate(&self) -> Result<(), anyhow::Error> {
@@ -809,7 +836,7 @@ impl Nexus {
         Ok(())
     }
 
-    pub(crate) async fn get_external_server_address(
+    pub(crate) fn get_external_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.external_server
@@ -819,7 +846,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub(crate) async fn get_techport_server_address(
+    pub(crate) fn get_techport_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.techport_external_server
@@ -829,7 +856,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub(crate) async fn get_internal_server_address(
+    pub(crate) fn get_internal_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.internal_server
@@ -839,7 +866,7 @@ impl Nexus {
             .map(|server| server.local_addr())
     }
 
-    pub(crate) async fn get_lockstep_server_address(
+    pub(crate) fn get_lockstep_server_address(
         &self,
     ) -> Option<std::net::SocketAddr> {
         self.lockstep_server
@@ -871,17 +898,6 @@ impl Nexus {
             self.log.new(o!("component" => "InternalApi")),
             Arc::clone(&self.authz),
             authn::Context::internal_api(),
-            Arc::clone(&self.db_datastore)
-                as Arc<dyn nexus_auth::storage::Storage>,
-        )
-    }
-
-    /// Returns an [`OpContext`] used for authenticating SCIM requests
-    pub fn opctx_external_scim(&self) -> OpContext {
-        OpContext::for_background(
-            self.log.new(o!("component" => "ExternalScim")),
-            Arc::clone(&self.authz),
-            authn::Context::external_scim(),
             Arc::clone(&self.db_datastore)
                 as Arc<dyn nexus_auth::storage::Storage>,
         )
@@ -1332,6 +1348,7 @@ async fn map_switch_zone_addrs(
     use gateway_client::Client as MgsClient;
     info!(log, "Determining switch slots managed by switch zones");
     let mut switch_zone_addrs = HashMap::new();
+
     for addr in switch_zone_addresses {
         let mgs_client = MgsClient::new(
             &format!("http://[{}]:{}", addr, MGS_PORT),

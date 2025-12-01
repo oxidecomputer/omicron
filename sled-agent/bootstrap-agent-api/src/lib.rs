@@ -11,6 +11,7 @@ use dropshot::{
     HttpError, HttpResponseOk, HttpResponseUpdatedNoContent, RequestContext,
     TypedBody,
 };
+use dropshot_api_manager_types::api_versions;
 use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,12 @@ use sled_agent_types::{
 };
 use sled_hardware_types::Baseboard;
 use tufaceous_artifact::ArtifactVersion;
+
+api_versions!([
+    // Do not create new versions of this client-side versioned API.
+    // https://github.com/oxidecomputer/omicron/issues/9290
+    (1, INITIAL),
+]);
 
 #[dropshot::api_description]
 pub trait BootstrapAgentApi {

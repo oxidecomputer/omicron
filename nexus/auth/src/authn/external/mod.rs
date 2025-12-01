@@ -15,6 +15,7 @@ use slog::trace;
 use std::borrow::Borrow;
 use uuid::Uuid;
 
+pub mod scim;
 pub mod session_cookie;
 pub mod spoof;
 pub mod token;
@@ -235,6 +236,7 @@ mod test {
                 SKIP => SchemeResult::NotRequested,
                 OK => SchemeResult::Authenticated(authn::Details {
                     actor: self.actor,
+                    device_token_expiration: None,
                 }),
                 FAIL => SchemeResult::Failed(Reason::BadCredentials {
                     actor: self.actor,

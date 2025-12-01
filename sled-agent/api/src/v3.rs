@@ -2,33 +2,42 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::time::Duration;
-
-use chrono::{DateTime, Utc};
-use id_map::{IdMap, IdMappable};
+use chrono::DateTime;
+use chrono::Utc;
+use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
+use iddqd::id_upcast;
 use nexus_sled_agent_shared::inventory::{
-    self, BootPartitionContents, ConfigReconcilerInventoryResult,
+    BootPartitionContents, ConfigReconcilerInventoryResult,
     HostPhase2DesiredSlots, InventoryDataset, InventoryDisk, InventoryZpool,
     OmicronZoneDataset, OmicronZoneImageSource, OrphanedDataset,
     RemoveMupdateOverrideInventory, SledRole, ZoneImageResolverInventory,
 };
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
-use omicron_common::{
-    api::external::{ByteCount, Generation},
-    api::internal::shared::{NetworkInterface, SourceNatConfig},
-    disk::{DatasetConfig, OmicronPhysicalDiskConfig},
-    zpool_name::ZpoolName,
-};
-use omicron_uuid_kinds::{
-    DatasetUuid, MupdateOverrideUuid, OmicronZoneUuid, PhysicalDiskUuid,
-    SledUuid,
-};
+use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
+use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
+use omicron_common::disk::DatasetConfig;
+use omicron_common::disk::OmicronPhysicalDiskConfig;
+use omicron_common::zpool_name::ZpoolName;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::MupdateOverrideUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use sled_hardware_types::{Baseboard, SledCpuFamily};
+use serde::Deserialize;
+use serde::Serialize;
+use sled_agent_types::inventory::v9;
+use sled_hardware_types::Baseboard;
+use sled_hardware_types::SledCpuFamily;
+use std::collections::BTreeMap;
+use std::net::IpAddr;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
+use std::time::Duration;
 
 /// Identity and basic status information about this sled agent
 #[derive(Deserialize, Serialize, JsonSchema)]
@@ -50,24 +59,41 @@ pub struct Inventory {
     pub zone_image_resolver: ZoneImageResolverInventory,
 }
 
-impl From<inventory::Inventory> for Inventory {
-    fn from(value: inventory::Inventory) -> Self {
+impl From<v9::Inventory> for Inventory {
+    fn from(value: v9::Inventory) -> Self {
+        let v9::Inventory {
+            sled_id,
+            sled_agent_address,
+            sled_role,
+            baseboard,
+            usable_hardware_threads,
+            usable_physical_ram,
+            cpu_family,
+            reservoir_size,
+            disks,
+            zpools,
+            datasets,
+            ledgered_sled_config,
+            reconciler_status,
+            last_reconciliation,
+            zone_image_resolver,
+        } = value;
         Self {
-            sled_id: value.sled_id,
-            sled_agent_address: value.sled_agent_address,
-            sled_role: value.sled_role,
-            baseboard: value.baseboard,
-            usable_hardware_threads: value.usable_hardware_threads,
-            usable_physical_ram: value.usable_physical_ram,
-            cpu_family: value.cpu_family,
-            reservoir_size: value.reservoir_size,
-            disks: value.disks,
-            zpools: value.zpools,
-            datasets: value.datasets,
-            ledgered_sled_config: value.ledgered_sled_config.map(Into::into),
-            reconciler_status: value.reconciler_status.into(),
-            last_reconciliation: value.last_reconciliation.map(Into::into),
-            zone_image_resolver: value.zone_image_resolver,
+            sled_id,
+            sled_agent_address,
+            sled_role,
+            baseboard,
+            usable_hardware_threads,
+            usable_physical_ram,
+            cpu_family,
+            reservoir_size,
+            disks,
+            zpools,
+            datasets,
+            ledgered_sled_config: ledgered_sled_config.map(Into::into),
+            reconciler_status: reconciler_status.into(),
+            last_reconciliation: last_reconciliation.map(Into::into),
+            zone_image_resolver,
         }
     }
 }
@@ -76,15 +102,20 @@ impl From<inventory::Inventory> for Inventory {
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct OmicronSledConfig {
     pub generation: Generation,
-    pub disks: IdMap<OmicronPhysicalDiskConfig>,
-    pub datasets: IdMap<DatasetConfig>,
-    pub zones: IdMap<OmicronZoneConfig>,
+    #[serde(
+        with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronPhysicalDiskConfig>"
+    )]
+    pub disks: IdOrdMap<OmicronPhysicalDiskConfig>,
+    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<DatasetConfig>")]
+    pub datasets: IdOrdMap<DatasetConfig>,
+    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronZoneConfig>")]
+    pub zones: IdOrdMap<OmicronZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
     #[serde(default = "HostPhase2DesiredSlots::current_contents")]
     pub host_phase_2: HostPhase2DesiredSlots,
 }
 
-impl From<OmicronSledConfig> for inventory::OmicronSledConfig {
+impl From<OmicronSledConfig> for v9::OmicronSledConfig {
     fn from(value: OmicronSledConfig) -> Self {
         Self {
             generation: value.generation,
@@ -97,8 +128,8 @@ impl From<OmicronSledConfig> for inventory::OmicronSledConfig {
     }
 }
 
-impl From<inventory::OmicronSledConfig> for OmicronSledConfig {
-    fn from(value: inventory::OmicronSledConfig) -> Self {
+impl From<v9::OmicronSledConfig> for OmicronSledConfig {
+    fn from(value: v9::OmicronSledConfig) -> Self {
         Self {
             generation: value.generation,
             disks: value.disks,
@@ -111,7 +142,7 @@ impl From<inventory::OmicronSledConfig> for OmicronSledConfig {
 }
 
 /// Describes one Omicron-managed zone running on a sled
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct OmicronZoneConfig {
     pub id: OmicronZoneUuid,
 
@@ -127,15 +158,17 @@ pub struct OmicronZoneConfig {
     pub image_source: OmicronZoneImageSource,
 }
 
-impl IdMappable for OmicronZoneConfig {
-    type Id = OmicronZoneUuid;
+impl IdOrdItem for OmicronZoneConfig {
+    type Key<'a> = OmicronZoneUuid;
 
-    fn id(&self) -> Self::Id {
+    fn key(&self) -> Self::Key<'_> {
         self.id
     }
+
+    id_upcast!();
 }
 
-impl From<OmicronZoneConfig> for inventory::OmicronZoneConfig {
+impl From<OmicronZoneConfig> for v9::OmicronZoneConfig {
     fn from(value: OmicronZoneConfig) -> Self {
         Self {
             id: value.id,
@@ -146,8 +179,8 @@ impl From<OmicronZoneConfig> for inventory::OmicronZoneConfig {
     }
 }
 
-impl From<inventory::OmicronZoneConfig> for OmicronZoneConfig {
-    fn from(value: inventory::OmicronZoneConfig) -> Self {
+impl From<v9::OmicronZoneConfig> for OmicronZoneConfig {
+    fn from(value: v9::OmicronZoneConfig) -> Self {
         Self {
             id: value.id,
             filesystem_pool: value.filesystem_pool,
@@ -159,7 +192,7 @@ impl From<inventory::OmicronZoneConfig> for OmicronZoneConfig {
 
 /// Describes what kind of zone this is (i.e., what component is running in it)
 /// as well as any type-specific configuration
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OmicronZoneType {
     BoundaryNtp {
@@ -250,7 +283,7 @@ pub enum OmicronZoneType {
     },
 }
 
-impl From<OmicronZoneType> for inventory::OmicronZoneType {
+impl From<OmicronZoneType> for v9::OmicronZoneType {
     fn from(value: OmicronZoneType) -> Self {
         match value {
             OmicronZoneType::BoundaryNtp {
@@ -327,10 +360,10 @@ impl From<OmicronZoneType> for inventory::OmicronZoneType {
     }
 }
 
-impl From<inventory::OmicronZoneType> for OmicronZoneType {
-    fn from(value: inventory::OmicronZoneType) -> Self {
+impl From<v9::OmicronZoneType> for OmicronZoneType {
+    fn from(value: v9::OmicronZoneType) -> Self {
         match value {
-            inventory::OmicronZoneType::BoundaryNtp {
+            v9::OmicronZoneType::BoundaryNtp {
                 address,
                 ntp_servers,
                 dns_servers,
@@ -345,33 +378,31 @@ impl From<inventory::OmicronZoneType> for OmicronZoneType {
                 nic,
                 snat_cfg,
             },
-            inventory::OmicronZoneType::Clickhouse { address, dataset } => {
+            v9::OmicronZoneType::Clickhouse { address, dataset } => {
                 Self::Clickhouse { address, dataset }
             }
-            inventory::OmicronZoneType::ClickhouseKeeper {
-                address,
-                dataset,
-            } => Self::ClickhouseKeeper { address, dataset },
-            inventory::OmicronZoneType::ClickhouseServer {
-                address,
-                dataset,
-            } => Self::ClickhouseServer { address, dataset },
-            inventory::OmicronZoneType::CockroachDb { address, dataset } => {
+            v9::OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+                Self::ClickhouseKeeper { address, dataset }
+            }
+            v9::OmicronZoneType::ClickhouseServer { address, dataset } => {
+                Self::ClickhouseServer { address, dataset }
+            }
+            v9::OmicronZoneType::CockroachDb { address, dataset } => {
                 Self::CockroachDb { address, dataset }
             }
-            inventory::OmicronZoneType::Crucible { address, dataset } => {
+            v9::OmicronZoneType::Crucible { address, dataset } => {
                 Self::Crucible { address, dataset }
             }
-            inventory::OmicronZoneType::CruciblePantry { address } => {
+            v9::OmicronZoneType::CruciblePantry { address } => {
                 Self::CruciblePantry { address }
             }
-            inventory::OmicronZoneType::ExternalDns {
+            v9::OmicronZoneType::ExternalDns {
                 dataset,
                 http_address,
                 dns_address,
                 nic,
             } => Self::ExternalDns { dataset, http_address, dns_address, nic },
-            inventory::OmicronZoneType::InternalDns {
+            v9::OmicronZoneType::InternalDns {
                 dataset,
                 http_address,
                 dns_address,
@@ -384,16 +415,16 @@ impl From<inventory::OmicronZoneType> for OmicronZoneType {
                 gz_address,
                 gz_address_index,
             },
-            inventory::OmicronZoneType::InternalNtp { address } => {
+            v9::OmicronZoneType::InternalNtp { address } => {
                 Self::InternalNtp { address }
             }
-            inventory::OmicronZoneType::Nexus {
+            v9::OmicronZoneType::Nexus {
                 internal_address,
-                lockstep_port: _,
                 external_ip,
                 nic,
                 external_tls,
                 external_dns_servers,
+                lockstep_port: _,
             } => Self::Nexus {
                 internal_address,
                 external_ip,
@@ -401,7 +432,7 @@ impl From<inventory::OmicronZoneType> for OmicronZoneType {
                 external_tls,
                 external_dns_servers,
             },
-            inventory::OmicronZoneType::Oximeter { address } => {
+            v9::OmicronZoneType::Oximeter { address } => {
                 Self::Oximeter { address }
             }
         }
@@ -426,8 +457,22 @@ pub struct ConfigReconcilerInventory {
     pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
 }
 
-impl From<inventory::ConfigReconcilerInventory> for ConfigReconcilerInventory {
-    fn from(value: inventory::ConfigReconcilerInventory) -> Self {
+impl From<ConfigReconcilerInventory> for v9::ConfigReconcilerInventory {
+    fn from(value: ConfigReconcilerInventory) -> Self {
+        Self {
+            last_reconciled_config: value.last_reconciled_config.into(),
+            external_disks: value.external_disks,
+            datasets: value.datasets,
+            orphaned_datasets: value.orphaned_datasets,
+            zones: value.zones,
+            boot_partitions: value.boot_partitions,
+            remove_mupdate_override: value.remove_mupdate_override,
+        }
+    }
+}
+
+impl From<v9::ConfigReconcilerInventory> for ConfigReconcilerInventory {
+    fn from(value: v9::ConfigReconcilerInventory) -> Self {
         Self {
             last_reconciled_config: value.last_reconciled_config.into(),
             external_disks: value.external_disks,
@@ -449,7 +494,7 @@ pub enum ConfigReconcilerInventoryStatus {
     NotYetRun,
     /// The reconciler task is actively running.
     Running {
-        config: OmicronSledConfig,
+        config: Box<OmicronSledConfig>,
         started_at: DateTime<Utc>,
         running_for: Duration,
     },
@@ -462,22 +507,44 @@ pub enum ConfigReconcilerInventoryStatus {
     Idle { completed_at: DateTime<Utc>, ran_for: Duration },
 }
 
-impl From<inventory::ConfigReconcilerInventoryStatus>
-    for ConfigReconcilerInventoryStatus
+impl From<ConfigReconcilerInventoryStatus>
+    for v9::ConfigReconcilerInventoryStatus
 {
-    fn from(value: inventory::ConfigReconcilerInventoryStatus) -> Self {
+    fn from(value: ConfigReconcilerInventoryStatus) -> Self {
         match value {
-            inventory::ConfigReconcilerInventoryStatus::NotYetRun => {
-                Self::NotYetRun
-            }
-            inventory::ConfigReconcilerInventoryStatus::Running {
+            ConfigReconcilerInventoryStatus::NotYetRun => Self::NotYetRun,
+            ConfigReconcilerInventoryStatus::Running {
                 config,
                 started_at,
                 running_for,
-            } => {
-                Self::Running { config: config.into(), started_at, running_for }
+            } => Self::Running {
+                config: Box::new((*config).into()),
+                started_at,
+                running_for,
+            },
+            ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
+                Self::Idle { completed_at, ran_for }
             }
-            inventory::ConfigReconcilerInventoryStatus::Idle {
+        }
+    }
+}
+
+impl From<v9::ConfigReconcilerInventoryStatus>
+    for ConfigReconcilerInventoryStatus
+{
+    fn from(value: v9::ConfigReconcilerInventoryStatus) -> Self {
+        match value {
+            v9::ConfigReconcilerInventoryStatus::NotYetRun => Self::NotYetRun,
+            v9::ConfigReconcilerInventoryStatus::Running {
+                config,
+                started_at,
+                running_for,
+            } => Self::Running {
+                config: Box::new((*config).into()),
+                started_at,
+                running_for,
+            },
+            v9::ConfigReconcilerInventoryStatus::Idle {
                 completed_at,
                 ran_for,
             } => Self::Idle { completed_at, ran_for },

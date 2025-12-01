@@ -135,7 +135,7 @@ impl DataStore {
         vmm_id: &PropolisUuid,
         migration: &nexus::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
-        let generation = Generation(migration.r#gen);
+        let generation = Generation(migration.generation);
         diesel::update(dsl::migration)
             .filter(dsl::id.eq(migration.migration_id))
             .filter(dsl::time_deleted.is_null())
@@ -157,7 +157,7 @@ impl DataStore {
         vmm_id: &PropolisUuid,
         migration: &nexus::MigrationRuntimeState,
     ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
-        let generation = Generation(migration.r#gen);
+        let generation = Generation(migration.generation);
         diesel::update(dsl::migration)
             .filter(dsl::id.eq(migration.migration_id))
             .filter(dsl::time_deleted.is_null())
@@ -240,6 +240,7 @@ mod tests {
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ),
             )

@@ -106,6 +106,12 @@ impl InternalServer {
             log.new(o!("component" => "dropshot_internal")),
         )
         .config(config.deployment.dropshot_internal.clone())
+        .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+            dropshot::ClientSpecifiesVersionInHeader::new(
+                omicron_common::api::VERSION_HEADER,
+                nexus_internal_api::latest_version(),
+            ),
+        )))
         .start()
         .map_err(|error| format!("initializing internal server: {}", error))
         {
@@ -412,20 +418,20 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx.context.nexus.inventory_load_rx()
     }
 
-    async fn get_http_server_external_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_external_server_address().await.unwrap()
+    fn get_http_server_external_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_external_server_address().unwrap()
     }
 
-    async fn get_http_server_techport_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_techport_server_address().await.unwrap()
+    fn get_http_server_techport_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_techport_server_address().unwrap()
     }
 
-    async fn get_http_server_internal_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_internal_server_address().await.unwrap()
+    fn get_http_server_internal_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_internal_server_address().unwrap()
     }
 
-    async fn get_http_server_lockstep_address(&self) -> SocketAddr {
-        self.apictx.context.nexus.get_lockstep_server_address().await.unwrap()
+    fn get_http_server_lockstep_address(&self) -> SocketAddr {
+        self.apictx.context.nexus.get_lockstep_server_address().unwrap()
     }
 
     async fn upsert_test_dataset(

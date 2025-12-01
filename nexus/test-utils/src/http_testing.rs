@@ -549,6 +549,7 @@ pub enum AuthnMode {
     PrivilegedUser,
     SiloUser(SiloUserUuid),
     Session(String),
+    DeviceToken(String),
 }
 
 impl AuthnMode {
@@ -578,6 +579,10 @@ impl AuthnMode {
             AuthnMode::Session(session_token) => {
                 let header_value = format!("session={}", session_token);
                 parse_header_pair(http::header::COOKIE, header_value)
+            }
+            AuthnMode::DeviceToken(token) => {
+                let header_value = format!("Bearer {}", token);
+                parse_header_pair(http::header::AUTHORIZATION, header_value)
             }
         }
     }
@@ -656,6 +661,17 @@ impl<'a> NexusRequest<'a> {
         NexusRequest::new(
             RequestBuilder::new(testctx, http::Method::POST, uri)
                 .body(Some(body))
+                .expect_status(Some(http::StatusCode::CREATED)),
+        )
+    }
+
+    /// Returns a new `NexusRequest` suitable for `POST $uri` with no body
+    pub fn objects_post_no_body(
+        testctx: &'a ClientTestContext,
+        uri: &str,
+    ) -> Self {
+        NexusRequest::new(
+            RequestBuilder::new(testctx, http::Method::POST, uri)
                 .expect_status(Some(http::StatusCode::CREATED)),
         )
     }

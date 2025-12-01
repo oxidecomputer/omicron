@@ -11,7 +11,8 @@ ID SERIAL NZPOOLS SUBNET
 ID NERRORS TIME_DONE 
 
 > blueprint-list
-T ENA ID PARENT TIME_CREATED 
+T ENA ID                                   PARENT TIME_CREATED             
+* no  00000000-0000-0000-0000-000000000000 <none> <REDACTED_TIMESTAMP> 
 
 
 > sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
@@ -863,15 +864,13 @@ wiped system
 
 > load state.json
 loaded data from "state.json"
-warnings:
-  could not determine active Nexus generation from serialized state: no target blueprint set (using default of 1)
 result:
   system:
     using collection 6e066695-94bc-4250-bd63-fd799c166cc1 as source of sled inventory data
     loaded sleds: 04ef3330-c682-4a08-8def-fcc4bef31bcd, 90c1102a-b9f5-4d88-92a2-60d54a2d98cc, dde1c0e2-b10d-4621-b420-f179f7a7a00a
     loaded collections: 6e066695-94bc-4250-bd63-fd799c166cc1
-    loaded blueprints: (none)
-    loaded service IP pool ranges: [V4(Ipv4Range { first: 192.0.2.2, last: 192.0.2.20 })]
+    loaded blueprints: 00000000-0000-0000-0000-000000000000
+    loaded external IP policy: ExternalIpPolicy { service_pool_ipv4_ranges: [Ipv4Range { first: 192.0.2.2, last: 192.0.2.20 }], service_pool_ipv6_ranges: [], external_dns_ips: {} }
     loaded internal DNS generations: (none)
     loaded external DNS generations: (none)
   config:

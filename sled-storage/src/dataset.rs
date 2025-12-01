@@ -8,8 +8,7 @@ use crate::config::MountConfig;
 use crate::keyfile::KeyFile;
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
-    self, DestroyDatasetErrorVariant, EncryptionDetails, Keypath, Mountpoint,
-    SizeDetails, Zfs,
+    self, EncryptionDetails, Keypath, Mountpoint, SizeDetails, Zfs,
 };
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
@@ -18,12 +17,10 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
 };
-use rand::distr::{Alphanumeric, SampleString};
 use slog::{Logger, debug, info, warn};
 use slog_error_chain::InlineErrorChain;
 use std::process::Stdio;
 use std::str::FromStr;
-use std::sync::OnceLock;
 
 pub const INSTALL_DATASET: &'static str = "install";
 pub const CRASH_DATASET: &'static str = "crash";
@@ -57,6 +54,7 @@ pub const ARTIFACT_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(40);
 pub const ZONE_DATASET: &'static str = "crypt/zone";
 pub const DUMP_DATASET: &'static str = "crypt/debug";
 pub const U2_DEBUG_DATASET: &'static str = "crypt/debug";
+pub const LOCAL_STORAGE_DATASET: &'static str = "crypt/local_storage";
 
 // This is the root dataset for all U.2 drives. Encryption is inherited.
 pub const CRYPT_DATASET: &'static str = "crypt";
@@ -64,7 +62,7 @@ pub const CRYPT_DATASET: &'static str = "crypt";
 pub const U2_EXPECTED_DATASET_COUNT: usize = 2;
 pub const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
     // Stores filesystems for zones
-    ExpectedDataset::new(ZONE_DATASET).wipe(),
+    ExpectedDataset::new(ZONE_DATASET),
     // For storing full kernel RAM dumps
     ExpectedDataset::new(DUMP_DATASET)
         .quota(DUMP_DATASET_QUOTA)
@@ -108,8 +106,6 @@ pub struct ExpectedDataset {
     name: &'static str,
     // Optional quota, in _bytes_
     quota: Option<ByteCount>,
-    // Identifies if the dataset should be deleted on boot
-    wipe: bool,
     // Optional compression mode
     compression: CompressionAlgorithm,
 }
@@ -119,7 +115,6 @@ impl ExpectedDataset {
         ExpectedDataset {
             name,
             quota: None,
-            wipe: false,
             compression: CompressionAlgorithm::Off,
         }
     }
@@ -138,11 +133,6 @@ impl ExpectedDataset {
 
     const fn quota(mut self, quota: ByteCount) -> Self {
         self.quota = Some(quota);
-        self
-    }
-
-    const fn wipe(mut self) -> Self {
-        self.wipe = true;
         self
     }
 
@@ -296,39 +286,6 @@ pub(crate) async fn ensure_zpool_has_datasets(
             zpool_name.dataset_mountpoint(&mount_config.root, dataset.name);
         let name = &format!("{}/{}", zpool_name, dataset.name);
 
-        // Use a value that's alive for the duration of this sled agent
-        // to answer the question: should we wipe this disk, or have
-        // we seen it before?
-        //
-        // If this value comes from a prior iteration of the sled agent,
-        // we opt to remove the corresponding dataset.
-        static AGENT_LOCAL_VALUE: OnceLock<String> = OnceLock::new();
-        let agent_local_value = AGENT_LOCAL_VALUE
-            .get_or_init(|| Alphanumeric.sample_string(&mut rand::rng(), 20));
-
-        if dataset.wipe {
-            match Zfs::get_oxide_value(name, "agent").await {
-                Ok(v) if &v == agent_local_value => {
-                    info!(log, "Skipping automatic wipe for dataset: {}", name);
-                }
-                Ok(_) | Err(_) => {
-                    info!(log, "Automatically destroying dataset: {}", name);
-                    Zfs::destroy_dataset(name).await.or_else(|err| {
-                        // If we can't find the dataset, that's fine -- it might
-                        // not have been formatted yet.
-                        if matches!(
-                            err.err,
-                            DestroyDatasetErrorVariant::NotFound
-                        ) {
-                            Ok(())
-                        } else {
-                            Err(err)
-                        }
-                    })?;
-                }
-            }
-        }
-
         let encryption_details = None;
         let size_details = Some(SizeDetails {
             quota: dataset.quota,
@@ -354,15 +311,6 @@ pub(crate) async fn ensure_zpool_has_datasets(
                 "err" => InlineErrorChain::new(&err),
             );
         })?;
-
-        if dataset.wipe {
-            Zfs::set_oxide_value(name, "agent", agent_local_value)
-                .await
-                .map_err(|err| DatasetError::CannotSetAgentProperty {
-                    dataset: name.clone(),
-                    err: Box::new(err),
-                })?;
-        }
     }
     info!(log, "Finished ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);
     Ok(())

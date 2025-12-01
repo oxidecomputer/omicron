@@ -12,6 +12,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::DiskSelector;
 use omicron_common::api::external::CreateResult;
@@ -96,6 +97,11 @@ impl super::Nexus {
             ));
         }
 
+        let disk: datastore::CrucibleDisk =
+            match self.datastore().disk_get(&opctx, authz_disk.id()).await? {
+                datastore::Disk::Crucible(disk) => disk,
+            };
+
         // If there isn't a running propolis, Nexus needs to use the Crucible
         // Pantry to make this snapshot
         let use_the_pantry = if let Some(attach_instance_id) =
@@ -120,12 +126,14 @@ impl super::Nexus {
             true
         };
 
+        let attach_instance_id = disk.runtime().attach_instance_id;
+
         let saga_params = sagas::snapshot_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id: authz_silo.id(),
             project_id: authz_project.id(),
-            disk_id: authz_disk.id(),
-            attach_instance_id: db_disk.runtime_state.attach_instance_id,
+            disk,
+            attach_instance_id,
             use_the_pantry,
             create_params: params.clone(),
         };

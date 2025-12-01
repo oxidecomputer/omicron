@@ -19,6 +19,7 @@ use omicron_common::api::external::{
     Digest, Error, FailureDomain, IdentityMetadata, InstanceState, Name,
     Nullable, ObjectIdentity, SimpleIdentity, SimpleIdentityOrName,
 };
+use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::*;
 use oxnet::{Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
@@ -533,6 +534,44 @@ impl TryFrom<ExternalIp> for FloatingIp {
             ExternalIp::Floating(v) => Ok(v),
         }
     }
+}
+
+// MULTICAST GROUPS
+
+/// View of a Multicast Group
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
+pub struct MulticastGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The multicast IP address held by this resource.
+    pub multicast_ip: IpAddr,
+    /// Source IP addresses for Source-Specific Multicast (SSM).
+    /// Empty array means any source is allowed.
+    pub source_ips: Vec<IpAddr>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// None means no VLAN tagging on egress.
+    pub mvlan: Option<VlanID>,
+    /// The ID of the IP pool this resource belongs to.
+    pub ip_pool_id: Uuid,
+    /// Current state of the multicast group.
+    pub state: String,
+}
+
+/// View of a Multicast Group Member (instance belonging to a multicast group)
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
+pub struct MulticastGroupMember {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the multicast group this member belongs to.
+    pub multicast_group_id: Uuid,
+    /// The ID of the instance that is a member of this group.
+    pub instance_id: Uuid,
+    /// Current state of the multicast group membership.
+    pub state: String,
 }
 
 // RACKS
@@ -1725,6 +1764,10 @@ pub enum AuditLogEntryActor {
         #[schemars(with = "Uuid")]
         silo_user_id: SiloUserUuid,
 
+        silo_id: Uuid,
+    },
+
+    Scim {
         silo_id: Uuid,
     },
 

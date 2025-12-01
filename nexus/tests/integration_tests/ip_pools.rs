@@ -1195,6 +1195,42 @@ async fn test_ip_pool_range_rejects_v6(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, "IPv6 ranges are not allowed yet");
 }
 
+// Support for IPv6 multicast ranges not enabled yet.
+// Delete this test when we support IPv6 multicast ranges.
+#[nexus_test]
+async fn test_ip_pool_multicast_range_rejects_v6(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a multicast pool
+    let pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "mcast-p0".parse().unwrap(),
+            description: "Multicast pool for IPv6 rejection test".to_string(),
+        },
+        IpVersion::V4,
+    );
+    object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
+        .await;
+
+    // Try to add an IPv6 multicast range (ff30::/12 is SSM)
+    let range = IpRange::V6(
+        Ipv6Range::new(
+            std::net::Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 10),
+            std::net::Ipv6Addr::new(0xff30, 0, 0, 0, 0, 0, 0, 20),
+        )
+        .unwrap(),
+    );
+
+    let add_url = "/v1/system/ip-pools/mcast-p0/ranges/add";
+    let error =
+        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
+            .await;
+
+    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
+}
+
 #[nexus_test]
 async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;

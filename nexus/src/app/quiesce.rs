@@ -631,7 +631,7 @@ mod test {
         let log = &cptestctx.logctx.log;
         let nexus_lockstep_url = format!(
             "http://{}",
-            cptestctx.server.get_http_server_lockstep_address().await
+            cptestctx.server.get_http_server_lockstep_address(),
         );
         let nexus_client = nexus_lockstep_client::Client::new(
             &nexus_lockstep_url,
@@ -663,7 +663,7 @@ mod test {
         let log = &cptestctx.logctx.log;
         let nexus_lockstep_url = format!(
             "http://{}",
-            cptestctx.server.get_http_server_lockstep_address().await
+            cptestctx.server.get_http_server_lockstep_address(),
         );
         let nexus_client = nexus_lockstep_client::Client::new(
             &nexus_lockstep_url,

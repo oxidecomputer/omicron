@@ -6,7 +6,7 @@
 //! from within the control plane
 
 progenitor::generate_api!(
-    spec = "../../openapi/nexus-internal.json",
+    spec = "../../openapi/nexus-internal/nexus-internal-1.0.0-6d8ade.json",
     interface = Positional,
     derives = [schemars::JsonSchema, PartialEq],
     inner_type = slog::Logger,
@@ -108,7 +108,11 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     for types::VmmRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::VmmRuntimeState) -> Self {
-        Self { gen: s.gen, state: s.state.into(), time_updated: s.time_updated }
+        Self {
+            r#gen: s.generation,
+            state: s.state.into(),
+            time_updated: s.time_updated,
+        }
     }
 }
 
@@ -133,7 +137,7 @@ impl From<omicron_common::api::internal::nexus::MigrationRuntimeState>
         Self {
             migration_id: s.migration_id,
             state: s.state.into(),
-            gen: s.gen,
+            r#gen: s.generation,
             time_updated: s.time_updated,
         }
     }
@@ -159,7 +163,7 @@ impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
     fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen,
+            r#gen: s.generation,
             time_updated: s.time_updated,
         }
     }
@@ -259,5 +263,15 @@ impl TryFrom<types::ProducerEndpoint>
             address,
             interval: ep.interval.into(),
         })
+    }
+}
+
+impl From<nexus_types::external_api::shared::Baseboard> for types::Baseboard {
+    fn from(value: nexus_types::external_api::shared::Baseboard) -> Self {
+        types::Baseboard {
+            part: value.part,
+            revision: value.revision,
+            serial: value.serial,
+        }
     }
 }

@@ -33,6 +33,7 @@ use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::ExpectedVersion;
+use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OximeterReadPolicy;
 use nexus_types::deployment::PlannerConfig;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -53,7 +54,7 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SpType;
-use omicron_common::address::IpRange;
+use omicron_common::address::Ipv4Range;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
@@ -70,6 +71,7 @@ use omicron_uuid_kinds::MupdateOverrideUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_hardware_types::GIMLET_SLED_MODEL;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -117,7 +119,7 @@ pub struct SystemDescription {
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     target_crucible_pantry_zone_count: usize,
-    service_ip_pool_ranges: Vec<IpRange>,
+    external_ip_policy: ExternalIpPolicy,
     internal_dns_version: Generation,
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
@@ -180,14 +182,22 @@ impl SystemDescription {
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
 
-        // IPs from TEST-NET-1 (RFC 5737)
-        let service_ip_pool_ranges = vec![
-            IpRange::try_from((
-                "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
-                "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
-            ))
-            .unwrap(),
-        ];
+        // Nexus / Boundary NTPs IPs from TEST-NET-1 (RFC 5737).
+        //
+        // This policy doesn't configure any external DNS IPs.
+        let external_ip_policy = {
+            let mut builder = ExternalIpPolicy::builder();
+            builder
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(
+                        "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
+                        "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
+                    )
+                    .unwrap(),
+                )
+                .unwrap();
+            builder.build()
+        };
 
         SystemDescription {
             sleds: IndexMap::new(),
@@ -202,7 +212,7 @@ impl SystemDescription {
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
             target_crucible_pantry_zone_count,
-            service_ip_pool_ranges,
+            external_ip_policy,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
@@ -245,25 +255,28 @@ impl SystemDescription {
         self
     }
 
-    pub fn target_nexus_zone_count(&mut self, count: usize) -> &mut Self {
+    pub fn set_target_nexus_zone_count(&mut self, count: usize) -> &mut Self {
         self.target_nexus_zone_count = count;
         self
     }
 
-    pub fn get_target_nexus_zone_count(&self) -> usize {
+    pub fn target_nexus_zone_count(&self) -> usize {
         self.target_nexus_zone_count
     }
 
-    pub fn target_cockroachdb_zone_count(&mut self, count: usize) -> &mut Self {
+    pub fn set_target_cockroachdb_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
         self.target_cockroachdb_zone_count = count;
         self
     }
 
-    pub fn get_target_cockroachdb_zone_count(&self) -> usize {
+    pub fn target_cockroachdb_zone_count(&self) -> usize {
         self.target_cockroachdb_zone_count
     }
 
-    pub fn target_boundary_ntp_zone_count(
+    pub fn set_target_boundary_ntp_zone_count(
         &mut self,
         count: usize,
     ) -> &mut Self {
@@ -271,11 +284,11 @@ impl SystemDescription {
         self
     }
 
-    pub fn get_target_boundary_ntp_zone_count(&self) -> usize {
+    pub fn target_boundary_ntp_zone_count(&self) -> usize {
         self.target_boundary_ntp_zone_count
     }
 
-    pub fn target_crucible_pantry_zone_count(
+    pub fn set_target_crucible_pantry_zone_count(
         &mut self,
         count: usize,
     ) -> &mut Self {
@@ -283,11 +296,11 @@ impl SystemDescription {
         self
     }
 
-    pub fn get_target_crucible_pantry_zone_count(&self) -> usize {
+    pub fn target_crucible_pantry_zone_count(&self) -> usize {
         self.target_crucible_pantry_zone_count
     }
 
-    pub fn target_internal_dns_zone_count(
+    pub fn set_target_internal_dns_zone_count(
         &mut self,
         count: usize,
     ) -> &mut Self {
@@ -295,15 +308,19 @@ impl SystemDescription {
         self
     }
 
-    pub fn get_target_internal_dns_zone_count(&self) -> usize {
+    pub fn target_internal_dns_zone_count(&self) -> usize {
         self.target_internal_dns_zone_count
     }
 
-    pub fn service_ip_pool_ranges(
+    pub fn external_ip_policy(&self) -> &ExternalIpPolicy {
+        &self.external_ip_policy
+    }
+
+    pub fn set_external_ip_policy(
         &mut self,
-        ranges: Vec<IpRange>,
+        policy: ExternalIpPolicy,
     ) -> &mut Self {
-        self.service_ip_pool_ranges = ranges;
+        self.external_ip_policy = policy;
         self
     }
 
@@ -1072,7 +1089,7 @@ impl SystemDescription {
         &self,
     ) -> anyhow::Result<PlanningInputBuilder> {
         let policy = Policy {
-            service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
+            external_ips: self.external_ip_policy.clone(),
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,
@@ -1280,7 +1297,7 @@ impl Sled {
     ) -> Sled {
         use typed_rng::TypedUuidRng;
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
-        let model = format!("model{}", unique);
+        let model = GIMLET_SLED_MODEL.to_string();
         let serial = format!("serial{}", unique);
         let revision = 0;
         let mut zpool_rng = TypedUuidRng::from_seed(

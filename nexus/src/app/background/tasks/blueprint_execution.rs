@@ -227,7 +227,7 @@ mod test {
     use httptest::Expectation;
     use httptest::matchers::{not, request};
     use httptest::responders::status_code;
-    use id_map::IdMap;
+    use iddqd::{IdOrdMap, id_ord_map};
     use itertools::Itertools as _;
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledCpuFamily, SledSystemHardware,
@@ -250,17 +250,18 @@ mod test {
         blueprint_zone_type,
     };
     use nexus_types::external_api::views::SledState;
+    use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external;
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::BlueprintUuid;
-
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use serde_json::json;
     use std::collections::BTreeMap;
+    use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::watch;
@@ -273,7 +274,7 @@ mod test {
     async fn create_blueprint(
         datastore: &DataStore,
         opctx: &OpContext,
-        blueprint_zones: BTreeMap<SledUuid, IdMap<BlueprintZoneConfig>>,
+        blueprint_zones: BTreeMap<SledUuid, IdOrdMap<BlueprintZoneConfig>>,
         dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = BlueprintUuid::new_v4();
@@ -285,9 +286,10 @@ mod test {
                     sled_id,
                     BlueprintSledConfig {
                         state: SledState::Active,
+                        subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                         sled_agent_generation: Generation::new().next(),
-                        disks: IdMap::new(),
-                        datasets: IdMap::new(),
+                        disks: IdOrdMap::new(),
+                        datasets: IdOrdMap::new(),
                         zones,
                         remove_mupdate_override: None,
                         host_phase_2:
@@ -478,30 +480,30 @@ mod test {
         // reporting success.
         fn make_zones(
             disposition: BlueprintZoneDisposition,
-        ) -> IdMap<BlueprintZoneConfig> {
+        ) -> IdOrdMap<BlueprintZoneConfig> {
             let pool_id = ZpoolUuid::new_v4();
             let zone_id = OmicronZoneUuid::new_v4();
-            [BlueprintZoneConfig {
-                disposition,
-                id: zone_id,
-                filesystem_pool: ZpoolName::new_external(pool_id),
-                zone_type: BlueprintZoneType::InternalDns(
-                    blueprint_zone_type::InternalDns {
-                        dataset: OmicronZoneDataset {
-                            pool_name: format!("oxp_{}", pool_id)
-                                .parse()
-                                .unwrap(),
+            id_ord_map! {
+                BlueprintZoneConfig {
+                    disposition,
+                    id: zone_id,
+                    filesystem_pool: ZpoolName::new_external(pool_id),
+                    zone_type: BlueprintZoneType::InternalDns(
+                        blueprint_zone_type::InternalDns {
+                            dataset: OmicronZoneDataset {
+                                pool_name: format!("oxp_{}", pool_id)
+                                    .parse()
+                                    .unwrap(),
+                            },
+                            dns_address: "[::1]:0".parse().unwrap(),
+                            gz_address: "::1".parse().unwrap(),
+                            gz_address_index: 0,
+                            http_address: "[::1]:12345".parse().unwrap(),
                         },
-                        dns_address: "[::1]:0".parse().unwrap(),
-                        gz_address: "::1".parse().unwrap(),
-                        gz_address_index: 0,
-                        http_address: "[::1]:12345".parse().unwrap(),
-                    },
-                ),
-                image_source: BlueprintZoneImageSource::InstallDataset,
-            }]
-            .into_iter()
-            .collect()
+                    ),
+                    image_source: BlueprintZoneImageSource::InstallDataset,
+                },
+            }
         }
 
         let generation = generation.next();

@@ -35,15 +35,18 @@ use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_common::disk::SharedDatasetConfig;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::ExternalZpoolUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::VolumeConstructionRequest;
 use serde::Serialize;
-use sled_storage::manager::NestedDatasetConfig;
-use sled_storage::manager::NestedDatasetListOptions;
-use sled_storage::manager::NestedDatasetLocation;
+use sled_agent_api::LocalStorageDatasetEnsureRequest;
+use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
+use sled_storage::nested_dataset::NestedDatasetConfig;
+use sled_storage::nested_dataset::NestedDatasetListOptions;
+use sled_storage::nested_dataset::NestedDatasetLocation;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -1136,6 +1139,7 @@ pub(crate) struct PhysicalDisk {
 /// Describes data being simulated within a dataset.
 pub(crate) enum DatasetContents {
     Crucible(CrucibleServer),
+    LocalStorage(LocalStorageDatasetEnsureRequest),
 }
 
 pub(crate) struct Zpool {
@@ -1162,19 +1166,20 @@ impl Zpool {
         start_port: u16,
         end_port: u16,
     ) -> &CrucibleServer {
-        self.datasets.insert(
-            id,
-            DatasetContents::Crucible(CrucibleServer::new(
+        let DatasetContents::Crucible(crucible) = self
+            .datasets
+            .entry(id)
+            .insert_entry(DatasetContents::Crucible(CrucibleServer::new(
                 log,
                 crucible_ip,
                 start_port,
                 end_port,
-            )),
-        );
-        let DatasetContents::Crucible(crucible) = self
-            .datasets
-            .get(&id)
-            .expect("Failed to get the dataset we just inserted");
+            )))
+            .into_mut()
+        else {
+            unreachable!("just inserted this variant!");
+        };
+
         crucible
     }
 
@@ -1187,7 +1192,9 @@ impl Zpool {
         region_id: Uuid,
     ) -> Option<Arc<CrucibleData>> {
         for dataset in self.datasets.values() {
-            let DatasetContents::Crucible(dataset) = dataset;
+            let DatasetContents::Crucible(dataset) = dataset else {
+                continue;
+            };
             for region in &dataset.data().list() {
                 let id = Uuid::from_str(&region.id.0).unwrap();
                 if id == region_id {
@@ -1203,7 +1210,9 @@ impl Zpool {
         let mut regions = vec![];
 
         for dataset in self.datasets.values() {
-            let DatasetContents::Crucible(dataset) = dataset;
+            let DatasetContents::Crucible(dataset) = dataset else {
+                continue;
+            };
             for region in &dataset.data().list() {
                 if region.state == State::Destroyed {
                     continue;
@@ -1223,6 +1232,14 @@ impl Zpool {
 
     pub fn drop_dataset(&mut self, id: DatasetUuid) {
         let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
+    }
+
+    fn insert_local_storage_dataset(
+        &mut self,
+        id: DatasetUuid,
+        request: LocalStorageDatasetEnsureRequest,
+    ) {
+        self.datasets.insert(id, DatasetContents::LocalStorage(request));
     }
 }
 
@@ -1669,8 +1686,8 @@ impl StorageInner {
             if path_components.peek().is_none() {
                 if nested_dataset.children.remove(path_component).is_none() {
                     return Err(HttpError::for_not_found(
-                        None,
-                        "Nested Dataset not found".to_string(),
+                        Some(NESTED_DATASET_NOT_FOUND.to_string()),
+                        NESTED_DATASET_NOT_FOUND.to_string(),
                     ));
                 };
                 return Ok(());
@@ -1852,8 +1869,11 @@ impl StorageInner {
         zpool
             .datasets
             .iter()
-            .map(|(id, dataset)| match dataset {
-                DatasetContents::Crucible(server) => (*id, server.address()),
+            .filter_map(|(id, dataset)| match dataset {
+                DatasetContents::Crucible(server) => {
+                    Some((*id, server.address()))
+                }
+                DatasetContents::LocalStorage(_) => None,
             })
             .collect()
     }
@@ -1882,6 +1902,9 @@ impl StorageInner {
     ) -> Arc<CrucibleData> {
         match self.get_dataset(zpool_id, dataset_id) {
             DatasetContents::Crucible(crucible) => crucible.data.clone(),
+            DatasetContents::LocalStorage(_) => {
+                panic!("asked for Crucible, got LocalStorage!")
+            }
         }
     }
 
@@ -1921,6 +1944,34 @@ impl StorageInner {
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
             .drop_dataset(dataset_id)
+    }
+
+    pub fn ensure_local_storage_dataset(
+        &mut self,
+        zpool_id: ExternalZpoolUuid,
+        dataset_id: DatasetUuid,
+        request: LocalStorageDatasetEnsureRequest,
+    ) {
+        let zpool_id =
+            ZpoolUuid::from_untyped_uuid(zpool_id.into_untyped_uuid());
+        self.zpools
+            .get_mut(&zpool_id)
+            .expect("Zpool does not exist")
+            .insert_local_storage_dataset(dataset_id, request);
+    }
+
+    pub fn get_local_storage_dataset(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> LocalStorageDatasetEnsureRequest {
+        match self.get_dataset(zpool_id, dataset_id) {
+            DatasetContents::Crucible(_) => {
+                panic!("asked for LocalStorage, got Crucible!")
+            }
+
+            DatasetContents::LocalStorage(request) => request.clone(),
+        }
     }
 }
 

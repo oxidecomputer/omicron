@@ -375,7 +375,8 @@ impl DataStore {
         authz_project: &authz::Project,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<Vpc> {
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
+        let authz_vpc_list = authz::VpcList::new(authz_project.clone());
+        opctx.authorize(authz::Action::ListChildren, &authz_vpc_list).await?;
 
         use nexus_db_schema::schema::vpc::dsl;
         match pagparams {
@@ -2864,14 +2865,14 @@ impl DataStore {
                     .unwrap_or_default(),
                 (RouteTarget::Instance(n), _) => instances
                     .get(&n)
-                    .map(|i| match i.1.ip {
-                        // TODO: update for dual-stack v4/6.
-                        ip @ IpNetwork::V4(_) => {
-                            (Some(RouterTarget::Ip(ip.ip())), None)
-                        }
-                        ip @ IpNetwork::V6(_) => {
-                            (None, Some(RouterTarget::Ip(ip.ip())))
-                        }
+                    .map(|(_inst, iface)| {
+                        let v4_target = iface
+                            .ipv4
+                            .map(|ipv4| RouterTarget::Ip(ipv4.into()));
+                        let v6_target = iface
+                            .ipv6
+                            .map(|ipv6| RouterTarget::Ip(ipv6.into()));
+                        (v4_target, v6_target)
                     })
                     .unwrap_or_default(),
                 (RouteTarget::Drop, _) => {
@@ -2976,7 +2977,10 @@ mod tests {
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use nexus_db_model::IncompleteNetworkInterface;
+    use nexus_db_model::IpConfig;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
+    use nexus_reconfigurator_planning::planner::Planner;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
@@ -2997,6 +3001,8 @@ mod tests {
     use oxnet::IpNet;
     use oxnet::Ipv4Net;
     use slog::info;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
 
     // Test that we detect the right error condition and return None when we
     // fail to insert a VPC due to VNI exhaustion.
@@ -3288,6 +3294,10 @@ mod tests {
                 .zone_type
                 .external_networking()
                 .expect("external networking for zone type");
+            let ip = nic
+                .ip_config
+                .ipv4_addr()
+                .expect("an IPv4 address for this NIC");
             IncompleteNetworkInterface::new_service(
                 nic.id,
                 zone_config.id.into_untyped_uuid(),
@@ -3296,7 +3306,7 @@ mod tests {
                     name: nic.name.clone(),
                     description: nic.name.to_string(),
                 },
-                nic.ip,
+                IpConfig::from_ipv4(*ip),
                 nic.mac,
                 nic.slot,
             )
@@ -3304,31 +3314,31 @@ mod tests {
         };
 
         // Create an initial, empty blueprint, and make it the target.
-        let bp0 = BlueprintBuilder::build_empty_with_sleds(
-            sled_ids.iter().copied(),
-            "test",
-        );
+        let bp0 = BlueprintBuilder::build_empty("test");
         bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
 
         // Our blueprint doesn't describe any services, so we shouldn't find any
         // sled IDs running services.
         assert_service_sled_ids(&datastore, &[]).await;
 
-        // Build an initial empty collection
-        let collection =
-            system.to_collection_builder().expect("collection builder").build();
-
         // Create a blueprint that has a Nexus on our third sled.
         let bp1 = {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp0,
-                &planning_input,
-                &collection,
                 "test",
                 PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
+
+            // We made changes to the planning input we want to be reflected in
+            // the new blueprint; reuse the `Planner`'s method for replicating
+            // those changes.
+            Planner::update_builder_from_planning_input(
+                &mut builder,
+                &planning_input,
+            );
+
             for &sled_id in &sled_ids {
                 builder
                     .sled_add_disks(
@@ -3340,12 +3350,20 @@ mod tests {
                     )
                     .expect("ensured disks");
             }
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator")
+            .for_new_nexus()
+            .expect("found external IP for Nexus");
             builder
                 .sled_add_zone_nexus_with_config(
                     sled_ids[2],
                     false,
                     Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
+                    external_ip,
                     bp0.nexus_generation,
                 )
                 .expect("added nexus to third sled");
@@ -3409,19 +3427,27 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp2,
-                &planning_input,
-                &collection,
                 "test",
                 PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
+                    planning_input.external_ip_policy(),
+                )
+                .expect("constructed ExternalNetworkingAllocator");
             for &sled_id in &sled_ids {
+                let external_ip = external_networking_alloc
+                    .for_new_nexus()
+                    .expect("found external IP for Nexus");
                 builder
                     .sled_add_zone_nexus_with_config(
                         sled_id,
                         false,
                         Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
+                        external_ip,
                         bp2.nexus_generation,
                     )
                     .expect("added nexus to third sled");
@@ -3996,6 +4022,7 @@ mod tests {
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ),
             )
@@ -4030,8 +4057,7 @@ mod tests {
                         name: "nic".parse().unwrap(),
                         description: "A NIC...".into(),
                     },
-                    None,
-                    vec![],
+                    IpConfig::auto_ipv4(),
                 )
                 .unwrap(),
             )
@@ -4048,7 +4074,10 @@ mod tests {
         assert!(routes.iter().any(|x| (x.dest
             == "192.168.0.0/16".parse::<IpNet>().unwrap())
             && match x.target {
-                RouterTarget::Ip(ip) => ip == nic.ip.ip(),
+                RouterTarget::Ip(IpAddr::V4(ipv4)) =>
+                    ipv4 == Ipv4Addr::from(nic.ipv4.unwrap()),
+                RouterTarget::Ip(IpAddr::V6(ipv6)) =>
+                    ipv6 == Ipv6Addr::from(nic.ipv6.unwrap()),
                 _ => false,
             }));
 

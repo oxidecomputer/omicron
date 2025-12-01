@@ -6,6 +6,7 @@ use super::Nexus;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
 use authn::external::HttpAuthnScheme;
+use authn::external::scim::HttpAuthnScimToken;
 use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
@@ -141,6 +142,7 @@ impl ServerContext {
                         Box::new(HttpAuthnSessionCookie)
                     }
                     SchemeName::AccessToken => Box::new(HttpAuthnToken),
+                    SchemeName::ScimToken => Box::new(HttpAuthnScimToken),
                 },
             )
             .collect();
@@ -456,12 +458,15 @@ impl authn::external::SiloUserSilo for ServerContext {
 
 #[async_trait]
 impl authn::external::token::TokenContext for ServerContext {
-    async fn token_actor(
+    async fn authenticate_token(
         &self,
         token: String,
-    ) -> Result<authn::Actor, authn::Reason> {
+    ) -> Result<
+        (authn::Actor, Option<chrono::DateTime<chrono::Utc>>),
+        authn::Reason,
+    > {
         let opctx = self.nexus.opctx_external_authn();
-        self.nexus.device_access_token_actor(opctx, token).await
+        self.nexus.authenticate_token(opctx, token).await
     }
 }
 
@@ -493,5 +498,16 @@ impl SessionStore for ServerContext {
 
     fn session_absolute_timeout(&self) -> Duration {
         self.console_config.session_absolute_timeout
+    }
+}
+
+#[async_trait]
+impl authn::external::scim::ScimTokenContext for ServerContext {
+    async fn scim_token_actor(
+        &self,
+        token: String,
+    ) -> Result<authn::Actor, authn::Reason> {
+        let opctx = self.nexus.opctx_external_authn();
+        self.nexus.scim_token_actor(opctx, token).await
     }
 }

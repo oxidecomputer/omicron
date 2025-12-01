@@ -32,9 +32,10 @@ use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
+    InstanceExternalIpBody, InstanceMulticastBody, VmmPutStateBody,
     VmmPutStateResponse, VmmUnregisterResponse,
 };
+use sled_agent_types::probes::ProbeSet;
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
@@ -491,7 +492,7 @@ impl SledAgentApi for SledAgentImpl {
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceEnsureBody>,
+        body: TypedBody<sled_agent_types::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
@@ -551,6 +552,30 @@ impl SledAgentApi for SledAgentImpl {
         let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         sa.instance_delete_external_ip(id, &body_args).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_join_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+        sa.instance_join_multicast_group(id, &body_args).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn vmm_leave_multicast_group(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<InstanceMulticastBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = rqctx.context();
+        let id = path_params.into_inner().propolis_id;
+        let body_args = body.into_inner();
+        sa.instance_leave_multicast_group(id, &body_args).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -1085,6 +1110,49 @@ impl SledAgentApi for SledAgentImpl {
             }
         }
         sa.hardware_monitor().set_switch_zone_policy(policy);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn probes_put(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ProbeSet>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        request_context.context().set_probes(body.into_inner().probes);
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn local_storage_dataset_ensure(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+        body: TypedBody<LocalStorageDatasetEnsureRequest>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let path_params = path_params.into_inner();
+        let request = body.into_inner();
+
+        sa.create_local_storage_dataset(
+            path_params.zpool_id,
+            path_params.dataset_id,
+            request,
+        )
+        .await?;
+
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn local_storage_dataset_delete(
+        request_context: RequestContext<Self::Context>,
+        path_params: Path<LocalStoragePathParam>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        let path_params = path_params.into_inner();
+
+        sa.delete_local_storage_dataset(
+            path_params.zpool_id,
+            path_params.dataset_id,
+        )
+        .await?;
+
         Ok(HttpResponseUpdatedNoContent())
     }
 }

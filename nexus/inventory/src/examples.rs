@@ -52,6 +52,7 @@ use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use sled_agent_types::inventory::v9::OmicronZonesConfig as OmicronZonesConfigV9;
 use sled_agent_types::zone_images::MupdateOverrideNonBootInfo;
 use sled_agent_types::zone_images::MupdateOverrideNonBootMismatch;
 use sled_agent_types::zone_images::MupdateOverrideNonBootResult;
@@ -373,12 +374,23 @@ pub fn representative() -> Representative {
     // (2) pretty-printing each one with `json --in-place --file FILENAME`
     // (3) adjusting the format slightly with
     //         `jq '{ generation: .omicron_generation, zones: .zones }'`
+    //
+    // Note that these files are in an older format of the zone configuration
+    // types. Rather than rewrite these, we're relying on existing conversion
+    // code, which we already have in order to support the sled-agent's
+    // versioned API in any case.
     let sled14_data = include_str!("../example-data/madrid-sled14.json");
     let sled16_data = include_str!("../example-data/madrid-sled16.json");
     let sled17_data = include_str!("../example-data/madrid-sled17.json");
-    let sled14: OmicronZonesConfig = serde_json::from_str(sled14_data).unwrap();
-    let sled16: OmicronZonesConfig = serde_json::from_str(sled16_data).unwrap();
-    let sled17: OmicronZonesConfig = serde_json::from_str(sled17_data).unwrap();
+    let sled14_v9: OmicronZonesConfigV9 =
+        serde_json::from_str(sled14_data).unwrap();
+    let sled16_v9: OmicronZonesConfigV9 =
+        serde_json::from_str(sled16_data).unwrap();
+    let sled17_v9: OmicronZonesConfigV9 =
+        serde_json::from_str(sled17_data).unwrap();
+    let sled14 = OmicronZonesConfig::try_from(sled14_v9).unwrap();
+    let sled16 = OmicronZonesConfig::try_from(sled16_v9).unwrap();
+    let sled17 = OmicronZonesConfig::try_from(sled17_v9).unwrap();
 
     // Convert these to `OmicronSledConfig`s. We'll start with empty disks and
     // datasets for now, and add to them below for sled14.
@@ -501,11 +513,14 @@ pub fn representative() -> Representative {
     let mut zpools = Vec::new();
     for disk in &disks {
         let pool_id = zpool_id_iter.next().unwrap();
-        sled14.disks.insert(OmicronPhysicalDiskConfig {
-            identity: disk.identity.clone(),
-            id: disk_id_iter.next().unwrap(),
-            pool_id,
-        });
+        sled14
+            .disks
+            .insert_unique(OmicronPhysicalDiskConfig {
+                identity: disk.identity.clone(),
+                id: disk_id_iter.next().unwrap(),
+                pool_id,
+            })
+            .unwrap();
         zpools.push(InventoryZpool {
             id: pool_id,
             total_size: ByteCount::from(4096),
@@ -524,15 +539,18 @@ pub fn representative() -> Representative {
         reservation: None,
         compression: "lz4".to_string(),
     }];
-    sled14.datasets.insert(DatasetConfig {
-        id: datasets[0].id.unwrap(),
-        name: dataset_name,
-        inner: SharedDatasetConfig {
-            compression: datasets[0].compression.parse().unwrap(),
-            quota: datasets[0].quota,
-            reservation: datasets[0].reservation,
-        },
-    });
+    sled14
+        .datasets
+        .insert_unique(DatasetConfig {
+            id: datasets[0].id.unwrap(),
+            name: dataset_name,
+            inner: SharedDatasetConfig {
+                compression: datasets[0].compression.parse().unwrap(),
+                quota: datasets[0].quota,
+                reservation: datasets[0].reservation,
+            },
+        })
+        .unwrap();
 
     builder
         .found_sled_inventory(

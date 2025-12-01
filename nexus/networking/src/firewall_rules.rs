@@ -284,7 +284,7 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         .get(vpc.name())
                         .unwrap_or(&no_interfaces)
                         .iter()
-                        .filter(|nic| nic.ip == *addr)
+                        .filter(|nic| nic.ip_config.has_addr(addr))
                         .for_each(&mut push_target_nic);
                 }
                 external::VpcFirewallRuleTarget::IpNet(net) => {
@@ -292,14 +292,17 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                         .get(vpc.name())
                         .unwrap_or(&no_interfaces)
                         .iter()
-                        .filter(|nic| match (net, nic.ip) {
-                            (IpNet::V4(net), IpAddr::V4(ip)) => {
-                                net.contains(ip)
-                            }
-                            (IpNet::V6(net), IpAddr::V6(ip)) => {
-                                net.contains(ip)
-                            }
-                            (_, _) => false,
+                        .filter(|nic| match net {
+                            IpNet::V4(net) => nic
+                                .ip_config
+                                .ipv4_addr()
+                                .map(|ip| net.contains(*ip))
+                                .unwrap_or(false),
+                            IpNet::V6(net) => nic
+                                .ip_config
+                                .ipv6_addr()
+                                .map(|ip| net.contains(*ip))
+                                .unwrap_or(false),
                         })
                         .for_each(&mut push_target_nic);
                 }
@@ -366,9 +369,21 @@ pub async fn resolve_firewall_rules_for_sled_agent(
                                 .get(&name)
                                 .unwrap_or(&no_interfaces)
                             {
-                                host_addrs.insert(HostIdentifier::Ip(
-                                    IpNet::host_net(interface.ip),
-                                ));
+                                // Insert both IPv4 and / or IPv6 addresses.
+                                if let Some(ipv4) =
+                                    interface.ip_config.ipv4_addr()
+                                {
+                                    host_addrs.insert(HostIdentifier::Ip(
+                                        IpNet::host_net(IpAddr::V4(*ipv4)),
+                                    ));
+                                }
+                                if let Some(ipv6) =
+                                    interface.ip_config.ipv6_addr()
+                                {
+                                    host_addrs.insert(HostIdentifier::Ip(
+                                        IpNet::host_net(IpAddr::V6(*ipv6)),
+                                    ));
+                                }
                             }
                         }
                         external::VpcFirewallRuleHostFilter::Subnet(name) => {

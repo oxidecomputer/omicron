@@ -19,6 +19,7 @@ use crate::db::model::Name;
 use crate::db::model::NetworkInterface;
 use crate::db::model::NetworkInterfaceKind;
 use crate::db::model::NetworkInterfaceUpdate;
+use crate::db::model::SqlU8;
 use crate::db::model::VpcSubnet;
 use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
@@ -32,6 +33,8 @@ use nexus_db_errors::OptionalError;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
 use nexus_db_model::IpVersion;
+use nexus_db_model::Ipv4Addr;
+use nexus_db_model::Ipv6Addr;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
@@ -43,35 +46,128 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::internal::shared::PrivateIpConfig;
+use omicron_common::api::internal::shared::PrivateIpv4Config;
+use omicron_common::api::internal::shared::PrivateIpv6Config;
+use oxnet::Ipv4Net;
+use oxnet::Ipv6Net;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// OPTE requires information that's currently split across the network
 /// interface and VPC subnet tables.
-#[derive(Debug, diesel::Queryable)]
+#[derive(Debug, diesel::Queryable, diesel::Selectable)]
 struct NicInfo {
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::id)]
     id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::parent_id)]
     parent_id: Uuid,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::kind)]
     kind: NetworkInterfaceKind,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::name)]
     name: db::model::Name,
-    ip: ipnetwork::IpNetwork,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::ip)]
+    ipv4: Option<Ipv4Addr>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::ipv6)]
+    ipv6: Option<Ipv6Addr>,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::mac)]
     mac: db::model::MacAddr,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc_subnet::ipv4_block)]
     ipv4_block: db::model::Ipv4Net,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc_subnet::ipv6_block)]
     ipv6_block: db::model::Ipv6Net,
+    #[diesel(select_expression = nexus_db_schema::schema::vpc::vni)]
     vni: db::model::Vni,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::is_primary)]
     primary: bool,
-    slot: i16,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::slot)]
+    slot: SqlU8,
+    #[diesel(select_expression = nexus_db_schema::schema::network_interface::transit_ips)]
     transit_ips: Vec<ipnetwork::IpNetwork>,
 }
 
-impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
-    fn from(
+impl TryFrom<NicInfo>
+    for omicron_common::api::internal::shared::NetworkInterface
+{
+    type Error = Error;
+
+    fn try_from(
         nic: NicInfo,
-    ) -> omicron_common::api::internal::shared::NetworkInterface {
-        let ip_subnet = if nic.ip.is_ipv4() {
-            oxnet::IpNet::V4(nic.ipv4_block.0)
-        } else {
-            oxnet::IpNet::V6(nic.ipv6_block.0)
+    ) -> Result<
+        omicron_common::api::internal::shared::NetworkInterface,
+        Self::Error,
+    > {
+        let ip = match (nic.ipv4, nic.ipv6) {
+            (None, None) => {
+                return Err(Error::internal_error(
+                    "Found NIC with no VPC-private IP addresses at all",
+                ));
+            }
+            (Some(ipv4), None) => {
+                let transit_ips = nic
+                    .transit_ips
+                    .iter()
+                    .map(|net| {
+                        let ipnetwork::IpNetwork::V4(net) = net else {
+                            return Err(Error::internal_error(
+                                "Found NIC with IPv4 address only, but \
+                                which has IPv6 transit IPs",
+                            ));
+                        };
+                        Ok(Ipv4Net::from(*net))
+                    })
+                    .collect::<Result<_, _>>()?;
+                PrivateIpConfig::V4(PrivateIpv4Config::new_with_transit_ips(
+                    *ipv4,
+                    *nic.ipv4_block,
+                    transit_ips,
+                )?)
+            }
+            (None, Some(ipv6)) => {
+                let transit_ips = nic
+                    .transit_ips
+                    .iter()
+                    .map(|net| {
+                        let ipnetwork::IpNetwork::V6(net) = net else {
+                            return Err(Error::internal_error(
+                                "Found NIC with IPv6 address only, but \
+                                which has IPv4 transit IPs",
+                            ));
+                        };
+                        Ok(Ipv6Net::from(*net))
+                    })
+                    .collect::<Result<_, _>>()?;
+                PrivateIpConfig::V6(PrivateIpv6Config::new_with_transit_ips(
+                    *ipv6,
+                    *nic.ipv6_block,
+                    transit_ips,
+                )?)
+            }
+            (Some(ipv4), Some(ipv6)) => {
+                let mut ipv4_transit_ips = Vec::new();
+                let mut ipv6_transit_ips = Vec::new();
+                for net in nic.transit_ips.iter() {
+                    match net {
+                        ipnetwork::IpNetwork::V4(net) => {
+                            ipv4_transit_ips.push(Ipv4Net::from(*net))
+                        }
+                        ipnetwork::IpNetwork::V6(net) => {
+                            ipv6_transit_ips.push(Ipv6Net::from(*net))
+                        }
+                    }
+                }
+                let v4 = PrivateIpv4Config::new_with_transit_ips(
+                    *ipv4,
+                    *nic.ipv4_block,
+                    ipv4_transit_ips,
+                )?;
+                let v6 = PrivateIpv6Config::new_with_transit_ips(
+                    *ipv6,
+                    *nic.ipv6_block,
+                    ipv6_transit_ips,
+                )?;
+                PrivateIpConfig::DualStack { v4, v6 }
+            }
         };
         let kind = match nic.kind {
             NetworkInterfaceKind::Instance => {
@@ -84,18 +180,16 @@ impl From<NicInfo> for omicron_common::api::internal::shared::NetworkInterface {
                 omicron_common::api::internal::shared::NetworkInterfaceKind::Probe{ id: nic.parent_id }
             }
         };
-        omicron_common::api::internal::shared::NetworkInterface {
+        Ok(omicron_common::api::internal::shared::NetworkInterface {
             id: nic.id,
             kind,
             name: nic.name.into(),
-            ip: nic.ip.ip(),
+            ip_config: ip,
             mac: nic.mac.0,
-            subnet: ip_subnet,
             vni: nic.vni.0,
             primary: nic.primary,
             slot: u8::try_from(nic.slot).unwrap(),
-            transit_ips: nic.transit_ips.iter().map(|v| (*v).into()).collect(),
-        }
+        })
     }
 }
 
@@ -112,8 +206,13 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, authz_instance)
             .await
             .map_err(network_interface::InsertError::External)?;
+        // Creating a NIC doesn't create a child resource of the subnet itself;
+        // it creates a child of the Instance. We only need Read permission on
+        // the subnet to reference it. This allows limited-collaborators to
+        // create instances while still blocking them from modifying networking
+        // infrastructure.
         opctx
-            .authorize(authz::Action::CreateChild, authz_subnet)
+            .authorize(authz::Action::Read, authz_subnet)
             .await
             .map_err(network_interface::InsertError::External)?;
         self.instance_create_network_interface_raw(&opctx, interface).await
@@ -507,32 +606,14 @@ impl DataStore {
             )
             .inner_join(vpc::table.on(vpc_subnet::vpc_id.eq(vpc::id)))
             .order_by(network_interface::slot)
-            // TODO-cleanup: Having to specify each column again is less than
-            // ideal, but we can't derive `Selectable` since this is the result
-            // of a JOIN and not from a single table. DRY this out if possible.
-            .select((
-                network_interface::id,
-                network_interface::parent_id,
-                network_interface::kind,
-                network_interface::name,
-                network_interface::ip,
-                network_interface::mac,
-                vpc_subnet::ipv4_block,
-                vpc_subnet::ipv6_block,
-                vpc::vni,
-                network_interface::is_primary,
-                network_interface::slot,
-                network_interface::transit_ips,
-            ))
-            .get_results_async::<NicInfo>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .select(NicInfo::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        Ok(rows
+        rows
             .into_iter()
-            .map(omicron_common::api::internal::shared::NetworkInterface::from)
-            .collect())
+            .map(omicron_common::api::internal::shared::NetworkInterface::try_from)
+            .collect::<Result<_, _>>()
     }
 
     /// Return the information about an instance's network interfaces required
@@ -928,6 +1009,7 @@ mod tests {
     use crate::db::pub_test_utils::TestDatabase;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
+    use nexus_db_model::IpConfig;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_test_utils::dev;
     use std::collections::BTreeSet;
@@ -979,7 +1061,7 @@ mod tests {
                     name: name.parse().unwrap(),
                     description: name,
                 },
-                ip.into(),
+                IpConfig::from_ipv4(ip),
                 macs.next().unwrap(),
                 0,
             )
