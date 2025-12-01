@@ -2015,17 +2015,16 @@ impl DataStore {
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
 
-        let query = InsertTargetQuery {
-            target_id: target.target_id,
-            enabled: target.enabled,
-            time_made_target: target.time_made_target,
-        };
-
-        query
-            .to_query()
-            .execute_async(conn)
-            .await
-            .map_err(|e| Error::from(query.decode_error(e)))?;
+        insert_target_query(
+            target.target_id,
+            target.enabled,
+            target.time_made_target,
+        )
+        .execute_async(conn)
+        .await
+        .map_err(|e| {
+            Error::from(decode_target_insert_error(target.target_id, e))
+        })?;
 
         Ok(())
     }
@@ -2041,7 +2040,7 @@ impl DataStore {
     // could reconsider this and make `blueprint_target_set_current` accept
     // blueprints where either their own or their parent is the current
     // blueprint, although this would require some rework in the nontrivial
-    // `InsertTargetQuery` CTE.
+    // `insert_target_query` CTE.
     pub async fn blueprint_target_set_current_enabled(
         &self,
         opctx: &OpContext,
@@ -2805,6 +2804,39 @@ impl From<InsertTargetError> for Error {
     }
 }
 
+// Uncastable sentinel used to detect we attempt to make a blueprint the target
+// when it does not exist in the blueprint table.
+const NO_SUCH_BLUEPRINT_SENTINEL: &str = "no-such-blueprint";
+
+// Uncastable sentinel used to detect we attempt to make a blueprint the target
+// when its parent_blueprint_id is not the current target.
+const PARENT_NOT_TARGET_SENTINEL: &str = "parent-not-target";
+
+// Error messages generated from the above sentinel values.
+const NO_SUCH_BLUEPRINT_ERROR_MESSAGE: &str = "could not parse \"no-such-blueprint\" as type uuid: \
+     uuid: incorrect UUID length: no-such-blueprint";
+const PARENT_NOT_TARGET_ERROR_MESSAGE: &str = "could not parse \"parent-not-target\" as type uuid: \
+     uuid: incorrect UUID length: parent-not-target";
+
+fn decode_target_insert_error(
+    target_id: BlueprintUuid,
+    err: DieselError,
+) -> InsertTargetError {
+    match err {
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
+            if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE =>
+        {
+            InsertTargetError::NoSuchBlueprint(target_id)
+        }
+        DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
+            if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE =>
+        {
+            InsertTargetError::ParentNotTarget(target_id)
+        }
+        other => InsertTargetError::Other(other),
+    }
+}
+
 /// Query to insert a new current target blueprint.
 ///
 /// The `bp_target` table's primary key is the `version` field, and we enforce
@@ -2926,145 +2958,105 @@ impl From<InsertTargetError> for Error {
 ///     <new_target_time_made_target>
 ///     FROM new_target
 /// ```
-#[derive(Debug, Clone, Copy)]
-struct InsertTargetQuery {
+fn insert_target_query(
     target_id: BlueprintUuid,
     enabled: bool,
     time_made_target: DateTime<Utc>,
-}
+) -> TypedSqlQuery<()> {
+    let mut builder = QueryBuilder::new();
+    let target_id = *target_id.as_untyped_uuid();
 
-// Uncastable sentinel used to detect we attempt to make a blueprint the target
-// when it does not exist in the blueprint table.
-const NO_SUCH_BLUEPRINT_SENTINEL: &str = "no-such-blueprint";
-
-// Uncastable sentinel used to detect we attempt to make a blueprint the target
-// when its parent_blueprint_id is not the current target.
-const PARENT_NOT_TARGET_SENTINEL: &str = "parent-not-target";
-
-// Error messages generated from the above sentinel values.
-const NO_SUCH_BLUEPRINT_ERROR_MESSAGE: &str = "could not parse \"no-such-blueprint\" as type uuid: \
-     uuid: incorrect UUID length: no-such-blueprint";
-const PARENT_NOT_TARGET_ERROR_MESSAGE: &str = "could not parse \"parent-not-target\" as type uuid: \
-     uuid: incorrect UUID length: parent-not-target";
-
-impl InsertTargetQuery {
-    fn decode_error(&self, err: DieselError) -> InsertTargetError {
-        match err {
-            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
-                if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE =>
-            {
-                InsertTargetError::NoSuchBlueprint(self.target_id)
-            }
-            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
-                if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE =>
-            {
-                InsertTargetError::ParentNotTarget(self.target_id)
-            }
-            other => InsertTargetError::Other(other),
-        }
-    }
-}
-
-impl InsertTargetQuery {
-    fn to_query(self) -> TypedSqlQuery<()> {
-        let mut builder = QueryBuilder::new();
-
-        let target_id = *self.target_id.as_untyped_uuid();
-        let enabled = self.enabled;
-        let time_made_target = self.time_made_target;
-
-        builder.sql(
-            "WITH \
-            current_target AS ( \
-              SELECT \
-                version, \
-                blueprint_id \
-              FROM bp_target \
-              ORDER BY version DESC \
-              LIMIT 1 \
-            ), \
-            check_validity AS MATERIALIZED ( \
-              SELECT \
-                CAST( \
-                  IF( \
-                    (SELECT id FROM blueprint WHERE id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(target_id)
-        .sql(") IS NULL, '")
-        .sql(NO_SUCH_BLUEPRINT_SENTINEL)
-        .sql(
-            "', \
-                    IF( \
-                      (SELECT parent_blueprint_id FROM blueprint, current_target \
-                       WHERE id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(target_id)
-        .sql(
-            " \
-                       AND current_target.blueprint_id = parent_blueprint_id \
-                      ) IS NOT NULL \
-                      OR \
-                      (SELECT 1 FROM blueprint \
-                       WHERE id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(target_id)
-        .sql(
-            " \
-                       AND parent_blueprint_id IS NULL \
-                       AND NOT EXISTS (SELECT version FROM current_target) \
-                      ) = 1, \
-                      CAST(",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(target_id)
-        .sql(" AS text), '")
-        .sql(PARENT_NOT_TARGET_SENTINEL)
-        .sql(
-            "' \
-                    ) \
-                  ) AS UUID \
+    builder.sql(
+        "WITH \
+        current_target AS ( \
+          SELECT \
+            version, \
+            blueprint_id \
+          FROM bp_target \
+          ORDER BY version DESC \
+          LIMIT 1 \
+        ), \
+        check_validity AS MATERIALIZED ( \
+          SELECT \
+            CAST( \
+              IF( \
+                (SELECT id FROM blueprint WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(") IS NULL, '")
+    .sql(NO_SUCH_BLUEPRINT_SENTINEL)
+    .sql(
+        "', \
+                IF( \
+                  (SELECT parent_blueprint_id FROM blueprint, current_target \
+                   WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+                   AND current_target.blueprint_id = parent_blueprint_id \
+                  ) IS NOT NULL \
+                  OR \
+                  (SELECT 1 FROM blueprint \
+                   WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+                   AND parent_blueprint_id IS NULL \
+                   AND NOT EXISTS (SELECT version FROM current_target) \
+                  ) = 1, \
+                  CAST(",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(" AS text), '")
+    .sql(PARENT_NOT_TARGET_SENTINEL)
+    .sql(
+        "' \
                 ) \
-            ), \
-            new_target AS ( \
-              SELECT 1 AS new_version FROM blueprint \
-              WHERE id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(target_id)
-        .sql(
-            " \
-              AND parent_blueprint_id IS NULL \
-              AND NOT EXISTS (SELECT version FROM current_target) \
-              UNION \
-              SELECT current_target.version + 1 \
-              FROM current_target, blueprint \
-              WHERE id = ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(target_id)
-        .sql(
-            " \
-              AND parent_blueprint_id IS NOT NULL \
-              AND parent_blueprint_id = current_target.blueprint_id \
+              ) AS UUID \
             ) \
-            INSERT INTO bp_target(version, blueprint_id, enabled, time_made_target) \
-            SELECT new_target.new_version, ",
-        )
-        .param()
-        .bind::<sql_types::Uuid, _>(target_id)
-        .sql(", ")
-        .param()
-        .bind::<sql_types::Bool, _>(enabled)
-        .sql(", ")
-        .param()
-        .bind::<sql_types::Timestamptz, _>(time_made_target)
-        .sql(" FROM new_target");
+        ), \
+        new_target AS ( \
+          SELECT 1 AS new_version FROM blueprint \
+          WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+          AND parent_blueprint_id IS NULL \
+          AND NOT EXISTS (SELECT version FROM current_target) \
+          UNION \
+          SELECT current_target.version + 1 \
+          FROM current_target, blueprint \
+          WHERE id = ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(
+        " \
+          AND parent_blueprint_id IS NOT NULL \
+          AND parent_blueprint_id = current_target.blueprint_id \
+        ) \
+        INSERT INTO bp_target(version, blueprint_id, enabled, time_made_target) \
+        SELECT new_target.new_version, ",
+    )
+    .param()
+    .bind::<sql_types::Uuid, _>(target_id)
+    .sql(", ")
+    .param()
+    .bind::<sql_types::Bool, _>(enabled)
+    .sql(", ")
+    .param()
+    .bind::<sql_types::Timestamptz, _>(time_made_target)
+    .sql(" FROM new_target");
 
-        builder.query()
-    }
+    builder.query()
 }
 
 #[cfg(test)]
@@ -4724,39 +4716,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn insert_target_query_sql_snapshot() {
+    async fn expectorate_insert_target_query() {
         use crate::db::raw_query_builder::expectorate_query_contents;
 
-        let query = InsertTargetQuery {
-            target_id: BlueprintUuid::nil(),
-            enabled: true,
-            time_made_target: Utc::now(),
-        };
+        let query = insert_target_query(BlueprintUuid::nil(), true, Utc::now());
 
         expectorate_query_contents(
-            &query.to_query(),
+            &query,
             "tests/output/insert_target_blueprint_query.sql",
         )
         .await;
     }
 
     #[tokio::test]
-    async fn insert_target_query_is_valid() {
+    async fn explain_insert_target_query() {
         use crate::db::explain::ExplainableAsync;
 
-        let logctx = dev::test_setup_log("insert_target_query_is_valid");
+        let logctx = dev::test_setup_log("explain_insert_target_query");
         let db = TestDatabase::new_with_pool(&logctx.log).await;
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let query = InsertTargetQuery {
-            target_id: BlueprintUuid::nil(),
-            enabled: false,
-            time_made_target: Utc::now(),
-        };
+        let query =
+            insert_target_query(BlueprintUuid::nil(), false, Utc::now());
 
         let _ = query
-            .to_query()
             .explain_async(&conn)
             .await
             .expect("Failed to explain query - is it valid SQL?");
