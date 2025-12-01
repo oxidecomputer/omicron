@@ -3,8 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use expectorate::assert_contents;
-use nexus_reconfigurator_blippy::Blippy;
-use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
@@ -13,42 +11,15 @@ use omicron_test_utils::dev::test_setup_log;
 use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
 use std::mem;
 
-/// Checks various conditions that should be true for all blueprints
 #[track_caller]
-fn verify_sim_latest_blueprint(sim: &ReconfiguratorCliTestState) {
-    let blueprint = sim.blueprint(BlueprintId::Latest).unwrap();
-    let planning_input = sim.planning_input(BlueprintId::Latest).unwrap();
-
-    let blippy_report = Blippy::new(blueprint, &planning_input)
-        .into_report(BlippyReportSortKey::Kind);
-    if !blippy_report.notes().is_empty() {
-        eprintln!("{}", blueprint.display());
-        eprintln!("---");
-        eprintln!("{}", blippy_report.display());
-        panic!("expected blippy report for blueprint to have no notes");
-    }
-}
-
-#[track_caller]
-fn assert_sim_planning_makes_no_changes(
-    sim: &mut ReconfiguratorCliTestState,
-) -> Blueprint {
-    let blueprint = sim.run_planner().unwrap();
-    verify_sim_latest_blueprint(sim);
-
-    let parent = sim
-        .blueprint(BlueprintId::Id(
-            blueprint.parent_blueprint_id.expect("blueprint must have parent"),
-        ))
-        .expect("parent blueprint must be in simulation");
-
-    let summary = blueprint.diff_since_blueprint(&parent);
+fn assert_blueprint_diff_is_empty(
+    bp1: &Blueprint,
+    bp2: &Blueprint,
+) {
+    let summary = bp2.diff_since_blueprint(&bp1);
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
-    mem::drop(summary);
-
-    blueprint
 }
 
 /// Runs through a basic sequence of blueprints for adding a sled
@@ -62,7 +33,7 @@ fn test_basic_add_sled() {
     sim.load_example(|builder| Ok(builder)).unwrap();
     let blueprint1 = sim.blueprint(BlueprintId::Latest).unwrap().clone();
     println!("{}", blueprint1.display());
-    verify_sim_latest_blueprint(&sim);
+    sim.assert_latest_blueprint_is_blippy_clean();
 
     // Now run the planner.  It should do nothing because our initial
     // system didn't have any issues that the planner currently knows how to
@@ -84,7 +55,7 @@ fn test_basic_add_sled() {
     assert_eq!(summary.total_datasets_removed(), 0);
     assert_eq!(summary.total_datasets_modified(), 0);
     mem::drop(summary);
-    verify_sim_latest_blueprint(&sim);
+    sim.assert_latest_blueprint_is_blippy_clean();
 
     // Now add a new sled.
     let new_sled_id =
@@ -125,12 +96,13 @@ fn test_basic_add_sled() {
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
     mem::drop(summary);
-    verify_sim_latest_blueprint(&sim);
+    sim.assert_latest_blueprint_is_blippy_clean();
 
     // Check that with no change in inventory, the planner makes no changes.
     // It needs to wait for inventory to reflect the new NTP zone before
     // proceeding.
-    let _blueprint4 = assert_sim_planning_makes_no_changes(&mut sim);
+    let blueprint4 = sim.run_planner().unwrap();
+    assert_blueprint_diff_is_empty(&blueprint3, &blueprint4);
 
     // Now update the inventory to have the requested NTP zone.
     sim.deploy_configs_to_active_sleds("add NTP zone", &blueprint3)
@@ -171,7 +143,7 @@ fn test_basic_add_sled() {
     }
     mem::drop(zones_diff);
     mem::drop(summary);
-    verify_sim_latest_blueprint(&sim);
+    sim.assert_latest_blueprint_is_blippy_clean();
 
     // Check that there are no more steps once the Crucible zones are
     // deployed.
@@ -183,7 +155,8 @@ fn test_basic_add_sled() {
     let _inventory = sim
         .generate_inventory("inventory with new NTP zone")
         .expect("generated inventory");
-    let _blueprint6 = assert_sim_planning_makes_no_changes(&mut sim);
+    let blueprint6 = sim.run_planner().unwrap();
+    assert_blueprint_diff_is_empty(&blueprint5, &blueprint6);
 
     logctx.cleanup_successful();
 }

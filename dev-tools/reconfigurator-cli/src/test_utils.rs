@@ -11,6 +11,8 @@ use crate::CollectionIdOpt;
 use crate::ReconfiguratorSim;
 use crate::cmd_blueprint_plan;
 use anyhow::Context;
+use nexus_reconfigurator_blippy::Blippy;
+use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::system::SledBuilder;
 use nexus_reconfigurator_simulation::BlueprintId;
@@ -87,6 +89,31 @@ impl ReconfiguratorCliTestState {
             .blueprint(parent_blueprint)
             .context("invalid parent blueprint")?;
         self.sim.planning_input(parent_blueprint)
+    }
+
+    /// Assert that the latest blueprint and current planning input are "blippy
+    /// clean" (i.e., have no [`Blippy`] notes).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the latest blueprint and current planning input have any
+    /// blippy notes.
+    pub fn assert_latest_blueprint_is_blippy_clean(&self) {
+        let blueprint = self
+            .blueprint(BlueprintId::Latest)
+            .expect("always have a latest blueprint");
+        let planning_input = self
+            .planning_input(BlueprintId::Latest)
+            .expect("always have a latest blueprint");
+
+        let blippy_report = Blippy::new(blueprint, &planning_input)
+            .into_report(BlippyReportSortKey::Kind);
+        if !blippy_report.notes().is_empty() {
+            eprintln!("{}", blueprint.display());
+            eprintln!("---");
+            eprintln!("{}", blippy_report.display());
+            panic!("expected blippy report for blueprint to have no notes");
+        }
     }
 
     /// Change the internal simulator state.
