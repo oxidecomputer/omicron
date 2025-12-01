@@ -7,6 +7,7 @@ use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::Blueprint;
 use omicron_common::api::external::Generation;
 use omicron_test_utils::dev::test_setup_log;
 use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
@@ -29,7 +30,9 @@ fn verify_sim_latest_blueprint(sim: &ReconfiguratorCliTestState) {
 }
 
 #[track_caller]
-fn assert_sim_planning_makes_no_changes(sim: &mut ReconfiguratorCliTestState) {
+fn assert_sim_planning_makes_no_changes(
+    sim: &mut ReconfiguratorCliTestState,
+) -> Blueprint {
     let blueprint = sim.run_planner().unwrap();
     verify_sim_latest_blueprint(sim);
 
@@ -43,6 +46,9 @@ fn assert_sim_planning_makes_no_changes(sim: &mut ReconfiguratorCliTestState) {
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
+    mem::drop(summary);
+
+    blueprint
 }
 
 /// Runs through a basic sequence of blueprints for adding a sled
@@ -124,7 +130,7 @@ fn test_basic_add_sled() {
     // Check that with no change in inventory, the planner makes no changes.
     // It needs to wait for inventory to reflect the new NTP zone before
     // proceeding.
-    assert_sim_planning_makes_no_changes(&mut sim);
+    let _blueprint4 = assert_sim_planning_makes_no_changes(&mut sim);
 
     // Now update the inventory to have the requested NTP zone.
     sim.deploy_configs_to_active_sleds("add NTP zone", &blueprint3)
@@ -177,7 +183,7 @@ fn test_basic_add_sled() {
     let _inventory = sim
         .generate_inventory("inventory with new NTP zone")
         .expect("generated inventory");
-    assert_sim_planning_makes_no_changes(&mut sim);
+    let _blueprint6 = assert_sim_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
 }
