@@ -31,6 +31,8 @@ use illumos_utils::zpool::ZpoolName;
 #[cfg(feature = "testing")]
 use illumos_utils::zpool::ZpoolOrRamdisk;
 #[cfg(feature = "testing")]
+use omicron_common::api::internal::shared::DatasetKind;
+#[cfg(feature = "testing")]
 use sled_storage::dataset::U2_DEBUG_DATASET;
 #[cfg(feature = "testing")]
 use sled_storage::dataset::ZONE_DATASET;
@@ -372,7 +374,7 @@ impl ConfigReconcilerHandle {
                 Err(InventoryError::LedgerContentsNotAvailable)
             }
             Some(CurrentSledConfig::WaitingForInitialConfig) => Ok(None),
-            Some(CurrentSledConfig::Ledgered(config)) => Ok(Some(config)),
+            Some(CurrentSledConfig::Ledgered(config)) => Ok(Some(*config)),
         }
     }
 
@@ -496,6 +498,31 @@ impl AvailableDatasetsReceiver {
                 .map(|(pool, path)| PathInPool {
                     pool: ZpoolOrRamdisk::Zpool(*pool),
                     path: path.join(ZONE_DATASET),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn all_mounted_local_storage_datasets(&self) -> Vec<PathInPool> {
+        match &self.inner {
+            AvailableDatasetsReceiverInner::Real(receiver) => {
+                receiver.borrow().all_mounted_local_storage_datasets().collect()
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeTempDir { zpool, tempdir } => {
+                vec![PathInPool {
+                    pool: zpool.clone(),
+                    path: tempdir
+                        .path()
+                        .join(DatasetKind::LocalStorage.to_string()),
+                }]
+            }
+            #[cfg(feature = "testing")]
+            AvailableDatasetsReceiverInner::FakeStatic(pools) => pools
+                .iter()
+                .map(|(pool, path)| PathInPool {
+                    pool: ZpoolOrRamdisk::Zpool(*pool),
+                    path: path.join(DatasetKind::LocalStorage.to_string()),
                 })
                 .collect(),
         }

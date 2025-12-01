@@ -16,15 +16,18 @@ use crate::{SimState, Simulator, utils::DisplayUuidPrefix};
 #[derive(Clone, Debug)]
 pub struct GraphRenderOptions {
     verbose: bool,
-    limit: Option<usize>,
-    from: Option<ReconfiguratorSimStateUuid>,
+    starting_state: GraphStartingState,
     current: ReconfiguratorSimStateUuid,
 }
 
 impl GraphRenderOptions {
     /// Create new render options with the current state.
     pub fn new(current: ReconfiguratorSimStateUuid) -> Self {
-        Self { verbose: false, limit: None, from: None, current }
+        Self {
+            verbose: false,
+            starting_state: GraphStartingState::None,
+            current,
+        }
     }
 
     /// Set true to show verbose details.
@@ -33,20 +36,29 @@ impl GraphRenderOptions {
         self
     }
 
-    /// Set the generation limit.
-    pub fn with_limit(mut self, limit: Option<usize>) -> Self {
-        self.limit = limit;
-        self
-    }
-
     /// Set the starting state for ancestry filtering.
-    pub fn with_from(
+    pub fn with_starting_state(
         mut self,
-        from: Option<ReconfiguratorSimStateUuid>,
+        starting_state: GraphStartingState,
     ) -> Self {
-        self.from = from;
+        self.starting_state = starting_state;
         self
     }
+}
+
+#[derive(Clone, Debug)]
+pub enum GraphStartingState {
+    None,
+    State {
+        /// The starting state.
+        start: ReconfiguratorSimStateUuid,
+        /// The maximum number of states to render.
+        ///
+        /// We do not allow a limit to be set without a starting state, because
+        /// showing the last few states without regard to ancestry doesn't make
+        /// a huge amount of sense.
+        limit: Option<usize>,
+    },
 }
 
 impl Simulator {
@@ -63,8 +75,10 @@ impl Simulator {
         options: &GraphRenderOptions,
     ) -> Vec<&SimState> {
         let mut remaining_heads: Vec<ReconfiguratorSimStateUuid> =
-            if let Some(from_id) = options.from {
-                vec![from_id]
+            if let GraphStartingState::State { start, .. } =
+                options.starting_state
+            {
+                vec![start]
             } else {
                 self.heads().iter().copied().collect()
             };
@@ -181,11 +195,14 @@ fn render_graph(
         .build_box_drawing();
 
     // Apply the limit if specified.
-    let limited_states = if let Some(limit) = options.limit {
-        &states[..limit.min(states.len())]
-    } else {
-        &states[..]
-    };
+    let limited_states =
+        if let GraphStartingState::State { limit: Some(limit), .. } =
+            options.starting_state
+        {
+            &states[..limit.min(states.len())]
+        } else {
+            &states[..]
+        };
 
     for (index, state) in limited_states.iter().enumerate() {
         let is_last = index == limited_states.len() - 1;

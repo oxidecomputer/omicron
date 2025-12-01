@@ -25,7 +25,7 @@ use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
 use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::proto::xfer::Protocol;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
 use internal_dns_types::config::DnsConfigBuilder;
 use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use internal_dns_types::names::ServiceName;
@@ -66,6 +66,8 @@ use nexus_types::deployment::blueprint_zone_type;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
+use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
+use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
 use omicron_common::address::NTP_PORT;
@@ -80,6 +82,7 @@ use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::disk::CompressionAlgorithm;
@@ -109,7 +112,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::iter::{once, repeat, zip};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -186,7 +189,8 @@ pub struct ControlPlaneTestContext<N> {
     pub oximeter: Oximeter,
     pub producer: ProducerServer,
     pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
-    pub dendrite: HashMap<SwitchLocation, dev::dendrite::DendriteInstance>,
+    pub dendrite:
+        RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
     pub external_dns_zone_name: String,
     pub external_dns: dns_server::TransientServer,
@@ -278,6 +282,29 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         )
     }
 
+    pub fn lockstep_client(&self) -> nexus_lockstep_client::Client {
+        nexus_lockstep_client::Client::new(
+            &format!("http://{}", self.lockstep_client.bind_address),
+            self.lockstep_client.client_log.clone(),
+        )
+    }
+
+    /// Stop a Dendrite instance for testing failure scenarios.
+    pub async fn stop_dendrite(
+        &self,
+        switch_location: omicron_common::api::external::SwitchLocation,
+    ) {
+        use slog::debug;
+        let log = &self.logctx.log;
+        debug!(log, "Stopping Dendrite for {switch_location}");
+
+        let dendrite_opt =
+            { self.dendrite.write().unwrap().remove(&switch_location) };
+        if let Some(mut dendrite) = dendrite_opt {
+            dendrite.cleanup().await.unwrap();
+        }
+    }
+
     pub async fn teardown(mut self) {
         self.server.close().await;
         self.database.cleanup().await.unwrap();
@@ -292,7 +319,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
-        for (_, mut dendrite) in self.dendrite {
+        for (_, mut dendrite) in self.dendrite.into_inner().unwrap() {
             dendrite.cleanup().await.unwrap();
         }
         for (_, mut mgd) in self.mgd {
@@ -429,7 +456,17 @@ impl RackInitRequestBuilder {
     }
 }
 
-pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
+/// Starts the control plane for tests and tools
+///
+/// This helper manges the configuration and startup of all the control plane
+/// components in a way where:
+///
+/// - control planes started in this way are isolated from each other (in that
+///   they don't know about each other, have separate data/databases, etc.)
+/// - components are generally listening on localhost and pointed at each other
+/// - most components are the real deal, though a few are simulated (notably
+///   sled agent and SPs)
+pub struct ControlPlaneStarter<'a, N: NexusServer> {
     pub config: &'a mut NexusConfig,
     test_name: &'a str,
     rack_init_builder: RackInitRequestBuilder,
@@ -450,7 +487,8 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub oximeter: Option<Oximeter>,
     pub producer: Option<ProducerServer>,
     pub gateway: BTreeMap<SwitchLocation, GatewayTestContext>,
-    pub dendrite: HashMap<SwitchLocation, dev::dendrite::DendriteInstance>,
+    pub dendrite:
+        RwLock<HashMap<SwitchLocation, dev::dendrite::DendriteInstance>>,
     pub mgd: HashMap<SwitchLocation, dev::maghemite::MgdInstance>,
 
     // NOTE: Only exists after starting Nexus, until external Nexus is
@@ -477,12 +515,10 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 }
 
 type StepInitFn<'a, N> = Box<
-    dyn for<'b> FnOnce(
-        &'b mut ControlPlaneTestContextBuilder<'a, N>,
-    ) -> BoxFuture<'b, ()>,
+    dyn for<'b> FnOnce(&'b mut ControlPlaneStarter<'a, N>) -> BoxFuture<'b, ()>,
 >;
 
-impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
+impl<'a, N: NexusServer> ControlPlaneStarter<'a, N> {
     pub fn new(test_name: &'a str, config: &'a mut NexusConfig) -> Self {
         let start_time = chrono::Utc::now();
         let logctx = LogContext::new(test_name, &config.pkg.log);
@@ -509,7 +545,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             oximeter: None,
             producer: None,
             gateway: BTreeMap::new(),
-            dendrite: HashMap::new(),
+            dendrite: RwLock::new(HashMap::new()),
             mgd: HashMap::new(),
             nexus_internal: None,
             nexus_internal_addr: None,
@@ -742,7 +778,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         .await
         .unwrap();
         let port = dendrite.port;
-        self.dendrite.insert(switch_location, dendrite);
+        self.dendrite.write().unwrap().insert(switch_location, dendrite);
 
         let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
 
@@ -787,11 +823,16 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .host_zone_switch(
                 sled_id,
                 Ipv6Addr::LOCALHOST,
-                self.dendrite.get(&switch_location).unwrap().port,
+                self.dendrite
+                    .read()
+                    .unwrap()
+                    .get(&switch_location)
+                    .unwrap()
+                    .port,
                 self.gateway.get(&switch_location).unwrap().port,
                 self.mgd.get(&switch_location).unwrap().port,
             )
-            .unwrap();
+            .unwrap()
     }
 
     pub async fn start_oximeter(&mut self) {
@@ -848,6 +889,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             Some(ReconfiguratorConfig {
                 planner_enabled: false,
                 planner_config: PlannerConfig::default(),
+                tuf_repo_pruner_enabled: true,
             });
         self.config.deployment.internal_dns = InternalDns::FromAddress {
             address: self
@@ -965,6 +1007,13 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .mac_addrs
             .next()
             .expect("ran out of MAC addresses");
+        let ip_config = PrivateIpConfig::new_ipv4(
+            NEXUS_OPTE_IPV4_SUBNET
+                .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
+                .unwrap(),
+            *NEXUS_OPTE_IPV4_SUBNET,
+        )
+        .unwrap();
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
@@ -988,20 +1037,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 lockstep_port,
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
-                    ip: NEXUS_OPTE_IPV4_SUBNET
-                        .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1 + which)
-                        .unwrap()
-                        .into(),
                     kind: NetworkInterfaceKind::Service {
                         id: id.into_untyped_uuid(),
                     },
                     mac,
                     name: format!("nexus-{}", id).parse().unwrap(),
+                    ip_config,
                     primary: true,
                     slot: 0,
-                    subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
                     vni: Vni::SERVICES_VNI,
-                    transit_ips: vec![],
                 },
                 nexus_generation: Generation::new(),
             }),
@@ -1135,14 +1179,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         )
         .await;
 
-        let external_server_addr =
-            server.get_http_server_external_address().await;
+        let external_server_addr = server.get_http_server_external_address();
         let techport_external_server_addr =
-            server.get_http_server_techport_address().await;
-        let internal_server_addr =
-            server.get_http_server_internal_address().await;
-        let lockstep_server_addr =
-            server.get_http_server_lockstep_address().await;
+            server.get_http_server_techport_address();
+        let internal_server_addr = server.get_http_server_internal_address();
+        let lockstep_server_addr = server.get_http_server_lockstep_address();
         let testctx_external = ClientTestContext::new(
             external_server_addr,
             self.logctx
@@ -1340,6 +1381,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let internal_ip = NTP_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
             .unwrap();
+        let private_ip_config =
+            PrivateIpConfig::new_ipv4(internal_ip, *NTP_OPTE_IPV4_SUBNET)
+                .unwrap();
         let external_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let address = format!("[::1]:{NTP_PORT}").parse().unwrap(); // localhost
         let zone_id = OmicronZoneUuid::new_v4();
@@ -1365,16 +1409,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         kind: NetworkInterfaceKind::Service {
                             id: zone_id.into_untyped_uuid(),
                         },
-                        ip: internal_ip.into(),
+                        ip_config: private_ip_config,
                         mac,
                         name: format!("boundary-ntp-{zone_id}")
                             .parse()
                             .unwrap(),
                         primary: true,
                         slot: 0,
-                        subnet: (*NTP_OPTE_IPV4_SUBNET).into(),
                         vni: Vni::SERVICES_VNI,
-                        transit_ips: vec![],
                     },
                     external_ip: OmicronZoneExternalSnatIp {
                         id: ExternalIpUuid::new_v4(),
@@ -1444,6 +1486,24 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .to_string()
             .parse()
             .unwrap();
+
+        let ip_config = if dns.dns_server.local_address().is_ipv4() {
+            PrivateIpConfig::new_ipv4(
+                DNS_OPTE_IPV4_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
+                    .unwrap(),
+                *DNS_OPTE_IPV4_SUBNET,
+            )
+            .unwrap()
+        } else {
+            PrivateIpConfig::new_ipv6(
+                DNS_OPTE_IPV6_SUBNET
+                    .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u128 + 1)
+                    .unwrap(),
+                *DNS_OPTE_IPV6_SUBNET,
+            )
+            .unwrap()
+        };
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: zone_id,
@@ -1458,10 +1518,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     http_address: dropshot_address,
                     nic: NetworkInterface {
                         id: Uuid::new_v4(),
-                        ip: DNS_OPTE_IPV4_SUBNET
-                            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES + 1)
-                            .unwrap()
-                            .into(),
                         kind: NetworkInterfaceKind::Service {
                             id: zone_id.into_untyped_uuid(),
                         },
@@ -1469,11 +1525,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         name: format!("external-dns-{}", zone_id)
                             .parse()
                             .unwrap(),
+                        ip_config,
                         primary: true,
                         slot: 0,
-                        subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
                         vni: Vni::SERVICES_VNI,
-                        transit_ips: vec![],
                     },
                 },
             ),
@@ -1542,7 +1597,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             producer: self.producer.unwrap(),
             logctx: self.logctx,
             gateway: self.gateway,
-            dendrite: self.dendrite,
+            dendrite: RwLock::new(self.dendrite.into_inner().unwrap()),
             mgd: self.mgd,
             external_dns_zone_name: self.external_dns_zone_name.unwrap(),
             external_dns: self.external_dns.unwrap(),
@@ -1579,7 +1634,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         for (_, gateway) in self.gateway {
             gateway.teardown().await;
         }
-        for (_, mut dendrite) in self.dendrite {
+        for (_, mut dendrite) in self.dendrite.into_inner().unwrap() {
             dendrite.cleanup().await.unwrap();
         }
         for (_, mut mgd) in self.mgd {
@@ -1611,59 +1666,65 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         {
             let sled_id = sled_agent.sled_agent_id();
 
-            let mut disks = IdMap::new();
-            let mut datasets = IdMap::new();
+            let mut disks = IdOrdMap::new();
+            let mut datasets = IdOrdMap::new();
             let zones = if let Some(zones) = maybe_zones {
                 for zone in zones {
                     let zpool = &zone.filesystem_pool;
-                    disks.insert(BlueprintPhysicalDiskConfig {
-                        disposition:
-                            BlueprintPhysicalDiskDisposition::InService,
-                        identity: omicron_common::disk::DiskIdentity {
-                            vendor: "nexus-tests".to_string(),
-                            model: "nexus-test-model".to_string(),
-                            serial: format!("nexus-test-disk-{disk_index}"),
-                        },
-                        id: PhysicalDiskUuid::new_v4(),
-                        pool_id: zpool.id(),
-                    });
+                    disks
+                        .insert_unique(BlueprintPhysicalDiskConfig {
+                            disposition:
+                                BlueprintPhysicalDiskDisposition::InService,
+                            identity: omicron_common::disk::DiskIdentity {
+                                vendor: "nexus-tests".to_string(),
+                                model: "nexus-test-model".to_string(),
+                                serial: format!("nexus-test-disk-{disk_index}"),
+                            },
+                            id: PhysicalDiskUuid::new_v4(),
+                            pool_id: zpool.id(),
+                        })
+                        .expect("freshly generated disk IDs are unique");
                     disk_index += 1;
                     let id = DatasetUuid::new_v4();
-                    datasets.insert(BlueprintDatasetConfig {
-                        disposition: BlueprintDatasetDisposition::InService,
-                        id,
-                        pool: *zpool,
-                        kind: DatasetKind::TransientZone {
-                            name: illumos_utils::zone::zone_name(
-                                zone.zone_type.kind().zone_prefix(),
-                                Some(zone.id),
-                            ),
-                        },
-                        address: None,
-                        quota: None,
-                        reservation: None,
-                        compression: CompressionAlgorithm::Off,
-                    });
+                    datasets
+                        .insert_unique(BlueprintDatasetConfig {
+                            disposition: BlueprintDatasetDisposition::InService,
+                            id,
+                            pool: *zpool,
+                            kind: DatasetKind::TransientZone {
+                                name: illumos_utils::zone::zone_name(
+                                    zone.zone_type.kind().zone_prefix(),
+                                    Some(zone.id),
+                                ),
+                            },
+                            address: None,
+                            quota: None,
+                            reservation: None,
+                            compression: CompressionAlgorithm::Off,
+                        })
+                        .expect("freshly generated dataset IDs are unique");
                 }
                 zones.iter().cloned().collect()
             } else {
-                IdMap::new()
+                IdOrdMap::new()
             };
 
             // Populate extra fake disks, giving each sled 10 total.
             if disks.len() < 10 {
                 for _ in disks.len()..10 {
-                    disks.insert(BlueprintPhysicalDiskConfig {
-                        disposition:
-                            BlueprintPhysicalDiskDisposition::InService,
-                        identity: omicron_common::disk::DiskIdentity {
-                            vendor: "nexus-tests".to_string(),
-                            model: "nexus-test-model".to_string(),
-                            serial: format!("nexus-test-disk-{disk_index}"),
-                        },
-                        id: PhysicalDiskUuid::new_v4(),
-                        pool_id: ZpoolUuid::new_v4(),
-                    });
+                    disks
+                        .insert_unique(BlueprintPhysicalDiskConfig {
+                            disposition:
+                                BlueprintPhysicalDiskDisposition::InService,
+                            identity: omicron_common::disk::DiskIdentity {
+                                vendor: "nexus-tests".to_string(),
+                                model: "nexus-test-model".to_string(),
+                                serial: format!("nexus-test-disk-{disk_index}"),
+                            },
+                            id: PhysicalDiskUuid::new_v4(),
+                            pool_id: ZpoolUuid::new_v4(),
+                        })
+                        .expect("freshly generated disk IDs are unique");
                     disk_index += 1;
                 }
             }
@@ -1671,6 +1732,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 sled_id,
                 BlueprintSledConfig {
                     state: SledState::Active,
+                    subnet: Ipv6Subnet::new(Ipv6Addr::LOCALHOST),
                     sled_agent_generation,
                     disks,
                     datasets,
@@ -1719,10 +1781,9 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
 ) -> Result<ControlPlaneTestContext<N>> {
-    let builder =
-        ControlPlaneTestContextBuilder::<N>::new("omicron-dev", config);
+    let starter = ControlPlaneStarter::<N>::new("omicron-dev", config);
 
-    let log = &builder.logctx.log;
+    let log = &starter.logctx.log;
     debug!(log, "Ensuring seed tarball exists");
 
     // Start up a ControlPlaneTestContext, which tautologically sets up
@@ -1739,7 +1800,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
     status.log(log, &seed_tar);
 
     Ok(setup_with_config_impl(
-        builder,
+        starter,
         PopulateCrdb::FromSeed { input_tar: seed_tar },
         sim::SimMode::Auto,
         None,
@@ -1759,9 +1820,9 @@ pub async fn test_setup_with_config<N: NexusServer>(
     extra_sled_agents: u16,
     gateway_config_file: Utf8PathBuf,
 ) -> ControlPlaneTestContext<N> {
-    let builder = ControlPlaneTestContextBuilder::<N>::new(test_name, config);
+    let starter = ControlPlaneStarter::<N>::new(test_name, config);
     setup_with_config_impl(
-        builder,
+        starter,
         PopulateCrdb::FromEnvironmentSeed,
         sim_mode,
         initial_cert,
@@ -1773,7 +1834,7 @@ pub async fn test_setup_with_config<N: NexusServer>(
 }
 
 async fn setup_with_config_impl<N: NexusServer>(
-    mut builder: ControlPlaneTestContextBuilder<'_, N>,
+    mut starter: ControlPlaneStarter<'_, N>,
     populate: PopulateCrdb,
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
@@ -1784,7 +1845,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     const STEP_TIMEOUT: Duration = Duration::from_secs(600);
 
     // All setups will start with CRDB and clickhouse
-    builder
+    starter
         .init_with_steps(
             vec![
                 (
@@ -1806,7 +1867,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // DNS and Nexus, but we currently don't use SMF to manage the services used in
     // the test context so we need to make the Nexus / DNS information available
     // to get the switch services working.
-    builder
+    starter
         .init_with_steps(
             vec![
                 (
@@ -1832,7 +1893,7 @@ async fn setup_with_config_impl<N: NexusServer>(
         .await;
 
     if second_nexus {
-        builder
+        starter
             .init_with_steps(
                 vec![(
                     "configure_second_nexus",
@@ -1850,7 +1911,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // agent will be for switch1.
 
     let mgs_config = gateway_config_file.clone();
-    builder
+    starter
         .init_with_steps(
             vec![
                 (
@@ -1894,7 +1955,7 @@ async fn setup_with_config_impl<N: NexusServer>(
         .await;
 
     if extra_sled_agents > 0 {
-        builder
+        starter
             .init_with_steps(
                 vec![
                     (
@@ -1943,7 +2004,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // The first and second sled agents have special UUIDs, and any extra ones
     // after that are random.
 
-    builder
+    starter
         .init_with_steps(
             vec![(
                 "start_sled1",
@@ -1962,7 +2023,7 @@ async fn setup_with_config_impl<N: NexusServer>(
         .await;
 
     if extra_sled_agents > 0 {
-        builder
+        starter
             .init_with_steps(
                 vec![(
                     "start_sled2",
@@ -1982,7 +2043,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     }
 
     for index in 1..extra_sled_agents {
-        builder
+        starter
             .init_with_steps(
                 vec![(
                     "add_extra_sled_agent",
@@ -2005,7 +2066,7 @@ async fn setup_with_config_impl<N: NexusServer>(
     // agent. Afterwards, configure the sled agents and start the rest of the
     // the required services.
 
-    builder
+    starter
         .init_with_steps(
             vec![
                 (
@@ -2049,7 +2110,7 @@ async fn setup_with_config_impl<N: NexusServer>(
         )
         .await;
 
-    builder.build()
+    starter.build()
 }
 
 /// Starts a simulated sled agent
@@ -2065,13 +2126,19 @@ pub async fn start_sled_agent(
     sim_mode: sim::SimMode,
     simulated_upstairs: &Arc<sim::SimulatedUpstairs>,
 ) -> Result<sim::Server, String> {
-    let config = sim::Config::for_testing(
+    // Generate a baseboard serial number that matches the SP configuration
+    // (SimGimlet00, SimGimlet01, etc.) so that inventory can link sled agents
+    // to their corresponding SPs via baseboard_id.
+    let baseboard_serial = format!("SimGimlet{:02}", sled_index);
+
+    let config = sim::Config::for_testing_with_baseboard(
         id,
         sim_mode,
         Some(nexus_address),
         Some(update_directory),
         sim::ZpoolConfig::None,
         SledCpuFamily::AmdMilan,
+        Some(baseboard_serial),
     );
     start_sled_agent_with_config(log, &config, sled_index, simulated_upstairs)
         .await
@@ -2310,4 +2377,32 @@ async fn wait_for_producer_impl(
     )
     .await
     .expect("Failed to find producer within time limit");
+}
+
+/// Build a DPD client for test validation using the first running dendrite instance
+pub fn dpd_client<N: NexusServer>(
+    cptestctx: &ControlPlaneTestContext<N>,
+) -> dpd_client::Client {
+    // Get the first available dendrite instance and extract the values we need
+    let dendrite_guard = cptestctx.dendrite.read().unwrap();
+    let (switch_location, dendrite_instance) = dendrite_guard
+        .iter()
+        .next()
+        .expect("No dendrite instances running for test");
+
+    // Copy the values we need while the guard is still alive
+    let switch_location = *switch_location;
+    let port = dendrite_instance.port;
+    drop(dendrite_guard);
+
+    let client_state = dpd_client::ClientState {
+        tag: String::from("nexus-test"),
+        log: cptestctx.logctx.log.new(slog::o!(
+            "component" => "DpdClient",
+            "switch" => switch_location.to_string()
+        )),
+    };
+
+    let addr = Ipv6Addr::LOCALHOST;
+    dpd_client::Client::new(&format!("http://[{addr}]:{port}"), client_state)
 }

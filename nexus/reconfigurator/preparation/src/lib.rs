@@ -550,14 +550,14 @@ pub async fn reconfigurator_state_load(
             .chain(std::iter::once(*latest_version.version))
             .collect();
         let mut rv = BTreeMap::new();
-        for gen in dns_generations_needed {
+        for r#gen in dns_generations_needed {
             let config = datastore
-                .dns_config_read_version(&opctx, dns_group, gen)
+                .dns_config_read_version(&opctx, dns_group, r#gen)
                 .await
                 .with_context(|| {
-                    format!("reading {:?} DNS version {}", dns_group, gen)
+                    format!("reading {:?} DNS version {}", dns_group, r#gen)
                 })?;
-            rv.insert(gen, config);
+            rv.insert(r#gen, config);
         }
 
         Ok::<BTreeMap<_, _>, anyhow::Error>(rv)
@@ -582,7 +582,7 @@ pub async fn reconfigurator_state_load(
     Ok(UnstableReconfiguratorState {
         planning_input,
         collections,
-        target_blueprint: Some(target_blueprint),
+        target_blueprint,
         blueprints,
         internal_dns,
         external_dns,

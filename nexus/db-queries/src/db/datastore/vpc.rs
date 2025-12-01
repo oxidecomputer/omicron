@@ -2979,6 +2979,8 @@ mod tests {
     use nexus_db_model::IncompleteNetworkInterface;
     use nexus_db_model::IpConfig;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
+    use nexus_reconfigurator_planning::planner::Planner;
     use nexus_reconfigurator_planning::planner::PlannerRng;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
@@ -3292,9 +3294,10 @@ mod tests {
                 .zone_type
                 .external_networking()
                 .expect("external networking for zone type");
-            let IpAddr::V4(ip) = nic.ip else {
-                panic!("Expected an IPv4 address for this NIC");
-            };
+            let ip = nic
+                .ip_config
+                .ipv4_addr()
+                .expect("an IPv4 address for this NIC");
             IncompleteNetworkInterface::new_service(
                 nic.id,
                 zone_config.id.into_untyped_uuid(),
@@ -3303,7 +3306,7 @@ mod tests {
                     name: nic.name.clone(),
                     description: nic.name.to_string(),
                 },
-                IpConfig::from_ipv4(ip),
+                IpConfig::from_ipv4(*ip),
                 nic.mac,
                 nic.slot,
             )
@@ -3311,31 +3314,31 @@ mod tests {
         };
 
         // Create an initial, empty blueprint, and make it the target.
-        let bp0 = BlueprintBuilder::build_empty_with_sleds(
-            sled_ids.iter().copied(),
-            "test",
-        );
+        let bp0 = BlueprintBuilder::build_empty("test");
         bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
 
         // Our blueprint doesn't describe any services, so we shouldn't find any
         // sled IDs running services.
         assert_service_sled_ids(&datastore, &[]).await;
 
-        // Build an initial empty collection
-        let collection =
-            system.to_collection_builder().expect("collection builder").build();
-
         // Create a blueprint that has a Nexus on our third sled.
         let bp1 = {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp0,
-                &planning_input,
-                &collection,
                 "test",
                 PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
+
+            // We made changes to the planning input we want to be reflected in
+            // the new blueprint; reuse the `Planner`'s method for replicating
+            // those changes.
+            Planner::update_builder_from_planning_input(
+                &mut builder,
+                &planning_input,
+            );
+
             for &sled_id in &sled_ids {
                 builder
                     .sled_add_disks(
@@ -3347,12 +3350,20 @@ mod tests {
                     )
                     .expect("ensured disks");
             }
+            let external_ip = ExternalNetworkingAllocator::from_current_zones(
+                &builder,
+                planning_input.external_ip_policy(),
+            )
+            .expect("constructed ExternalNetworkingAllocator")
+            .for_new_nexus()
+            .expect("found external IP for Nexus");
             builder
                 .sled_add_zone_nexus_with_config(
                     sled_ids[2],
                     false,
                     Vec::new(),
                     BlueprintZoneImageSource::InstallDataset,
+                    external_ip,
                     bp0.nexus_generation,
                 )
                 .expect("added nexus to third sled");
@@ -3416,19 +3427,27 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp2,
-                &planning_input,
-                &collection,
                 "test",
                 PlannerRng::from_entropy(),
             )
             .expect("created blueprint builder");
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::from_current_zones(
+                    &builder,
+                    planning_input.external_ip_policy(),
+                )
+                .expect("constructed ExternalNetworkingAllocator");
             for &sled_id in &sled_ids {
+                let external_ip = external_networking_alloc
+                    .for_new_nexus()
+                    .expect("found external IP for Nexus");
                 builder
                     .sled_add_zone_nexus_with_config(
                         sled_id,
                         false,
                         Vec::new(),
                         BlueprintZoneImageSource::InstallDataset,
+                        external_ip,
                         bp2.nexus_generation,
                     )
                     .expect("added nexus to third sled");
@@ -4003,6 +4022,7 @@ mod tests {
                         start: false,
                         auto_restart_policy: Default::default(),
                         anti_affinity_groups: Vec::new(),
+                        multicast_groups: Vec::new(),
                     },
                 ),
             )

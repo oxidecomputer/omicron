@@ -352,7 +352,16 @@ mismatched zone type: after: Nexus(
             name: Name(
                 "nexus-5a8e9719-62bd-40be-81b1-20b85970740b",
             ),
-            ip: 172.30.2.5,
+            ip_config: V4(
+                PrivateIpv4Config {
+                    ip: 172.30.2.5,
+                    subnet: Ipv4Net {
+                        addr: 172.30.2.0,
+                        width: 24,
+                    },
+                    transit_ips: [],
+                },
+            ),
             mac: MacAddr(
                 MacAddr6(
                     [
@@ -365,18 +374,11 @@ mismatched zone type: after: Nexus(
                     ],
                 ),
             ),
-            subnet: V4(
-                Ipv4Net {
-                    addr: 172.30.2.0,
-                    width: 24,
-                },
-            ),
             vni: Vni(
                 100,
             ),
             primary: true,
             slot: 0,
-            transit_ips: [],
         },
         external_tls: false,
         external_dns_servers: [],

@@ -7,13 +7,10 @@ use nexus_auth::context::OpContext;
 use nexus_lockstep_client::types::QuiesceState;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::PlannerRng;
-use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::PlannerConfig;
-use omicron_common::api::external::Error;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_uuid_kinds::GenericUuid;
@@ -31,38 +28,12 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
     let nexus_lockstep_url = format!(
         "http://{}",
-        cptestctx.server.get_http_server_lockstep_address().await
+        cptestctx.server.get_http_server_lockstep_address(),
     );
     let nexus_client =
         nexus_lockstep_client::Client::new(&nexus_lockstep_url, log.clone());
 
-    // Collect what we need to modify the blueprint.
-    let collection = wait_for_condition(
-        || async {
-            let collection = datastore
-                .inventory_get_latest_collection(&opctx)
-                .await
-                .map_err(CondCheckError::Failed)?;
-            match collection {
-                Some(s) => Ok(s),
-                None => Err(CondCheckError::<Error>::NotYet),
-            }
-        },
-        &Duration::from_secs(1),
-        &Duration::from_secs(60),
-    )
-    .await
-    .expect("initial inventory collection");
-
-    let planner_config = datastore
-        .reconfigurator_config_get_latest(&opctx)
-        .await
-        .expect("obtained latest reconfigurator config")
-        .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
-    let planning_input =
-        PlanningInputFromDb::assemble(&opctx, &datastore, planner_config)
-            .await
-            .expect("planning input");
+    // Load the current target blueprint.
     let target_blueprint = nexus
         .blueprint_target_view(&opctx)
         .await
@@ -77,8 +48,6 @@ async fn test_quiesce(cptestctx: &ControlPlaneTestContext) {
     let mut builder = BlueprintBuilder::new_based_on(
         log,
         &blueprint1,
-        &planning_input,
-        &collection,
         "test-suite",
         PlannerRng::from_entropy(),
     )

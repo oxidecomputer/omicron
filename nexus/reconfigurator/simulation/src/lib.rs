@@ -60,7 +60,7 @@ mod zone_images;
 
 pub use config::*;
 pub use operation::*;
-pub use render_graph::GraphRenderOptions;
+pub use render_graph::*;
 pub use rng::*;
 pub use sim::*;
 pub use state::*;

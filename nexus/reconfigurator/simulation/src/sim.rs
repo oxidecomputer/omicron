@@ -15,9 +15,10 @@ use omicron_uuid_kinds::{
 use typed_rng::TypedUuidRng;
 
 use crate::{
-    RestoreKind, SimOperation, SimOperationKind, SimState,
+    ReconfiguratorSimId, ReconfiguratorSimOpId, RestoreKind, SimOperation,
+    SimOperationKind, SimState,
     errors::{
-        OpMatch, OperationError, OperationIdPrefixError, StateIdPrefixError,
+        OpMatch, OperationError, OperationIdResolveError, StateIdResolveError,
         StateMatch,
     },
     seed_from_entropy,
@@ -153,10 +154,10 @@ impl Simulator {
     ///
     /// Returns the unique state ID that matches the given prefix.
     /// Returns an error if zero or multiple states match the prefix.
-    pub fn get_state_by_prefix(
+    fn get_state_by_prefix(
         &self,
         prefix: &str,
-    ) -> Result<ReconfiguratorSimStateUuid, StateIdPrefixError> {
+    ) -> Result<ReconfiguratorSimStateUuid, StateIdResolveError> {
         let mut matching_ids = Vec::new();
 
         if Self::ROOT_ID.to_string().starts_with(prefix) {
@@ -170,7 +171,7 @@ impl Simulator {
         }
 
         match matching_ids.len() {
-            0 => Err(StateIdPrefixError::NoMatch(prefix.to_string())),
+            0 => Err(StateIdResolveError::NoMatch(prefix.to_string())),
             1 => Ok(matching_ids[0]),
             n => {
                 // Sort for deterministic output.
@@ -190,13 +191,35 @@ impl Simulator {
                     })
                     .collect();
 
-                Err(StateIdPrefixError::Ambiguous {
+                Err(StateIdResolveError::Ambiguous {
                     prefix: prefix.to_string(),
                     count: n,
                     matches,
                 })
             }
         }
+    }
+
+    /// Resolve a [`ReconfiguratorSimId`] to a [`ReconfiguratorSimStateUuid`].
+    pub fn resolve_state_id(
+        &self,
+        id: ReconfiguratorSimId,
+    ) -> Result<ReconfiguratorSimStateUuid, StateIdResolveError> {
+        match id {
+            ReconfiguratorSimId::Id(id) => Ok(id),
+            ReconfiguratorSimId::Prefix(prefix) => {
+                self.get_state_by_prefix(&prefix)
+            }
+        }
+    }
+
+    /// Combines [`Self::resolve_state_id`] and [`Self::get_state`].
+    pub fn resolve_and_get_state(
+        &self,
+        id: ReconfiguratorSimId,
+    ) -> Result<&SimState, StateIdResolveError> {
+        let resolved = self.resolve_state_id(id)?;
+        self.get_state(resolved).ok_or(StateIdResolveError::NotFound(resolved))
     }
 
     #[inline]
@@ -292,7 +315,7 @@ impl Simulator {
     }
 
     /// Get all operations in the log.
-    pub fn operations(&self) -> impl Iterator<Item = &SimOperation> {
+    pub fn operations(&self) -> impl DoubleEndedIterator<Item = &SimOperation> {
         self.operations.values()
     }
 
@@ -308,10 +331,10 @@ impl Simulator {
     ///
     /// Returns the unique operation ID that matches the given prefix.
     /// Returns an error if zero or multiple operations match the prefix.
-    pub fn operation_get_by_prefix(
+    fn operation_get_by_prefix(
         &self,
         prefix: &str,
-    ) -> Result<ReconfiguratorSimOpUuid, OperationIdPrefixError> {
+    ) -> Result<ReconfiguratorSimOpUuid, OperationIdResolveError> {
         let mut matching_ids = Vec::new();
 
         for op in self.operations.values() {
@@ -321,7 +344,7 @@ impl Simulator {
         }
 
         match matching_ids.len() {
-            0 => Err(OperationIdPrefixError::NoMatch(prefix.to_string())),
+            0 => Err(OperationIdResolveError::NoMatch(prefix.to_string())),
             1 => Ok(matching_ids[0]),
             n => {
                 // Sort for deterministic output.
@@ -341,13 +364,36 @@ impl Simulator {
                     })
                     .collect();
 
-                Err(OperationIdPrefixError::Ambiguous {
+                Err(OperationIdResolveError::Ambiguous {
                     prefix: prefix.to_string(),
                     count: n,
                     matches,
                 })
             }
         }
+    }
+
+    /// Resolve a [`ReconfiguratorSimOpId`] to a [`ReconfiguratorSimOpUuid`].
+    pub fn resolve_operation_id(
+        &self,
+        id: ReconfiguratorSimOpId,
+    ) -> Result<ReconfiguratorSimOpUuid, OperationIdResolveError> {
+        match id {
+            ReconfiguratorSimOpId::Id(id) => Ok(id),
+            ReconfiguratorSimOpId::Prefix(prefix) => {
+                self.operation_get_by_prefix(&prefix)
+            }
+        }
+    }
+
+    /// Combines [`Self::resolve_operation_id`] and [`Self::operation_get`].
+    pub fn resolve_and_get_operation(
+        &self,
+        id: ReconfiguratorSimOpId,
+    ) -> Result<&SimOperation, OperationIdResolveError> {
+        let resolved = self.resolve_operation_id(id)?;
+        self.operation_get(resolved)
+            .ok_or(OperationIdResolveError::NotFound(resolved))
     }
 
     /// Undo an operation.

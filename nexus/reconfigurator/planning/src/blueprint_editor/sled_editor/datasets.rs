@@ -4,7 +4,8 @@
 
 use crate::blueprint_builder::EditCounts;
 use crate::planner::SledPlannerRng;
-use id_map::IdMap;
+use iddqd::IdOrdMap;
+use iddqd::id_ord_map;
 use illumos_utils::zpool::ZpoolName;
 use nexus_types::deployment::BlueprintDatasetConfig;
 use nexus_types::deployment::BlueprintDatasetDisposition;
@@ -125,7 +126,7 @@ impl PartialDatasetConfig {
 
 #[derive(Debug)]
 pub(super) struct DatasetsEditor {
-    datasets: IdMap<BlueprintDatasetConfig>,
+    datasets: IdOrdMap<BlueprintDatasetConfig>,
     // Cache of _in service only_ datasets, identified by (zpool, kind).
     in_service_by_zpool_and_kind:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, DatasetUuid>>,
@@ -134,7 +135,7 @@ pub(super) struct DatasetsEditor {
 
 impl DatasetsEditor {
     pub fn new(
-        datasets: IdMap<BlueprintDatasetConfig>,
+        datasets: IdOrdMap<BlueprintDatasetConfig>,
     ) -> Result<Self, MultipleDatasetsOfKind> {
         let mut in_service_by_zpool_and_kind = BTreeMap::new();
         for dataset in datasets.iter() {
@@ -170,13 +171,13 @@ impl DatasetsEditor {
 
     pub fn empty() -> Self {
         Self {
-            datasets: IdMap::new(),
+            datasets: IdOrdMap::new(),
             in_service_by_zpool_and_kind: BTreeMap::new(),
             counts: EditCounts::zeroes(),
         }
     }
 
-    pub fn finalize(self) -> (IdMap<BlueprintDatasetConfig>, EditCounts) {
+    pub fn finalize(self) -> (IdOrdMap<BlueprintDatasetConfig>, EditCounts) {
         (self.datasets, self.counts)
     }
 
@@ -258,7 +259,7 @@ impl DatasetsEditor {
         &mut self,
         dataset: PartialDatasetConfig,
         rng: &mut SledPlannerRng,
-    ) -> id_map::RefMut<'_, BlueprintDatasetConfig> {
+    ) -> id_ord_map::RefMut<'_, BlueprintDatasetConfig> {
         // Convert the partial config into a full config by finding or
         // generating its ID.
         let PartialDatasetConfig {
@@ -308,7 +309,7 @@ impl DatasetsEditor {
 
         // Add or update our config with this new dataset info.
         match self.datasets.entry(dataset.id) {
-            id_map::Entry::Vacant(slot) => {
+            id_ord_map::Entry::Vacant(slot) => {
                 self.in_service_by_zpool_and_kind
                     .entry(dataset.pool.id())
                     .or_default()
@@ -316,7 +317,7 @@ impl DatasetsEditor {
                 self.counts.added += 1;
                 slot.insert(dataset)
             }
-            id_map::Entry::Occupied(mut prev) => {
+            id_ord_map::Entry::Occupied(mut prev) => {
                 if *prev.get() != dataset {
                     self.counts.updated += 1;
                     prev.insert(dataset);
@@ -362,12 +363,12 @@ mod tests {
             .map(|kind| (BlueprintDatasetDisposition::Expunged, kind))
     }
 
-    fn build_test_config<I, J>(values: I) -> IdMap<BlueprintDatasetConfig>
+    fn build_test_config<I, J>(values: I) -> IdOrdMap<BlueprintDatasetConfig>
     where
         I: Iterator<Item = J>,
         J: Iterator<Item = (BlueprintDatasetDisposition, DatasetKind)>,
     {
-        let mut datasets = IdMap::new();
+        let mut datasets = IdOrdMap::new();
         let mut dataset_id_index = 0;
         for (zpool_id_index, disposition_kinds) in values.enumerate() {
             let zpool_id = ZpoolUuid::from_untyped_uuid(Uuid::from_u128(
@@ -391,8 +392,9 @@ mod tests {
                     reservation: None,
                     compression: CompressionAlgorithm::Off,
                 };
-                let prev = datasets.insert(dataset);
-                assert!(prev.is_none(), "no duplicate dataset IDs");
+                datasets
+                    .insert_unique(dataset)
+                    .expect("no duplicate dataset IDs");
             }
         }
         datasets
@@ -411,7 +413,7 @@ mod tests {
     }
 
     impl ZpoolsWithInServiceDatasets {
-        fn into_config(self) -> IdMap<BlueprintDatasetConfig> {
+        fn into_config(self) -> IdOrdMap<BlueprintDatasetConfig> {
             build_test_config(
                 self.by_zpool
                     .into_iter()
@@ -433,7 +435,7 @@ mod tests {
     }
 
     impl ZpoolsWithExpungedDatasets {
-        fn into_config(self) -> IdMap<BlueprintDatasetConfig> {
+        fn into_config(self) -> IdOrdMap<BlueprintDatasetConfig> {
             build_test_config(
                 self.by_zpool
                     .into_iter()
@@ -452,7 +454,7 @@ mod tests {
     }
 
     impl ZpoolsWithMixedDatasets {
-        fn into_config(self) -> IdMap<BlueprintDatasetConfig> {
+        fn into_config(self) -> IdOrdMap<BlueprintDatasetConfig> {
             build_test_config(self.by_zpool.into_iter().map(
                 |(in_service, expunged)| {
                     all_in_service(in_service.kinds)

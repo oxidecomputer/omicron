@@ -73,11 +73,11 @@ log --verbose
 
 # Switch states with a full UUID.
 switch 4d8d6725-1ae3-4f88-b9cb-a34db82d7439
-log -n 3
+log
 
 # Switch states with a unique prefix.
 switch 860f
-log -n 3
+log
 
 # Switch states with an ambiguous prefix (should fail).
 switch 4

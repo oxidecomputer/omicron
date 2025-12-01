@@ -320,7 +320,7 @@ impl JsonSchema for Name {
         "Name".to_string()
     }
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some(
@@ -401,13 +401,13 @@ impl JsonSchema for NameOrId {
     }
 
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
                 one_of: Some(vec![
-                    label_schema("id", gen.subschema_for::<Uuid>()),
-                    label_schema("name", gen.subschema_for::<Name>()),
+                    label_schema("id", generator.subschema_for::<Uuid>()),
+                    label_schema("name", generator.subschema_for::<Name>()),
                 ]),
                 ..Default::default()
             })),
@@ -453,7 +453,7 @@ impl JsonSchema for UserId {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         name_schema(schemars::schema::Metadata {
             title: Some("A username for a local-only user".to_string()),
@@ -877,7 +877,7 @@ impl JsonSchema for Hostname {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::Schema::Object(schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -957,6 +957,8 @@ pub enum ResourceType {
     LldpLinkConfig,
     LoopbackAddress,
     MetricProducer,
+    MulticastGroup,
+    MulticastGroupMember,
     NatEntry,
     Oximeter,
     PhysicalDisk,
@@ -1419,6 +1421,12 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 
 // DISKS
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum DiskType {
+    Crucible,
+}
+
 /// View of a Disk
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Disk {
@@ -1433,6 +1441,7 @@ pub struct Disk {
     pub block_size: ByteCount,
     pub state: DiskState,
     pub device_path: String,
+    pub disk_type: DiskType,
 }
 
 /// State of a Disk
@@ -2174,7 +2183,7 @@ impl JsonSchema for L4PortRange {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2294,7 +2303,7 @@ impl JsonSchema for IcmpParamRange {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2466,7 +2475,7 @@ impl JsonSchema for MacAddr {
     }
 
     fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
+        _: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         schemars::schema::SchemaObject {
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -2515,6 +2524,12 @@ impl Vni {
 
     /// The VNI for the builtin services VPC.
     pub const SERVICES_VNI: Self = Self(100);
+
+    /// VNI default if no VPC is provided for a multicast group.
+    ///
+    /// This is a low-numbered VNI to avoid colliding with user VNIs.
+    /// However, it is not in the Oxide-reserved range yet.
+    pub const DEFAULT_MULTICAST_VNI: Self = Self(77);
 
     /// Oxide reserves a slice of initial VNIs for its own use.
     pub const MIN_GUEST_VNI: u32 = 1024;
@@ -3333,12 +3348,12 @@ impl BgpMessageHistory {
 
 impl JsonSchema for BgpMessageHistory {
     fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
+        generator: &mut schemars::r#gen::SchemaGenerator,
     ) -> schemars::schema::Schema {
         let obj = schemars::schema::Schema::Object(
             schemars::schema::SchemaObject::default(),
         );
-        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        generator.definitions_mut().insert(Self::schema_name(), obj.clone());
         obj
     }
 

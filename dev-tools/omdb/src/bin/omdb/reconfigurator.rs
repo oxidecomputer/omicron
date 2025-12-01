@@ -202,14 +202,7 @@ async fn cmd_reconfigurator_archive(
     //    successfully archived some blueprints before hitting this error. We
     //    attempt to notice this and log a message for the operator in this
     //    case.
-    let target_blueprint_id = saved_state
-        .target_blueprint
-        .context(
-            "system has no current target blueprint: \
-             cannot remove non-target blueprints",
-        )?
-        .target_id;
-
+    let target_blueprint_id = saved_state.target_blueprint.target_id;
     let mut ndeleted = 0;
 
     eprintln!("removing saved, non-target blueprints ...");
@@ -428,6 +421,7 @@ async fn cmd_reconfigurator_config_history(
         version: String,
         planner_enabled: String,
         add_zones_with_mupdate_override: String,
+        tuf_repo_pruner_enabled: String,
         time_modified: String,
     }
 
@@ -441,6 +435,7 @@ async fn cmd_reconfigurator_config_history(
                         planner_enabled,
                         planner_config:
                             PlannerConfig { add_zones_with_mupdate_override },
+                        tuf_repo_pruner_enabled,
                     },
                 time_modified,
             } = s;
@@ -449,6 +444,7 @@ async fn cmd_reconfigurator_config_history(
                 planner_enabled: planner_enabled.to_string(),
                 add_zones_with_mupdate_override:
                     add_zones_with_mupdate_override.to_string(),
+                tuf_repo_pruner_enabled: tuf_repo_pruner_enabled.to_string(),
                 time_modified: time_modified.to_string(),
             }
         })

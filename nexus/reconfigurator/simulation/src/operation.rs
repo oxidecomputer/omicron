@@ -125,17 +125,10 @@ pub enum SimOperationKind {
 }
 
 impl SimOperationKind {
-    pub fn is_undo(&self) -> bool {
+    pub(crate) fn is_undo(&self) -> bool {
         matches!(
             self,
             SimOperationKind::Restore { kind: RestoreKind::Undo, .. }
-        )
-    }
-
-    pub fn is_redo(&self) -> bool {
-        matches!(
-            self,
-            SimOperationKind::Restore { kind: RestoreKind::Redo, .. }
         )
     }
 }
@@ -156,22 +149,25 @@ pub(crate) fn render_operation_graph(
         .with_min_row_height(0)
         .build_box_drawing();
 
-    let start = if let Some(limit) = limit {
-        simulator.operations().count().saturating_sub(limit)
+    // limited_ops is in reverse order, so that the most recent operation is
+    // shown first.
+    let limited_ops: Vec<_> = if let Some(limit) = limit {
+        // Take the last `limit` operations.
+        simulator.operations().rev().take(limit).collect()
     } else {
-        0
+        simulator.operations().rev().collect()
     };
-    let limited_ops: Vec<_> = simulator.operations().skip(start).collect();
 
-    // Process in reverse order.
-    for (op_index, op) in limited_ops.iter().enumerate().rev() {
-        let shown_first = op_index == limited_ops.len() - 1;
-        let shown_last = op_index == 0;
+    for (op_index, op) in limited_ops.iter().enumerate() {
+        let shown_first = op_index == 0;
+        let shown_last = op_index == limited_ops.len() - 1;
 
         let parents = if shown_last {
             Vec::new()
         } else {
-            let next_op = limited_ops[op_index - 1];
+            // "next" here is really previous, i.e. next in the reversed list of
+            // operations.
+            let next_op = limited_ops[op_index + 1];
             vec![Ancestor::Parent(next_op.id())]
         };
 
@@ -199,11 +195,10 @@ pub(crate) fn render_operation_graph(
 
             // Show the current head first with an @ marker.
             if let Some(state) = simulator.get_state(current) {
-                let head_str = current.to_string();
                 swriteln!(
                     message,
                     "  @ {} (gen {})",
-                    head_str,
+                    current,
                     state.generation()
                 );
             }
@@ -211,12 +206,11 @@ pub(crate) fn render_operation_graph(
             // Show other heads with *.
             for head in op.heads() {
                 if *head != current {
-                    let head_str = head.to_string();
                     if let Some(state) = simulator.get_state(*head) {
                         swriteln!(
                             message,
                             "  * {} (gen {})",
-                            head_str,
+                            head,
                             state.generation()
                         );
                     }

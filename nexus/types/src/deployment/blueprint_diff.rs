@@ -124,7 +124,9 @@ impl<'a> BlueprintDiffSummary<'a> {
     }
 
     /// All sled IDs present in the diff in any way
-    pub fn all_sled_ids(&self) -> impl Iterator<Item = SledUuid> + '_ {
+    pub fn all_sled_ids(
+        &self,
+    ) -> impl Iterator<Item = SledUuid> + '_ + use<'_> {
         self.diff
             .sleds
             .added
@@ -235,7 +237,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         if zones_diff.added.is_empty() {
             return None;
         }
-        Some(BpDiffZoneDetails::new(zones_diff.added.values().map(|z| *z)))
+        Some(BpDiffZoneDetails::new(zones_diff.added.iter().copied()))
     }
 
     /// Iterate over all removed zones on a sled
@@ -257,7 +259,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         if zones_diff.removed.is_empty() {
             return None;
         }
-        Some(BpDiffZoneDetails::new(zones_diff.removed.values().map(|z| *z)))
+        Some(BpDiffZoneDetails::new(zones_diff.removed.iter().copied()))
     }
 
     /// Iterate over all modified zones on a sled
@@ -268,7 +270,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         // Then check if the sled is modified and there are any modified zones
         let zones_diff =
             &self.diff.sleds.get_modified(sled_id)?.diff_pair().zones;
-        let mut modified_zones = zones_diff.modified_values_diff().peekable();
+        let mut modified_zones = zones_diff.modified_diff().peekable();
         if modified_zones.peek().is_none() {
             return None;
         }
@@ -291,7 +293,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         // Then check if the sled is modified and there are any unchanged zones
         let zones_diff =
             &self.diff.sleds.get_modified(sled_id)?.diff_pair().zones;
-        let mut unchanged_zones = zones_diff.unchanged_values().peekable();
+        let mut unchanged_zones = zones_diff.unchanged().peekable();
         if unchanged_zones.peek().is_none() {
             return None;
         }
@@ -317,9 +319,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         if disks_diff.added.is_empty() {
             return None;
         }
-        Some(DiffPhysicalDisksDetails::new(
-            disks_diff.added.values().map(|z| *z),
-        ))
+        Some(DiffPhysicalDisksDetails::new(disks_diff.added.iter().copied()))
     }
 
     /// Iterate over all removed disks on a sled
@@ -341,9 +341,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         if disks_diff.removed.is_empty() {
             return None;
         }
-        Some(DiffPhysicalDisksDetails::new(
-            disks_diff.removed.values().map(|z| *z),
-        ))
+        Some(DiffPhysicalDisksDetails::new(disks_diff.removed.iter().copied()))
     }
 
     /// Iterate over all unchanged disks on a sled
@@ -362,7 +360,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         // Then check if the sled is modified and there are any unchanged disks
         let disks_diff =
             &self.diff.sleds.get_modified(sled_id)?.diff_pair().disks;
-        let mut unchanged_disks = disks_diff.unchanged_values().peekable();
+        let mut unchanged_disks = disks_diff.unchanged().peekable();
         if unchanged_disks.peek().is_none() {
             return None;
         }
@@ -378,7 +376,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         // Check if the sled is modified and there are any modified disks
         let disks_diff =
             &self.diff.sleds.get_modified(sled_id)?.diff_pair().disks;
-        let mut modified_disks = disks_diff.modified_values_diff().peekable();
+        let mut modified_disks = disks_diff.modified_diff().peekable();
         if modified_disks.peek().is_none() {
             return None;
         }
@@ -404,7 +402,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         if datasets_diff.added.is_empty() {
             return None;
         }
-        Some(DiffDatasetsDetails::new(datasets_diff.added.values().map(|z| *z)))
+        Some(DiffDatasetsDetails::new(datasets_diff.added.iter().copied()))
     }
 
     /// Iterate over all removed datasets on a sled
@@ -426,9 +424,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         if datasets_diff.removed.is_empty() {
             return None;
         }
-        Some(DiffDatasetsDetails::new(
-            datasets_diff.removed.values().map(|z| *z),
-        ))
+        Some(DiffDatasetsDetails::new(datasets_diff.removed.iter().copied()))
     }
 
     /// Iterate over all unchanged datasets on a sled
@@ -447,8 +443,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         // Then check if the sled is modified and there are any unchanged datasets
         let datasets_diff =
             &self.diff.sleds.get_modified(sled_id)?.diff_pair().datasets;
-        let mut unchanged_datasets =
-            datasets_diff.unchanged_values().peekable();
+        let mut unchanged_datasets = datasets_diff.unchanged().peekable();
         if unchanged_datasets.peek().is_none() {
             return None;
         }
@@ -463,8 +458,7 @@ impl<'a> BlueprintDiffSummary<'a> {
         // Check if the sled is modified and there are any modified datasets
         let datasets_diff =
             self.diff.sleds.get_modified(sled_id)?.diff_pair().datasets;
-        let mut modified_datasets =
-            datasets_diff.modified_values_diff().peekable();
+        let mut modified_datasets = datasets_diff.modified_diff().peekable();
         if modified_datasets.peek().is_none() {
             return None;
         }
@@ -1787,7 +1781,7 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
 
     pub fn make_metadata_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvList> {
+    ) -> impl IntoIterator<Item = KvList> + use<> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
@@ -1848,7 +1842,7 @@ impl<'diff, 'b> BlueprintDiffDisplay<'diff, 'b> {
 
     pub fn make_oximeter_read_diff_tables(
         &self,
-    ) -> impl IntoIterator<Item = KvList> {
+    ) -> impl IntoIterator<Item = KvList> + use<> {
         macro_rules! diff_row {
             ($member:ident, $label:expr) => {
                 diff_row!($member, $label, std::convert::identity)
