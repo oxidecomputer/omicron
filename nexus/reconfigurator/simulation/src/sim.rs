@@ -227,18 +227,6 @@ impl Simulator {
         self.sim_uuid_rng.next()
     }
 
-    /// Render the operation log as a graph.
-    ///
-    /// Operations are shown in reverse chronological order (newest first) as a
-    /// linear chain.
-    pub fn render_operation_graph(
-        &self,
-        limit: Option<usize>,
-        verbose: bool,
-    ) -> String {
-        crate::operation::render_operation_graph(self, limit, verbose)
-    }
-
     pub(crate) fn add_state(&mut self, state: Arc<SimState>) {
         let id = state.id();
         let parent = state.parent();
