@@ -24,7 +24,7 @@ use nexus_types::{
 };
 use omicron_common::{api::external::Generation, disk::M2Slot};
 use omicron_uuid_kinds::{
-    BlueprintUuid, CollectionUuid, ReconfiguratorSimUuid, SledUuid,
+    BlueprintUuid, CollectionUuid, ReconfiguratorSimStateUuid, SledUuid,
 };
 use strum::IntoEnumIterator as _;
 
@@ -677,7 +677,7 @@ impl fmt::Display for ResolvedCollectionId {
 #[derive(Clone, Debug)]
 pub enum ReconfiguratorSimId {
     /// The specified state by full UUID.
-    Id(ReconfiguratorSimUuid),
+    Id(ReconfiguratorSimStateUuid),
 
     /// The specified state by UUID prefix.
     Prefix(String),
