@@ -2599,16 +2599,12 @@ pub(crate) mod test {
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
     use crate::example::example;
-    use crate::system::SledBuilder;
     use chrono::DateTime;
     use chrono::Utc;
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
     use iddqd::IdOrdMap;
-    use nexus_reconfigurator_blippy::Blippy;
-    use nexus_reconfigurator_blippy::BlippyReportSortKey;
-    use nexus_reconfigurator_simulation::BlueprintId;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
     use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
     use nexus_types::deployment::BlueprintArtifactVersion;
@@ -2655,7 +2651,6 @@ pub(crate) mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use oxnet::Ipv6Net;
-    use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
     use semver::Version;
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeMap;
@@ -2692,22 +2687,6 @@ pub(crate) mod test {
                 _ => None,
             })
             .collect::<BTreeSet<_>>()
-    }
-
-    /// Checks various conditions that should be true for all blueprints
-    #[track_caller]
-    pub fn verify_sim_latest_blueprint(sim: &ReconfiguratorCliTestState) {
-        let blueprint = sim.blueprint(BlueprintId::Latest).unwrap();
-        let planning_input = sim.planning_input(BlueprintId::Latest).unwrap();
-
-        let blippy_report = Blippy::new(blueprint, &planning_input)
-            .into_report(BlippyReportSortKey::Kind);
-        if !blippy_report.notes().is_empty() {
-            eprintln!("{}", blueprint.display());
-            eprintln!("---");
-            eprintln!("{}", blippy_report.display());
-            panic!("expected blippy report for blueprint to have no notes");
-        }
     }
 
     #[track_caller]

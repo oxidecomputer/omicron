@@ -5,7 +5,6 @@
 use expectorate::assert_contents;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
-use nexus_reconfigurator_planning::system::SledBuilder;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::Generation;
@@ -31,10 +30,16 @@ fn verify_sim_latest_blueprint(sim: &ReconfiguratorCliTestState) {
 
 #[track_caller]
 fn assert_sim_planning_makes_no_changes(sim: &mut ReconfiguratorCliTestState) {
-    sim.run(&["blueprint-plan latest latest"]).unwrap();
+    let blueprint = sim.run_planner().unwrap();
     verify_sim_latest_blueprint(sim);
 
-    let summary = sim.blueprint_diff_parent(BlueprintId::Latest).unwrap();
+    let parent = sim
+        .blueprint(BlueprintId::Id(
+            blueprint.parent_blueprint_id.expect("blueprint must have parent"),
+        ))
+        .expect("parent blueprint must be in simulation");
+
+    let summary = blueprint.diff_since_blueprint(&parent);
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
@@ -49,14 +54,15 @@ fn test_basic_add_sled() {
 
     // Use our example system.
     sim.load_example(|builder| Ok(builder)).unwrap();
-    let blueprint1 = sim.blueprint(BlueprintId::Latest).unwrap();
+    let blueprint1 = sim.blueprint(BlueprintId::Latest).unwrap().clone();
     println!("{}", blueprint1.display());
     verify_sim_latest_blueprint(&sim);
 
     // Now run the planner.  It should do nothing because our initial
     // system didn't have any issues that the planner currently knows how to
     // fix.
-    let (_blueprint2, summary) = sim.run_planner().unwrap();
+    let blueprint2 = sim.run_planner().unwrap();
+    let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (expected no changes):\n{}", summary.display());
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
@@ -75,18 +81,12 @@ fn test_basic_add_sled() {
     verify_sim_latest_blueprint(&sim);
 
     // Now add a new sled.
-    let mut new_sled_id = None;
-    sim.change_state(|state| {
-        let sled_id = state.rng_mut().next_sled_id();
-        let new_sled = SledBuilder::new().id(sled_id);
-        state.system_mut().description_mut().sled(new_sled)?;
-        new_sled_id = Some(sled_id);
-        Ok(format!("added sled {sled_id}"))
-    })
-    .expect("added sled");
+    let new_sled_id =
+        sim.add_sled("add new sled", |sled| sled).expect("added sled");
 
     // Check that the first step is to add an NTP zone
-    let (_blueprint3, summary) = sim.run_planner().unwrap();
+    let blueprint3 = sim.run_planner().unwrap();
+    let summary = blueprint3.diff_since_blueprint(&blueprint2);
 
     println!(
         "2 -> 3 (expect new NTP zone on new sled):\n{}",
@@ -104,12 +104,13 @@ fn test_basic_add_sled() {
     //    + local storage), plus one transient zone root for the NTP zone
     assert_eq!(summary.total_datasets_added(), 31);
 
-    let (&&new_sled_id, sled_added) =
+    let (&sled_id, sled_added) =
         summary.diff.sleds.added.first_key_value().unwrap();
     // We have defined elsewhere that the first generation contains no
     // zones.  So the first one with zones must be newer.  See
     // OmicronZonesConfig::INITIAL_GENERATION.
     assert!(sled_added.sled_agent_generation > Generation::new());
+    assert_eq!(*sled_id, new_sled_id);
     assert_eq!(sled_added.zones.len(), 1);
     assert!(matches!(
         sled_added.zones.first().unwrap().kind(),
@@ -118,7 +119,6 @@ fn test_basic_add_sled() {
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
     mem::drop(summary);
-    let blueprint3_id = sim.blueprint(BlueprintId::Latest).unwrap().id;
     verify_sim_latest_blueprint(&sim);
 
     // Check that with no change in inventory, the planner makes no changes.
@@ -127,18 +127,15 @@ fn test_basic_add_sled() {
     assert_sim_planning_makes_no_changes(&mut sim);
 
     // Now update the inventory to have the requested NTP zone.
-    sim.run(&[
-        &format!("sled-set {new_sled_id} omicron-config latest"),
-        "inventory-generate",
-        "blueprint-plan latest latest",
-    ])
-    .unwrap();
+    sim.deploy_configs_to_active_sleds("add NTP zone", &blueprint3)
+        .expect("deployed configs");
+    let _inventory = sim
+        .generate_inventory("inventory with new NTP zone")
+        .expect("generated inventory");
+    let blueprint5 = sim.run_planner().unwrap();
 
     // Check that the next step is to add Crucible zones
-    let summary = sim
-        .blueprint_diff(BlueprintId::Id(blueprint3_id), BlueprintId::Latest)
-        .unwrap();
-
+    let summary = blueprint5.diff_since_blueprint(&blueprint3);
     println!("3 -> 5 (expect Crucible zones):\n{}", summary.display());
     assert_contents(
         "tests/output/planner_basic_add_sled_3_5.txt",
@@ -172,11 +169,14 @@ fn test_basic_add_sled() {
 
     // Check that there are no more steps once the Crucible zones are
     // deployed.
-    sim.run(&[
-        &format!("sled-set {new_sled_id} omicron-config latest"),
-        "inventory-generate",
-    ])
-    .unwrap();
+    sim.deploy_configs_to_active_sleds(
+        "deploy new Crucible zones",
+        &blueprint5,
+    )
+    .expect("deployed configs");
+    let _inventory = sim
+        .generate_inventory("inventory with new NTP zone")
+        .expect("generated inventory");
     assert_sim_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
