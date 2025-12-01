@@ -217,7 +217,7 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
 async fn test_repo_upload() -> Result<()> {
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_repo_upload")
-            .extra_sled_agents(3)
+            .with_extra_sled_agents(3)
             .start::<omicron_nexus::Server>()
             .await;
     let client = &cptestctx.external_client;
@@ -867,7 +867,7 @@ async fn test_repo_prune(cptestctx: &ControlPlaneTestContext) {
 async fn test_repo_list() -> Result<()> {
     let cptestctx =
         nexus_test_utils::ControlPlaneBuilder::new("test_repo_list")
-            .extra_sled_agents(3)
+            .with_extra_sled_agents(3)
             .start::<omicron_nexus::Server>()
             .await;
     let client = &cptestctx.external_client;

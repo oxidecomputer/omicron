@@ -129,7 +129,7 @@ pub fn nexus_test(attrs: TokenStream, input: TokenStream) -> TokenStream {
             let ctx = ::nexus_test_utils::ControlPlaneBuilder::new(
                 #func_ident_string,
             )
-            .extra_sled_agents(#extra_sled_agents)
+            .with_extra_sled_agents(#extra_sled_agents)
             .start::<#which_nexus>()
             .await;
             #func_ident(&ctx).await;

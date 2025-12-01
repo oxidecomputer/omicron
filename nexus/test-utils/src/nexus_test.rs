@@ -44,9 +44,7 @@ pub struct ControlPlaneBuilder<'a> {
 
     // defaults provided by the builder
     nextra_sled_agents: u16,
-    sim_mode: sim::SimMode,
     tls_cert: Option<Certificate>,
-    gateway_config_file: Utf8PathBuf,
     nexus_config: NexusConfig,
 }
 
@@ -55,39 +53,24 @@ impl<'a> ControlPlaneBuilder<'a> {
         ControlPlaneBuilder {
             test_name,
             nextra_sled_agents: 0,
-            sim_mode: sim::SimMode::Explicit,
             tls_cert: None,
-            gateway_config_file: DEFAULT_SP_SIM_CONFIG.into(),
             nexus_config: load_test_config(),
         }
     }
 
-    pub fn extra_sled_agents(mut self, nextra: u16) -> ControlPlaneBuilder<'a> {
+    pub fn with_extra_sled_agents(
+        mut self,
+        nextra: u16,
+    ) -> ControlPlaneBuilder<'a> {
         self.nextra_sled_agents = nextra;
         self
     }
 
-    pub fn sim_mode(
-        mut self,
-        sim_mode: sim::SimMode,
-    ) -> ControlPlaneBuilder<'a> {
-        self.sim_mode = sim_mode;
-        self
-    }
-
-    pub fn tls_cert(
+    pub fn with_tls_cert(
         mut self,
         tls_cert: Option<Certificate>,
     ) -> ControlPlaneBuilder<'a> {
         self.tls_cert = tls_cert;
-        self
-    }
-
-    pub fn mgs_config_file(
-        mut self,
-        path: Utf8PathBuf,
-    ) -> ControlPlaneBuilder<'a> {
-        self.gateway_config_file = path;
         self
     }
 
@@ -106,10 +89,10 @@ impl<'a> ControlPlaneBuilder<'a> {
         setup_with_config_impl(
             starter,
             PopulateCrdb::FromEnvironmentSeed,
-            self.sim_mode,
+            sim::SimMode::Explicit,
             self.tls_cert,
             self.nextra_sled_agents,
-            self.gateway_config_file,
+            DEFAULT_SP_SIM_CONFIG.into(),
             false,
         )
         .await

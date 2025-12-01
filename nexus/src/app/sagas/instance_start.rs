@@ -1018,7 +1018,7 @@ mod test {
         let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
             "should_start_with_dead_switch",
         )
-        .extra_sled_agents(3)
+        .with_extra_sled_agents(3)
         .start::<crate::Server>()
         .await;
 

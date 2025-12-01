@@ -348,7 +348,7 @@ async fn test_silo_certificates() {
             .customize_nexus_config(&|config| {
                 config.deployment.dropshot_external.tls = true;
             })
-            .tls_cert(Some(silo1.cert.clone()))
+            .with_tls_cert(Some(silo1.cert.clone()))
             .start::<omicron_nexus::Server>()
             .await;
 
