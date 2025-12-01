@@ -951,19 +951,42 @@ impl DataStore {
                 }
             })?;
 
+        // Only link default gateway for unicast pools (not multicast pools).
+        // Internet gateways are used for unicast traffic routing, not multicast.
         if ip_pool_resource.is_default {
-            self.link_default_gateway(
-                opctx,
-                ip_pool_resource.resource_id,
-                ip_pool_resource.ip_pool_id,
-                &conn,
-            )
-            .await?;
+            use nexus_db_schema::schema::ip_pool::dsl;
+
+            let pool_type: IpPoolType = dsl::ip_pool
+                .filter(dsl::id.eq(ip_pool_resource.ip_pool_id))
+                .filter(dsl::time_deleted.is_null())
+                .select(dsl::pool_type)
+                .first_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            if pool_type == IpPoolType::Unicast {
+                self.link_default_gateway(
+                    opctx,
+                    ip_pool_resource.resource_id,
+                    ip_pool_resource.ip_pool_id,
+                    &conn,
+                )
+                .await?;
+            }
         }
 
         Ok(result)
     }
 
+    // Links the default internet gateway for all VPCs in a silo to the given
+    // IP pool.
+    //
+    // This is only applicable to unicast pools, where as multicast
+    // traffic uses DPD/switch-level forwarding rather than internet gateway
+    // routing.
+    //
     // TODO-correctness: This seems like it should be in a transaction. At
     // least, the nested-loops can mostly be re-expressed as a join between the
     // silos, projects, vpcs, and Internet gateway tables.
