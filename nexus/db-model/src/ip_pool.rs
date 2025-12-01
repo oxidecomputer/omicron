@@ -289,9 +289,28 @@ impl std::fmt::Display for IpPoolType {
     }
 }
 
+/// IP pool resource type.
+///
+/// `pool_type` and `ip_version` are denormalized from [IpPool]
+/// for a unique index on defaults.
 #[derive(Queryable, Insertable, Selectable, Clone, Copy, Debug, PartialEq)]
 #[diesel(table_name = ip_pool_resource)]
 pub struct IpPoolResource {
+    pub ip_pool_id: Uuid,
+    pub resource_type: IpPoolResourceType,
+    pub resource_id: Uuid,
+    pub is_default: bool,
+    pub pool_type: IpPoolType,
+    pub ip_version: IpVersion,
+}
+
+/// Input for creating an IP pool resource.
+///
+/// The `pool_type` and `ip_version` fields are populated from [IpPool]
+/// by the `link_ip_pool_to_external_silo_query` query, so they are not needed
+/// as input.
+#[derive(Clone, Copy, Debug)]
+pub struct IncompleteIpPoolResource {
     pub ip_pool_id: Uuid,
     pub resource_type: IpPoolResourceType,
     pub resource_id: Uuid,

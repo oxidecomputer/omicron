@@ -9103,7 +9103,7 @@
           "system/ip-pools"
         ],
         "summary": "Link IP pool to silo",
-        "description": "Users in linked silos can allocate external IPs from this pool for their instances. A silo can have at most one default pool. IPs are allocated from the default pool when users ask for one without specifying a pool.",
+        "description": "Users in linked silos can allocate external IPs from this pool for their instances. A silo can have at most one default pool per combination of pool type (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4 default pools. IPs are allocated from the default pool when users ask for one without specifying a pool.",
         "operationId": "ip_pool_silo_link",
         "parameters": [
           {
@@ -11179,7 +11179,7 @@
           "system/silos"
         ],
         "summary": "List IP pools linked to silo",
-        "description": "Linked IP pools are available to users in the specified silo. A silo can have at most one default pool. IPs are allocated from the default pool when users ask for one without specifying a pool.",
+        "description": "Linked IP pools are available to users in the specified silo. A silo can have at most one default pool per combination of pool type (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4 default pools. IPs are allocated from the default pool when users ask for one without specifying a pool.",
         "operationId": "silo_ip_pool_list",
         "parameters": [
           {
@@ -21992,7 +21992,7 @@
         "type": "object",
         "properties": {
           "is_default": {
-            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified.\n\nA silo can have at most one default pool per combination of pool type (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4 default pools total.",
             "type": "boolean"
           },
           "silo": {
@@ -22081,7 +22081,7 @@
             "format": "uuid"
           },
           "is_default": {
-            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified.\n\nA silo can have at most one default pool per combination of pool type (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4 default pools total.",
             "type": "boolean"
           },
           "silo_id": {
@@ -22120,7 +22120,7 @@
         "type": "object",
         "properties": {
           "is_default": {
-            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo, so when a pool is made default, an existing default will remain linked but will no longer be the default.",
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified.\n\nA silo can have at most one default pool per combination of pool type (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4 default pools total. When a pool is made default, only an existing default with the same pool type and IP version will be demoted.",
             "type": "boolean"
           }
         },
@@ -24760,7 +24760,7 @@
             "format": "uuid"
           },
           "is_default": {
-            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified.\n\nA silo can have at most one default pool per combination of pool type (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4 default pools total.",
             "type": "boolean"
           },
           "name": {

@@ -438,8 +438,10 @@ pub trait NexusExternalApi {
     /// List IP pools linked to silo
     ///
     /// Linked IP pools are available to users in the specified silo. A silo
-    /// can have at most one default pool. IPs are allocated from the default
-    /// pool when users ask for one without specifying a pool.
+    /// can have at most one default pool per combination of pool type (unicast
+    /// or multicast) and IP version (IPv4 or IPv6), allowing up to 4 default
+    /// pools. IPs are allocated from the default pool when users ask for one
+    /// without specifying a pool.
     #[endpoint {
         method = GET,
         path = "/v1/system/silos/{silo}/ip-pools",
@@ -1006,8 +1008,10 @@ pub trait NexusExternalApi {
     /// Link IP pool to silo
     ///
     /// Users in linked silos can allocate external IPs from this pool for their
-    /// instances. A silo can have at most one default pool. IPs are allocated
-    /// from the default pool when users ask for one without specifying a pool.
+    /// instances. A silo can have at most one default pool per combination of
+    /// pool type (unicast or multicast) and IP version (IPv4 or IPv6), allowing
+    /// up to 4 default pools. IPs are allocated from the default pool when
+    /// users ask for one without specifying a pool.
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools/{pool}/silos",

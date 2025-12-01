@@ -2283,18 +2283,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
     resource_type omicron.public.ip_pool_resource_type NOT NULL,
     resource_id UUID NOT NULL,
     is_default BOOL NOT NULL,
-    -- TODO: timestamps for soft deletes?
+
+    -- Denormalized from ip_pool for unique index on defaults
+    pool_type omicron.public.ip_pool_type NOT NULL,
+    ip_version omicron.public.ip_version NOT NULL,
 
     -- resource_type is redundant because resource IDs are globally unique, but
     -- logically it belongs here
     PRIMARY KEY (ip_pool_id, resource_type, resource_id)
 );
 
--- a given resource can only have one default ip pool
-CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
-    resource_id
-) where
-    is_default = true;
+-- A silo can have one default pool per (pool_type, ip_version) combination,
+-- allowing up to 4 default pools (unicast/multicast × v4/v6).
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource_type_version
+ON omicron.public.ip_pool_resource (
+    resource_id,
+    pool_type,
+    ip_version
+) WHERE is_default = true;
 
 -- created solely to prevent a table scan when we delete links on silo delete
 CREATE INDEX IF NOT EXISTS ip_pool_resource_id ON omicron.public.ip_pool_resource (
@@ -7358,7 +7364,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '213.0.0', NULL)
+    (TRUE, NOW(), NOW(), '214.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

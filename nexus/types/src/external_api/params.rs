@@ -1079,7 +1079,10 @@ pub struct IpPoolLinkSilo {
     pub silo: NameOrId,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total.
     pub is_default: bool,
 }
 
@@ -1087,9 +1090,11 @@ pub struct IpPoolLinkSilo {
 pub struct IpPoolSiloUpdate {
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
-    /// There can be at most one default for a given silo, so when a pool is
-    /// made default, an existing default will remain linked but will no longer
-    /// be the default.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total. When a pool is made default, only an existing
+    /// default with the same pool type and IP version will be demoted.
     pub is_default: bool,
 }
 

@@ -14,6 +14,7 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::datastore::SERVICE_IPV4_POOL_NAME;
 use crate::db::datastore::SERVICE_IPV6_POOL_NAME;
 use crate::db::identity::Resource;
+use crate::db::model::IncompleteIpPoolResource;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
 use crate::db::model::IpPoolRange;
@@ -290,7 +291,12 @@ impl DataStore {
             // from the definition; it's not lexicographic. So correctness here
             // relies on the types being most-specific-first in the definition.
             // There are tests for this.
-            .order(ip_pool_resource::resource_type.asc())
+            //
+            // Also order by IP version to prefer V4 over V6 when both exist.
+            .order((
+                ip_pool_resource::resource_type.asc(),
+                ip_pool::ip_version.asc(),
+            ))
             .select(IpPool::as_select())
             .first_async::<IpPool>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -893,7 +899,7 @@ impl DataStore {
     pub async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
-        ip_pool_resource: IpPoolResource,
+        ip_pool_resource: IncompleteIpPoolResource,
     ) -> CreateResult<IpPoolResource> {
         if ip_pool_resource.resource_id == INTERNAL_SILO_ID {
             return Err(Error::invalid_request(
@@ -906,7 +912,7 @@ impl DataStore {
             .await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let result = link_ip_pool_to_external_silo_query(&ip_pool_resource)
+        let result: IpPoolResource = link_ip_pool_to_external_silo_query(&ip_pool_resource)
             .get_result_async(&*conn)
             .await
             .map_err(|e| {
@@ -953,28 +959,16 @@ impl DataStore {
 
         // Only link default gateway for unicast pools (not multicast pools).
         // Internet gateways are used for unicast traffic routing, not multicast.
-        if ip_pool_resource.is_default {
-            use nexus_db_schema::schema::ip_pool::dsl;
-
-            let pool_type: IpPoolType = dsl::ip_pool
-                .filter(dsl::id.eq(ip_pool_resource.ip_pool_id))
-                .filter(dsl::time_deleted.is_null())
-                .select(dsl::pool_type)
-                .first_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-            if pool_type == IpPoolType::Unicast {
-                self.link_default_gateway(
-                    opctx,
-                    ip_pool_resource.resource_id,
-                    ip_pool_resource.ip_pool_id,
-                    &conn,
-                )
-                .await?;
-            }
+        if ip_pool_resource.is_default
+            && result.pool_type == IpPoolType::Unicast
+        {
+            self.link_default_gateway(
+                opctx,
+                ip_pool_resource.resource_id,
+                ip_pool_resource.ip_pool_id,
+                &conn,
+            )
+            .await?;
         }
 
         Ok(result)
@@ -1151,12 +1145,12 @@ impl DataStore {
         Ok(())
     }
 
-    // TODO: The current model only allows one default pool per silo, but we
-    // need up to 4 default pools: IPv4/unicast, IPv4/multicast, IPv6/unicast,
-    // IPv6/multicast. Without this, users would have to switch the default
-    // pool back and forth for allocation to work between pool types.
-    // The schema should support a default pool per (silo, ip_version, pool_type)
-    // tuple.
+    /// Set or unset a pool as the default for a silo.
+    ///
+    /// A silo can have at most one default pool per combination of pool type
+    /// (unicast or multicast) and IP version (IPv4 or IPv6), allowing up to 4
+    /// default pools total. When setting a pool as default, only the existing
+    /// default with the same (pool_type, ip_version) will be demoted.
     pub async fn ip_pool_set_default(
         &self,
         opctx: &OpContext,
@@ -1164,6 +1158,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         is_default: bool,
     ) -> UpdateResult<IpPoolResource> {
+        use nexus_db_schema::schema::ip_pool::dsl as pool_dsl;
         use nexus_db_schema::schema::ip_pool_resource::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_ip_pool).await?;
@@ -1198,6 +1193,7 @@ impl DataStore {
         #[derive(Debug)]
         enum IpPoolResourceUpdateError {
             FailedToUnsetDefault(DieselError),
+            PoolNotFound(DieselError),
         }
         type TxnError = TransactionError<IpPoolResourceUpdateError>;
 
@@ -1207,20 +1203,40 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Find existing default for this silo.
+                    // Get the pool type and IP version of the pool we're
+                    // making default. A silo can have multiple defaults (one
+                    // per pool type + IP version variant), so we only unset the
+                    // default for the matching (pool_type, ip_version) pair.
+                    let (pool_type, ip_version) = pool_dsl::ip_pool
+                        .filter(pool_dsl::id.eq(ip_pool_id))
+                        .filter(pool_dsl::time_deleted.is_null())
+                        .select((pool_dsl::pool_type, pool_dsl::ip_version))
+                        .first_async::<(IpPoolType, IpVersion)>(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail(TxnError::CustomError(
+                                IpPoolResourceUpdateError::PoolNotFound(e),
+                            ))
+                        })?;
+
+                    // Find existing default for this silo with the same pool
+                    // type and IP version.
                     let existing_default = dsl::ip_pool_resource
+                        .inner_join(pool_dsl::ip_pool)
                         .filter(dsl::resource_type.eq(IpPoolResourceType::Silo))
                         .filter(dsl::resource_id.eq(silo_id))
                         .filter(dsl::is_default.eq(true))
+                        .filter(pool_dsl::pool_type.eq(pool_type))
+                        .filter(pool_dsl::ip_version.eq(ip_version))
                         .select(IpPoolResource::as_select())
                         .get_result_async(&conn)
                         .await;
 
-                    // if there is an existing default, we need to unset it
+                    // If there is an existing default, we need to unset it
                     // before we can set the new default
                     if let Ok(existing_default) = existing_default {
-                        // if the pool we're making default is already default for this
-                        // silo, don't error: just noop
+                        // If the pool we're making default is already default
+                        // for this silo, don't error: just noop
                         if existing_default.ip_pool_id == ip_pool_id {
                             return Ok(existing_default);
                         }
@@ -1267,6 +1283,12 @@ impl DataStore {
                 Some(TxnError::CustomError(
                     IpPoolResourceUpdateError::FailedToUnsetDefault(err),
                 )) => public_error_from_diesel(err, ErrorHandler::Server),
+                Some(TxnError::CustomError(
+                    IpPoolResourceUpdateError::PoolNotFound(err),
+                )) => public_error_from_diesel(
+                    err,
+                    ErrorHandler::NotFoundByResource(authz_ip_pool),
+                ),
                 Some(TxnError::Database(err)) => {
                     public_error_from_diesel(err, ErrorHandler::Server)
                 }
@@ -1772,13 +1794,15 @@ const LAST_POOL_SENTINEL: &str = "last-pool";
 // WITH
 //   -- Select the IP Pool by ID, used to ensure it still exists when we run
 //   -- this query. Also select the reservation type, and fail if the pool is
-//   -- currently reserved for Oxide.
+//   -- currently reserved for Oxide. Include `pool_type` and `ip_version` for
+//   -- denormalization into `ip_pool_resource`, which allows for a partial
+//   -- index we can constrain pool defaults on.
 //   ip_pool AS (
 //      SELECT CAST(IF(
 //          reservation_type != 'external_silos',
 //          'bad-link-type',
 //          $1)
-//      AS UUID)
+//      AS UUID) AS id, pool_type, ip_version
 //      FROM ip_pool
 //      WHERE id = $2 AND time_deleted IS NULL
 //   )
@@ -1787,7 +1811,7 @@ const LAST_POOL_SENTINEL: &str = "last-pool";
 //   silo AS (SELECT id FROM silo WHERE id = $3 AND time_deleted IS NULL),
 // INSERT
 // INTO
-//   ip_pool_resource (ip_pool_id, resource_type, resource_id, is_default)
+//   ip_pool_resource (ip_pool_id, resource_type, resource_id, is_default, pool_type, ip_version)
 // SELECT
 //   -- If the pool exists, take its ID as a string. If it does not exist, take
 //   -- the string `'ip-pool-deleted'`. Attempt to cast the result to a UUID.
@@ -1799,7 +1823,9 @@ const LAST_POOL_SENTINEL: &str = "last-pool";
 //   -- the string `'silo-deleted'`. Attempt to cast the result to a UUID.
 //   -- This is the "true or cast error" trick we use in many places.
 //   CAST(COALESCE(CAST(s.id AS STRING), 'silo-deleted') AS UUID),
-//    $5
+//   $5,
+//   ip.pool_type,
+//   ip.ip_version
 // FROM
 //   (SELECT 1) AS dummy
 //   LEFT JOIN ip_pool AS ip ON true
@@ -1808,7 +1834,7 @@ const LAST_POOL_SENTINEL: &str = "last-pool";
 //  *
 // ```
 fn link_ip_pool_to_external_silo_query(
-    ip_pool_resource: &IpPoolResource,
+    ip_pool_resource: &IncompleteIpPoolResource,
 ) -> TypedSqlQuery<SelectableSql<IpPoolResource>> {
     let mut builder = QueryBuilder::new();
     builder
@@ -1822,7 +1848,7 @@ fn link_ip_pool_to_external_silo_query(
         .sql("', ")
         .param()
         .bind::<sql_types::Text, _>(ip_pool_resource.ip_pool_id.to_string())
-        .sql(") AS UUID) AS id FROM ip_pool WHERE id = ")
+        .sql(") AS UUID) AS id, pool_type, ip_version FROM ip_pool WHERE id = ")
         .param()
         .bind::<sql_types::Uuid, _>(ip_pool_resource.ip_pool_id)
         .sql(
@@ -1838,7 +1864,9 @@ fn link_ip_pool_to_external_silo_query(
                 ip_pool_id, \
                 resource_type, \
                 resource_id, \
-                is_default\
+                is_default, \
+                pool_type, \
+                ip_version\
             ) SELECT CAST(COALESCE(CAST(ip.id AS STRING), '",
         )
         .sql(IP_POOL_DELETED_SENTINEL)
@@ -1853,7 +1881,8 @@ fn link_ip_pool_to_external_silo_query(
         .param()
         .bind::<sql_types::Bool, _>(ip_pool_resource.is_default)
         .sql(
-            " FROM (SELECT 1) AS dummy \
+            ", ip.pool_type, ip.ip_version \
+            FROM (SELECT 1) AS dummy \
             LEFT JOIN ip_pool AS ip ON TRUE \
             LEFT JOIN silo AS s ON TRUE \
             RETURNING *",
@@ -2139,7 +2168,8 @@ mod test {
     };
     use crate::db::explain::ExplainableAsync as _;
     use crate::db::model::{
-        IpPool, IpPoolResource, IpPoolResourceType, Project,
+        IncompleteIpPoolResource, IpPool, IpPoolResource, IpPoolResourceType,
+        Project,
     };
     use crate::db::pagination::Paginator;
     use crate::db::pub_test_utils::TestDatabase;
@@ -2151,7 +2181,8 @@ mod test {
     };
     use nexus_db_lookup::LookupPath;
     use nexus_db_model::{
-        IpPoolIdentity, IpPoolReservationType, IpPoolType, IpVersion,
+        InternetGatewayIpPool, IpPoolIdentity, IpPoolReservationType,
+        IpPoolType, IpVersion,
     };
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::{
@@ -2246,7 +2277,7 @@ mod test {
         assert_matches!(error, Error::ObjectNotFound { .. });
 
         // now link to silo
-        let link_body = IpPoolResource {
+        let link_body = IncompleteIpPoolResource {
             ip_pool_id: pool1_for_silo.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2316,7 +2347,7 @@ mod test {
         let err = datastore
             .ip_pool_link_silo(
                 &opctx,
-                IpPoolResource {
+                IncompleteIpPoolResource {
                     ip_pool_id: second_silo_default.id(),
                     resource_type: IpPoolResourceType::Silo,
                     resource_id: silo_id,
@@ -2431,7 +2462,7 @@ mod test {
             // now link it to the current silo, and it is still not internal.
             let silo_id = opctx.authn.silo_required().unwrap().id();
             let is_default = matches!(version, IpVersion::V4);
-            let link = IpPoolResource {
+            let link = IncompleteIpPoolResource {
                 ip_pool_id: other_pool.id(),
                 resource_type: IpPoolResourceType::Silo,
                 resource_id: silo_id,
@@ -2522,7 +2553,7 @@ mod test {
             .unwrap();
         assert_eq!(max_ips, 5);
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -2606,7 +2637,7 @@ mod test {
             pool.id(),
             LookupType::ById(pool.id()),
         );
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -2789,7 +2820,7 @@ mod test {
             .expect("Should create multicast IP pool");
 
         let authz_silo = opctx.authn.silo_required().unwrap();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -2862,7 +2893,7 @@ mod test {
             .await
             .expect("Should create multicast IP pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -2922,7 +2953,7 @@ mod test {
             .await
             .expect("Should create multicast IP pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -2965,7 +2996,7 @@ mod test {
             .await
             .expect("Should create default multicast IP pool");
 
-        let default_link = IpPoolResource {
+        let default_link = IncompleteIpPoolResource {
             ip_pool_id: default_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -3252,7 +3283,7 @@ mod test {
     // Ensure we have the right query contents.
     #[tokio::test]
     async fn expectorate_insert_ip_pool_external_silo_link() {
-        let res = IpPoolResource {
+        let res = IncompleteIpPoolResource {
             ip_pool_id: uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7"),
             resource_type: IpPoolResourceType::Silo,
             resource_id: INTERNAL_SILO_ID,
@@ -3275,7 +3306,7 @@ mod test {
         let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
-        let res = IpPoolResource {
+        let res = IncompleteIpPoolResource {
             ip_pool_id: uuid::uuid!("aaa84fbd-85a5-4fcb-b34f-23b7e56145c7"),
             resource_type: IpPoolResourceType::Silo,
             resource_id: INTERNAL_SILO_ID,
@@ -3318,7 +3349,7 @@ mod test {
             .expect("Failed to create IP pool");
 
         // We should fail to link it to some other silo now.
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: uuid::uuid!("cfb16a9d-764e-4c5d-8d0d-cf737885b84a"),
@@ -3363,7 +3394,7 @@ mod test {
             .expect("Failed to create IP pool");
 
         // Link to an external silo.
-        let external_link = IpPoolResource {
+        let external_link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: nexus_types::silo::DEFAULT_SILO_ID,
@@ -3440,7 +3471,7 @@ mod test {
         assert_eq!(c, 1, "Should have deleted something");
 
         // Now try link to it.
-        let external_link = IpPoolResource {
+        let external_link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: nexus_types::silo::DEFAULT_SILO_ID,
@@ -3492,7 +3523,7 @@ mod test {
         assert_eq!(c, 1, "Should have deleted something");
 
         // Now try link to it.
-        let external_link = IpPoolResource {
+        let external_link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: nexus_types::silo::DEFAULT_SILO_ID,
@@ -3920,7 +3951,7 @@ mod test {
         );
 
         // Link pool to silo
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -3984,6 +4015,665 @@ mod test {
             .await
             .expect("Query should succeed");
         assert!(result.is_none(), "Should not find pool for non-multicast IP");
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that a silo can have multiple default pools (one per `pool_type` +
+    /// `ip_version` variant), and that setting a new default only demotes
+    /// pools with the same (pool_type, ip_version).
+    #[tokio::test]
+    async fn test_multiple_default_pools_per_silo() {
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let logctx =
+            dev::test_setup_log("test_multiple_default_pools_per_silo");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        fn create_pool(
+            name: &str,
+            pool_type: IpPoolType,
+            ip_version: IpVersion,
+        ) -> IpPool {
+            let identity = IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: format!("{name} pool"),
+            };
+
+            if pool_type == IpPoolType::Multicast {
+                IpPool::new_multicast(
+                    &identity,
+                    ip_version,
+                    IpPoolReservationType::ExternalSilos,
+                )
+            } else {
+                IpPool::new(
+                    &identity,
+                    ip_version,
+                    IpPoolReservationType::ExternalSilos,
+                )
+            }
+        }
+
+        // Create 4 default pools - one for each (pool_type, ip_version) variant
+        let unicast_ipv4 = datastore
+            .ip_pool_create(
+                &opctx,
+                create_pool("unicast-ipv4", IpPoolType::Unicast, IpVersion::V4),
+            )
+            .await
+            .expect("Should create unicast IPv4 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_ipv4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast IPv4");
+        let (.., authz_unicast_ipv4) = LookupPath::new(&opctx, datastore)
+            .ip_pool_id(unicast_ipv4.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        let unicast_ipv6 = datastore
+            .ip_pool_create(
+                &opctx,
+                create_pool("unicast-ipv6", IpPoolType::Unicast, IpVersion::V6),
+            )
+            .await
+            .expect("Should create unicast IPv6 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_ipv6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast IPv6");
+
+        let multicast_ipv4 = datastore
+            .ip_pool_create(
+                &opctx,
+                create_pool(
+                    "multicast-ipv4",
+                    IpPoolType::Multicast,
+                    IpVersion::V4,
+                ),
+            )
+            .await
+            .expect("Should create multicast IPv4 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_ipv4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link multicast IPv4");
+
+        let multicast_ipv6 = datastore
+            .ip_pool_create(
+                &opctx,
+                create_pool(
+                    "multicast-ipv6",
+                    IpPoolType::Multicast,
+                    IpVersion::V6,
+                ),
+            )
+            .await
+            .expect("Should create multicast IPv6 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_ipv6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link multicast IPv6");
+        let (.., authz_multicast_ipv6) = LookupPath::new(&opctx, datastore)
+            .ip_pool_id(multicast_ipv6.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        // Verify unicast IPv4 and multicast IPv4 are defaults
+        let default_unicast_ipv4 = datastore
+            .ip_pools_fetch_default(&opctx)
+            .await
+            .expect("Should find default unicast IPv4 pool");
+        assert_eq!(default_unicast_ipv4.1.id(), unicast_ipv4.id());
+
+        let default_multicast_ipv4 = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .await
+            .expect("Should find default multicast IPv4 pool");
+        assert_eq!(default_multicast_ipv4.1.id(), multicast_ipv4.id());
+
+        // Now create a new unicast IPv4 pool and make it default
+        // This should only demote the existing unicast IPv4 default
+        let new_unicast_ipv4 = datastore
+            .ip_pool_create(
+                &opctx,
+                create_pool(
+                    "new-unicast-ipv4",
+                    IpPoolType::Unicast,
+                    IpVersion::V4,
+                ),
+            )
+            .await
+            .expect("Should create new unicast IPv4 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: new_unicast_ipv4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: false, // Start as non-default
+                },
+            )
+            .await
+            .expect("Should link new unicast IPv4");
+        let (.., authz_new_unicast_ipv4) = LookupPath::new(&opctx, datastore)
+            .ip_pool_id(new_unicast_ipv4.id())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        datastore
+            .ip_pool_set_default(
+                &opctx,
+                &authz_new_unicast_ipv4,
+                &authz_silo,
+                true,
+            )
+            .await
+            .expect("Should set new unicast IPv4 as default");
+
+        // Verify new unicast IPv4 is now default
+        let default_unicast_ipv4 = datastore
+            .ip_pools_fetch_default(&opctx)
+            .await
+            .expect("Should find new default unicast IPv4 pool");
+        assert_eq!(default_unicast_ipv4.1.id(), new_unicast_ipv4.id());
+
+        // Verify other defaults were not affected
+        let default_multicast_ipv4 = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .await
+            .expect("Multicast IPv4 should still be default");
+        assert_eq!(default_multicast_ipv4.1.id(), multicast_ipv4.id());
+
+        // Verify original unicast IPv4 is no longer default by checking the link
+        let link = ip_pool_resource::table
+            .select(IpPoolResource::as_select())
+            .filter(ip_pool_resource::ip_pool_id.eq(authz_unicast_ipv4.id()))
+            .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
+            .first_async::<IpPoolResource>(
+                &*datastore.pool_connection_authorized(&opctx).await.unwrap(),
+            )
+            .await
+            .expect("Should find original unicast IPv4 link");
+        assert!(
+            !link.is_default,
+            "Original unicast IPv4 should no longer be default"
+        );
+
+        // Verify we can unset one default without affecting others
+        datastore
+            .ip_pool_set_default(
+                &opctx,
+                &authz_multicast_ipv6,
+                &authz_silo,
+                false,
+            )
+            .await
+            .expect("Should unset multicast IPv6 default");
+
+        // Other defaults should still exist
+        let default_unicast_ipv4 = datastore
+            .ip_pools_fetch_default(&opctx)
+            .await
+            .expect("Unicast IPv4 should still be default");
+        assert_eq!(default_unicast_ipv4.1.id(), new_unicast_ipv4.id());
+
+        let default_multicast_ipv4 = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .await
+            .expect("Multicast IPv4 should still be default");
+        assert_eq!(default_multicast_ipv4.1.id(), multicast_ipv4.id());
+
+        // Verify the unique constraint: trying to link another unicast IPv4 pool
+        // as default should fail because `new_unicast_ipv4` is already the default
+        // for that (pool_type, ip_version) variation
+        let duplicate_unicast_ipv4 = datastore
+            .ip_pool_create(
+                &opctx,
+                create_pool(
+                    "duplicate-unicast-ipv4",
+                    IpPoolType::Unicast,
+                    IpVersion::V4,
+                ),
+            )
+            .await
+            .expect("Should create duplicate unicast IPv4 pool");
+        let err = datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: duplicate_unicast_ipv4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect_err("Should fail to link duplicate default unicast IPv4");
+        assert_matches!(
+            err,
+            Error::ObjectAlreadyExists { .. },
+            "Expected ObjectAlreadyExists for duplicate default pool"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that when both IPv4 and IPv6 defaults exist for the same pool type,
+    /// `ip_pools_fetch_default_by_type` returns the IPv4 pool (ordering preference).
+    #[tokio::test]
+    async fn test_default_pool_ipv4_ipv6_ordering() {
+        let logctx =
+            dev::test_setup_log("test_default_pool_ipv4_ipv6_ordering");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create IPv6 pool first (to ensure ordering isn't just insertion order)
+        let identity_ipv6 = IdentityMetadataCreateParams {
+            name: "unicast-ipv6-pool".parse().unwrap(),
+            description: "Unicast IPv6 pool".to_string(),
+        };
+        let unicast_ipv6 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity_ipv6,
+                    IpVersion::V6,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create unicast IPv6 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_ipv6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast IPv6");
+
+        // Create IPv4 pool second
+        let identity_ipv4 = IdentityMetadataCreateParams {
+            name: "unicast-ipv4-pool".parse().unwrap(),
+            description: "Unicast IPv4 pool".to_string(),
+        };
+        let unicast_ipv4 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity_ipv4,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create unicast IPv4 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_ipv4.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast IPv4");
+
+        // Fetch default - should get IPv4 even though IPv6 was created first
+        let (_, default_pool) = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Unicast)
+            .await
+            .expect("Should find default unicast pool");
+
+        assert_eq!(
+            default_pool.id(),
+            unicast_ipv4.id(),
+            "Should prefer IPv4 over IPv6 when both are defaults"
+        );
+        assert_eq!(
+            default_pool.ip_version,
+            IpVersion::V4,
+            "Default pool should be IPv4"
+        );
+
+        // Also verify via `ip_pools_fetch_default`
+        let (_, default_pool) = datastore
+            .ip_pools_fetch_default(&opctx)
+            .await
+            .expect("Should find default pool");
+        assert_eq!(default_pool.ip_version, IpVersion::V4);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that IPv6-only defaults work correctly when no IPv4 default exists.
+    #[tokio::test]
+    async fn test_ipv6_only_default_pool() {
+        let logctx = dev::test_setup_log("test_ipv6_only_default_pool");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create only an IPv6 default pool
+        let identity = IdentityMetadataCreateParams {
+            name: "unicast-ipv6-only".parse().unwrap(),
+            description: "IPv6 only pool".to_string(),
+        };
+        let unicast_ipv6 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &identity,
+                    IpVersion::V6,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create unicast IPv6 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_ipv6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast IPv6");
+
+        // Should successfully fetch the IPv6 default
+        let (_, default_pool) = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Unicast)
+            .await
+            .expect("Should find default unicast pool");
+
+        assert_eq!(default_pool.id(), unicast_ipv6.id());
+        assert_eq!(default_pool.ip_version, IpVersion::V6);
+
+        // Also test for multicast IPv6 only
+        let mcast_identity = IdentityMetadataCreateParams {
+            name: "multicast-ipv6-only".parse().unwrap(),
+            description: "Multicast IPv6 only pool".to_string(),
+        };
+        let multicast_ipv6 = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &mcast_identity,
+                    IpVersion::V6,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast IPv6 pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_ipv6.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link multicast IPv6");
+
+        let (_, default_mcast) = datastore
+            .ip_pools_fetch_default_by_type(&opctx, IpPoolType::Multicast)
+            .await
+            .expect("Should find default multicast pool");
+
+        assert_eq!(default_mcast.id(), multicast_ipv6.id());
+        assert_eq!(default_mcast.ip_version, IpVersion::V6);
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that denormalized columns (pool_type, ip_version) in `IpPoolResource`
+    /// match the parent record.
+    #[tokio::test]
+    async fn test_denormalized_columns_consistency() {
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let logctx =
+            dev::test_setup_log("test_denormalized_columns_consistency");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create pools of each type and version
+        let test_cases = [
+            ("unicast-ipv4", IpPoolType::Unicast, IpVersion::V4),
+            ("unicast-ipv6", IpPoolType::Unicast, IpVersion::V6),
+            ("multicast-ipv4", IpPoolType::Multicast, IpVersion::V4),
+            ("multicast-ipv6", IpPoolType::Multicast, IpVersion::V6),
+        ];
+
+        for (name, pool_type, ip_version) in test_cases {
+            let identity = IdentityMetadataCreateParams {
+                name: name.parse().unwrap(),
+                description: format!("{} pool", name),
+            };
+
+            let pool = if pool_type == IpPoolType::Multicast {
+                datastore
+                    .ip_pool_create(
+                        &opctx,
+                        IpPool::new_multicast(
+                            &identity,
+                            ip_version,
+                            IpPoolReservationType::ExternalSilos,
+                        ),
+                    )
+                    .await
+                    .expect("Should create pool")
+            } else {
+                datastore
+                    .ip_pool_create(
+                        &opctx,
+                        IpPool::new(
+                            &identity,
+                            ip_version,
+                            IpPoolReservationType::ExternalSilos,
+                        ),
+                    )
+                    .await
+                    .expect("Should create pool")
+            };
+
+            // Link to silo
+            datastore
+                .ip_pool_link_silo(
+                    &opctx,
+                    IncompleteIpPoolResource {
+                        ip_pool_id: pool.id(),
+                        resource_type: IpPoolResourceType::Silo,
+                        resource_id: authz_silo.id(),
+                        is_default: false,
+                    },
+                )
+                .await
+                .expect("Should link pool");
+
+            // Verify denormalized columns match by querying the resource directly
+            let link = ip_pool_resource::table
+                .select(IpPoolResource::as_select())
+                .filter(ip_pool_resource::ip_pool_id.eq(pool.id()))
+                .first_async::<IpPoolResource>(
+                    &*datastore
+                        .pool_connection_authorized(&opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .expect("Should find link");
+
+            assert_eq!(
+                link.pool_type, pool_type,
+                "Denormalized pool_type should match parent for {}",
+                name
+            );
+            assert_eq!(
+                link.ip_version, ip_version,
+                "Denormalized ip_version should match parent for {}",
+                name
+            );
+        }
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Test that only unicast pools trigger gateway linking, not multicast pools,
+    /// confirming multicast is bypassed.
+    #[tokio::test]
+    async fn test_gateway_linking_unicast_only() {
+        use nexus_db_schema::schema::internet_gateway_ip_pool;
+
+        let logctx = dev::test_setup_log("test_gateway_linking_unicast_only");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Create a multicast pool and make it default
+        let mcast_identity = IdentityMetadataCreateParams {
+            name: "multicast-default".parse().unwrap(),
+            description: "Default multicast pool".to_string(),
+        };
+        let multicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &mcast_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create multicast pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: multicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link multicast pool");
+
+        // Check that no gateway links were created for the multicast pool
+        let mcast_gateway_links: Vec<InternetGatewayIpPool> =
+            internet_gateway_ip_pool::table
+                .filter(
+                    internet_gateway_ip_pool::ip_pool_id
+                        .eq(multicast_pool.id()),
+                )
+                .filter(internet_gateway_ip_pool::time_deleted.is_null())
+                .select(InternetGatewayIpPool::as_select())
+                .load_async(
+                    &*datastore
+                        .pool_connection_authorized(&opctx)
+                        .await
+                        .unwrap(),
+                )
+                .await
+                .expect("Should query gateway links");
+
+        assert!(
+            mcast_gateway_links.is_empty(),
+            "Multicast pools should *not* create internet gateway links"
+        );
+
+        // Create a unicast pool and make it default
+        let unicast_identity = IdentityMetadataCreateParams {
+            name: "unicast-default".parse().unwrap(),
+            description: "Default unicast pool".to_string(),
+        };
+        let unicast_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new(
+                    &unicast_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create unicast pool");
+        datastore
+            .ip_pool_link_silo(
+                &opctx,
+                IncompleteIpPoolResource {
+                    ip_pool_id: unicast_pool.id(),
+                    resource_type: IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: true,
+                },
+            )
+            .await
+            .expect("Should link unicast pool");
 
         db.terminate().await;
         logctx.cleanup_successful();

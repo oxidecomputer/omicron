@@ -661,6 +661,8 @@ table! {
         resource_type -> crate::enums::IpPoolResourceTypeEnum,
         resource_id -> Uuid,
         is_default -> Bool,
+        pool_type -> crate::enums::IpPoolTypeEnum,
+        ip_version -> crate::enums::IpVersionEnum,
     }
 }
 
