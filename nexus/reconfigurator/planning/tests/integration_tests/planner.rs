@@ -12,10 +12,7 @@ use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
 use std::mem;
 
 #[track_caller]
-fn assert_blueprint_diff_is_empty(
-    bp1: &Blueprint,
-    bp2: &Blueprint,
-) {
+fn assert_blueprint_diff_is_empty(bp1: &Blueprint, bp2: &Blueprint) {
     let summary = bp2.diff_since_blueprint(&bp1);
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
