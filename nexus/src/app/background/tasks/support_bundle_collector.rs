@@ -90,13 +90,22 @@ fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
 // Categories should be additive.
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 enum BundleDataCategory {
+    // Collects reconfigurator state (some of the latest blueprints,
+    // information about the target blueprint).
     Reconfigurator,
+    // Collects info from sled agents, running a handful of
+    // diagnostic commands (e.g., zoneadm, dladm, etc).
     HostInfo,
+    // Collects sled serial numbers, cubby numbers, and UUIDs.
     SledCubbyInfo,
+    // Saves task dumps from SPs.
     SpDumps,
 }
 
 // The set of sleds to include
+//
+// Multiple values of this enum are joined together into a HashSet.
+// Therefore "SledSelection::All" overrides specific sleds.
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 enum SledSelection {
     All,
