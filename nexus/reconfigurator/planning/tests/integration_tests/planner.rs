@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use assert_matches::assert_matches;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
@@ -1022,9 +1023,12 @@ fn test_disk_add_expunge_decommission() {
 
     // Create an example system with two sleds. We're going to expunge one
     // of these sleds.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(2).build();
-    let mut collection = example.collection;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| {
+        builder.nsleds(2).internal_dns_count(1)
+    })
+    .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // The initial blueprint configuration has generation 2
     let (sled_id, sled_config) = blueprint1.sleds.first_key_value().unwrap();
@@ -1038,45 +1042,30 @@ fn test_disk_add_expunge_decommission() {
         );
     }
 
-    let mut builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-
     // Let's expunge a disk. Its disposition should change to `Expunged`
     // but its state should remain active.
-    let expunged_disk_id = {
-        let expunged_disk = &mut builder
-            .sleds_mut()
-            .get_mut(&sled_id)
-            .unwrap()
-            .resources
-            .zpools
-            .iter_mut()
-            // Skip over the first disk - this is the one which hosts
-            // many of our zones, like Nexus, and is more complicated
-            // to expunge.
-            .nth(1)
-            .unwrap()
-            .1;
-        expunged_disk.policy = PhysicalDiskPolicy::Expunged;
-        expunged_disk.disk_id
-    };
+    let expunged_disk_id = sim
+        .change_state("expunge one disk", |state| {
+            let expunged_disk = state
+                .system_mut()
+                .description_mut()
+                .get_sled_mut(*sled_id)
+                .unwrap()
+                .resources_mut()
+                .zpools
+                .iter_mut()
+                // Skip over the first disk - this is the one which hosts
+                // many of our zones, like Nexus, and is more complicated
+                // to expunge.
+                .nth(1)
+                .unwrap()
+                .1;
+            expunged_disk.policy = PhysicalDiskPolicy::Expunged;
+            Ok(expunged_disk.disk_id)
+        })
+        .expect("expunged disk");
 
-    let input = builder.build();
-
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test: expunge a disk",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (expunge a disk):\n{}", diff.display());
 
@@ -1105,38 +1094,17 @@ fn test_disk_add_expunge_decommission() {
     }
 
     // We haven't updated the inventory, so no changes should be made
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
-    );
+    let blueprint2a = sim.run_planner().expect("planning succeeded");
+    assert_blueprint_diff_is_empty(&blueprint2, &blueprint2a);
 
     // Let's update the inventory to reflect that the sled-agent
     // has learned about the expungement.
-    collection
-        .sled_agents
-        .get_mut(sled_id)
-        .unwrap()
-        .last_reconciliation
-        .as_mut()
-        .unwrap()
-        .last_reconciled_config
-        .generation = Generation::from_u32(3);
+    sim.deploy_configs_to_active_sleds("deploy disk expungement", &blueprint2)
+        .expect("deployed configs");
+    sim.generate_inventory("inventory with expunged disk")
+        .expect("generated inventory");
 
-    let blueprint3 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint2,
-        &input,
-        "test: decommission a disk",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint3.diff_since_blueprint(&blueprint2);
     println!("2 -> 3 (decommission a disk):\n{}", diff.display());
 
@@ -1153,13 +1121,13 @@ fn test_disk_add_expunge_decommission() {
     // `Expunged{ready_for_cleanup: true, ..}`.
     for disk in &sled_config.disks {
         if disk.id == expunged_disk_id {
-            assert!(matches!(
+            assert_matches!(
                 disk.disposition,
                 BlueprintPhysicalDiskDisposition::Expunged {
                     ready_for_cleanup: true,
                     ..
                 }
-            ));
+            );
         } else {
             assert_eq!(
                 disk.disposition,
@@ -1177,23 +1145,10 @@ fn test_disk_add_expunge_decommission() {
     // We don't rely on the sled-agents learning about expungement to
     // decommission because by definition expunging a sled means it's
     // already gone.
-    let mut builder = input.into_builder();
-    builder.expunge_sled(sled_id).unwrap();
-    let input = builder.build();
+    sim.sled_expunge("expunge full sled", *sled_id).expect("expunged sled");
+    let blueprint4 = sim.run_planner().expect("planning succeeded");
 
-    let blueprint4 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint3,
-        &input,
-        "test: expunge and decommission all disks",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp4")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
-    let diff = blueprint3.diff_since_blueprint(&blueprint2);
+    let diff = blueprint4.diff_since_blueprint(&blueprint3);
     println!(
         "3 -> 4 (expunge and decommission all disks):\n{}",
         diff.display()

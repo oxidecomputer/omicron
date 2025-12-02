@@ -55,6 +55,7 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+assert_matches.workspace = true
 dns-server.workspace = true
 dropshot.workspace = true
 expectorate.workspace = true

@@ -7178,6 +7178,7 @@ name = "nexus-reconfigurator-planning"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "camino",
  "camino-tempfile",
  "chrono",
