@@ -7359,6 +7359,25 @@ dependencies = [
 [[package]]
 name = "nexus-sled-agent-shared-migrations"
 version = "0.1.0"
+dependencies = [
+ "camino",
+ "chrono",
+ "daft",
+ "iddqd",
+ "illumos-utils",
+ "indent_write",
+ "omicron-common",
+ "omicron-passwords",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sled-hardware-types",
+ "thiserror 2.0.17",
+ "tufaceous-artifact",
+ "uuid",
+]
 
 [[package]]
 name = "nexus-test-interface"
