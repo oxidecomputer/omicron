@@ -1802,16 +1802,18 @@ mod tests {
         let tempdir = Utf8TempDir::new().unwrap();
         let core_dir = tempdir.path().join(CRASH_DATASET);
         let debug_dir = tempdir.path().join(DUMP_DATASET);
-        let zone_logs = tempdir.path().join("root/var/svc/log");
-        let adm_logs = tempdir.path().join("var/adm");
+        let zone_path = tempdir.path().join("myzone");
+        let zone_logs = zone_path.join("root/var/svc/log");
+        let global_path = tempdir.path().join("global");
+        let adm_logs = global_path.join("var/adm");
 
         let tempdir_path = tempdir.path().as_str().to_string();
         let global_zone = Zone::from_str(&format!(
-            "0:global:running:{tempdir_path}::ipkg:shared"
+            "0:global:running:{global_path}::ipkg:shared"
         ))
         .unwrap();
         let zone = Zone::from_str(&format!(
-            "1:myzone:running:{tempdir_path}::ipkg:shared"
+            "1:myzone:running:{zone_path}::ipkg:shared"
         ))
         .unwrap();
 
@@ -1850,6 +1852,8 @@ mod tests {
             tokio::sync::mpsc::channel(1).1,
         );
 
+        tokio::fs::create_dir_all(&zone_path).await.unwrap();
+        tokio::fs::create_dir_all(&global_path).await.unwrap();
         tokio::fs::create_dir_all(&core_dir).await.unwrap();
         tokio::fs::create_dir_all(&debug_dir).await.unwrap();
         tokio::fs::create_dir_all(&zone_logs).await.unwrap();
