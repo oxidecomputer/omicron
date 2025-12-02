@@ -18,6 +18,7 @@ use nexus_reconfigurator_planning::example::SimRngState;
 use nexus_reconfigurator_planning::example::example;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
+use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -143,6 +144,35 @@ fn get_nexus_ids_at_generation(
             _ => None,
         })
         .collect::<BTreeSet<_>>()
+}
+
+#[track_caller]
+fn sim_assert_planning_makes_no_changes(
+    sim: &mut ReconfiguratorCliTestState,
+) -> Blueprint {
+    // Get the latest blueprint.
+    let blueprint = sim
+        .blueprint(BlueprintId::Latest)
+        .expect("always have a latest blueprint")
+        .clone();
+
+    // Ensure all sleds have the latest configs deployed, emulating blueprint
+    // execution.
+    sim.deploy_configs_to_active_sleds(
+        "deploy latest configs to all sleds",
+        &blueprint,
+    )
+    .expect("deployed configs");
+
+    // Ensure our planning input will see an inventory with the configs we just
+    // deployed.
+    sim.generate_inventory("inventory with latest configs")
+        .expect("generated inventory");
+
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
+    assert_blueprint_diff_is_empty(&blueprint, &new_blueprint);
+
+    new_blueprint
 }
 
 #[track_caller]
@@ -291,12 +321,7 @@ fn test_basic_add_sled() {
     }
 
     // Check that there are no more steps once the Crucible zones are deployed.
-    sim.deploy_configs_to_active_sleds("add Crucible zones", &blueprint5)
-        .expect("deployed configs");
-    sim.generate_inventory("inventory with new Crucible zone")
-        .expect("generated inventory");
-    let blueprint6 = sim.run_planner().expect("planning succeeded");
-    assert_blueprint_diff_is_empty(&blueprint5, &blueprint6);
+    sim_assert_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
 }
@@ -377,12 +402,7 @@ fn test_add_multiple_nexus_to_one_sled() {
     }
 
     // Test a no-op planning iteration.
-    sim.deploy_configs_to_active_sleds("add Nexus zones", &blueprint2)
-        .expect("deployed configs");
-    sim.generate_inventory("inventory with new zones")
-        .expect("generated inventory");
-    let blueprint3 = sim.run_planner().expect("planning succeeded");
-    assert_blueprint_diff_is_empty(&blueprint2, &blueprint3);
+    sim_assert_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
 }
@@ -396,9 +416,9 @@ fn test_spread_additional_nexus_zones_across_sleds() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Use our example system as a starting point.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-    let collection = example.collection;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // This blueprint should only have 3 Nexus zones: one on each sled.
     assert_eq!(blueprint1.sleds.len(), 3);
@@ -410,23 +430,12 @@ fn test_spread_additional_nexus_zones_across_sleds() {
     }
 
     // Now run the planner with a high number of target Nexus zones.
-    let mut builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-    builder.policy_mut().target_nexus_zone_count = 14;
-    let input = builder.build();
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
+    sim.change_state("update target zone counts", |state| {
+        state.system_mut().description_mut().set_target_nexus_zone_count(14);
+        Ok(())
+    })
+    .expect("changed policy");
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
 
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (added additional Nexus zones):\n{}", summary.display());
@@ -460,13 +469,7 @@ fn test_spread_additional_nexus_zones_across_sleds() {
     assert_eq!(total_new_nexus_zones, 11);
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
-    );
+    sim_assert_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
 }

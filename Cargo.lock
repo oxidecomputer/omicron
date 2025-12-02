@@ -7204,6 +7204,7 @@ dependencies = [
  "nexus-config",
  "nexus-inventory",
  "nexus-reconfigurator-blippy",
+ "nexus-reconfigurator-simulation",
  "nexus-sled-agent-shared",
  "nexus-types",
  "omicron-common",
