@@ -13,6 +13,7 @@ use crate::CollectionIdOpt;
 use crate::ReconfiguratorSim;
 use crate::cmd_blueprint_plan;
 use anyhow::Context;
+use nexus_inventory::now_db_precision;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -197,6 +198,42 @@ impl ReconfiguratorCliTestState {
             f(&mut builder)?;
             let blueprint = Arc::new(builder.build(BlueprintSource::Test));
             system.add_blueprint(Arc::clone(&blueprint))?;
+            Ok(blueprint)
+        })
+    }
+
+    /// State change helper: edit the latest blueprint in an abnormal way that
+    /// cannot be done via `BlueprintBuilder`, then insert the edited blueprint
+    /// as the latest.
+    pub fn blueprint_edit_latest_low_level<F>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<Arc<Blueprint>>
+    where
+        F: FnOnce(&mut Blueprint) -> anyhow::Result<()>,
+    {
+        self.change_state(description, |state| {
+            let mut rng = state.rng_mut().next_planner_rng();
+            let system = state.system_mut();
+            let parent_blueprint = system
+                .get_blueprint(
+                    &system.resolve_blueprint_id(BlueprintId::Latest),
+                )
+                .expect("always have a latest blueprint");
+            let mut blueprint = parent_blueprint.clone();
+
+            // Perform whatever modifications the caller wants.
+            f(&mut blueprint)?;
+
+            // Update metadata fields to make this a new blueprint.
+            blueprint.id = rng.next_blueprint();
+            blueprint.parent_blueprint_id = Some(parent_blueprint.id);
+            blueprint.time_created = now_db_precision();
+
+            let blueprint = Arc::new(blueprint);
+            system.add_blueprint(Arc::clone(&blueprint))?;
+
             Ok(blueprint)
         })
     }

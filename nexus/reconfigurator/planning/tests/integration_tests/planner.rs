@@ -53,6 +53,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::InternalDnsGenerationStatus;
 use nexus_types::inventory::TimeSync;
 use omicron_common::address::Ipv4Range;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::TufArtifactMeta;
@@ -954,56 +955,43 @@ fn test_dataset_settings_modified_in_place() {
     static TEST_NAME: &str = "planner_dataset_settings_modified_in_place";
     let logctx = test_setup_log(TEST_NAME);
 
-    // Create an example system with a single sled
-    let (example, mut blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
-    let collection = example.collection;
-
-    let mut builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-
-    // Avoid churning on the quantity of Nexus and internal DNS zones -
-    // we're okay staying at one each.
-    builder.policy_mut().target_nexus_zone_count = 1;
-    builder.policy_mut().target_internal_dns_zone_count = 1;
+    // Create an example system with a single sled and a single Nexus.
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| Ok(builder.nsleds(1).nexus_count(1)))
+        .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+    let sled_id = blueprint1.sleds().next().expect("1 sled");
 
     // Manually update the blueprint to report an abnormal "Debug dataset"
-    {
-        let (_sled_id, sled_config) =
-            blueprint1.sleds.iter_mut().next().unwrap();
-        let mut dataset_config = sled_config
-            .datasets
-            .iter_mut()
-            .find(|config| {
-                matches!(config.kind, omicron_common::disk::DatasetKind::Debug)
-            })
-            .expect("No debug dataset found");
+    let blueprint1a = sim
+        .blueprint_edit_latest_low_level(
+            "change dataset properties",
+            |blueprint| {
+                let sled_config = blueprint.sleds.get_mut(&sled_id).unwrap();
+                let mut dataset_config = sled_config
+                    .datasets
+                    .iter_mut()
+                    .find(|config| {
+                        matches!(
+                            config.kind,
+                            omicron_common::disk::DatasetKind::Debug
+                        )
+                    })
+                    .expect("No debug dataset found");
 
-        // These values are out-of-sync with what the blueprint will typically
-        // enforce.
-        dataset_config.quota = None;
-        dataset_config.reservation = Some(
-            omicron_common::api::external::ByteCount::from_gibibytes_u32(1),
-        );
-    }
+                // These values are out-of-sync with what the blueprint will
+                // typically enforce.
+                dataset_config.quota = None;
+                dataset_config.reservation =
+                    Some(ByteCount::from_gibibytes_u32(1));
 
-    let input = builder.build();
+                Ok(())
+            },
+        )
+        .expect("changed properties");
 
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test: fix a dataset",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
-    let summary = blueprint2.diff_since_blueprint(&blueprint1);
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
+    let summary = blueprint2.diff_since_blueprint(&blueprint1a);
     println!("1 -> 2 (modify a dataset):\n{}", summary.display());
     assert_contents(
         "tests/output/planner_dataset_settings_modified_in_place_1_2.txt",
