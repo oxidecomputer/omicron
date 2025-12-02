@@ -1635,6 +1635,10 @@ impl Sled {
         });
     }
 
+    pub fn resources_mut(&mut self) -> &mut SledResources {
+        &mut self.resources
+    }
+
     pub fn sp_state(&self) -> Option<&(u16, SpState)> {
         self.inventory_sp.as_ref()
     }

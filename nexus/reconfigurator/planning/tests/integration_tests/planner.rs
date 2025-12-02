@@ -840,7 +840,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     );
 
     // The IP addresses of the new external DNS zones should be the
-    // same as the original set that we "found".
+    // same as the original set that we set up.
     let mut ips = blueprint3
         .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
         .filter_map(|(_id, zone)| {
@@ -867,20 +867,15 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
         "planner_crucible_allocation_skips_nonprovisionable_disks";
     let logctx = test_setup_log(TEST_NAME);
 
-    // Create an example system with a single sled
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
-    let collection = example.collection;
-
-    let mut builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-
-    // Avoid churning on the quantity of Nexus and internal DNS zones -
-    // we're okay staying at one each.
-    builder.policy_mut().target_nexus_zone_count = 1;
-    builder.policy_mut().target_internal_dns_zone_count = 1;
+    // Create an example system with a single sled, a single Nexus, and a single
+    // internal DNS to avoid churn unrelated to this test.
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| {
+        builder.nsleds(1).nexus_count(1).internal_dns_count(1)
+    })
+    .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+    let sled_id = blueprint1.sleds().next().expect("1 sled");
 
     // Make generated disk ids deterministic
     let mut disk_rng = TypedUuidRng::from_seed(TEST_NAME, "NewPhysicalDisks");
@@ -895,8 +890,6 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
         state: PhysicalDiskState::Active,
     };
 
-    let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-
     // Inject some new disks into the input.
     //
     // These counts are arbitrary, as long as they're non-zero
@@ -906,33 +899,30 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
     const NEW_EXPUNGED_DISKS: usize = 1;
 
     let mut zpool_rng = TypedUuidRng::from_seed(TEST_NAME, "NewZpools");
-    for _ in 0..NEW_IN_SERVICE_DISKS {
-        sled_details.resources.zpools.insert(
-            ZpoolUuid::from(zpool_rng.next()),
-            new_sled_disk(PhysicalDiskPolicy::InService),
-        );
-    }
-    for _ in 0..NEW_EXPUNGED_DISKS {
-        sled_details.resources.zpools.insert(
-            ZpoolUuid::from(zpool_rng.next()),
-            new_sled_disk(PhysicalDiskPolicy::Expunged),
-        );
-    }
+    sim.change_state("add new disks", |state| {
+        let resources = state
+            .system_mut()
+            .description_mut()
+            .get_sled_mut(sled_id)
+            .expect("sled exists")
+            .resources_mut();
+        for _ in 0..NEW_IN_SERVICE_DISKS {
+            resources.zpools.insert(
+                ZpoolUuid::from(zpool_rng.next()),
+                new_sled_disk(PhysicalDiskPolicy::InService),
+            );
+        }
+        for _ in 0..NEW_EXPUNGED_DISKS {
+            resources.zpools.insert(
+                ZpoolUuid::from(zpool_rng.next()),
+                new_sled_disk(PhysicalDiskPolicy::Expunged),
+            );
+        }
+        Ok(())
+    })
+    .expect("added new disks");
 
-    let input = builder.build();
-
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test: some new disks",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (some new disks, one expunged):\n{}", summary.display());
     assert_eq!(summary.diff.sleds.modified().count(), 1);
@@ -954,13 +944,7 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
     assert_eq!(summary.total_datasets_modified(), 0);
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
-    );
+    sim_assert_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
 }
