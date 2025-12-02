@@ -1110,13 +1110,12 @@ impl DumpSetupWorker {
                 debug_dir, logdir, "*.log", zone_name, false,
             )
             .await?;
-            if zone.global() {
-                let adm_logdir = zone.path.join("var/adm");
-                self.archive_logs_from_zone_path(
-                    debug_dir, adm_logdir, "messages", zone_name, false,
-                )
-                .await?;
-            }
+
+            let adm_logdir = zone.path.join("var/adm");
+            self.archive_logs_from_zone_path(
+                debug_dir, adm_logdir, "messages", zone_name, false,
+            )
+            .await?;
         }
         Ok(())
     }
