@@ -36,7 +36,7 @@ impl Svcs {
         let mut cmd = Command::new(PFEXEC);
         let cmd = cmd.args(&[SVCS, "-Zx"]);
         let output = execute_async(cmd).await?;
-        SvcNotRunning::parse(log, &output.stdout)
+        Ok(SvcNotRunning::parse(log, &output.stdout))
     }
 
     #[cfg(not(target_os = "illumos"))]
