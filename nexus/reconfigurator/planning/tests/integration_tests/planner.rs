@@ -238,7 +238,7 @@ fn test_basic_add_sled() {
     assert_eq!(summary.total_datasets_modified(), 0);
 
     // Now add a new sled.
-    let new_sled_id = sim.add_sled("add new sled").expect("added sled");
+    let new_sled_id = sim.sled_add("add new sled").expect("added sled");
 
     // Check that the first step is to add an NTP zone
     let blueprint3 = sim.run_planner().expect("planning succeeded");
@@ -612,33 +612,17 @@ fn test_reuse_external_ips_from_expunged_zones() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Use our example system as a starting point.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-    let collection = example.collection;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // Expunge the first sled we see, which will result in a Nexus external
     // IP no longer being associated with a running zone, and a new Nexus
     // zone being added to one of the two remaining sleds.
-    let mut builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-    let (sled_id, _) = builder.sleds_mut().iter_mut().next().expect("no sleds");
-    let sled_id = *sled_id;
-    builder.expunge_sled(&sled_id).unwrap();
-    let input = builder.build();
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
+    let sled_id = blueprint1.sleds().next().expect("at least one sled");
+    sim.sled_expunge("expunge first sled", sled_id).expect("expunged sled");
 
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (expunged sled):\n{}", diff.display());
 
@@ -659,27 +643,19 @@ fn test_reuse_external_ips_from_expunged_zones() {
     // Set the target Nexus zone count to one that will completely exhaust
     // the service IP pool. This will force reuse of the IP that was
     // allocated to the expunged Nexus zone.
-    let mut builder = input.into_builder();
-    let num_available_external_ips = builder
-        .policy_mut()
-        .external_ips
-        .clone()
-        .into_non_external_dns_ips()
-        .count();
-    builder.policy_mut().target_nexus_zone_count = num_available_external_ips;
-    let input = builder.build();
-    let blueprint3 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint2,
-        &input,
-        "test_blueprint3",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
+    sim.change_state("adjust target Nexus count", |state| {
+        let description = state.system_mut().description_mut();
+        let num_available_external_ips = description
+            .external_ip_policy()
+            .clone()
+            .into_non_external_dns_ips()
+            .count();
+        description.set_target_nexus_zone_count(num_available_external_ips);
+        Ok(())
+    })
+    .expect("updated target Nexus count");
 
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint3.diff_since_blueprint(&blueprint2);
     println!("2 -> 3 (maximum Nexus):\n{}", diff.display());
 
@@ -703,13 +679,7 @@ fn test_reuse_external_ips_from_expunged_zones() {
     );
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint3,
-        &input,
-        &collection,
-        TEST_NAME,
-    );
+    sim_assert_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
 }

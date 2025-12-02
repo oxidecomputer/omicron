@@ -24,6 +24,7 @@ use nexus_reconfigurator_simulation::errors::KeyError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::external_api::views::SledPolicy;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 
@@ -201,14 +202,14 @@ impl ReconfiguratorCliTestState {
     }
 
     /// State change helper: add a new sled, returning its ID.
-    pub fn add_sled(&mut self, description: &str) -> anyhow::Result<SledUuid> {
-        self.add_sled_customized(description, |sled| sled)
+    pub fn sled_add(&mut self, description: &str) -> anyhow::Result<SledUuid> {
+        self.sled_add_customized(description, |sled| sled)
     }
 
     /// State change helper: add a new sled, returning its ID.
     ///
     /// `f` provides an opportunity to customize the sled.
-    pub fn add_sled_customized<F>(
+    pub fn sled_add_customized<F>(
         &mut self,
         description: &str,
         f: F,
@@ -221,6 +222,21 @@ impl ReconfiguratorCliTestState {
             let new_sled = f(SledBuilder::new().id(sled_id));
             state.system_mut().description_mut().sled(new_sled)?;
             Ok(sled_id)
+        })
+    }
+
+    /// State change helper: expunge a sled.
+    pub fn sled_expunge(
+        &mut self,
+        description: &str,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<()> {
+        self.change_state(description, |state| {
+            state
+                .system_mut()
+                .description_mut()
+                .sled_set_policy(sled_id, SledPolicy::Expunged)?;
+            Ok(())
         })
     }
 
