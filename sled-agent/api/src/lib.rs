@@ -55,14 +55,14 @@ use sled_diagnostics::SledDiagnosticsQueryOutput;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
 
+/// Copies of data types that changed between v10 and v11.
+mod v10;
 /// Copies of data types that changed between v3 and v4.
 mod v3;
 /// Copies of data types that changed between v6 and v7.
 mod v6;
 /// Copies of data types that changed between v8 and v9.
 mod v8;
-/// Copies of data types that changed between v10 and v11.
-mod v10;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -705,11 +705,11 @@ pub trait SledAgentApi {
     async fn v10_inventory(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<v10::Inventory>, HttpError> {
-        Self::inventory(rqctx)
-            .await
-            .map(|HttpResponseOk(inv)| HttpResponseOk(v10::Inventory::from(inv)))
+        Self::inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v10::Inventory::from(inv))
+        })
     }
-    
+
     /// Fetch basic information about this sled
     #[endpoint {
         operation_id = "inventory",
