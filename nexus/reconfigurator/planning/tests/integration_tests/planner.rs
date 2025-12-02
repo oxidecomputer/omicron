@@ -107,9 +107,15 @@ fn assert_blueprint_diff_is_empty(bp1: &Blueprint, bp2: &Blueprint) {
     );
 
     let summary = bp2.diff_since_blueprint(&bp1);
-    assert_eq!(summary.diff.sleds.added.len(), 0);
-    assert_eq!(summary.diff.sleds.removed.len(), 0);
-    assert_eq!(summary.diff.sleds.modified().count(), 0);
+    if !summary.diff.sleds.added.is_empty()
+        || !summary.diff.sleds.removed.is_empty()
+        || summary.diff.sleds.modified().count() != 0
+    {
+        panic!(
+            "expected empty blueprint diff, but got nonempty diff:\n{}",
+            summary.display()
+        );
+    }
 }
 
 /// Checks various conditions that should be true for all blueprints
@@ -1183,17 +1189,13 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Create an example system with a single sled
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
-    let collection = example.collection;
-    let input = example.input;
-
-    let mut builder = input.into_builder();
-
-    // Avoid churning on the quantity of Nexus and internal DNS zones -
-    // we're okay staying at one each.
-    builder.policy_mut().target_nexus_zone_count = 1;
-    builder.policy_mut().target_internal_dns_zone_count = 1;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| {
+        builder.nsleds(1).nexus_count(1).internal_dns_count(1)
+    })
+    .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+    let sled_id = blueprint1.sleds().next().expect("1 sled");
 
     // The example system should be assigning crucible zones to each
     // in-service disk. When we expunge one of these disks, the planner
@@ -1213,31 +1215,25 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
                 .or_insert_with(|| 1);
         }
     }
-    let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-    let (_, disk) = sled_details
-        .resources
-        .zpools
-        .iter_mut()
-        .find(|(zpool_id, _disk)| {
-            *zpool_by_zone_usage.get(*zpool_id).unwrap() == 1
-        })
-        .expect("Couldn't find zpool only used by a single zone");
-    disk.policy = PhysicalDiskPolicy::Expunged;
+    sim.change_state("expunge disk with 1 zone", |state| {
+        let (_, disk) = state
+            .system_mut()
+            .description_mut()
+            .get_sled_mut(sled_id)
+            .unwrap()
+            .resources_mut()
+            .zpools
+            .iter_mut()
+            .find(|(zpool_id, _disk)| {
+                *zpool_by_zone_usage.get(*zpool_id).unwrap() == 1
+            })
+            .expect("Couldn't find zpool only used by a single zone");
+        disk.policy = PhysicalDiskPolicy::Expunged;
+        Ok(())
+    })
+    .expect("expunged disk");
 
-    let input = builder.build();
-
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test: expunge a disk",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (expunge a disk):\n{}", summary.display());
     assert_eq!(summary.diff.sleds.added.len(), 0);
@@ -1319,14 +1315,46 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
         "Should have expunged this zone"
     );
 
-    // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
+    // Let's update the inventory to reflect that the sled-agent
+    // has learned about the expungement. Re-planning should flip the
+    // `ready_for_cleanup` bit to true for our modified zone.
+    sim.deploy_configs_to_active_sleds("deploy disk expungement", &blueprint2)
+        .expect("deployed configs");
+    sim.generate_inventory("inventory with expunged disk")
+        .expect("generated inventory");
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
+    let summary = blueprint3.diff_since_blueprint(&blueprint2);
+    assert_eq!(summary.total_zones_added(), 0);
+    assert_eq!(summary.total_zones_removed(), 0);
+    assert_eq!(summary.total_zones_modified(), 1);
+    let bp3_modified_sled =
+        summary.diff.sleds.modified_values_diff().next().unwrap();
+    assert!(bp3_modified_sled.zones.added.is_empty());
+    assert!(bp3_modified_sled.zones.removed.is_empty());
+    let mut bp3_modified_zones =
+        bp3_modified_sled.zones.modified_diff().collect::<Vec<_>>();
+    assert_eq!(bp3_modified_zones.len(), 1);
+    let bp3_modified_zone = bp3_modified_zones.pop().unwrap();
+    assert!(
+        bp3_modified_zone.zone_type.before.is_crucible(),
+        "Expected the modified zone to be a Crucible zone, \
+             but it was: {:?}",
+        bp3_modified_zone.zone_type.before.kind()
     );
+    assert_eq!(
+        *bp3_modified_zone.disposition.after,
+        BlueprintZoneDisposition::Expunged {
+            as_of_generation: modified_sled_config
+                .sled_agent_generation
+                .before
+                .next(),
+            ready_for_cleanup: true,
+        },
+        "Should have marked this zone ready for cleanup"
+    );
+
+    // Test a no-op planning iteration.
+    sim_assert_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
 }
