@@ -18,7 +18,6 @@ use nexus_reconfigurator_planning::example::SimRngState;
 use nexus_reconfigurator_planning::example::example;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
-use nexus_reconfigurator_planning::system::SledBuilder;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -79,6 +78,7 @@ use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
+use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
 use semver::Version;
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
@@ -94,6 +94,21 @@ use tufaceous_artifact::ArtifactVersion;
 use tufaceous_artifact::KnownArtifactKind;
 use typed_rng::TypedUuidRng;
 use uuid::Uuid;
+
+#[track_caller]
+fn assert_blueprint_diff_is_empty(bp1: &Blueprint, bp2: &Blueprint) {
+    // A blueprint always has an empty diff with itself; if someone passes the
+    // same blueprint twice it's probably a typo in the caller.
+    assert_ne!(
+        bp1.id, bp2.id,
+        "assert_blueprint_diff_is_empty() called with the same blueprint twice"
+    );
+
+    let summary = bp2.diff_since_blueprint(&bp1);
+    assert_eq!(summary.diff.sleds.added.len(), 0);
+    assert_eq!(summary.diff.sleds.removed.len(), 0);
+    assert_eq!(summary.diff.sleds.modified().count(), 0);
+}
 
 /// Checks various conditions that should be true for all blueprints
 fn verify_blueprint(blueprint: &Blueprint, planning_input: &PlanningInput) {
@@ -167,35 +182,15 @@ fn test_basic_add_sled() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Use our example system.
-    let mut rng = SimRngState::from_seed(TEST_NAME);
-    let (mut example, blueprint1) =
-        ExampleSystemBuilder::new_with_rng(&logctx.log, rng.next_system_rng())
-            .build();
-    verify_blueprint(&blueprint1, &example.input);
-
-    let input = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder")
-        .build();
-
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
     println!("{}", blueprint1.display());
 
     // Now run the planner.  It should do nothing because our initial
     // system didn't have any issues that the planner currently knows how to
     // fix.
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "no-op?",
-        &example.collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (expected no changes):\n{}", summary.display());
     assert_eq!(summary.diff.sleds.added.len(), 0);
@@ -211,27 +206,12 @@ fn test_basic_add_sled() {
     assert_eq!(summary.total_datasets_added(), 0);
     assert_eq!(summary.total_datasets_removed(), 0);
     assert_eq!(summary.total_datasets_modified(), 0);
-    verify_blueprint(&blueprint2, &input);
 
     // Now add a new sled.
-    let mut sled_id_rng = rng.next_sled_id_rng();
-    let new_sled_id = sled_id_rng.next();
-    let _ = example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
-    let input = example.system.to_planning_input_builder().unwrap().build();
+    let new_sled_id = sim.add_sled("add new sled").expect("added sled");
 
     // Check that the first step is to add an NTP zone
-    let blueprint3 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint2,
-        &input,
-        "test: add NTP?",
-        &example.collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint3.diff_since_blueprint(&blueprint2);
     println!(
         "2 -> 3 (expect new NTP zone on new sled):\n{}",
@@ -263,60 +243,24 @@ fn test_basic_add_sled() {
     ));
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
-    verify_blueprint(&blueprint3, &input);
 
     // Check that with no change in inventory, the planner makes no changes.
     // It needs to wait for inventory to reflect the new NTP zone before
     // proceeding.
-    let blueprint4 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint3,
-        &input,
-        "test: add nothing more",
-        &example.collection,
-        PlannerRng::from_seed((TEST_NAME, "bp4")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-    let summary = blueprint4.diff_since_blueprint(&blueprint3);
-    println!("3 -> 4 (expected no changes):\n{}", summary.display());
-    assert_eq!(summary.diff.sleds.added.len(), 0);
-    assert_eq!(summary.diff.sleds.removed.len(), 0);
-    assert_eq!(summary.diff.sleds.modified().count(), 0);
-    verify_blueprint(&blueprint4, &input);
+    let blueprint4 = sim.run_planner().expect("planning succeeded");
+    assert_blueprint_diff_is_empty(&blueprint3, &blueprint4);
 
     // Now update the inventory to have the requested NTP zone.
     //
     // TODO: mutating example.system doesn't automatically update
     // example.collection -- this should be addressed via API improvements.
-    example
-        .system
-        .sled_set_omicron_config(
-            new_sled_id,
-            blueprint4
-                .sleds
-                .get(&new_sled_id)
-                .expect("blueprint should contain zones for new sled")
-                .clone()
-                .into_in_service_sled_config(),
-        )
-        .unwrap();
-    let collection = example.system.to_collection_builder().unwrap().build();
+    sim.deploy_configs_to_active_sleds("add NTP zone", &blueprint3)
+        .expect("deployed configs");
+    sim.generate_inventory("inventory with new NTP zone")
+        .expect("generated inventory");
 
     // Check that the next step is to add Crucible zones
-    let blueprint5 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint3,
-        &input,
-        "test: add Crucible zones?",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp5")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let blueprint5 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint5.diff_since_blueprint(&blueprint3);
     println!("3 -> 5 (expect Crucible zones):\n{}", summary.display());
     assert_contents(
@@ -345,16 +289,14 @@ fn test_basic_add_sled() {
             panic!("unexpectedly added a non-Crucible zone: {zone:?}");
         }
     }
-    verify_blueprint(&blueprint5, &input);
 
-    // Check that there are no more steps.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint5,
-        &input,
-        &collection,
-        TEST_NAME,
-    );
+    // Check that there are no more steps once the Crucible zones are deployed.
+    sim.deploy_configs_to_active_sleds("add Crucible zones", &blueprint5)
+        .expect("deployed configs");
+    sim.generate_inventory("inventory with new Crucible zone")
+        .expect("generated inventory");
+    let blueprint6 = sim.run_planner().expect("planning succeeded");
+    assert_blueprint_diff_is_empty(&blueprint5, &blueprint6);
 
     logctx.cleanup_successful();
 }

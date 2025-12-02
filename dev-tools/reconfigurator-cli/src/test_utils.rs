@@ -20,7 +20,6 @@ use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::errors::KeyError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 
@@ -39,10 +38,15 @@ impl ReconfiguratorCliTestState {
         Self { sim }
     }
 
+    /// Load the default example system.
+    pub fn load_example(&mut self) -> anyhow::Result<()> {
+        self.load_example_customized(|builder| Ok(builder))
+    }
+
     /// Load an example system.
     ///
     /// `f` provides an opportunity to customize the system.
-    pub fn load_example<F>(&mut self, f: F) -> anyhow::Result<()>
+    pub fn load_example_customized<F>(&mut self, f: F) -> anyhow::Result<()>
     where
         F: FnOnce(ExampleSystemBuilder) -> anyhow::Result<ExampleSystemBuilder>,
     {
@@ -61,6 +65,20 @@ impl ReconfiguratorCliTestState {
 
     /// Run the blueprint planner, using the latest blueprint and inventory
     /// collection as input.
+    ///
+    /// Returns the new blueprint.
+    ///
+    /// # Errors
+    ///
+    /// Fails if planning fails. (This is unusual.)
+    ///
+    /// # Panics
+    ///
+    /// Panics if planning succeeds but the planner emits a blueprint that has
+    /// one or more [`Blippy`] notes. We always expect the planner to emit
+    /// "blippy clean" blueprints, and since this is used throughout the
+    /// planner's tests, we want to assert that any blueprint we plan is indeed
+    /// blippy clean.
     pub fn run_planner(&mut self) -> anyhow::Result<Blueprint> {
         if let Some(output) = cmd_blueprint_plan(
             &mut self.sim,
@@ -71,11 +89,8 @@ impl ReconfiguratorCliTestState {
         )? {
             println!("{output}");
         }
-        let system = self.sim.current_state().system();
-        let blueprint = system
-            .resolve_and_get_blueprint(BlueprintId::Latest)
-            .expect("planning succeeded, so we must have a latest blueprint");
-        Ok(blueprint.clone())
+
+        Ok(self.assert_latest_blueprint_is_blippy_clean())
     }
 
     /// Assemble the current planning input, using `parent_blueprint` to derive
@@ -94,11 +109,13 @@ impl ReconfiguratorCliTestState {
     /// Assert that the latest blueprint and current planning input are "blippy
     /// clean" (i.e., have no [`Blippy`] notes).
     ///
+    /// Returns the latest blueprint.
+    ///
     /// # Panics
     ///
     /// Panics if the latest blueprint and current planning input have any
     /// blippy notes.
-    pub fn assert_latest_blueprint_is_blippy_clean(&self) {
+    pub fn assert_latest_blueprint_is_blippy_clean(&self) -> Blueprint {
         let blueprint = self
             .blueprint(BlueprintId::Latest)
             .expect("always have a latest blueprint");
@@ -114,6 +131,8 @@ impl ReconfiguratorCliTestState {
             eprintln!("{}", blippy_report.display());
             panic!("expected blippy report for blueprint to have no notes");
         }
+
+        blueprint.clone()
     }
 
     /// Change the internal simulator state.
@@ -132,22 +151,27 @@ impl ReconfiguratorCliTestState {
     }
 
     /// State change helper: generate a new inventory collection from the
-    /// current simulator state, returning the new collection.
+    /// current simulator state.
     pub fn generate_inventory(
         &mut self,
         description: &str,
-    ) -> anyhow::Result<Collection> {
+    ) -> anyhow::Result<()> {
         self.change_state(description, |state| {
             let inventory = state.to_collection_builder()?.build();
-            state.system_mut().add_collection(inventory.clone())?;
-            Ok(inventory)
+            state.system_mut().add_collection(inventory)?;
+            Ok(())
         })
     }
 
-    /// State change helper: add a new sled, return its ID.
+    /// State change helper: add a new sled, returning its ID.
+    pub fn add_sled(&mut self, description: &str) -> anyhow::Result<SledUuid> {
+        self.add_sled_customized(description, |sled| sled)
+    }
+
+    /// State change helper: add a new sled, returning its ID.
     ///
     /// `f` provides an opportunity to customize the sled.
-    pub fn add_sled<F>(
+    pub fn add_sled_customized<F>(
         &mut self,
         description: &str,
         f: F,
