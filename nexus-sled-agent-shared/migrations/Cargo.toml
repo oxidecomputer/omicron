@@ -17,10 +17,20 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
+proptest = { workspace = true, optional = true }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sled-hardware-types.workspace = true
+strum.workspace = true
+test-strategy = { workspace = true, optional = true }
 thiserror.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true
+
+[features]
+testing = ["dep:proptest", "dep:test-strategy"]

@@ -6,24 +6,58 @@
 
 use crate::v1;
 
+use camino::Utf8PathBuf;
+use chrono::{DateTime, Utc};
+use daft::Diffable;
+use iddqd::IdOrdItem;
+use iddqd::IdOrdMap;
+use iddqd::id_upcast;
+use indent_write::fmt::IndentWriter;
+use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
+use omicron_common::ledger::Ledgerable;
+use omicron_common::snake_case_result;
+use omicron_common::snake_case_result::SnakeCaseResult;
+use omicron_common::update::OmicronZoneManifestSource;
+use omicron_common::{
+    api::{
+        external::{self, ByteCount, Generation},
+        internal::shared::{NetworkInterface, SourceNatConfig},
+    },
+    disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
+    zpool_name::ZpoolName,
+};
+use omicron_uuid_kinds::{
+    DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid,
+    OmicronZoneUuid, PhysicalDiskUuid, SledUuid, ZpoolUuid,
+};
+use schemars::schema::{Schema, SchemaObject};
+use schemars::{JsonSchema, SchemaGenerator};
+use serde::{Deserialize, Serialize};
+pub use sled_hardware_types::{Baseboard, SledCpuFamily};
+use std::collections::BTreeMap;
+use std::fmt::{self, Write};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::time::Duration;
+use tufaceous_artifact::ArtifactHash;
+
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Inventory {
     pub sled_id: SledUuid,
     pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
+    pub sled_role: v1::SledRole,
     pub baseboard: Baseboard,
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub cpu_family: SledCpuFamily,
     pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
-    pub datasets: Vec<InventoryDataset>,
+    pub disks: Vec<v1::InventoryDisk>,
+    pub zpools: Vec<v1::InventoryZpool>,
+    pub datasets: Vec<v1::InventoryDataset>,
     pub ledgered_sled_config: Option<OmicronSledConfig>,
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
+    pub zone_image_resolver: v1::ZoneImageResolverInventory,
 }
 
 /// Status of the sled-agent-config-reconciler task.
@@ -51,7 +85,7 @@ pub enum ConfigReconcilerInventoryStatus {
 impl TryFrom<Inventory> for v1::Inventory {
     type Error = external::Error;
 
-    fn try_from(value: inventory::Inventory) -> Result<Self, Self::Error> {
+    fn try_from(value: Inventory) -> Result<Self, Self::Error> {
         let ledgered_sled_config =
             value.ledgered_sled_config.map(TryInto::try_into).transpose()?;
         let reconciler_status = value.reconciler_status.try_into()?;
@@ -118,8 +152,8 @@ pub struct OmicronSledConfig {
     #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronZoneConfig>")]
     pub zones: IdOrdMap<OmicronZoneConfig>,
     pub remove_mupdate_override: Option<MupdateOverrideUuid>,
-    #[serde(default = "HostPhase2DesiredSlots::current_contents")]
-    pub host_phase_2: HostPhase2DesiredSlots,
+    #[serde(default = "v1::HostPhase2DesiredSlots::current_contents")]
+    pub host_phase_2: v1::HostPhase2DesiredSlots,
 }
 
 impl Default for OmicronSledConfig {
@@ -130,7 +164,7 @@ impl Default for OmicronSledConfig {
             datasets: IdOrdMap::default(),
             zones: IdOrdMap::default(),
             remove_mupdate_override: None,
-            host_phase_2: HostPhase2DesiredSlots::current_contents(),
+            host_phase_2: v1::HostPhase2DesiredSlots::current_contents(),
         }
     }
 }
@@ -151,7 +185,7 @@ impl Ledgerable for OmicronSledConfig {
 impl TryFrom<v1::OmicronSledConfig> for OmicronSledConfig {
     type Error = external::Error;
 
-    fn try_from(value: OmicronSledConfig) -> Result<Self, Self::Error> {
+    fn try_from(value: v1::OmicronSledConfig) -> Result<Self, Self::Error> {
         let zones = value
             .zones
             .into_iter()
@@ -170,9 +204,7 @@ impl TryFrom<v1::OmicronSledConfig> for OmicronSledConfig {
 
 impl TryFrom<OmicronSledConfig> for v1::OmicronSledConfig {
     type Error = external::Error;
-    fn try_from(
-        value: inventory::OmicronSledConfig,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(value: OmicronSledConfig) -> Result<Self, Self::Error> {
         let zones = value
             .zones
             .into_iter()
@@ -204,8 +236,8 @@ pub struct OmicronZoneConfig {
     pub zone_type: OmicronZoneType,
     // Use `InstallDataset` if this field is not present in a deserialized
     // blueprint or ledger.
-    #[serde(default = "OmicronZoneImageSource::deserialize_default")]
-    pub image_source: OmicronZoneImageSource,
+    #[serde(default = "v1::OmicronZoneImageSource::deserialize_default")]
+    pub image_source: v1::OmicronZoneImageSource,
 }
 
 impl IdOrdItem for OmicronZoneConfig {
@@ -298,7 +330,7 @@ impl TryFrom<v1::OmicronZonesConfig> for OmicronZonesConfig {
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()
-            .map(|zones| inventory::OmicronZonesConfig {
+            .map(|zones| OmicronZonesConfig {
                 generation: value.generation,
                 zones,
             })
@@ -326,7 +358,7 @@ pub enum OmicronZoneType {
     /// Type of clickhouse zone used for a single node clickhouse deployment
     Clickhouse {
         address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
+        dataset: v1::OmicronZoneDataset,
     },
 
     /// A zone used to run a Clickhouse Keeper node
@@ -334,29 +366,29 @@ pub enum OmicronZoneType {
     /// Keepers are only used in replicated clickhouse setups
     ClickhouseKeeper {
         address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
+        dataset: v1::OmicronZoneDataset,
     },
 
     /// A zone used to run a Clickhouse Server in a replicated deployment
     ClickhouseServer {
         address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
+        dataset: v1::OmicronZoneDataset,
     },
 
     CockroachDb {
         address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
+        dataset: v1::OmicronZoneDataset,
     },
 
     Crucible {
         address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
+        dataset: v1::OmicronZoneDataset,
     },
     CruciblePantry {
         address: SocketAddrV6,
     },
     ExternalDns {
-        dataset: OmicronZoneDataset,
+        dataset: v1::OmicronZoneDataset,
         /// The address at which the external DNS server API is reachable.
         http_address: SocketAddrV6,
         /// The address at which the external DNS server is reachable.
@@ -365,7 +397,7 @@ pub enum OmicronZoneType {
         nic: NetworkInterface,
     },
     InternalDns {
-        dataset: OmicronZoneDataset,
+        dataset: v1::OmicronZoneDataset,
         http_address: SocketAddrV6,
         dns_address: SocketAddrV6,
         /// The addresses in the global zone which should be created
@@ -406,24 +438,26 @@ pub enum OmicronZoneType {
 
 impl OmicronZoneType {
     /// Returns the [`ZoneKind`] corresponding to this variant.
-    pub fn kind(&self) -> ZoneKind {
+    pub fn kind(&self) -> v1::ZoneKind {
         match self {
-            OmicronZoneType::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
-            OmicronZoneType::Clickhouse { .. } => ZoneKind::Clickhouse,
+            OmicronZoneType::BoundaryNtp { .. } => v1::ZoneKind::BoundaryNtp,
+            OmicronZoneType::Clickhouse { .. } => v1::ZoneKind::Clickhouse,
             OmicronZoneType::ClickhouseKeeper { .. } => {
-                ZoneKind::ClickhouseKeeper
+                v1::ZoneKind::ClickhouseKeeper
             }
             OmicronZoneType::ClickhouseServer { .. } => {
-                ZoneKind::ClickhouseServer
+                v1::ZoneKind::ClickhouseServer
             }
-            OmicronZoneType::CockroachDb { .. } => ZoneKind::CockroachDb,
-            OmicronZoneType::Crucible { .. } => ZoneKind::Crucible,
-            OmicronZoneType::CruciblePantry { .. } => ZoneKind::CruciblePantry,
-            OmicronZoneType::ExternalDns { .. } => ZoneKind::ExternalDns,
-            OmicronZoneType::InternalDns { .. } => ZoneKind::InternalDns,
-            OmicronZoneType::InternalNtp { .. } => ZoneKind::InternalNtp,
-            OmicronZoneType::Nexus { .. } => ZoneKind::Nexus,
-            OmicronZoneType::Oximeter { .. } => ZoneKind::Oximeter,
+            OmicronZoneType::CockroachDb { .. } => v1::ZoneKind::CockroachDb,
+            OmicronZoneType::Crucible { .. } => v1::ZoneKind::Crucible,
+            OmicronZoneType::CruciblePantry { .. } => {
+                v1::ZoneKind::CruciblePantry
+            }
+            OmicronZoneType::ExternalDns { .. } => v1::ZoneKind::ExternalDns,
+            OmicronZoneType::InternalDns { .. } => v1::ZoneKind::InternalDns,
+            OmicronZoneType::InternalNtp { .. } => v1::ZoneKind::InternalNtp,
+            OmicronZoneType::Nexus { .. } => v1::ZoneKind::Nexus,
+            OmicronZoneType::Oximeter { .. } => v1::ZoneKind::Oximeter,
         }
     }
 
@@ -622,7 +656,7 @@ impl TryFrom<v1::OmicronZoneType> for OmicronZoneType {
 
     fn try_from(value: v1::OmicronZoneType) -> Result<Self, Self::Error> {
         match value {
-            OmicronZoneType::BoundaryNtp {
+            v1::OmicronZoneType::BoundaryNtp {
                 address,
                 ntp_servers,
                 dns_servers,
@@ -924,4 +958,8 @@ impl ConfigReconcilerInventory {
         self.zones = zones;
         self.remove_mupdate_override = remove_mupdate_override;
     }
+}
+
+fn default_nexus_lockstep_port() -> u16 {
+    omicron_common::address::NEXUS_LOCKSTEP_PORT
 }
