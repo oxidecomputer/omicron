@@ -690,10 +690,6 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Inventory>, HttpError>;
 
-    // TODO-K: Just adding VERSION_ADD_SMF_SERVICES_HEALTH_CHECK above doesn't
-    // seem to work. Looks like I need to create a whole new module and endpoint
-    // for v10_inventory like the others?
-
     /// Fetch basic information about this sled
     #[endpoint {
         operation_id = "inventory",
