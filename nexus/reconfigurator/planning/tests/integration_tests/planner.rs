@@ -310,34 +310,21 @@ fn test_add_multiple_nexus_to_one_sled() {
 
     // Use our example system with one sled and one Nexus instance as a
     // starting point.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-            .nsleds(1)
-            .nexus_count(1)
-            .build();
-    let sled_id = example
-        .collection
-        .sled_agents
-        .iter()
-        .next()
-        .map(|sa| sa.sled_id)
-        .unwrap();
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| Ok(builder.nsleds(1).nexus_count(1)))
+        .expect("loaded example system");
 
-    let input = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder")
-        .build();
-    let collection = example.collection;
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // This blueprint should only have 1 Nexus instance on the one sled we
     // kept.
     assert_eq!(blueprint1.sleds.len(), 1);
+    let sled_id = blueprint1.sleds().next().unwrap();
     assert_eq!(
         blueprint1
             .sleds
             .get(&sled_id)
-            .expect("missing kept sled")
+            .unwrap()
             .zones
             .iter()
             .filter(|z| z.zone_type.is_nexus())
@@ -345,27 +332,23 @@ fn test_add_multiple_nexus_to_one_sled() {
         1
     );
 
+    // Change the policy to 5 Nexus zones and only a single internal DNS zone.
+    // (The default policy for internal DNS is higher than one, and we don't
+    // want that to pollute our diffs below.)
+    let target_nexus_zone_count = 5;
+    sim.change_state("update target zone counts", |state| {
+        state
+            .system_mut()
+            .description_mut()
+            .set_target_nexus_zone_count(target_nexus_zone_count)
+            .set_target_internal_dns_zone_count(1);
+        Ok(())
+    })
+    .expect("changed policy");
+
     // Now run the planner.  It should add additional Nexus zones to the
     // one sled we have.
-    let mut builder = input.into_builder();
-    builder.policy_mut().target_nexus_zone_count = 5;
-
-    // But we don't want it to add any more internal DNS zones,
-    // which it would by default (because we have only one sled).
-    builder.policy_mut().target_internal_dns_zone_count = 1;
-
-    let input = builder.build();
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
 
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (added additional Nexus zones):\n{}", summary.display());
@@ -386,7 +369,7 @@ fn test_add_multiple_nexus_to_one_sled() {
         .diff_pair()
         .zones
         .added;
-    assert_eq!(zones_added.len(), input.target_nexus_zone_count() - 1);
+    assert_eq!(zones_added.len(), target_nexus_zone_count - 1);
     for zone in zones_added {
         if zone.kind() != ZoneKind::Nexus {
             panic!("unexpectedly added a non-Nexus zone: {zone:?}");
@@ -394,13 +377,12 @@ fn test_add_multiple_nexus_to_one_sled() {
     }
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
-    );
+    sim.deploy_configs_to_active_sleds("add Nexus zones", &blueprint2)
+        .expect("deployed configs");
+    sim.generate_inventory("inventory with new zones")
+        .expect("generated inventory");
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
+    assert_blueprint_diff_is_empty(&blueprint2, &blueprint3);
 
     logctx.cleanup_successful();
 }
