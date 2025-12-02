@@ -26,6 +26,28 @@ pub struct Inventory {
     pub zone_image_resolver: ZoneImageResolverInventory,
 }
 
+/// Status of the sled-agent-config-reconciler task.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ConfigReconcilerInventoryStatus {
+    /// The reconciler task has not yet run for the first time since sled-agent
+    /// started.
+    NotYetRun,
+    /// The reconciler task is actively running.
+    Running {
+        config: Box<OmicronSledConfig>,
+        started_at: DateTime<Utc>,
+        running_for: Duration,
+    },
+    /// The reconciler task is currently idle, but previously did complete a
+    /// reconciliation attempt.
+    ///
+    /// This variant does not include the `OmicronSledConfig` used in the last
+    /// attempt, because that's always available via
+    /// [`ConfigReconcilerInventory::last_reconciled_config`].
+    Idle { completed_at: DateTime<Utc>, ran_for: Duration },
+}
+
 impl TryFrom<Inventory> for v1::Inventory {
     type Error = external::Error;
 
@@ -52,6 +74,32 @@ impl TryFrom<Inventory> for v1::Inventory {
             last_reconciliation,
             zone_image_resolver: value.zone_image_resolver,
         })
+    }
+}
+
+impl TryFrom<ConfigReconcilerInventoryStatus>
+    for v1::ConfigReconcilerInventoryStatus
+{
+    type Error = external::Error;
+
+    fn try_from(
+        value: ConfigReconcilerInventoryStatus,
+    ) -> Result<Self, Self::Error> {
+        match value {
+            ConfigReconcilerInventoryStatus::NotYetRun => Ok(Self::NotYetRun),
+            ConfigReconcilerInventoryStatus::Running {
+                config,
+                started_at,
+                running_for,
+            } => Ok(Self::Running {
+                config: Box::new((*config).try_into()?),
+                started_at,
+                running_for,
+            }),
+            ConfigReconcilerInventoryStatus::Idle { completed_at, ran_for } => {
+                Ok(Self::Idle { completed_at, ran_for })
+            }
+        }
     }
 }
 
@@ -217,6 +265,532 @@ impl TryFrom<OmicronZoneConfig> for v1::OmicronZoneConfig {
     }
 }
 
+/// Describes the set of Omicron-managed zones running on a sled
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct OmicronZonesConfig {
+    /// generation number of this configuration
+    ///
+    /// This generation number is owned by the control plane (i.e., RSS or
+    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
+    /// should not be bumped within Sled Agent.
+    ///
+    /// Sled Agent rejects attempts to set the configuration to a generation
+    /// older than the one it's currently running.
+    pub generation: Generation,
+
+    /// list of running zones
+    pub zones: Vec<OmicronZoneConfig>,
+}
+
+impl OmicronZonesConfig {
+    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
+    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
+}
+
+impl TryFrom<v1::OmicronZonesConfig> for OmicronZonesConfig {
+    type Error = external::Error;
+
+    fn try_from(value: v1::OmicronZonesConfig) -> Result<Self, Self::Error> {
+        value
+            .zones
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map(|zones| inventory::OmicronZonesConfig {
+                generation: value.generation,
+                zones,
+            })
+    }
+}
+
+/// Describes what kind of zone this is (i.e., what component is running in it)
+/// as well as any type-specific configuration
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OmicronZoneType {
+    BoundaryNtp {
+        address: SocketAddrV6,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+        /// The service vNIC providing outbound connectivity using OPTE.
+        nic: NetworkInterface,
+        /// The SNAT configuration for outbound connections.
+        snat_cfg: SourceNatConfig,
+    },
+
+    /// Type of clickhouse zone used for a single node clickhouse deployment
+    Clickhouse {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    /// A zone used to run a Clickhouse Keeper node
+    ///
+    /// Keepers are only used in replicated clickhouse setups
+    ClickhouseKeeper {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    /// A zone used to run a Clickhouse Server in a replicated deployment
+    ClickhouseServer {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    CockroachDb {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    Crucible {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+    CruciblePantry {
+        address: SocketAddrV6,
+    },
+    ExternalDns {
+        dataset: OmicronZoneDataset,
+        /// The address at which the external DNS server API is reachable.
+        http_address: SocketAddrV6,
+        /// The address at which the external DNS server is reachable.
+        dns_address: SocketAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+    },
+    InternalDns {
+        dataset: OmicronZoneDataset,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+        /// The addresses in the global zone which should be created
+        ///
+        /// For the DNS service, which exists outside the sleds's typical subnet
+        /// - adding an address in the GZ is necessary to allow inter-zone
+        /// traffic routing.
+        gz_address: Ipv6Addr,
+
+        /// The address is also identified with an auxiliary bit of information
+        /// to ensure that the created global zone address can have a unique
+        /// name.
+        gz_address_index: u32,
+    },
+    InternalNtp {
+        address: SocketAddrV6,
+    },
+    Nexus {
+        /// The address at which the internal nexus server is reachable.
+        internal_address: SocketAddrV6,
+        /// The port at which the internal lockstep server is reachable. This
+        /// shares the same IP address with `internal_address`.
+        #[serde(default = "default_nexus_lockstep_port")]
+        lockstep_port: u16,
+        /// The address at which the external nexus server is reachable.
+        external_ip: IpAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+        /// Whether Nexus's external endpoint should use TLS
+        external_tls: bool,
+        /// External DNS servers Nexus can use to resolve external hosts.
+        external_dns_servers: Vec<IpAddr>,
+    },
+    Oximeter {
+        address: SocketAddrV6,
+    },
+}
+
+impl OmicronZoneType {
+    /// Returns the [`ZoneKind`] corresponding to this variant.
+    pub fn kind(&self) -> ZoneKind {
+        match self {
+            OmicronZoneType::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
+            OmicronZoneType::Clickhouse { .. } => ZoneKind::Clickhouse,
+            OmicronZoneType::ClickhouseKeeper { .. } => {
+                ZoneKind::ClickhouseKeeper
+            }
+            OmicronZoneType::ClickhouseServer { .. } => {
+                ZoneKind::ClickhouseServer
+            }
+            OmicronZoneType::CockroachDb { .. } => ZoneKind::CockroachDb,
+            OmicronZoneType::Crucible { .. } => ZoneKind::Crucible,
+            OmicronZoneType::CruciblePantry { .. } => ZoneKind::CruciblePantry,
+            OmicronZoneType::ExternalDns { .. } => ZoneKind::ExternalDns,
+            OmicronZoneType::InternalDns { .. } => ZoneKind::InternalDns,
+            OmicronZoneType::InternalNtp { .. } => ZoneKind::InternalNtp,
+            OmicronZoneType::Nexus { .. } => ZoneKind::Nexus,
+            OmicronZoneType::Oximeter { .. } => ZoneKind::Oximeter,
+        }
+    }
+
+    /// Does this zone require time synchronization before it is initialized?"
+    ///
+    /// This function is somewhat conservative - the set of services
+    /// that can be launched before timesync has completed is intentionally kept
+    /// small, since it would be easy to add a service that expects time to be
+    /// reasonably synchronized.
+    pub fn requires_timesync(&self) -> bool {
+        match self {
+            // These zones can be initialized and started before time has been
+            // synchronized. For the NTP zones, this should be self-evident --
+            // we need the NTP zone to actually perform time synchronization!
+            //
+            // The DNS zone is a bit of an exception here, since the NTP zone
+            // itself may rely on DNS lookups as a dependency.
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::InternalDns { .. } => false,
+            _ => true,
+        }
+    }
+
+    /// Returns the underlay IP address associated with this zone.
+    ///
+    /// Assumes all zone have exactly one underlay IP address (which is
+    /// currently true).
+    pub fn underlay_ip(&self) -> Ipv6Addr {
+        match self {
+            OmicronZoneType::BoundaryNtp { address, .. }
+            | OmicronZoneType::Clickhouse { address, .. }
+            | OmicronZoneType::ClickhouseKeeper { address, .. }
+            | OmicronZoneType::ClickhouseServer { address, .. }
+            | OmicronZoneType::CockroachDb { address, .. }
+            | OmicronZoneType::Crucible { address, .. }
+            | OmicronZoneType::CruciblePantry { address }
+            | OmicronZoneType::ExternalDns { http_address: address, .. }
+            | OmicronZoneType::InternalNtp { address }
+            | OmicronZoneType::Nexus { internal_address: address, .. }
+            | OmicronZoneType::Oximeter { address } => *address.ip(),
+            OmicronZoneType::InternalDns {
+                http_address: address,
+                dns_address,
+                ..
+            } => {
+                // InternalDns is the only variant that carries two
+                // `SocketAddrV6`s that are both on the underlay network. We
+                // expect these to have the same IP address.
+                debug_assert_eq!(address.ip(), dns_address.ip());
+                *address.ip()
+            }
+        }
+    }
+
+    /// Identifies whether this is an NTP zone
+    pub fn is_ntp(&self) -> bool {
+        match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. } => true,
+
+            OmicronZoneType::Clickhouse { .. }
+            | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
+            | OmicronZoneType::CockroachDb { .. }
+            | OmicronZoneType::Crucible { .. }
+            | OmicronZoneType::CruciblePantry { .. }
+            | OmicronZoneType::ExternalDns { .. }
+            | OmicronZoneType::InternalDns { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+
+    /// Identifies whether this is a boundary NTP zone
+    pub fn is_boundary_ntp(&self) -> bool {
+        matches!(self, OmicronZoneType::BoundaryNtp { .. })
+    }
+
+    /// Identifies whether this is a Nexus zone
+    pub fn is_nexus(&self) -> bool {
+        match self {
+            OmicronZoneType::Nexus { .. } => true,
+
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Clickhouse { .. }
+            | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
+            | OmicronZoneType::CockroachDb { .. }
+            | OmicronZoneType::Crucible { .. }
+            | OmicronZoneType::CruciblePantry { .. }
+            | OmicronZoneType::ExternalDns { .. }
+            | OmicronZoneType::InternalDns { .. }
+            | OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+
+    /// Identifies whether this a Crucible (not Crucible pantry) zone
+    pub fn is_crucible(&self) -> bool {
+        match self {
+            OmicronZoneType::Crucible { .. } => true,
+
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Clickhouse { .. }
+            | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
+            | OmicronZoneType::CockroachDb { .. }
+            | OmicronZoneType::CruciblePantry { .. }
+            | OmicronZoneType::ExternalDns { .. }
+            | OmicronZoneType::InternalDns { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+
+    /// This zone's external IP
+    pub fn external_ip(&self) -> Option<IpAddr> {
+        match self {
+            OmicronZoneType::Nexus { external_ip, .. } => Some(*external_ip),
+            OmicronZoneType::ExternalDns { dns_address, .. } => {
+                Some(dns_address.ip())
+            }
+            OmicronZoneType::BoundaryNtp { snat_cfg, .. } => Some(snat_cfg.ip),
+
+            OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Clickhouse { .. }
+            | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
+            | OmicronZoneType::CockroachDb { .. }
+            | OmicronZoneType::Crucible { .. }
+            | OmicronZoneType::CruciblePantry { .. }
+            | OmicronZoneType::InternalDns { .. }
+            | OmicronZoneType::Oximeter { .. } => None,
+        }
+    }
+
+    /// The service vNIC providing external connectivity to this zone
+    pub fn service_vnic(&self) -> Option<&NetworkInterface> {
+        match self {
+            OmicronZoneType::Nexus { nic, .. }
+            | OmicronZoneType::ExternalDns { nic, .. }
+            | OmicronZoneType::BoundaryNtp { nic, .. } => Some(nic),
+
+            OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Clickhouse { .. }
+            | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::ClickhouseServer { .. }
+            | OmicronZoneType::CockroachDb { .. }
+            | OmicronZoneType::Crucible { .. }
+            | OmicronZoneType::CruciblePantry { .. }
+            | OmicronZoneType::InternalDns { .. }
+            | OmicronZoneType::Oximeter { .. } => None,
+        }
+    }
+
+    /// If this kind of zone has an associated dataset, return the dataset's
+    /// name. Otherwise, return `None`.
+    pub fn dataset_name(&self) -> Option<DatasetName> {
+        let (dataset, dataset_kind) = match self {
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Nexus { .. }
+            | OmicronZoneType::Oximeter { .. }
+            | OmicronZoneType::CruciblePantry { .. } => None,
+            OmicronZoneType::Clickhouse { dataset, .. } => {
+                Some((dataset, DatasetKind::Clickhouse))
+            }
+            OmicronZoneType::ClickhouseKeeper { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseKeeper))
+            }
+            OmicronZoneType::ClickhouseServer { dataset, .. } => {
+                Some((dataset, DatasetKind::ClickhouseServer))
+            }
+            OmicronZoneType::CockroachDb { dataset, .. } => {
+                Some((dataset, DatasetKind::Cockroach))
+            }
+            OmicronZoneType::Crucible { dataset, .. } => {
+                Some((dataset, DatasetKind::Crucible))
+            }
+            OmicronZoneType::ExternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::ExternalDns))
+            }
+            OmicronZoneType::InternalDns { dataset, .. } => {
+                Some((dataset, DatasetKind::InternalDns))
+            }
+        }?;
+
+        Some(DatasetName::new(dataset.pool_name, dataset_kind))
+    }
+}
+
+impl TryFrom<v1::OmicronZoneType> for OmicronZoneType {
+    type Error = external::Error;
+
+    fn try_from(value: v1::OmicronZoneType) -> Result<Self, Self::Error> {
+        match value {
+            OmicronZoneType::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg,
+            } => Ok(Self::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic: nic.try_into()?,
+                snat_cfg,
+            }),
+            v1::OmicronZoneType::Clickhouse { address, dataset } => {
+                Ok(Self::Clickhouse { address, dataset })
+            }
+            v1::OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+                Ok(Self::ClickhouseKeeper { address, dataset })
+            }
+            v1::OmicronZoneType::ClickhouseServer { address, dataset } => {
+                Ok(Self::ClickhouseServer { address, dataset })
+            }
+            v1::OmicronZoneType::CockroachDb { address, dataset } => {
+                Ok(Self::CockroachDb { address, dataset })
+            }
+            v1::OmicronZoneType::Crucible { address, dataset } => {
+                Ok(Self::Crucible { address, dataset })
+            }
+            v1::OmicronZoneType::CruciblePantry { address } => {
+                Ok(Self::CruciblePantry { address })
+            }
+            v1::OmicronZoneType::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic,
+            } => Ok(Self::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic: nic.try_into()?,
+            }),
+            v1::OmicronZoneType::InternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            } => Ok(Self::InternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            }),
+            v1::OmicronZoneType::InternalNtp { address } => {
+                Ok(Self::InternalNtp { address })
+            }
+            v1::OmicronZoneType::Nexus {
+                internal_address,
+                lockstep_port,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => Ok(Self::Nexus {
+                internal_address,
+                lockstep_port,
+                external_ip,
+                nic: nic.try_into()?,
+                external_tls,
+                external_dns_servers,
+            }),
+            v1::OmicronZoneType::Oximeter { address } => {
+                Ok(Self::Oximeter { address })
+            }
+        }
+    }
+}
+
+impl TryFrom<OmicronZoneType> for v1::OmicronZoneType {
+    type Error = external::Error;
+
+    fn try_from(value: OmicronZoneType) -> Result<Self, Self::Error> {
+        match value {
+            OmicronZoneType::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg,
+            } => Ok(Self::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic: nic.try_into()?,
+                snat_cfg,
+            }),
+            OmicronZoneType::Clickhouse { address, dataset } => {
+                Ok(Self::Clickhouse { address, dataset })
+            }
+            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+                Ok(Self::ClickhouseKeeper { address, dataset })
+            }
+            OmicronZoneType::ClickhouseServer { address, dataset } => {
+                Ok(Self::ClickhouseServer { address, dataset })
+            }
+            OmicronZoneType::CockroachDb { address, dataset } => {
+                Ok(Self::CockroachDb { address, dataset })
+            }
+            OmicronZoneType::Crucible { address, dataset } => {
+                Ok(Self::Crucible { address, dataset })
+            }
+            OmicronZoneType::CruciblePantry { address } => {
+                Ok(Self::CruciblePantry { address })
+            }
+            OmicronZoneType::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic,
+            } => Ok(Self::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic: nic.try_into()?,
+            }),
+            OmicronZoneType::InternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            } => Ok(Self::InternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            }),
+            OmicronZoneType::InternalNtp { address } => {
+                Ok(Self::InternalNtp { address })
+            }
+            OmicronZoneType::Nexus {
+                internal_address,
+                lockstep_port,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => Ok(Self::Nexus {
+                internal_address,
+                lockstep_port,
+                external_ip,
+                nic: nic.try_into()?,
+                external_tls,
+                external_dns_servers,
+            }),
+            OmicronZoneType::Oximeter { address } => {
+                Ok(Self::Oximeter { address })
+            }
+        }
+    }
+}
+
 /// Describes the last attempt made by the sled-agent-config-reconciler to
 /// reconcile the current sled config against the actual state of the sled.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
@@ -238,9 +812,7 @@ pub struct ConfigReconcilerInventory {
 impl TryFrom<ConfigReconcilerInventory> for v1::ConfigReconcilerInventory {
     type Error = external::Error;
 
-    fn try_from(
-        value: inventory::ConfigReconcilerInventory,
-    ) -> Result<Self, Self::Error> {
+    fn try_from(value: ConfigReconcilerInventory) -> Result<Self, Self::Error> {
         Ok(Self {
             last_reconciled_config: value.last_reconciled_config.try_into()?,
             external_disks: value.external_disks,

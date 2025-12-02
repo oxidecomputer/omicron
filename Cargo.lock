@@ -7339,6 +7339,7 @@ dependencies = [
  "iddqd",
  "illumos-utils",
  "indent_write",
+ "nexus-sled-agent-shared-migrations",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",
