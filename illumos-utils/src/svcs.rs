@@ -124,13 +124,10 @@ impl SvcNotRunning {
     }
 
     #[allow(dead_code)]
-    fn parse(
-        log: &Logger,
-        data: &[u8],
-    ) -> Result<Vec<SvcNotRunning>, ExecutionError> {
+    fn parse(log: &Logger, data: &[u8]) -> Vec<SvcNotRunning> {
         let mut svcs = vec![];
         if data.is_empty() {
-            return Ok(svcs);
+            return svcs;
         }
         // The reponse we get from running `svcs -Zxv` is a free-form text.
         // Example:
@@ -167,6 +164,9 @@ impl SvcNotRunning {
                     current_svc.fmri = fmri.to_string()
                 };
             } else {
+                // We don't return errors if data is missing from a line.
+                // We want to collect as much information as we can from
+                // every service in the response.
                 if let Some((key, value)) = line.split_once(": ") {
                     match key.trim() {
                         "Zone" => current_svc.zone = value.to_string(),
@@ -186,9 +186,6 @@ impl SvcNotRunning {
                                 ) {
                                     Ok(t) => t,
                                     Err(e) => {
-                                        // We don't return an error here because
-                                        // we want to collect as much information
-                                        // as we can, instead of bailing out
                                         info!(
                                             log,
                                             "unable to parse service instance \
@@ -236,7 +233,7 @@ impl SvcNotRunning {
                 }
             }
         }
-        Ok(svcs)
+        svcs
     }
 }
 
@@ -300,7 +297,7 @@ Reason: Start method failed repeatedly, last died on Killed (9).
 Impact: This service is not running."#;
 
         let log = log();
-        let services = SvcNotRunning::parse(&log, output.as_bytes()).unwrap();
+        let services = SvcNotRunning::parse(&log, output.as_bytes());
 
         // We want to make sure we only have two entries
         assert_eq!(services.len(), 2);
@@ -368,7 +365,7 @@ Impact: This service is not running.
 "#;
 
         let log = log();
-        let services = SvcNotRunning::parse(&log, output.as_bytes()).unwrap();
+        let services = SvcNotRunning::parse(&log, output.as_bytes());
 
         // We want to make sure we have an entry even if we weren't able to
         // parse the timestamp.
@@ -405,7 +402,7 @@ Impact: This service is not running.
 "#;
 
         let log = log();
-        let services = SvcNotRunning::parse(&log, output.as_bytes()).unwrap();
+        let services = SvcNotRunning::parse(&log, output.as_bytes());
 
         // We want to make sure we have an entry even if we weren't able to
         // parse two lines.
