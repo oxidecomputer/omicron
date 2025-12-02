@@ -1133,8 +1133,7 @@ impl SledAgent {
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
-        // TODO-K: Filter out the ones just in maintenance?
-        let smf_services_in_maintenance =
+        let smf_services_enabled_not_running =
             Svcs::enabled_not_running(&self.log).await?;
 
         let ReconcilerInventory {
@@ -1162,7 +1161,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
-            smf_services_in_maintenance,
+            smf_services_enabled_not_running,
         })
     }
 

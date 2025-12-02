@@ -707,8 +707,7 @@ pub struct SledAgent {
     pub zone_image_resolver: ZoneImageResolverInventory,
     // TODO-K: What's the point of this type and also sled_agent::Inventory?
     // they're the same almost?
-    // TODO-K: change for not running? extract only in maintenance?
-    pub smf_services_in_maintenance: Vec<SvcNotRunning>,
+    pub smf_services_enabled_not_running: Vec<SvcNotRunning>,
 }
 
 impl IdOrdItem for SledAgent {

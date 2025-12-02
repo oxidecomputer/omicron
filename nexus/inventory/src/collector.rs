@@ -433,7 +433,6 @@ impl<'a> Collector<'a> {
         }
     }
 
-    // TODO-K: This is where the sled agent info is being collected
     /// Collect inventory from all sled agent instances
     async fn collect_all_sled_agents(&mut self) {
         let urls = match self.sled_agent_lister.list_sled_agents().await {

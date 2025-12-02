@@ -5,8 +5,11 @@
 //! Utilities for reporting SMF services' status.
 
 use crate::ExecutionError;
+#[cfg(target_os = "illumos")]
 use crate::PFEXEC;
+#[cfg(target_os = "illumos")]
 use crate::execute_async;
+#[cfg(target_os = "illumos")]
 use crate::zone::SVCS;
 
 use chrono::DateTime;
@@ -18,6 +21,7 @@ use serde::Serialize;
 use slog::Logger;
 use slog::info;
 use std::fmt::Display;
+#[cfg(target_os = "illumos")]
 use tokio::process::Command;
 
 /// Wraps commands for interacting with interfaces.
@@ -25,6 +29,7 @@ pub struct Svcs {}
 
 impl Svcs {
     /// Lists SMF services that are enabled but not running
+    #[cfg(target_os = "illumos")]
     pub async fn enabled_not_running(
         log: &Logger,
     ) -> Result<Vec<SvcNotRunning>, ExecutionError> {
@@ -32,6 +37,14 @@ impl Svcs {
         let cmd = cmd.args(&[SVCS, "-Zx"]);
         let output = execute_async(cmd).await?;
         SvcNotRunning::parse(log, &output.stdout)
+    }
+
+    #[cfg(not(target_os = "illumos"))]
+    pub async fn enabled_not_running(
+        log: &Logger,
+    ) -> Result<Vec<SvcNotRunning>, ExecutionError> {
+        info!(log, "OS not illumos, will not check state of SMF services");
+        Ok(vec![])
     }
 }
 
@@ -93,9 +106,11 @@ pub struct SvcNotRunning {
     additional_info: Vec<String>,
 }
 
-// TODO-K: new struct SvcsNotRunning with a IdOrdMap? Parse fn can lived there
-
 impl SvcNotRunning {
+    // These methods are only used when the target OS is "illumos". They are not
+    // marked as a configuration option based on target OS because they are not
+    // Illumos specific themselves. We mark them as unused instead.
+    #[allow(dead_code)]
     fn new() -> SvcNotRunning {
         SvcNotRunning {
             fmri: String::new(),
@@ -108,6 +123,7 @@ impl SvcNotRunning {
         }
     }
 
+    #[allow(dead_code)]
     fn parse(
         log: &Logger,
         data: &[u8],

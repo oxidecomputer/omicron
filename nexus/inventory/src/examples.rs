@@ -994,6 +994,6 @@ pub fn sled_agent(
         last_reconciliation,
         zone_image_resolver,
         // TODO-K: Have functionality to add some services in maintenance?
-        smf_services_in_maintenance: vec![],
+        smf_services_enabled_not_running: vec![],
     }
 }

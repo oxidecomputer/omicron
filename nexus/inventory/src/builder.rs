@@ -675,7 +675,7 @@ impl CollectionBuilder {
             reconciler_status: inventory.reconciler_status,
             last_reconciliation: inventory.last_reconciliation,
             zone_image_resolver: inventory.zone_image_resolver,
-            smf_services_in_maintenance: inventory.smf_services_in_maintenance,
+            smf_services_enabled_not_running: inventory.smf_services_enabled_not_running,
         };
 
         self.sleds

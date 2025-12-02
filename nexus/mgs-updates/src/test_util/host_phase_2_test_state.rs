@@ -356,7 +356,7 @@ mod api_impl {
                         non_boot_status: IdOrdMap::new(),
                     },
                 },
-                smf_services_in_maintenance: vec![],
+                smf_services_enabled_not_running: vec![],
             }))
         }
 

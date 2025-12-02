@@ -1369,7 +1369,7 @@ impl<'a> TestBoardCollectionBuilder<'a> {
                                 ConfigReconcilerInventoryStatus::NotYetRun,
                             zone_image_resolver:
                                 ZoneImageResolverInventory::new_fake(),
-                            smf_services_in_maintenance: vec![],
+                            smf_services_enabled_not_running: vec![],
                         },
                     )
                     .unwrap();

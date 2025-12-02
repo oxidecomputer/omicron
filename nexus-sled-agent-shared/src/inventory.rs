@@ -129,7 +129,7 @@ pub struct Inventory {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
-    pub smf_services_in_maintenance: Vec<SvcNotRunning>,
+    pub smf_services_enabled_not_running: Vec<SvcNotRunning>,
 }
 
 /// Describes the last attempt made by the sled-agent-config-reconciler to

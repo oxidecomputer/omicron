@@ -1418,7 +1418,7 @@ impl Sled {
                 // XXX: return something more reasonable here?
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
                 // TODO-K: Have the ability to add some services here
-                smf_services_in_maintenance: vec![],
+                smf_services_enabled_not_running: vec![],
             }
         };
 
@@ -1597,7 +1597,7 @@ impl Sled {
             reconciler_status: inv_sled_agent.reconciler_status.clone(),
             last_reconciliation: inv_sled_agent.last_reconciliation.clone(),
             zone_image_resolver: inv_sled_agent.zone_image_resolver.clone(),
-            smf_services_in_maintenance: vec![],
+            smf_services_enabled_not_running: vec![],
         };
 
         Sled {

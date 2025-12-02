@@ -808,9 +808,9 @@ impl SledAgent {
         // TODO-K: check if this is correct, or if I should do something
         // different for a simulated environment. The command below will only
         // work with Illumos machines
-        let smf_services_in_maintenance =
+        let smf_services_enabled_not_running =
             Svcs::enabled_not_running(&self.log).await?;
-        //let smf_services_in_maintenance = vec![];
+        //let smf_services_enabled_not_running = vec![];
 
         let storage = self.storage.lock();
 
@@ -901,7 +901,7 @@ impl SledAgent {
             ),
             // TODO: simulate the zone image resolver with greater fidelity
             zone_image_resolver: ZoneImageResolverInventory::new_fake(),
-            smf_services_in_maintenance,
+            smf_services_enabled_not_running,
         })
     }
 
