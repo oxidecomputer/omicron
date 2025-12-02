@@ -705,8 +705,6 @@ pub struct SledAgent {
     pub reconciler_status: ConfigReconcilerInventoryStatus,
     pub last_reconciliation: Option<ConfigReconcilerInventory>,
     pub zone_image_resolver: ZoneImageResolverInventory,
-    // TODO-K: What's the point of this type and also sled_agent::Inventory?
-    // they're the same almost?
     pub smf_services_enabled_not_running: Vec<SvcNotRunning>,
 }
 

@@ -633,6 +633,9 @@ pub fn representative() -> Representative {
                 zone_image_resolver(ZoneImageResolverExampleKind::Mismatch {
                     has_mupdate_override: true,
                 }),
+                // TODO-K: Will want to add some services in maintenance here
+                // in a follow up PR when SMF service health information is
+                // being added to the DB.
             ),
         )
         .unwrap();
@@ -993,7 +996,9 @@ pub fn sled_agent(
         reconciler_status,
         last_reconciliation,
         zone_image_resolver,
-        // TODO-K: Have functionality to add some services in maintenance?
+        // TODO-K: We'll want to have the functionality to add some services
+        // here in a future PR. This will be more useful when we add this
+        // information to the DB.
         smf_services_enabled_not_running: vec![],
     }
 }

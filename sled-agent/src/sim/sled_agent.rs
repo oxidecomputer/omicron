@@ -793,7 +793,6 @@ impl SledAgent {
         Ok(addr)
     }
 
-    // TODO-K: Remove async?
     pub async fn inventory(
         &self,
         addr: SocketAddr,
@@ -805,12 +804,8 @@ impl SledAgent {
             SocketAddr::V6(v6) => v6,
         };
 
-        // TODO-K: check if this is correct, or if I should do something
-        // different for a simulated environment. The command below will only
-        // work with Illumos machines
         let smf_services_enabled_not_running =
             Svcs::enabled_not_running(&self.log).await?;
-        //let smf_services_enabled_not_running = vec![];
 
         let storage = self.storage.lock();
 

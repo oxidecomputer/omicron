@@ -896,7 +896,6 @@ fn display_sleds(
             }
         }
 
-        // TODO-K: make sure this is the display we actually want
         if !smf_services_enabled_not_running.is_empty() {
             writeln!(indented, "SMF services in maintenance:")?;
             let mut indent2 = IndentWriter::new("  ", &mut indented);
