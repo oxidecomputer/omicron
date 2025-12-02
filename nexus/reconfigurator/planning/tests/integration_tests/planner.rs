@@ -482,14 +482,9 @@ fn test_spread_internal_dns_zones_across_sleds() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Use our example system as a starting point.
-    let (example, mut blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-    let collection = example.collection;
-
-    example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // This blueprint should have exactly 3 internal DNS zones: one on each
     // sled.
@@ -508,26 +503,20 @@ fn test_spread_internal_dns_zones_across_sleds() {
     // Try to run the planner with a high number of internal DNS zones;
     // it will fail because the target is > INTERNAL_DNS_REDUNDANCY.
     {
-        let mut builder = example
-            .system
-            .to_planning_input_builder()
-            .expect("created PlanningInputBuilder");
-        builder.policy_mut().target_internal_dns_zone_count = 14;
+        let mut sim = sim.clone();
+        sim.change_state("change policy", |state| {
+            state
+                .system_mut()
+                .description_mut()
+                .set_target_internal_dns_zone_count(14);
+            Ok(())
+        })
+        .expect("changed policy");
 
-        match Planner::new_based_on(
-            logctx.log.clone(),
-            &blueprint1,
-            &builder.build(),
-            "test_blueprint2",
-            &collection,
-            PlannerRng::from_entropy(),
-        )
-        .expect("created planner")
-        .plan()
-        {
+        match sim.run_planner() {
             Ok(_) => panic!("unexpected success"),
             Err(err) => {
-                let err = InlineErrorChain::new(&err).to_string();
+                let err = InlineErrorChain::new(&*err).to_string();
                 assert!(
                     err.contains(
                         "no reserved subnets available for internal DNS"
@@ -538,46 +527,45 @@ fn test_spread_internal_dns_zones_across_sleds() {
         }
     }
 
-    // Remove two of the internal DNS zones; the planner should put new
+    // Expunge two of the internal DNS zones; the planner should put new
     // zones back in their places.
-    for (_sled_id, sled) in blueprint1.sleds.iter_mut().take(2) {
-        sled.zones.retain(|z| !z.zone_type.is_internal_dns());
-    }
-    for (_, sled_config) in blueprint1.sleds.iter_mut().take(2) {
-        sled_config.datasets.retain(|dataset| {
-            // This is gross; once zone configs know explicit dataset IDs,
-            // we should retain by ID instead.
-            match &dataset.kind {
-                DatasetKind::InternalDns => false,
-                DatasetKind::TransientZone { name } => {
-                    !name.starts_with("oxz_internal_dns")
-                }
-                _ => true,
+    let zones_to_expunge = blueprint1
+        .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
+        .filter_map(|(sled_id, zone)| {
+            zone.zone_type.is_internal_dns().then_some((sled_id, zone.id))
+        })
+        .take(2);
+    let mut nexpunged = 0;
+    let blueprint2 = sim
+        .blueprint_edit_latest("expunge 2 internal DNS zones", |builder| {
+            for (sled_id, zone_id) in zones_to_expunge {
+                builder
+                    .sled_expunge_zone(sled_id, zone_id)
+                    .expect("expunged zone");
+                builder
+                    .sled_mark_expunged_zone_ready_for_cleanup(sled_id, zone_id)
+                    .expect("marked zone ready for cleanup");
+                nexpunged += 1;
             }
-        });
-    }
+            Ok(())
+        })
+        .expect("expunged zones");
+    assert_eq!(nexpunged, 2);
 
-    let builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-    let input = builder.build();
-
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
+    // Deploy this blueprint and generate a new inventory from it.
+    sim.deploy_configs_to_active_sleds(
+        "deploy latest configs to all sleds",
+        &blueprint2,
     )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
+    .expect("deployed configs");
+    sim.generate_inventory("inventory with latest configs")
+        .expect("generated inventory");
 
-    let summary = blueprint2.diff_since_blueprint(&blueprint1);
+    // The planner should put new zones back in their places.
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
+    let summary = blueprint3.diff_since_blueprint(&blueprint2);
     println!(
-        "1 -> 2 (added additional internal DNS zones):\n{}",
+        "2 -> 3 (added additional internal DNS zones):\n{}",
         summary.display()
     );
     assert_eq!(summary.diff.sleds.added.len(), 0);
@@ -611,13 +599,7 @@ fn test_spread_internal_dns_zones_across_sleds() {
     assert_eq!(total_new_zones, 2);
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
-    );
+    sim_assert_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
 }

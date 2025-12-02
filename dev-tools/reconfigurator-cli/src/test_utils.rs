@@ -5,6 +5,8 @@
 //! helpers for writing Rust tests that use reconfigurator-cli to drive a
 //! simulated system
 
+use std::sync::Arc;
+
 use crate::BlueprintIdOpt;
 use crate::BlueprintPlanArgs;
 use crate::CollectionIdOpt;
@@ -13,16 +15,19 @@ use crate::cmd_blueprint_plan;
 use anyhow::Context;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
+use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::system::SledBuilder;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::errors::KeyError;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::PlanningInput;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 
+#[derive(Debug, Clone)]
 pub struct ReconfiguratorCliTestState {
     sim: ReconfiguratorSim,
 }
@@ -160,6 +165,38 @@ impl ReconfiguratorCliTestState {
             let inventory = state.to_collection_builder()?.build();
             state.system_mut().add_collection(inventory)?;
             Ok(())
+        })
+    }
+
+    /// State change helper: edit the latest blueprint, inserting a new latest
+    /// blueprint.
+    pub fn blueprint_edit_latest<F>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<Arc<Blueprint>>
+    where
+        F: FnOnce(&mut BlueprintBuilder<'_>) -> anyhow::Result<()>,
+    {
+        let log = self.sim.log.clone();
+        self.change_state(description, |state| {
+            let rng = state.rng_mut().next_planner_rng();
+            let system = state.system_mut();
+            let blueprint = system
+                .get_blueprint(
+                    &system.resolve_blueprint_id(BlueprintId::Latest),
+                )
+                .expect("always have a latest blueprint");
+            let mut builder = BlueprintBuilder::new_based_on(
+                &log,
+                blueprint,
+                "ReconfiguratorCliTestState",
+                rng,
+            )?;
+            f(&mut builder)?;
+            let blueprint = Arc::new(builder.build(BlueprintSource::Test));
+            system.add_blueprint(Arc::clone(&blueprint))?;
+            Ok(blueprint)
         })
     }
 
