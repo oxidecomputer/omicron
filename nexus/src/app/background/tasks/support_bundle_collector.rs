@@ -1095,7 +1095,7 @@ impl BundleCollection {
 
     // Perform the work of collecting the support bundle into a temporary directory
     //
-    // "dir" is a directory where data can be stored.
+    // "dir" is an output directory where data can be stored.
     //
     // If a partial bundle can be collected, it should be returned as
     // an Ok(SupportBundleCollectionReport). Any failures from this function
