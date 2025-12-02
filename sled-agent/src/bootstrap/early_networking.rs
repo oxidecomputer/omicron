@@ -19,8 +19,8 @@ use mg_admin_client::types::BfdPeerConfig as MgBfdPeerConfig;
 use mg_admin_client::types::BgpPeerConfig as MgBgpPeerConfig;
 use mg_admin_client::types::ImportExportPolicy as MgImportExportPolicy;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, CheckerSource, Prefix, Prefix4,
-    Prefix6, ShaperSource, StaticRoute4, StaticRoute4List,
+    AddStaticRoute4Request, ApplyRequest, CheckerSource, ShaperSource,
+    StaticRoute4, StaticRoute4List,
 };
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::address::DENDRITE_PORT;
@@ -35,6 +35,7 @@ use omicron_common::backoff::{
 };
 use omicron_ddm_admin_client::DdmError;
 use oxnet::IpNet;
+use rdb_types::{Prefix, Prefix4, Prefix6};
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{HashMap, HashSet};
