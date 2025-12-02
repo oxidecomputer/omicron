@@ -10,7 +10,6 @@ use expectorate::assert_contents;
 use iddqd::IdOrdMap;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
-use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
 use nexus_reconfigurator_planning::example::ExampleSystem;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
@@ -693,106 +692,104 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Use our example system as a starting point.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-    let collection = example.collection;
-
-    let input = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder")
-        .build();
-
-    // We should not be able to add any external DNS zones yet,
-    // because we haven't give it any addresses (which currently
-    // come only from RSS). This is not an error, though.
-    assert!(input.external_ip_policy().external_dns_ips().is_empty());
-    let mut external_networking_alloc =
-        ExternalNetworkingAllocator::from_blueprint(
-            &blueprint1,
-            input.external_ip_policy(),
-        )
-        .expect("constructed allocator");
-    external_networking_alloc
-        .for_new_external_dns()
-        .expect_err("should not have available IPs for external DNS");
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // Change the policy: add some external DNS IPs.
     let external_dns_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
         addr.parse::<Ipv4Addr>().expect("can't parse external DNS IP address")
     });
-    let input = {
-        let mut builder = input.into_builder();
-        let mut ip_policy =
-            builder.policy_mut().external_ips.clone().into_builder();
-        // Add a "service IP pool" covering our external DNS IP range.
-        ip_policy
-            .push_service_pool_ipv4_range(
-                Ipv4Range::new(external_dns_ips[0], external_dns_ips[2])
-                    .unwrap(),
-            )
-            .unwrap();
-        // Set these IPs as "for external DNS".
-        for ip in external_dns_ips {
-            ip_policy.add_external_dns_ip(ip.into()).unwrap();
-        }
-        builder.policy_mut().external_ips = ip_policy.build();
-        builder.build()
-    };
+    let external_ip_policy = sim
+        .change_state("add external DNS IPs to policy", |state| {
+            let description = state.system_mut().description_mut();
 
-    // Build a builder for a modfied blueprint based on the new policy.
-    let mut blueprint_builder = BlueprintBuilder::new_based_on(
-        &logctx.log,
-        &blueprint1,
-        TEST_NAME,
-        PlannerRng::from_entropy(),
-    )
-    .expect("failed to build blueprint builder");
-    let mut external_networking_alloc =
-        ExternalNetworkingAllocator::from_current_zones(
-            &blueprint_builder,
-            input.external_ip_policy(),
-        )
-        .expect("constructed allocator");
+            // We should not be able to add any external DNS zones yet,
+            // because we haven't give it any addresses (which currently
+            // come only from RSS). This is not an error, though.
+            assert!(
+                description.external_ip_policy().external_dns_ips().is_empty()
+            );
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::from_blueprint(
+                    &blueprint1,
+                    description.external_ip_policy(),
+                )
+                .expect("constructed allocator");
+            external_networking_alloc
+                .for_new_external_dns()
+                .expect_err("should not have available IPs for external DNS");
 
-    // Now we can add external DNS zones. We'll add two to the first
-    // sled and one to the second.
+            let mut ip_policy =
+                description.external_ip_policy().clone().into_builder();
+
+            // Add a "service IP pool" covering our external DNS IP range.
+            ip_policy
+                .push_service_pool_ipv4_range(
+                    Ipv4Range::new(external_dns_ips[0], external_dns_ips[2])
+                        .unwrap(),
+                )
+                .unwrap();
+            // Set these IPs as "for external DNS".
+            for ip in external_dns_ips {
+                ip_policy.add_external_dns_ip(ip.into()).unwrap();
+            }
+
+            let external_ip_policy = ip_policy.build();
+            description.set_external_ip_policy(external_ip_policy.clone());
+
+            Ok(external_ip_policy)
+        })
+        .expect("added external DNS IPs to policy");
+
+    // Manually place 3 external DNS zones: two on sled_1 and one on sled_2.
     let (sled_1, sled_2) = {
-        let mut sleds = blueprint_builder.sled_ids_with_zones();
+        let mut sleds = blueprint1.sleds();
         (
             sleds.next().expect("at least one sled"),
             sleds.next().expect("at least two sleds"),
         )
     };
-    blueprint_builder
-        .sled_add_zone_external_dns(
-            sled_1,
-            BlueprintZoneImageSource::InstallDataset,
-            external_networking_alloc
-                .for_new_external_dns()
-                .expect("got IP for external DNS"),
-        )
-        .expect("added external DNS zone");
-    blueprint_builder
-        .sled_add_zone_external_dns(
-            sled_1,
-            BlueprintZoneImageSource::InstallDataset,
-            external_networking_alloc
-                .for_new_external_dns()
-                .expect("got IP for external DNS"),
-        )
-        .expect("added external DNS zone");
-    blueprint_builder
-        .sled_add_zone_external_dns(
-            sled_2,
-            BlueprintZoneImageSource::InstallDataset,
-            external_networking_alloc
-                .for_new_external_dns()
-                .expect("got IP for external DNS"),
-        )
-        .expect("added external DNS zone");
+    let blueprint1a = sim
+        .blueprint_edit_latest("add external DNS zones", |blueprint_builder| {
+            let mut external_networking_alloc =
+                ExternalNetworkingAllocator::from_current_zones(
+                    &blueprint_builder,
+                    &external_ip_policy,
+                )
+                .expect("constructed allocator");
+            blueprint_builder
+                .sled_add_zone_external_dns(
+                    sled_1,
+                    BlueprintZoneImageSource::InstallDataset,
+                    external_networking_alloc
+                        .for_new_external_dns()
+                        .expect("got IP for external DNS"),
+                )
+                .expect("added external DNS zone");
+            blueprint_builder
+                .sled_add_zone_external_dns(
+                    sled_1,
+                    BlueprintZoneImageSource::InstallDataset,
+                    external_networking_alloc
+                        .for_new_external_dns()
+                        .expect("got IP for external DNS"),
+                )
+                .expect("added external DNS zone");
+            blueprint_builder
+                .sled_add_zone_external_dns(
+                    sled_2,
+                    BlueprintZoneImageSource::InstallDataset,
+                    external_networking_alloc
+                        .for_new_external_dns()
+                        .expect("got IP for external DNS"),
+                )
+                .expect("added external DNS zone");
 
-    let blueprint1a = blueprint_builder.build(BlueprintSource::Test);
+            Ok(())
+        })
+        .expect("built new blueprint");
+
     assert_eq!(
         blueprint1a
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
@@ -803,24 +800,11 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     );
 
     // Plan with external DNS.
-    let input_builder = input.clone().into_builder();
-    let input = input_builder.build();
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1a,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (added external DNS zones):\n{}", diff.display());
 
-    // The first sled should have three external DNS zones.
+    // This blueprint should have three external DNS zones.
     assert_eq!(
         blueprint2
             .all_omicron_zones(BlueprintZoneDisposition::is_in_service)
@@ -833,21 +817,9 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     // Expunge the first sled and re-plan. That gets us two expunged
     // external DNS zones; two external DNS zones should then be added to
     // the remaining sleds.
-    let mut input_builder = input.into_builder();
-    input_builder.expunge_sled(&sled_1).expect("found sled 1 again");
-    let input = input_builder.build();
-    let blueprint3 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint2,
-        &input,
-        "test_blueprint3",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to re-plan");
-
+    sim.sled_expunge("expunge sled with 2 external DNS zones", sled_1)
+        .expect("expunged sled");
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint3.diff_since_blueprint(&blueprint2);
     println!("2 -> 3 (expunged sled):\n{}", diff.display());
     assert_eq!(
@@ -884,13 +856,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     );
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint3,
-        &input,
-        &collection,
-        TEST_NAME,
-    );
+    sim_assert_planning_makes_no_changes(&mut sim);
 
     logctx.cleanup_successful();
 }
