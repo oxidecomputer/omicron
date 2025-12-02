@@ -486,18 +486,18 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
         output.cleanup_report,
         Some(SupportBundleCleanupReport { ..Default::default() })
     );
+
+    let report = output.collection_report.as_ref().expect("Missing report");
+    assert_eq!(report.bundle, bundle.id);
+    assert!(report.listed_in_service_sleds);
+    assert!(report.listed_sps);
+    assert!(report.activated_in_db_ok);
     assert_eq!(
-        output.collection_report,
-        Some(SupportBundleCollectionReport {
-            bundle: bundle.id,
-            listed_in_service_sleds: true,
-            listed_sps: true,
-            activated_in_db_ok: true,
-            ereports: Some(SupportBundleEreportStatus {
-                n_collected: 0,
-                n_found: 0,
-                errors: Vec::new()
-            })
+        report.ereports,
+        Some(SupportBundleEreportStatus {
+            n_collected: 0,
+            n_found: 0,
+            errors: Vec::new()
         })
     );
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
@@ -588,18 +588,17 @@ async fn test_support_bundle_range_requests(
     // Finish collection, activate the bundle.
     let output = activate_bundle_collection_background_task(&cptestctx).await;
     assert_eq!(output.collection_err, None);
+    let report = output.collection_report.as_ref().expect("Missing report");
+    assert_eq!(report.bundle, bundle.id);
+    assert!(report.listed_in_service_sleds);
+    assert!(report.listed_sps);
+    assert!(report.activated_in_db_ok);
     assert_eq!(
-        output.collection_report,
-        Some(SupportBundleCollectionReport {
-            bundle: bundle.id,
-            listed_in_service_sleds: true,
-            listed_sps: true,
-            activated_in_db_ok: true,
-            ereports: Some(SupportBundleEreportStatus {
-                n_collected: 0,
-                n_found: 0,
-                errors: Vec::new()
-            })
+        report.ereports,
+        Some(SupportBundleEreportStatus {
+            n_collected: 0,
+            n_found: 0,
+            errors: Vec::new()
         })
     );
     let bundle = bundle_get(&client, bundle.id).await.unwrap();

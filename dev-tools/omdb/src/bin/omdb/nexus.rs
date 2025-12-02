@@ -98,6 +98,7 @@ use std::fs::OpenOptions;
 use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use support_bundle_viewer::LocalFileAccess;
 use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
@@ -2612,6 +2613,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 listed_in_service_sleds,
                 listed_sps,
                 activated_in_db_ok,
+                mut steps,
                 ereports,
             }) = collection_report
             {
@@ -2623,6 +2625,19 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!(
                     "      Bundle was able to list service processors: {listed_sps}"
                 );
+
+                steps.sort_unstable_by_key(|s| s.start);
+                for step in steps {
+                    let duration = (step.end - step.start)
+                        .to_std()
+                        .unwrap_or(Duration::from_millis(0));
+                    println!(
+                        "      Step {} ({}ms): {}",
+                        step.name,
+                        duration.as_millis(),
+                        step.status
+                    );
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
