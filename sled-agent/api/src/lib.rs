@@ -61,6 +61,8 @@ mod v3;
 mod v6;
 /// Copies of data types that changed between v8 and v9.
 mod v8;
+/// Copies of data types that changed between v10 and v11.
+mod v10;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -682,7 +684,7 @@ pub trait SledAgentApi {
     #[endpoint {
         method = GET,
         path = "/inventory",
-        versions = VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..,
+        versions = VERSION_ADD_SMF_SERVICES_HEALTH_CHECK..,
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
@@ -692,6 +694,22 @@ pub trait SledAgentApi {
     // seem to work. Looks like I need to create a whole new module and endpoint
     // for v10_inventory like the others?
 
+    /// Fetch basic information about this sled
+    #[endpoint {
+        operation_id = "inventory",
+        method = GET,
+        path = "/inventory",
+        versions =
+            VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES..VERSION_ADD_SMF_SERVICES_HEALTH_CHECK,
+    }]
+    async fn v10_inventory(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<v10::Inventory>, HttpError> {
+        Self::inventory(rqctx)
+            .await
+            .map(|HttpResponseOk(inv)| HttpResponseOk(v10::Inventory::from(inv)))
+    }
+    
     /// Fetch basic information about this sled
     #[endpoint {
         operation_id = "inventory",
