@@ -61,7 +61,7 @@ struct ArtifactDestination {
     // Zpool containing `control_plane_dir`, if we're on a real gimlet.
     control_plane_zpool: Option<ZpoolName>,
 
-    // Directory in which we save the measurements
+    // Directory in which we save the measurements.
     measurement_dir: Utf8PathBuf,
 }
 
@@ -72,7 +72,7 @@ impl ArtifactDestination {
         std::fs::create_dir_all(&control_plane_dir)
             .with_context(|| format!("error creating directories at {dir}"))?;
 
-        // for now we store the measurements within the install data set
+        // For now we store the measurements within the install dataset.
         let measurement_dir = control_plane_dir.join("measurements");
         std::fs::create_dir_all(&measurement_dir)
             .with_context(|| format!("error creating directories at {dir}"))?;
@@ -228,7 +228,7 @@ impl<'a> ArtifactWriter<'a> {
         control_plane_id: &'a ArtifactHashId,
         control_plane_zones: &'a ControlPlaneZoneImages,
 
-        measurement_corpus: &'a Vec<MeasurementToWrite>,
+        measurement_corpus: &'a [MeasurementToWrite],
 
         destination: WriteDestination,
     ) -> Self {
@@ -564,8 +564,7 @@ struct ArtifactsToWrite<'a> {
     control_plane_zones: &'a ControlPlaneZoneImages,
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
-
-    measurement_corpus: &'a Vec<MeasurementToWrite>,
+    measurement_corpus: &'a [MeasurementToWrite],
 }
 
 impl ArtifactsToWrite<'_> {

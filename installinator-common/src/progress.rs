@@ -52,7 +52,7 @@ pub enum InstallinatorComponent {
     /// The control plane component.
     ControlPlane,
 
-    /// The measurement corpus component
+    /// The measurement corpus component.
     MeasurementCorpus,
 
     /// A component that means "both the host and the control plane", used for
@@ -197,7 +197,7 @@ pub enum WriteComponent {
     /// The control plane component.
     ControlPlane,
 
-    /// The measurement corpus
+    /// The measurement corpus.
     MeasurementCorpus,
 
     /// Future variants that might be unknown.
