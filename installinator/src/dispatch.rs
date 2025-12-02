@@ -418,7 +418,7 @@ impl InstallOpts {
                                     c.hash.hash
                                 ),
                                 async move |cx2| {
-                                    let control_plane_artifact =
+                                    let measurement_artifact =
                                         fetch_artifact(
                                             &cx2, &c.hash, discovery, log,
                                         )
@@ -430,15 +430,15 @@ impl InstallOpts {
                                     // downloaded host phase 2 artifact.
                                     check_downloaded_artifact_hash(
                                         "measurement corpus",
-                                        control_plane_artifact.artifact.clone(),
+                                        measurement_artifact.artifact.clone(),
                                         c.hash.hash,
                                     )
                                     .await?;
 
                                     let address =
-                                        control_plane_artifact.peer.address();
+                                        measurement_artifact.peer.address();
 
-                                    StepSuccess::new(MidCorpus { name: c.name, artifact: control_plane_artifact})
+                                    StepSuccess::new(MidCorpus { name: c.name, artifact: measurement_artifact })
                                     .with_metadata(
                                         InstallinatorCompletionMetadata::Download {
                                             address,

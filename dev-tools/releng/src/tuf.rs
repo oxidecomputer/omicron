@@ -78,10 +78,10 @@ pub(crate) async fn build_tuf_repo(
 
     let mut measurement_corpus = vec![];
 
-    for entry in std::fs::read_dir(
+    for entry in fs::read_dir(
         output_dir.join("hubris-staging").join("measurement_corpus"),
     )
-    .context("failed to read `hubris-staging/measurement_corpus")?
+    .context("failed to read `hubris-staging/measurement_corpus`")?
     {
         let entry = entry?;
 
@@ -96,10 +96,10 @@ pub(crate) async fn build_tuf_repo(
         });
     }
 
-    for entry in std::fs::read_dir(
+    for entry in fs::read_dir(
         output_dir.join("hubris-production").join("measurement_corpus"),
     )
-    .context("failed to read `hubris-production/measurement_corpus")?
+    .context("failed to read `hubris-production/measurement_corpus`")?
     {
         let entry = entry?;
         let corim = rats_corim::Corim::from_file(entry.path())?;
