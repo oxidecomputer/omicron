@@ -292,6 +292,14 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
 
+        // Test the whatis command with two known UUIDs
+        &[
+            "db",
+            "whatis",
+            "001de000-5110-4000-8000-000000000000",
+            "001de000-05e4-4000-8000-000000004007",
+        ],
+
         // This operation will set the "db_metadata_nexus" state to quiesced.
         //
         // This would normally only be set by a Nexus as it shuts itself down;
