@@ -26,6 +26,7 @@ use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::errors::KeyError;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintSource;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::Collection;
@@ -224,6 +225,19 @@ impl ReconfiguratorCliTestState {
             state.system_mut().add_collection(collection)?;
             Ok(result)
         })
+    }
+
+    /// State change helper: set the Clickhouse cluster policy.
+    pub fn set_clickhouse_policy(
+        &mut self,
+        description: &str,
+        policy: ClickhousePolicy,
+    ) {
+        self.change_description(description, |desc| {
+            desc.clickhouse_policy(policy);
+            Ok(())
+        })
+        .expect("closure can't fail");
     }
 
     /// State change helper: edit the latest blueprint, inserting a new latest

@@ -1,5 +1,5 @@
-from: blueprint ffc8884b-ff7f-46d8-902d-60ab2328c6da
-to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
+from: blueprint a32cce67-a0c6-414c-9c50-701c5f088038
+to:   blueprint 71be0671-4467-45a9-956c-fb5aebb9b455
 
  MODIFIED SLEDS:
 
@@ -90,9 +90,9 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     oxp_e6d5be67-1b3d-4a02-8814-fa5501b43753/crypt/local_storage                                                     63f0a7cf-698c-4a67-861c-73094bc08fd2   in service     none      none          off        
     oxp_f5ba6818-6e84-4636-acd0-ecffe39d9ac1/crypt/local_storage                                                     5df23613-544e-4557-8f6b-907fa0ce3a33   in service     none      none          off        
     oxp_fbf819d2-c7bc-4cd4-874a-aa96d511b871/crypt/local_storage                                                     8d5149b7-281d-4d3e-ad0e-463bb945ed0f   in service     none      none          off        
-*   oxp_251b29f7-a35b-403f-bde4-2622553ff800/crypt/clickhouse_keeper                                                 7cf113c9-a11a-415a-80f2-15352cb0abab   - in service   none      none          off        
+*   oxp_251b29f7-a35b-403f-bde4-2622553ff800/crypt/clickhouse_keeper                                                 50745558-51b1-4cf9-9a58-7cf6435e7d68   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
-*   oxp_251b29f7-a35b-403f-bde4-2622553ff800/crypt/zone/oxz_clickhouse_keeper_72e3f7d6-e343-4a24-aab6-54ff11cccee4   d983c3a3-84fe-4258-8d49-ee063d413d03   - in service   none      none          off        
+*   oxp_251b29f7-a35b-403f-bde4-2622553ff800/crypt/zone/oxz_clickhouse_keeper_b1e5bb14-1401-46f5-a9bd-d5975707e45e   0b049017-1e38-4679-976c-2a6da9509145   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
 
 
@@ -115,7 +115,7 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     internal_dns        cdedaa1a-c10a-4462-ab70-99a2eecbe237   install dataset   in service       fd00:1122:3344:1::1   
     internal_ntp        0e2e26fd-1771-438e-82ab-a414ac809fa2   install dataset   in service       fd00:1122:3344:102::21
     nexus               6c29dbdd-fc70-45ad-be24-ecccb3ffed5a   install dataset   in service       fd00:1122:3344:102::22
-*   clickhouse_keeper   72e3f7d6-e343-4a24-aab6-54ff11cccee4   install dataset   - in service     fd00:1122:3344:102::2f
+*   clickhouse_keeper   b1e5bb14-1401-46f5-a9bd-d5975707e45e   install dataset   - in service     fd00:1122:3344:102::2f
      └─                                                                          + expunged ⏳                           
 
 
@@ -204,13 +204,13 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     oxp_b731fdb2-4d3f-46fd-9321-867359ec83b5/crypt/local_storage                                                     f6692072-ab4c-4038-9658-0e9b73a39c11   in service     none      none          off        
     oxp_ce991267-dc79-44bb-8f4a-8eb820bd71c1/crypt/local_storage                                                     d565db50-49c7-428e-ad28-0887bd8bbe52   in service     none      none          off        
     oxp_d2a24a48-4d99-47fa-9f07-d2e5761ac462/crypt/local_storage                                                     5d664d43-b244-4ffe-8a3b-4a506d740593   in service     none      none          off        
-*   oxp_310d2663-5e11-4fb1-aa9f-47690491c0e6/crypt/clickhouse_keeper                                                 c8f24d19-cbf6-4bbb-9e0e-7da8dae77e72   - in service   none      none          off        
+*   oxp_310d2663-5e11-4fb1-aa9f-47690491c0e6/crypt/clickhouse_keeper                                                 a5fe655c-2d6c-42b5-ba62-29090d2cb479   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
-*   oxp_310d2663-5e11-4fb1-aa9f-47690491c0e6/crypt/clickhouse_server                                                 963bda52-8b08-412b-a4fc-ce652e3fe0d4   - in service   none      none          off        
+*   oxp_310d2663-5e11-4fb1-aa9f-47690491c0e6/crypt/clickhouse_server                                                 9c6df7c8-e186-4302-a6d1-fecf59352290   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
-*   oxp_310d2663-5e11-4fb1-aa9f-47690491c0e6/crypt/zone/oxz_clickhouse_keeper_eb2c2c36-492e-42c5-8f61-f50d5b0d0d2d   01a93db9-35cc-4fbd-82e9-0181f96f2057   - in service   none      none          off        
+*   oxp_310d2663-5e11-4fb1-aa9f-47690491c0e6/crypt/zone/oxz_clickhouse_keeper_c5330baf-0351-44fc-b245-dab453252db4   37446c96-f545-4081-9acc-66a9f23aa75e   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
-*   oxp_310d2663-5e11-4fb1-aa9f-47690491c0e6/crypt/zone/oxz_clickhouse_server_6d9f259c-6228-4695-bc13-b99a50ec3f33   57ac4eab-f839-4f08-bb5d-f11e07bcee30   - in service   none      none          off        
+*   oxp_310d2663-5e11-4fb1-aa9f-47690491c0e6/crypt/zone/oxz_clickhouse_server_6cbb8312-0b67-4bb6-8435-a012c3710cc5   50e0c902-6a85-4138-b9c6-e52f4ee43e55   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
 
 
@@ -232,9 +232,9 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     internal_dns        7ec7cbd5-00a5-475f-8f4f-300b6e8b4d68   install dataset   in service       fd00:1122:3344:2::1   
     internal_ntp        72dc2dd7-f58a-4393-862a-c98f2df63eeb   install dataset   in service       fd00:1122:3344:103::21
     nexus               ce64d8d1-c379-4ef4-a4da-c43a1d200888   install dataset   in service       fd00:1122:3344:103::22
-*   clickhouse_keeper   eb2c2c36-492e-42c5-8f61-f50d5b0d0d2d   install dataset   - in service     fd00:1122:3344:103::2e
+*   clickhouse_keeper   c5330baf-0351-44fc-b245-dab453252db4   install dataset   - in service     fd00:1122:3344:103::2e
      └─                                                                          + expunged ⏳                           
-*   clickhouse_server   6d9f259c-6228-4695-bc13-b99a50ec3f33   install dataset   - in service     fd00:1122:3344:103::2f
+*   clickhouse_server   6cbb8312-0b67-4bb6-8435-a012c3710cc5   install dataset   - in service     fd00:1122:3344:103::2f
      └─                                                                          + expunged ⏳                           
 
 
@@ -323,16 +323,16 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     oxp_c0147db4-2849-4a83-825c-4c3836f99067/crypt/local_storage                                                     a0d8fa11-5712-40bf-8667-1f536adf7d3f   in service     none      none          off        
     oxp_c2fab4d8-32a9-4840-b4fb-f5bf880c0d54/crypt/local_storage                                                     9a307e90-3cbf-4477-9d0e-cca8dce74ee3   in service     none      none          off        
     oxp_e2ab36af-e0b4-430e-b729-10826dc23e6e/crypt/local_storage                                                     d933444a-6325-4049-b6e4-cb7f2471577e   in service     none      none          off        
-*   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/clickhouse_keeper                                                 cc5437e5-5ec6-4a73-bd30-7c8f0e007d48   - in service   none      none          off        
+*   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/clickhouse_keeper                                                 469caf78-0001-4c2d-81ff-3ee101fe4fcd   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
-*   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/clickhouse_server                                                 423fb7d0-c737-4240-9733-a49d2c518ffd   - in service   none      none          off        
+*   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/clickhouse_server                                                 67170b1d-6a8f-4a4c-af90-bd78759037c0   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
-*   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/zone/oxz_clickhouse_keeper_23587b51-6938-4897-9e87-c83c49a857c3   3dd59904-b3de-4677-930a-122f4cc6f123   - in service   none      none          off        
+*   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/zone/oxz_clickhouse_keeper_c6bbc07a-10c4-416c-a95d-3ef5424b3818   cdf8dd38-7afc-402b-a680-63d72622d594   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
-*   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/zone/oxz_clickhouse_server_b0cfb814-4ba5-47d3-9d91-894e6e320acd   c63f1f94-5656-4b51-adb6-180a90e108f7   - in service   none      none          off        
+*   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/zone/oxz_clickhouse_server_8ec3ea60-5f3e-4457-aa69-743eef095336   7a38b056-43a3-406e-aba6-e3ebb26d31c6   - in service   none      none          off        
      └─                                                                                                                                                     + expunged                                        
-+   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/clickhouse                                                        dcb71de5-01c7-438b-ab30-f4dbd40b7d37   in service     none      none          off        
-+   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/zone/oxz_clickhouse_36861d9e-6c14-4414-a07b-dcdd781ee395          9afe8a01-9ac5-4b11-b122-c953b4df4704   in service     none      none          off        
++   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/clickhouse                                                        5915f71a-ad0a-423a-96b2-cd1177803075   in service     none      none          off        
++   oxp_0b065954-8656-4a0e-b347-e04231999c56/crypt/zone/oxz_clickhouse_0cdabbf2-b9d3-45ac-85ec-9eb7afe53498          b13e8c59-53eb-43d8-98d3-6eb9a72317fe   in service     none      none          off        
 
 
     omicron zones:
@@ -353,11 +353,11 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
     internal_dns        474ff5a0-1a4f-4d93-adab-d415a0ef587c   install dataset   in service       fd00:1122:3344:3::1   
     internal_ntp        f478b9ee-c40b-47bf-af8b-e0ce52db5ebd   install dataset   in service       fd00:1122:3344:101::21
     nexus               cdc9560a-4b72-479f-b635-23ec32a70f2a   install dataset   in service       fd00:1122:3344:101::22
-*   clickhouse_keeper   23587b51-6938-4897-9e87-c83c49a857c3   install dataset   - in service     fd00:1122:3344:101::2e
+*   clickhouse_keeper   c6bbc07a-10c4-416c-a95d-3ef5424b3818   install dataset   - in service     fd00:1122:3344:101::2e
      └─                                                                          + expunged ⏳                           
-*   clickhouse_server   b0cfb814-4ba5-47d3-9d91-894e6e320acd   install dataset   - in service     fd00:1122:3344:101::2f
+*   clickhouse_server   8ec3ea60-5f3e-4457-aa69-743eef095336   install dataset   - in service     fd00:1122:3344:101::2f
      └─                                                                          + expunged ⏳                           
-+   clickhouse          36861d9e-6c14-4414-a07b-dcdd781ee395   install dataset   in service       fd00:1122:3344:101::30
++   clickhouse          0cdabbf2-b9d3-45ac-85ec-9eb7afe53498   install dataset   in service       fd00:1122:3344:101::30
 
 
  COCKROACHDB SETTINGS:
@@ -379,21 +379,21 @@ to:   blueprint d895ef50-9978-454c-bdfb-b8dbe2c9a918
 -   max used server id:::::::::::::::::::::::::::::   2
 -   max used keeper id:::::::::::::::::::::::::::::   3
 -   cluster name:::::::::::::::::::::::::::::::::::   oximeter_cluster
--   cluster secret:::::::::::::::::::::::::::::::::   7894a059-89b5-407b-ad17-1d8d885e2f67
+-   cluster secret:::::::::::::::::::::::::::::::::   7c755290-ef4c-4ba3-8b86-e19966edc587
 -   highest seen keeper leader committed log index:   0
 
     clickhouse keepers at generation 2:
     ------------------------------------------------
     zone id                                keeper id
     ------------------------------------------------
--   23587b51-6938-4897-9e87-c83c49a857c3   1        
--   72e3f7d6-e343-4a24-aab6-54ff11cccee4   2        
--   eb2c2c36-492e-42c5-8f61-f50d5b0d0d2d   3        
+-   b1e5bb14-1401-46f5-a9bd-d5975707e45e   1        
+-   c5330baf-0351-44fc-b245-dab453252db4   2        
+-   c6bbc07a-10c4-416c-a95d-3ef5424b3818   3        
 
     clickhouse servers at generation 2:
     ------------------------------------------------
     zone id                                server id
     ------------------------------------------------
--   6d9f259c-6228-4695-bc13-b99a50ec3f33   1        
--   b0cfb814-4ba5-47d3-9d91-894e6e320acd   2        
+-   6cbb8312-0b67-4bb6-8435-a012c3710cc5   1        
+-   8ec3ea60-5f3e-4457-aa69-743eef095336   2        
 

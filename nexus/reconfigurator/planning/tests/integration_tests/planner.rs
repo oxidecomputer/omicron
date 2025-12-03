@@ -2154,14 +2154,13 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     let target_servers = 2;
 
     // Enable clickhouse clusters via policy
-    sim.change_description("enable clickhouse cluster", |desc| {
-        desc.clickhouse_policy(clickhouse_policy(ClickhouseMode::Both {
+    sim.set_clickhouse_policy(
+        "enable clustered",
+        clickhouse_policy(ClickhouseMode::Both {
             target_servers,
             target_keepers,
-        }));
-        Ok(())
-    })
-    .unwrap();
+        }),
+    );
 
     let blueprint2 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint2.diff_since_blueprint(&blueprint1);
@@ -2283,14 +2282,13 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     // but reconfigurations may only add or remove one node at a time.
     // Enable clickhouse clusters via policy
     let target_keepers = 5;
-    sim.change_description("enable clickhouse cluster", |desc| {
-        desc.clickhouse_policy(clickhouse_policy(ClickhouseMode::Both {
+    sim.set_clickhouse_policy(
+        "enable clickhouse cluster",
+        clickhouse_policy(ClickhouseMode::Both {
             target_servers,
             target_keepers,
-        }));
-        Ok(())
-    })
-    .unwrap();
+        }),
+    );
     let blueprint5 = sim.run_planner().expect("planning succeeded");
 
     let diff = blueprint5.diff_since_blueprint(&blueprint4);
@@ -2422,14 +2420,13 @@ fn test_expunge_clickhouse_clusters() {
     let target_servers = 2;
 
     // Enable clickhouse clusters via policy
-    sim.change_description("enable clickhouse cluster", |desc| {
-        desc.clickhouse_policy(clickhouse_policy(ClickhouseMode::Both {
+    sim.set_clickhouse_policy(
+        "enable clickhouse cluster",
+        clickhouse_policy(ClickhouseMode::Both {
             target_servers,
             target_keepers,
-        }));
-        Ok(())
-    })
-    .unwrap();
+        }),
+    );
 
     // Create a new blueprint to deploy all our clickhouse zones
     let blueprint2 = sim.run_planner().expect("planning succeeded");
@@ -2612,41 +2609,25 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     static TEST_NAME: &str =
         "planner_expunge_clickhouse_zones_after_policy_is_changed";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&log, TEST_NAME).build();
-    let collection = example.collection;
-
-    let mut input_builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded example system");
 
     let target_keepers = 3;
     let target_servers = 2;
 
     // Enable clickhouse clusters via policy
-    input_builder.policy_mut().clickhouse_policy =
-        Some(clickhouse_policy(ClickhouseMode::Both {
+    sim.set_clickhouse_policy(
+        "enable clickhouse cluster",
+        clickhouse_policy(ClickhouseMode::Both {
             target_servers,
             target_keepers,
-        }));
-    let input = input_builder.build();
+        }),
+    );
 
     // Create a new blueprint to deploy all our clickhouse zones
-    let blueprint2 = Planner::new_based_on(
-        log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
 
     // We should see zones for 3 clickhouse keepers, and 2 servers created
     let active_zones: Vec<_> = blueprint2
@@ -2674,26 +2655,14 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
         1,
         active_zones.iter().filter(|z| z.zone_type.is_clickhouse()).count()
     );
-    let mut input_builder = input.into_builder();
-    input_builder.policy_mut().clickhouse_policy =
-        Some(clickhouse_policy(ClickhouseMode::ClusterOnly {
+    sim.set_clickhouse_policy(
+        "disable single-node",
+        clickhouse_policy(ClickhouseMode::ClusterOnly {
             target_servers,
             target_keepers,
-        }));
-    let input = input_builder.build();
-
-    // Create a new blueprint with `ClickhouseMode::ClusterOnly`
-    let blueprint3 = Planner::new_based_on(
-        log.clone(),
-        &blueprint2,
-        &input,
-        "test_blueprint3",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+        }),
+    );
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
 
     // We should have expunged our single-node clickhouse zone
     let expunged_zones: Vec<_> = blueprint3
@@ -2705,23 +2674,11 @@ fn test_expunge_clickhouse_zones_after_policy_is_changed() {
     assert!(expunged_zones.first().unwrap().zone_type.is_clickhouse());
 
     // Disable clickhouse clusters via policy and restart single node
-    let mut input_builder = input.into_builder();
-    input_builder.policy_mut().clickhouse_policy =
-        Some(clickhouse_policy(ClickhouseMode::SingleNodeOnly));
-    let input = input_builder.build();
-
-    // Create a new blueprint for `ClickhouseMode::SingleNodeOnly`
-    let blueprint4 = Planner::new_based_on(
-        log.clone(),
-        &blueprint3,
-        &input,
-        "test_blueprint4",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp4")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+    sim.set_clickhouse_policy(
+        "re-enable single-node",
+        clickhouse_policy(ClickhouseMode::SingleNodeOnly),
+    );
+    let blueprint4 = sim.run_planner().expect("planning succeeded");
 
     let diff = blueprint4.diff_since_blueprint(&blueprint3);
     assert_contents(
