@@ -402,11 +402,8 @@ fn test_add_multiple_nexus_to_one_sled() {
     // (The default policy for internal DNS is higher than one, and we don't
     // want that to pollute our diffs below.)
     let target_nexus_zone_count = 5;
-    sim.change_state("update target zone counts", |state| {
-        state
-            .system_mut()
-            .description_mut()
-            .set_target_nexus_zone_count(target_nexus_zone_count)
+    sim.change_description("update target zone counts", |desc| {
+        desc.set_target_nexus_zone_count(target_nexus_zone_count)
             .set_target_internal_dns_zone_count(1);
         Ok(())
     })
@@ -474,8 +471,8 @@ fn test_spread_additional_nexus_zones_across_sleds() {
     }
 
     // Now run the planner with a high number of target Nexus zones.
-    sim.change_state("update target zone counts", |state| {
-        state.system_mut().description_mut().set_target_nexus_zone_count(14);
+    sim.change_description("update target zone counts", |desc| {
+        desc.set_target_nexus_zone_count(14);
         Ok(())
     })
     .expect("changed policy");
@@ -551,11 +548,8 @@ fn test_spread_internal_dns_zones_across_sleds() {
     // it will fail because the target is > INTERNAL_DNS_REDUNDANCY.
     {
         let mut sim = sim.clone();
-        sim.change_state("change policy", |state| {
-            state
-                .system_mut()
-                .description_mut()
-                .set_target_internal_dns_zone_count(14);
+        sim.change_description("change policy", |desc| {
+            desc.set_target_internal_dns_zone_count(14);
             Ok(())
         })
         .expect("changed policy");
@@ -693,14 +687,13 @@ fn test_reuse_external_ips_from_expunged_zones() {
     // Set the target Nexus zone count to one that will completely exhaust
     // the service IP pool. This will force reuse of the IP that was
     // allocated to the expunged Nexus zone.
-    sim.change_state("adjust target Nexus count", |state| {
-        let description = state.system_mut().description_mut();
-        let num_available_external_ips = description
+    sim.change_description("adjust target Nexus count", |desc| {
+        let num_available_external_ips = desc
             .external_ip_policy()
             .clone()
             .into_non_external_dns_ips()
             .count();
-        description.set_target_nexus_zone_count(num_available_external_ips);
+        desc.set_target_nexus_zone_count(num_available_external_ips);
         Ok(())
     })
     .expect("updated target Nexus count");
@@ -755,19 +748,15 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
         addr.parse::<Ipv4Addr>().expect("can't parse external DNS IP address")
     });
     let external_ip_policy = sim
-        .change_state("add external DNS IPs to policy", |state| {
-            let description = state.system_mut().description_mut();
-
+        .change_description("add external DNS IPs to policy", |desc| {
             // We should not be able to add any external DNS zones yet,
             // because we haven't give it any addresses (which currently
             // come only from RSS). This is not an error, though.
-            assert!(
-                description.external_ip_policy().external_dns_ips().is_empty()
-            );
+            assert!(desc.external_ip_policy().external_dns_ips().is_empty());
             let mut external_networking_alloc =
                 ExternalNetworkingAllocator::from_blueprint(
                     &blueprint1,
-                    description.external_ip_policy(),
+                    desc.external_ip_policy(),
                 )
                 .expect("constructed allocator");
             external_networking_alloc
@@ -775,7 +764,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
                 .expect_err("should not have available IPs for external DNS");
 
             let mut ip_policy =
-                description.external_ip_policy().clone().into_builder();
+                desc.external_ip_policy().clone().into_builder();
 
             // Add a "service IP pool" covering our external DNS IP range.
             ip_policy
@@ -790,7 +779,7 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
             }
 
             let external_ip_policy = ip_policy.build();
-            description.set_external_ip_policy(external_ip_policy.clone());
+            desc.set_external_ip_policy(external_ip_policy.clone());
 
             Ok(external_ip_policy)
         })
@@ -956,13 +945,9 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
     const NEW_EXPUNGED_DISKS: usize = 1;
 
     let mut zpool_rng = TypedUuidRng::from_seed(TEST_NAME, "NewZpools");
-    sim.change_state("add new disks", |state| {
-        let resources = state
-            .system_mut()
-            .description_mut()
-            .get_sled_mut(sled_id)
-            .expect("sled exists")
-            .resources_mut();
+    sim.change_description("add new disks", |desc| {
+        let resources =
+            desc.get_sled_mut(sled_id).expect("sled exists").resources_mut();
         for _ in 0..NEW_IN_SERVICE_DISKS {
             resources.zpools.insert(
                 ZpoolUuid::from(zpool_rng.next()),
@@ -1103,10 +1088,8 @@ fn test_disk_add_expunge_decommission() {
     // Let's expunge a disk. Its disposition should change to `Expunged`
     // but its state should remain active.
     let expunged_disk_id = sim
-        .change_state("expunge one disk", |state| {
-            let expunged_disk = state
-                .system_mut()
-                .description_mut()
+        .change_description("expunge one disk", |desc| {
+            let expunged_disk = desc
                 .get_sled_mut(*sled_id)
                 .unwrap()
                 .resources_mut()
@@ -1267,10 +1250,8 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
                 .or_insert_with(|| 1);
         }
     }
-    sim.change_state("expunge disk with 1 zone", |state| {
-        let (_, disk) = state
-            .system_mut()
-            .description_mut()
+    sim.change_description("expunge disk with 1 zone", |desc| {
+        let (_, disk) = desc
             .get_sled_mut(sled_id)
             .unwrap()
             .resources_mut()
@@ -1462,11 +1443,8 @@ fn test_disk_expungement_removes_zones_transient_filesystem() {
 
     // For that pool, find the physical disk behind it, and mark it
     // expunged.
-    sim.change_state("expunge disk hosting NTP", |state| {
-        state
-            .system_mut()
-            .description_mut()
-            .get_sled_mut(sled_id)
+    sim.change_description("expunge disk hosting NTP", |desc| {
+        desc.get_sled_mut(sled_id)
             .unwrap()
             .resources_mut()
             .zpools
@@ -1583,28 +1561,24 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
         })
         .expect("decommissioned sled");
 
-    sim.change_state("make sleds non-provisionable", |state| {
+    sim.change_description("make sleds non-provisionable", |desc| {
         // Change the sled policy for the nonprovisionable sled.
-        let description = state.system_mut().description_mut();
-        description
-            .sled_set_policy(
-                nonprovisionable_sled_id,
-                SledPolicy::InService {
-                    provision_policy: SledProvisionPolicy::NonProvisionable,
-                },
-            )
-            .expect("set policy");
+        desc.sled_set_policy(
+            nonprovisionable_sled_id,
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+        )
+        .expect("set policy");
 
         // Expunge the expunged and decommissioned sleds.
-        description
-            .sled_expunge(expunged_sled_id)
+        desc.sled_expunge(expunged_sled_id)
             .expect("expunged sled")
             .sled_expunge(decommissioned_sled_id)
             .expect("expunged sled");
 
         // Mark the updated state on the decommissioned sled.
-        description
-            .sled_set_state(decommissioned_sled_id, SledState::Decommissioned)
+        desc.sled_set_state(decommissioned_sled_id, SledState::Decommissioned)
             .expect("set state");
 
         // Change to a high number of target Nexus zones. The
@@ -1616,11 +1590,11 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
         //   add 6 to get to the new policy target of 9
         // * of the remaining 3 sleds, only 2 are eligible for provisioning
         // * each of those 2 sleds should get exactly 3 new Nexuses
-        description.set_target_nexus_zone_count(9);
+        desc.set_target_nexus_zone_count(9);
 
         // Disable addition of zone types we're not checking for below.
-        description.set_target_internal_dns_zone_count(0);
-        description.set_target_crucible_pantry_zone_count(0);
+        desc.set_target_internal_dns_zone_count(0);
+        desc.set_target_crucible_pantry_zone_count(0);
 
         Ok(())
     })
@@ -1854,8 +1828,8 @@ fn planner_decommissions_sleds() {
 
     // Expunge one of the sleds.
     let expunged_sled_id = blueprint1.sleds().next().expect("at least 1 sled");
-    sim.change_state("expunge sled", |state| {
-        state.system_mut().description_mut().sled_expunge(expunged_sled_id)?;
+    sim.change_description("expunge sled", |desc| {
+        desc.sled_expunge(expunged_sled_id)?;
         Ok(())
     })
     .unwrap();
@@ -1885,11 +1859,8 @@ fn planner_decommissions_sleds() {
 
     // Set the state of the expunged sled to decommissioned, and run the
     // planner again.
-    sim.change_state("decommission sled", |state| {
-        state
-            .system_mut()
-            .description_mut()
-            .sled_set_state(expunged_sled_id, SledState::Decommissioned)?;
+    sim.change_description("decommission sled", |desc| {
+        desc.sled_set_state(expunged_sled_id, SledState::Decommissioned)?;
         Ok(())
     })
     .unwrap();
@@ -1927,10 +1898,11 @@ fn planner_decommissions_sleds() {
     // non-empty. At some point we may also want to remove entries from the
     // sled table, but that's a future concern that would come after
     // blueprint cleanup is implemented.
-    sim.change_state("remove decommissioned sled", |state| {
-        state.system_mut().description_mut().sled_remove(expunged_sled_id)?;
+    sim.change_description("remove decommissioned sled", |desc| {
+        desc.sled_remove(expunged_sled_id)?;
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
 
     let blueprint4 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint4.diff_since_blueprint(&blueprint3);

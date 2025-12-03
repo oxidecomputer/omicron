@@ -19,6 +19,7 @@ use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::system::SledBuilder;
+use nexus_reconfigurator_planning::system::SystemDescription;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::errors::KeyError;
@@ -155,6 +156,20 @@ impl ReconfiguratorCliTestState {
         let ret = f(&mut state)?;
         self.sim.commit_and_bump(description.to_string(), state);
         Ok(ret)
+    }
+
+    /// State change helper: change only the system description.
+    pub fn change_description<F, T>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<T>
+    where
+        F: FnOnce(&mut SystemDescription) -> anyhow::Result<T>,
+    {
+        self.change_state(description, |state| {
+            f(state.system_mut().description_mut())
+        })
     }
 
     /// State change helper: generate a new inventory collection from the
