@@ -2055,8 +2055,7 @@ fn test_crucible_pantry() {
         pantry_sleds.len(),
     );
 
-    // Expunge one of the pantry-hosting sleds and re-plan. The planner
-    // should immediately replace the zone with one on another
+    // Expunge one of the pantry-hosting sleds and re-plan. The planner should immediately replace the zone with one on another
     // (non-expunged) sled.
     let expunged_sled_id = pantry_sleds[0];
     sim.sled_expunge("expunge first pantry sled", expunged_sled_id).unwrap();
@@ -2092,9 +2091,9 @@ fn test_single_node_clickhouse() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Use our example system as a starting point.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-    let collection = example.collection;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // We should start with one ClickHouse zone. Find out which sled it's on.
     let clickhouse_sleds = blueprint1
@@ -2112,27 +2111,8 @@ fn test_single_node_clickhouse() {
 
     // Expunge the sled hosting ClickHouse and re-plan. The planner should
     // immediately replace the zone with one on another (non-expunged) sled.
-    let mut input_builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-    input_builder
-        .sleds_mut()
-        .get_mut(&clickhouse_sled)
-        .expect("can't find sled")
-        .policy = SledPolicy::Expunged;
-    let input = input_builder.build();
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to re-plan");
+    sim.sled_expunge("expunge clickhouse sled", clickhouse_sled).unwrap();
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
 
     let diff = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (expunged sled):\n{}", diff.display());
@@ -2147,12 +2127,9 @@ fn test_single_node_clickhouse() {
     );
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     logctx.cleanup_successful();
@@ -2164,13 +2141,11 @@ fn test_single_node_clickhouse() {
 fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     static TEST_NAME: &str = "planner_deploy_all_keeper_nodes";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-    let mut collection = example.collection;
-    verify_blueprint(&blueprint1, &example.input);
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // We shouldn't have a clickhouse cluster config, as we don't have a
     // clickhouse policy set yet
@@ -2179,30 +2154,16 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     let target_servers = 2;
 
     // Enable clickhouse clusters via policy
-    let mut input_builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-    input_builder.policy_mut().clickhouse_policy =
-        Some(clickhouse_policy(ClickhouseMode::Both {
+    sim.change_description("enable clickhouse cluster", |desc| {
+        desc.clickhouse_policy(clickhouse_policy(ClickhouseMode::Both {
             target_servers,
             target_keepers,
         }));
+        Ok(())
+    })
+    .unwrap();
 
-    // Creating a new blueprint should deploy all the new clickhouse zones
-    let input = input_builder.build();
-    let blueprint2 = Planner::new_based_on(
-        log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
-
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint2.diff_since_blueprint(&blueprint1);
     assert_contents(
         "tests/output/planner_deploy_all_keeper_nodes_1_2.txt",
@@ -2265,17 +2226,7 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
 
     // Planning again without changing inventory should result in the same
     // state
-    let blueprint3 = Planner::new_based_on(
-        log.clone(),
-        &blueprint2,
-        &input,
-        "test_blueprint3",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
 
     assert_eq!(
         blueprint2.clickhouse_cluster_config,
@@ -2304,20 +2255,12 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
             .cloned()
             .collect(),
     };
-    collection.clickhouse_keeper_cluster_membership.insert(membership);
+    sim.generate_inventory_customized("add membership", |builder| {
+        builder.found_clickhouse_keeper_cluster_membership(membership);
+        Ok(())
+    }).unwrap();
 
-    let blueprint4 = Planner::new_based_on(
-        log.clone(),
-        &blueprint3,
-        &input,
-        "test_blueprint4",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp4")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
-
+    let blueprint4 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint4.diff_since_blueprint(&blueprint3);
     assert_contents(
         "tests/output/planner_deploy_all_keeper_nodes_3_4.txt",
@@ -2339,24 +2282,15 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     // but reconfigurations may only add or remove one node at a time.
     // Enable clickhouse clusters via policy
     let target_keepers = 5;
-    let mut input_builder = input.into_builder();
-    input_builder.policy_mut().clickhouse_policy =
-        Some(clickhouse_policy(ClickhouseMode::Both {
+    sim.change_description("enable clickhouse cluster", |desc| {
+        desc.clickhouse_policy(clickhouse_policy(ClickhouseMode::Both {
             target_servers,
             target_keepers,
         }));
-    let input = input_builder.build();
-    let blueprint5 = Planner::new_based_on(
-        log.clone(),
-        &blueprint4,
-        &input,
-        "test_blueprint5",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp5")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+        Ok(())
+    })
+    .unwrap();
+    let blueprint5 = sim.run_planner().expect("planning succeeded");
 
     let diff = blueprint5.diff_since_blueprint(&blueprint4);
     assert_contents(
@@ -2394,18 +2328,7 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
 
     // Planning again without updating inventory results in the same
     // `ClickhouseClusterConfig`
-    let blueprint6 = Planner::new_based_on(
-        log.clone(),
-        &blueprint5,
-        &input,
-        "test_blueprint6",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp6")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
-
+    let blueprint6 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint6.diff_since_blueprint(&blueprint5);
     assert_contents(
         "tests/output/planner_deploy_all_keeper_nodes_5_6.txt",
@@ -2429,20 +2352,12 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
             .cloned()
             .collect(),
     };
-    collection.clickhouse_keeper_cluster_membership.insert(membership);
+    sim.generate_inventory_customized("add membership", |builder| {
+        builder.found_clickhouse_keeper_cluster_membership(membership);
+        Ok(())
+    }).unwrap();
 
-    let blueprint7 = Planner::new_based_on(
-        log.clone(),
-        &blueprint6,
-        &input,
-        "test_blueprint7",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp7")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
-
+    let blueprint7 = sim.run_planner().expect("planning succeeded");
     let bp7_config = blueprint7.clickhouse_cluster_config.as_ref().unwrap();
     assert_eq!(bp7_config.generation, bp6_config.generation.next());
     assert_eq!(
@@ -2470,19 +2385,12 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
             .cloned()
             .collect(),
     };
-    collection.clickhouse_keeper_cluster_membership.insert(membership);
-    let blueprint8 = Planner::new_based_on(
-        log.clone(),
-        &blueprint7,
-        &input,
-        "test_blueprint8",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp8")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+    sim.generate_inventory_customized("add membership", |builder| {
+        builder.found_clickhouse_keeper_cluster_membership(membership);
+        Ok(())
+    }).unwrap();
 
+    let blueprint8 = sim.run_planner().expect("planning succeeded");
     let bp8_config = blueprint8.clickhouse_cluster_config.as_ref().unwrap();
     assert_eq!(bp8_config.generation, bp7_config.generation);
     assert_eq!(bp8_config.max_used_keeper_id, bp7_config.max_used_keeper_id);

@@ -13,6 +13,7 @@ use crate::CollectionIdOpt;
 use crate::ReconfiguratorSim;
 use crate::cmd_blueprint_plan;
 use anyhow::Context;
+use nexus_inventory::CollectionBuilder;
 use nexus_inventory::now_db_precision;
 use nexus_reconfigurator_blippy::Blippy;
 use nexus_reconfigurator_blippy::BlippyReportSortKey;
@@ -182,6 +183,26 @@ impl ReconfiguratorCliTestState {
             let inventory = state.to_collection_builder()?.build();
             state.system_mut().add_collection(inventory)?;
             Ok(())
+        })
+    }
+
+    /// State change helper: generate a new inventory collection from the
+    /// current simulator state.
+    ///
+    /// `f` provides an opportunity to customize the collection.
+    pub fn generate_inventory_customized<F, T>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<T>
+    where
+        F: FnOnce(&mut CollectionBuilder) -> anyhow::Result<T>,
+    {
+        self.change_state(description, |state| {
+            let mut builder = state.to_collection_builder()?;
+            let result = f(&mut builder)?;
+            state.system_mut().add_collection(builder.build())?;
+            Ok(result)
         })
     }
 
