@@ -18,7 +18,6 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::object_get;
 use nexus_test_utils::resource_helpers::object_get_error;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::test_setup;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::{TufRepoUpload, TufRepoUploadStatus};
@@ -173,9 +172,11 @@ impl TestRepo {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload_unconfigured() -> Result<()> {
-    let cptestctx =
-        test_setup::<omicron_nexus::Server>("test_update_uninitialized", 0)
-            .await;
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+        "test_repo_upload_unconfigured",
+    )
+    .start::<omicron_nexus::Server>()
+    .await;
     let client = &cptestctx.external_client;
     let logctx = &cptestctx.logctx;
 
@@ -214,11 +215,11 @@ async fn test_repo_upload_unconfigured() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_upload() -> Result<()> {
-    let cptestctx = test_setup::<omicron_nexus::Server>(
-        "test_update_end_to_end",
-        3, // 4 total sled agents
-    )
-    .await;
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_repo_upload")
+            .with_extra_sled_agents(3)
+            .start::<omicron_nexus::Server>()
+            .await;
     let client = &cptestctx.external_client;
     let logctx = &cptestctx.logctx;
 
@@ -711,7 +712,8 @@ async fn test_trust_root_operations(cptestctx: &ControlPlaneTestContext) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_update_status() -> Result<()> {
     let cptestctx =
-        test_setup::<omicron_nexus::Server>("test_update_uninitialized", 0)
+        nexus_test_utils::ControlPlaneBuilder::new("test_update_status")
+            .start::<omicron_nexus::Server>()
             .await;
     let client = &cptestctx.external_client;
     let logctx = &cptestctx.logctx;
@@ -863,11 +865,11 @@ async fn test_repo_prune(cptestctx: &ControlPlaneTestContext) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_repo_list() -> Result<()> {
-    let cptestctx = test_setup::<omicron_nexus::Server>(
-        "test_update_repo_list",
-        3, // 4 total sled agents
-    )
-    .await;
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_repo_list")
+            .with_extra_sled_agents(3)
+            .start::<omicron_nexus::Server>()
+            .await;
     let client = &cptestctx.external_client;
     let logctx = &cptestctx.logctx;
 

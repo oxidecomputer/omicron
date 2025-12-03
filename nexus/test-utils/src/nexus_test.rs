@@ -38,6 +38,64 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+pub struct ControlPlaneBuilder<'a> {
+    // required
+    test_name: &'a str,
+
+    // defaults provided by the builder
+    nextra_sled_agents: u16,
+    tls_cert: Option<Certificate>,
+    nexus_config: NexusConfig,
+}
+
+impl<'a> ControlPlaneBuilder<'a> {
+    pub fn new(test_name: &'a str) -> Self {
+        ControlPlaneBuilder {
+            test_name,
+            nextra_sled_agents: 0,
+            tls_cert: None,
+            nexus_config: load_test_config(),
+        }
+    }
+
+    pub fn with_extra_sled_agents(mut self, nextra: u16) -> Self {
+        self.nextra_sled_agents = nextra;
+        self
+    }
+
+    pub fn with_tls_cert(mut self, tls_cert: Option<Certificate>) -> Self {
+        self.tls_cert = tls_cert;
+        self
+    }
+
+    pub fn customize_nexus_config(
+        mut self,
+        f: &dyn Fn(&mut NexusConfig) -> (),
+    ) -> Self {
+        f(&mut self.nexus_config);
+        self
+    }
+
+    pub async fn start<N: NexusServer>(self) -> ControlPlaneTestContext<N> {
+        let mut nexus_config = self.nexus_config;
+        let starter =
+            ControlPlaneStarter::<N>::new(self.test_name, &mut nexus_config);
+        setup_with_config_impl(
+            starter,
+            PopulateCrdb::FromEnvironmentSeed,
+            sim::SimMode::Explicit,
+            self.tls_cert,
+            self.nextra_sled_agents,
+            DEFAULT_SP_SIM_CONFIG.into(),
+            false,
+        )
+        .await
+    }
+}
+
+/// Helper for setting up the control plane for testing and accessing its parts
+///
+/// See [`ControlPlaneBuilder`] for setting one up.
 pub struct ControlPlaneTestContext<N> {
     pub start_time: chrono::DateTime<chrono::Utc>,
     pub external_client: ClientTestContext,
@@ -271,45 +329,7 @@ pub fn load_test_config() -> NexusConfig {
         .expect("failed to load config.test.toml")
 }
 
-pub async fn test_setup<N: NexusServer>(
-    test_name: &str,
-    extra_sled_agents: u16,
-) -> ControlPlaneTestContext<N> {
-    let mut config = load_test_config();
-    test_setup_with_config::<N>(
-        test_name,
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        extra_sled_agents,
-        DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await
-}
-
-/// Setup routine to use for tests.
-pub async fn test_setup_with_config<N: NexusServer>(
-    test_name: &str,
-    config: &mut NexusConfig,
-    sim_mode: sim::SimMode,
-    initial_cert: Option<Certificate>,
-    extra_sled_agents: u16,
-    gateway_config_file: Utf8PathBuf,
-) -> ControlPlaneTestContext<N> {
-    let starter = ControlPlaneStarter::<N>::new(test_name, config);
-    setup_with_config_impl(
-        starter,
-        PopulateCrdb::FromEnvironmentSeed,
-        sim_mode,
-        initial_cert,
-        extra_sled_agents,
-        gateway_config_file,
-        false,
-    )
-    .await
-}
-
-/// Setup routine to use for `omicron-dev`. Use [`test_setup_with_config`] for
+/// Setup routine to use for `omicron-dev`. Use [`ControlPlaneBuilder`] for
 /// tests.
 ///
 /// The main difference from tests is that this routine ensures the seed tarball
