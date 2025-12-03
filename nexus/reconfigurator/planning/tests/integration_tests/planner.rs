@@ -153,9 +153,33 @@ fn get_nexus_ids_at_generation(
         .collect::<BTreeSet<_>>()
 }
 
+/// Many tests want to ensure that if the planner runs again at a particular
+/// point (usually the end), it doesn't make any additional changes. There are
+/// two different intentions here:
+///
+/// * The planner is rerun after the current blueprint is executed, any new sled
+///   configs are deployed, and an inventory collection has been taken that
+///   reflects those deployments. This is `DeployLatestConfigs`.
+/// * The planner is rerun with the current blueprint as parent but no other
+///   changes (in particular, keeping the same inventory as was used to
+///   generatee the parent). This is `InputUnchanged`.
+///
+/// Most tests should use `DeployLatestConfigs`. Some tests that deal with
+/// expungements use `InputUnchanged` instead, because the planner does make
+/// (effectively spurious) changes after deploying configs: specifically, it
+/// will mark expunged zones as "ready for cleanup" once inventory reports that
+/// sleds have received the config that shuts down those expunged zones. Those
+/// tests could add extra steps to walk through this stage, but that's largely
+/// noise and so don't all bother.
+enum AssertPlanningMakesNoChangesMode {
+    DeployLatestConfigs,
+    InputUnchanged,
+}
+
 #[track_caller]
 fn sim_assert_planning_makes_no_changes(
     sim: &mut ReconfiguratorCliTestState,
+    mode: AssertPlanningMakesNoChangesMode,
 ) -> Blueprint {
     // Get the latest blueprint.
     let blueprint = sim
@@ -163,18 +187,25 @@ fn sim_assert_planning_makes_no_changes(
         .expect("always have a latest blueprint")
         .clone();
 
-    // Ensure all sleds have the latest configs deployed, emulating blueprint
-    // execution.
-    sim.deploy_configs_to_active_sleds(
-        "deploy latest configs to all sleds",
-        &blueprint,
-    )
-    .expect("deployed configs");
+    match mode {
+        AssertPlanningMakesNoChangesMode::InputUnchanged => {
+            // Nothing to do!
+        }
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs => {
+            // Ensure all sleds have the latest configs deployed, emulating
+            // blueprint execution.
+            sim.deploy_configs_to_active_sleds(
+                "deploy latest configs to all sleds",
+                &blueprint,
+            )
+            .expect("deployed configs");
 
-    // Ensure our planning input will see an inventory with the configs we just
-    // deployed.
-    sim.generate_inventory("inventory with latest configs")
-        .expect("generated inventory");
+            // Ensure our planning input will see an inventory with the configs
+            // we just deployed.
+            sim.generate_inventory("inventory with latest configs")
+                .expect("generated inventory");
+        }
+    }
 
     let new_blueprint = sim.run_planner().expect("planning succeeded");
     assert_blueprint_diff_is_empty(&blueprint, &new_blueprint);
@@ -328,7 +359,10 @@ fn test_basic_add_sled() {
     }
 
     // Check that there are no more steps once the Crucible zones are deployed.
-    sim_assert_planning_makes_no_changes(&mut sim);
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+    );
 
     logctx.cleanup_successful();
 }
@@ -409,7 +443,10 @@ fn test_add_multiple_nexus_to_one_sled() {
     }
 
     // Test a no-op planning iteration.
-    sim_assert_planning_makes_no_changes(&mut sim);
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+    );
 
     logctx.cleanup_successful();
 }
@@ -476,7 +513,10 @@ fn test_spread_additional_nexus_zones_across_sleds() {
     assert_eq!(total_new_nexus_zones, 11);
 
     // Test a no-op planning iteration.
-    sim_assert_planning_makes_no_changes(&mut sim);
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+    );
 
     logctx.cleanup_successful();
 }
@@ -606,7 +646,10 @@ fn test_spread_internal_dns_zones_across_sleds() {
     assert_eq!(total_new_zones, 2);
 
     // Test a no-op planning iteration.
-    sim_assert_planning_makes_no_changes(&mut sim);
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+    );
 
     logctx.cleanup_successful();
 }
@@ -686,7 +729,10 @@ fn test_reuse_external_ips_from_expunged_zones() {
     );
 
     // Test a no-op planning iteration.
-    sim_assert_planning_makes_no_changes(&mut sim);
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+    );
 
     logctx.cleanup_successful();
 }
@@ -864,7 +910,10 @@ fn test_reuse_external_dns_ips_from_expunged_zones() {
     );
 
     // Test a no-op planning iteration.
-    sim_assert_planning_makes_no_changes(&mut sim);
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+    );
 
     logctx.cleanup_successful();
 }
@@ -952,7 +1001,10 @@ fn test_crucible_allocation_skips_nonprovisionable_disks() {
     assert_eq!(summary.total_datasets_modified(), 0);
 
     // Test a no-op planning iteration.
-    sim_assert_planning_makes_no_changes(&mut sim);
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+    );
 
     logctx.cleanup_successful();
 }
@@ -1354,7 +1406,10 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
     );
 
     // Test a no-op planning iteration.
-    sim_assert_planning_makes_no_changes(&mut sim);
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+    );
 
     logctx.cleanup_successful();
 }
@@ -1366,23 +1421,11 @@ fn test_disk_expungement_removes_zones_transient_filesystem() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Create an example system with a single sled
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-            .nsleds(1)
-            .nexus_count(2)
-            .build();
-    let collection = example.collection;
-
-    let mut builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-
-    // Aside: Avoid churning on the quantity of Nexus zones - we're okay
-    // staying at two.
-    //
-    // Force two so that we can't expunge our way down to zero.
-    builder.policy_mut().target_nexus_zone_count = 2;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| Ok(builder.nsleds(1).nexus_count(2)))
+        .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
+    let sled_id = blueprint1.sleds().next().expect("1 sled");
 
     // Find whatever pool NTP was using
     let pool_to_expunge = blueprint1
@@ -1419,25 +1462,22 @@ fn test_disk_expungement_removes_zones_transient_filesystem() {
 
     // For that pool, find the physical disk behind it, and mark it
     // expunged.
-    let (_, sled_details) = builder.sleds_mut().iter_mut().next().unwrap();
-    let disk =
-        sled_details.resources.zpools.get_mut(&pool_to_expunge.id()).unwrap();
-    disk.policy = PhysicalDiskPolicy::Expunged;
+    sim.change_state("expunge disk hosting NTP", |state| {
+        state
+            .system_mut()
+            .description_mut()
+            .get_sled_mut(sled_id)
+            .unwrap()
+            .resources_mut()
+            .zpools
+            .get_mut(&pool_to_expunge.id())
+            .unwrap()
+            .policy = PhysicalDiskPolicy::Expunged;
+        Ok(())
+    })
+    .expect("expunged disk");
 
-    let input = builder.build();
-
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test: expunge a disk with a zone on top",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (expunge a disk):\n{}", summary.display());
     assert_eq!(summary.diff.sleds.added.len(), 0);
@@ -1481,13 +1521,12 @@ fn test_disk_expungement_removes_zones_transient_filesystem() {
     }
     assert_eq!(zone_kinds_on_pool, zone_kinds_added);
 
-    // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
+    // Test a no-op planning iteration. We use `InputUnchanged` here because if
+    // we deploy the configs, the planner _will_ make changes (marking the
+    // expunged zones as ready for cleanup).
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     logctx.cleanup_successful();
