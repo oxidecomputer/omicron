@@ -25,7 +25,7 @@ use sha2::{Digest, Sha256};
 use sled_agent_types::zone_images::{
     ArcIoError, ArcSerdeJsonError, ArtifactReadResult,
     InstallMetadataReadError, ZoneManifestArtifactResult,
-    ZoneManifestArtifactsResult, ZoneManifestZoneHashError,
+    ZoneManifestArtifactsResult, ManifestHashError,
 };
 use tufaceous_artifact::ArtifactHash;
 
@@ -120,7 +120,7 @@ impl WriteInstallDatasetContext {
             errors
                 .insert_unique(ZoneContentError {
                     zone_kind: ZoneKind::Clickhouse,
-                    error: ZoneManifestZoneHashError::SizeHashMismatch {
+                    error: ManifestHashError::SizeHashMismatch {
                         expected_size: zone2.json_size,
                         expected_hash: zone2.json_hash,
                         actual_size: zone2.contents.len() as u64,
@@ -138,7 +138,7 @@ impl WriteInstallDatasetContext {
             errors
                 .insert_unique(ZoneContentError {
                     zone_kind: ZoneKind::Crucible,
-                    error: ZoneManifestZoneHashError::SizeHashMismatch {
+                    error: ManifestHashError::SizeHashMismatch {
                         expected_size: zone3.json_size,
                         expected_hash: zone3.json_hash,
                         actual_size: zone3.json_size,
@@ -154,7 +154,7 @@ impl WriteInstallDatasetContext {
         errors
             .insert_unique(ZoneContentError {
                 zone_kind: ZoneKind::InternalDns,
-                error: ZoneManifestZoneHashError::ReadArtifact(
+                error: ManifestHashError::ReadArtifact(
                     ArcIoError::new(io::Error::from(io::ErrorKind::NotFound)),
                 ),
             })
@@ -165,7 +165,7 @@ impl WriteInstallDatasetContext {
         errors
             .insert_unique(ZoneContentError {
                 zone_kind: ZoneKind::Nexus,
-                error: ZoneManifestZoneHashError::NoArtifactForZoneKind(
+                error: ManifestHashError::NoArtifactForZoneKind(
                     ZoneKind::Nexus,
                 ),
             })
@@ -337,7 +337,7 @@ impl IdOrdItem for ZoneContents {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZoneContentError {
     zone_kind: ZoneKind,
-    pub error: ZoneManifestZoneHashError,
+    pub error: ManifestHashError,
 }
 
 impl IdOrdItem for ZoneContentError {

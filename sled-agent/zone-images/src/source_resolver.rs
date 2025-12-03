@@ -153,7 +153,7 @@ mod tests {
     use sled_agent_types::zone_images::{
         MupdateOverrideReadError, OmicronZoneFileSource,
         OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,
-        ZoneManifestReadError, ZoneManifestZoneHashError,
+        ZoneManifestReadError, ManifestHashError,
     };
     use sled_agent_zone_images_examples::{
         BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext, deserialize_error,
@@ -194,7 +194,7 @@ mod tests {
             OmicronZoneFileSource {
                 location: OmicronZoneImageLocation::InstallDataset {
                     hash: Err(ZoneImageLocationError::ZoneHash(
-                        ZoneManifestZoneHashError::ReadBootDisk(
+                        ManifestHashError::ReadBootDisk(
                             ZoneManifestReadError::InstallMetadata(
                                 deserialize_error(
                                     dir.path(),

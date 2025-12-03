@@ -85,7 +85,7 @@ pub struct MeasurementManifestStatus {
 }
 
 type MeasurementEntry =
-    Result<(String, ArtifactHash), ZoneManifestZoneHashError>;
+    Result<(String, ArtifactHash), ManifestHashError>;
 
 impl MeasurementManifestStatus {
     /// Convert this status to the inventory format.
@@ -115,10 +115,10 @@ impl MeasurementManifestStatus {
 
     pub fn all_measurements(
         &self,
-    ) -> Result<Vec<MeasurementEntry>, ZoneManifestZoneHashError> {
+    ) -> Result<Vec<MeasurementEntry>, ManifestHashError> {
         let artifacts_result =
             self.boot_disk_result.as_ref().map_err(|err| {
-                ZoneManifestZoneHashError::ReadBootDisk(err.clone())
+                ManifestHashError::ReadBootDisk(err.clone())
             })?;
 
         let mut results = Vec::new();
@@ -130,7 +130,7 @@ impl MeasurementManifestStatus {
                 }
                 ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
                     results.push(Err(
-                        ZoneManifestZoneHashError::SizeHashMismatch {
+                        ManifestHashError::SizeHashMismatch {
                             expected_size: artifact.expected_size,
                             expected_hash: artifact.expected_hash,
                             actual_size,
@@ -140,7 +140,7 @@ impl MeasurementManifestStatus {
                 }
                 // XXX FIXME I think we want the file name here too for error reporting
                 ArtifactReadResult::Error(err) => {
-                    results.push(Err(ZoneManifestZoneHashError::ReadArtifact(
+                    results.push(Err(ManifestHashError::ReadArtifact(
                         err.clone(),
                     )));
                 }
@@ -197,22 +197,22 @@ impl ZoneManifestStatus {
     pub fn zone_hash(
         &self,
         kind: ZoneKind,
-    ) -> Result<ArtifactHash, ZoneManifestZoneHashError> {
+    ) -> Result<ArtifactHash, ManifestHashError> {
         let artifacts_result =
             self.boot_disk_result.as_ref().map_err(|err| {
-                ZoneManifestZoneHashError::ReadBootDisk(err.clone())
+                ManifestHashError::ReadBootDisk(err.clone())
             })?;
 
         let file_name = kind.artifact_in_install_dataset();
         let artifact = &artifacts_result
             .data
             .get(file_name)
-            .ok_or(ZoneManifestZoneHashError::NoArtifactForZoneKind(kind))?;
+            .ok_or(ManifestHashError::NoArtifactForZoneKind(kind))?;
 
         match &artifact.status {
             ArtifactReadResult::Valid => Ok(artifact.expected_hash),
             ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
-                Err(ZoneManifestZoneHashError::SizeHashMismatch {
+                Err(ManifestHashError::SizeHashMismatch {
                     expected_size: artifact.expected_size,
                     expected_hash: artifact.expected_hash,
                     actual_size: *actual_size,
@@ -220,14 +220,14 @@ impl ZoneManifestStatus {
                 })
             }
             ArtifactReadResult::Error(err) => {
-                Err(ZoneManifestZoneHashError::ReadArtifact(err.clone()))
+                Err(ManifestHashError::ReadArtifact(err.clone()))
             }
         }
     }
 }
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq)]
-pub enum ZoneManifestZoneHashError {
+pub enum ManifestHashError {
     #[error("error reading boot disk")]
     ReadBootDisk(#[source] ZoneManifestReadError),
     #[error("no artifact found for zone kind {0:?}")]
@@ -1328,7 +1328,7 @@ pub enum RunningZoneImageLocation {
 pub enum ZoneImageLocationError {
     /// An error occurred while looking up the zone hash.
     #[error("error looking up zone hash from zone manifest")]
-    ZoneHash(#[source] ZoneManifestZoneHashError),
+    ZoneHash(#[source] ManifestHashError),
 
     /// The boot disk is unavailable.
     #[error("boot disk missing")]
