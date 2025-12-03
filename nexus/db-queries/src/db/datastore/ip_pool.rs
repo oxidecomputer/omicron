@@ -3375,7 +3375,7 @@ mod test {
             .expect("Could not add ASM multicast range");
 
         // Link ASM pool to silo
-        let asm_link = IpPoolResource {
+        let asm_link = IncompleteIpPoolResource {
             ip_pool_id: asm_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -3429,7 +3429,7 @@ mod test {
             .expect("Could not add SSM multicast range");
 
         // Link SSM pool to silo
-        let ssm_link = IpPoolResource {
+        let ssm_link = IncompleteIpPoolResource {
             ip_pool_id: ssm_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -3508,7 +3508,7 @@ mod test {
             .expect("Could not add SSM multicast range");
 
         // Link SSM pool to silo
-        let ssm_link = IpPoolResource {
+        let ssm_link = IncompleteIpPoolResource {
             ip_pool_id: ssm_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
@@ -3561,7 +3561,7 @@ mod test {
             .expect("Could not add ASM multicast range");
 
         // Link ASM pool to silo
-        let asm_link = IpPoolResource {
+        let asm_link = IncompleteIpPoolResource {
             ip_pool_id: asm_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: authz_silo.id(),
