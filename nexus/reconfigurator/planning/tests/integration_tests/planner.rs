@@ -1848,39 +1848,19 @@ fn planner_decommissions_sleds() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Use our example system as a starting point.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-
-    let collection = example.collection;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // Expunge one of the sleds.
-    //
-    // We expunge a sled via planning input using the builder so that disks
-    // are properly taken into account.
-    let mut builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-    let expunged_sled_id = {
-        let mut iter = builder.sleds_mut().iter_mut();
-        let (sled_id, _) = iter.next().expect("at least one sled");
-        *sled_id
-    };
-    builder.expunge_sled(&expunged_sled_id).expect("sled is expungable");
-    let input = builder.build();
+    let expunged_sled_id = blueprint1.sleds().next().expect("at least 1 sled");
+    sim.change_state("expunge sled", |state| {
+        state.system_mut().description_mut().sled_expunge(expunged_sled_id)?;
+        Ok(())
+    })
+    .unwrap();
 
-    let mut blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("failed to plan");
-
+    let mut blueprint2 = sim.run_planner().expect("planning succeeded");
     // Define a time_created for consistent output across runs.
     blueprint2.time_created = DateTime::<Utc>::UNIX_EPOCH;
 
@@ -1905,30 +1885,20 @@ fn planner_decommissions_sleds() {
 
     // Set the state of the expunged sled to decommissioned, and run the
     // planner again.
-    let mut builder = input.into_builder();
-    let expunged = builder
-        .sleds_mut()
-        .get_mut(&expunged_sled_id)
-        .expect("expunged sled is present in input");
-    expunged.state = SledState::Decommissioned;
-    let input = builder.build();
-
-    let blueprint3 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint2,
-        &input,
-        "test_blueprint3",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("succeeded in planner");
+    sim.change_state("decommission sled", |state| {
+        state
+            .system_mut()
+            .description_mut()
+            .sled_set_state(expunged_sled_id, SledState::Decommissioned)?;
+        Ok(())
+    })
+    .unwrap();
 
     // There should be no changes to the blueprint; we don't yet garbage
     // collect zones, so we should still have the sled's expunged zones
     // (even though the sled itself is no longer present in the list of
     // commissioned sleds).
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint3.diff_since_blueprint(&blueprint2);
     println!(
         "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
@@ -1943,12 +1913,9 @@ fn planner_decommissions_sleds() {
     );
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint3,
-        &input,
-        &collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // Now remove the decommissioned sled from the input entirely. (This
@@ -1960,22 +1927,12 @@ fn planner_decommissions_sleds() {
     // non-empty. At some point we may also want to remove entries from the
     // sled table, but that's a future concern that would come after
     // blueprint cleanup is implemented.
-    let mut builder = input.into_builder();
-    builder.sleds_mut().remove(&expunged_sled_id);
-    let input = builder.build();
+    sim.change_state("remove decommissioned sled", |state| {
+        state.system_mut().description_mut().sled_remove(expunged_sled_id)?;
+        Ok(())
+    }).unwrap();
 
-    let blueprint4 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint3,
-        &input,
-        "test_blueprint4",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp4")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("succeeded in planner");
-
+    let blueprint4 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint4.diff_since_blueprint(&blueprint3);
     println!(
         "3 -> 4 (removed from input {expunged_sled_id}):\n{}",
@@ -1990,12 +1947,9 @@ fn planner_decommissions_sleds() {
     );
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint4,
-        &input,
-        &collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     logctx.cleanup_successful();
