@@ -4405,42 +4405,59 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseDeleted, HttpError>;
 }
 
-/// Perform extra validations on the OpenAPI spec.
+/// Perform extra validations on the OpenAPI document, and generate the
+/// nexus_tags.txt file.
 pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
-    let is_blessed = cx
+    let blessed = cx
         .is_blessed()
         .expect("this is a versioned API so is_blessed should always be Some");
 
-    if !is_blessed {
-        if spec.openapi != "3.0.3" {
-            cx.report_error(anyhow!(
-                "Expected OpenAPI version to be 3.0.3, found {}",
-                spec.openapi,
-            ));
-        }
-        if spec.info.title != "Oxide Region API" {
-            cx.report_error(anyhow!(
-                "Expected OpenAPI version to be 'Oxide Region API', found '{}'",
-                spec.info.title,
-            ));
-        }
+    // There are two parts to this function:
+    //
+    // 1. Perform validation on the OpenAPI document.
+    // 2. Generate the nexus_tags.txt file.
+    //
+    // Step 1 should only be performed on non-blessed versions. That's because
+    // blessed versions are immutable, and if new checks are added in the
+    // future, we don't want old API versions to be affected.
+    //
+    // nexus_tags.txt is unversioned, so step 2 should only be performed on the
+    // latest version, whether or not it's blessed.
 
-        // Spot check a couple of items.
-        if spec.paths.paths.is_empty() {
-            cx.report_error(anyhow!("Expected at least one path in the spec"));
-        }
-        if spec.paths.paths.get("/v1/projects").is_none() {
-            cx.report_error(anyhow!("Expected a path for /v1/projects"));
-        }
+    if !blessed {
+        validate_api_doc(spec, &mut cx);
     }
 
-    // Construct a string that helps us identify the organization of tags and
-    // operations.
-    let mut ops_by_tag =
-        BTreeMap::<String, Vec<(String, String, String)>>::new();
+    // nexus_tags.txt is unversioned, so only write it out for the latest
+    // version (whether it's blessed or not).
+    if cx.is_latest() {
+        generate_tags_file(spec, &mut cx);
+    }
+}
 
-    let mut ops_by_tag_valid = true;
-    for (path, method, op) in spec.operations() {
+fn validate_api_doc(spec: &OpenAPI, cx: &mut ValidationContext<'_>) {
+    if spec.openapi != "3.0.3" {
+        cx.report_error(anyhow!(
+            "Expected OpenAPI version to be 3.0.3, found {}",
+            spec.openapi,
+        ));
+    }
+    if spec.info.title != "Oxide Region API" {
+        cx.report_error(anyhow!(
+            "Expected OpenAPI version to be 'Oxide Region API', found '{}'",
+            spec.info.title,
+        ));
+    }
+
+    // Spot check a couple of items.
+    if spec.paths.paths.is_empty() {
+        cx.report_error(anyhow!("Expected at least one path in the spec"));
+    }
+    if spec.paths.paths.get("/v1/projects").is_none() {
+        cx.report_error(anyhow!("Expected a path for /v1/projects"));
+    }
+
+    for (_path, _method, op) in spec.operations() {
         // Make sure each operation has exactly one tag. Note, we intentionally
         // do this before validating the OpenAPI output as fixing an error here
         // would necessitate refreshing the spec file again.
@@ -4450,21 +4467,30 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
                 op.operation_id.as_ref().unwrap(),
                 op.tags.len()
             ));
-            ops_by_tag_valid = false;
-            continue;
         }
 
         // Every non-hidden endpoint must have a summary
         if op.tags.contains(&"console-auth".to_string()) && op.summary.is_none()
         {
-            if !is_blessed {
-                cx.report_error(anyhow!(
-                    "operation '{}' is missing a summary doc comment",
-                    op.operation_id.as_ref().unwrap()
-                ));
-            }
-            // This error does not prevent `ops_by_tag` from being populated
-            // correctly, so we can continue.
+            cx.report_error(anyhow!(
+                "operation '{}' is missing a summary doc comment",
+                op.operation_id.as_ref().unwrap()
+            ));
+        }
+    }
+}
+
+fn generate_tags_file(spec: &OpenAPI, cx: &mut ValidationContext<'_>) {
+    // Construct a string that helps us identify the organization of tags and
+    // operations.
+    let mut ops_by_tag =
+        BTreeMap::<String, Vec<(String, String, String)>>::new();
+
+    for (path, method, op) in spec.operations() {
+        // If an operation doesn't have exactly one tag, skip generating the
+        // tags file entirely. (Validation above catches this case).
+        if op.tags.len() != 1 {
+            return;
         }
 
         ops_by_tag
@@ -4477,36 +4503,29 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
             ));
     }
 
-    // nexus_tags.txt is unversioned, so only write it out for the latest
-    // version.
-    if cx.is_latest() && ops_by_tag_valid {
-        let mut tags = String::new();
-        for (tag, mut ops) in ops_by_tag {
-            ops.sort();
+    let mut tags = String::new();
+    for (tag, mut ops) in ops_by_tag {
+        ops.sort();
+        tags.push_str(&format!(r#"API operations found with tag "{}""#, tag));
+        tags.push_str(&format!(
+            "\n{:40} {:8} {}\n",
+            "OPERATION ID", "METHOD", "URL PATH"
+        ));
+        for (operation_id, method, path) in ops {
             tags.push_str(&format!(
-                r#"API operations found with tag "{}""#,
-                tag
+                "{:40} {:8} {}\n",
+                operation_id, method, path
             ));
-            tags.push_str(&format!(
-                "\n{:40} {:8} {}\n",
-                "OPERATION ID", "METHOD", "URL PATH"
-            ));
-            for (operation_id, method, path) in ops {
-                tags.push_str(&format!(
-                    "{:40} {:8} {}\n",
-                    operation_id, method, path
-                ));
-            }
-            tags.push('\n');
         }
-
-        // When this fails, verify that operations on which you're adding,
-        // renaming, or changing the tags are what you intend.
-        cx.record_file_contents(
-            "nexus/external-api/output/nexus_tags.txt",
-            tags.into_bytes(),
-        );
+        tags.push('\n');
     }
+
+    // When this fails, verify that operations on which you're adding,
+    // renaming, or changing the tags are what you intend.
+    cx.record_file_contents(
+        "nexus/external-api/output/nexus_tags.txt",
+        tags.into_bytes(),
+    );
 }
 
 pub type IpPoolRangePaginationParams =
