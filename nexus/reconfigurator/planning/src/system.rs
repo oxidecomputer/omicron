@@ -22,13 +22,13 @@ use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
+use nexus_sled_agent_shared::inventory::ManifestBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::SledCpuFamily;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
 use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -626,7 +626,7 @@ impl SystemDescription {
     pub fn sled_set_zone_manifest(
         &mut self,
         sled_id: SledUuid,
-        boot_inventory: Result<ZoneManifestBootInventory, String>,
+        boot_inventory: Result<ManifestBootInventory, String>,
     ) -> anyhow::Result<&mut Self> {
         let sled = self.get_sled_mut(sled_id)?;
         sled.set_zone_manifest(boot_inventory);
@@ -1681,7 +1681,7 @@ impl Sled {
 
     fn set_zone_manifest(
         &mut self,
-        boot_inventory: Result<ZoneManifestBootInventory, String>,
+        boot_inventory: Result<ManifestBootInventory, String>,
     ) {
         self.inventory_sled_agent
             .zone_image_resolver

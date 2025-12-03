@@ -48,6 +48,9 @@ use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
 use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
+use nexus_sled_agent_shared::inventory::ManifestBootInventory;
+use nexus_sled_agent_shared::inventory::ManifestInventory;
+use nexus_sled_agent_shared::inventory::ManifestNonBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
@@ -56,9 +59,6 @@ use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideBootSuccessInventor
 use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_sled_agent_shared::inventory::{
     ConfigReconcilerInventoryResult, OmicronSledConfig, OmicronZoneConfig,
     OmicronZoneDataset, OmicronZoneImageSource, OmicronZoneType,
@@ -1593,12 +1593,12 @@ impl InvZoneImageResolver {
     pub fn into_inventory(
         self,
         artifacts: Option<IdOrdMap<ZoneArtifactInventory>>,
-        zone_manifest_non_boot: Option<IdOrdMap<ZoneManifestNonBootInventory>>,
+        zone_manifest_non_boot: Option<IdOrdMap<ManifestNonBootInventory>>,
         mupdate_override_non_boot: Option<
             IdOrdMap<MupdateOverrideNonBootInventory>,
         >,
     ) -> anyhow::Result<ZoneImageResolverInventory> {
-        // Build up the ZoneManifestInventory struct.
+        // Build up the ManifestInventory struct.
         let zone_manifest = {
             let boot_inventory = if let Some(error) =
                 self.zone_manifest_boot_disk_error
@@ -1630,7 +1630,7 @@ impl InvZoneImageResolver {
                     }
                 };
 
-                Ok(ZoneManifestBootInventory {
+                Ok(ManifestBootInventory {
                     source,
                     // Artifacts might really be None in case no zones were found.
                     // (This is unusual but permitted by the data model, so any
@@ -1639,7 +1639,7 @@ impl InvZoneImageResolver {
                 })
             };
 
-            ZoneManifestInventory {
+            ManifestInventory {
                 boot_disk_path: self.zone_manifest_boot_disk_path.into(),
                 boot_inventory,
                 // This might be None if no non-boot disks were found.
@@ -1732,7 +1732,7 @@ impl InvZoneManifestNonBoot {
     pub fn new(
         collection_id: CollectionUuid,
         sled_id: SledUuid,
-        non_boot: &ZoneManifestNonBootInventory,
+        non_boot: &ManifestNonBootInventory,
     ) -> Self {
         Self {
             inv_collection_id: collection_id.into(),
@@ -1745,7 +1745,7 @@ impl InvZoneManifestNonBoot {
     }
 }
 
-impl From<InvZoneManifestNonBoot> for ZoneManifestNonBootInventory {
+impl From<InvZoneManifestNonBoot> for ManifestNonBootInventory {
     fn from(row: InvZoneManifestNonBoot) -> Self {
         Self {
             zpool_id: row.non_boot_zpool_id.into(),

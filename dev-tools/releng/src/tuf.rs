@@ -78,13 +78,13 @@ pub(crate) async fn build_tuf_repo(
 
     let mut measurement_corpus = vec![];
 
-    for entry in fs::read_dir(
+    let mut read_dir = fs::read_dir(
         output_dir.join("hubris-staging").join("measurement_corpus"),
     )
-    .context("failed to read `hubris-staging/measurement_corpus`")?
-    {
-        let entry = entry?;
+    .await
+    .context("failed to read `hubris-staging/measurement_corpus`")?;
 
+    while let Some(entry) = read_dir.next_entry().await? {
         let corim = rats_corim::Corim::from_file(entry.path())?;
 
         measurement_corpus.push(DeserializedArtifactData {
@@ -96,12 +96,13 @@ pub(crate) async fn build_tuf_repo(
         });
     }
 
-    for entry in fs::read_dir(
+    let mut read_dir = fs::read_dir(
         output_dir.join("hubris-production").join("measurement_corpus"),
     )
-    .context("failed to read `hubris-production/measurement_corpus`")?
-    {
-        let entry = entry?;
+    .await
+    .context("failed to read `hubris-production/measurement_corpus`")?;
+
+    while let Some(entry) = read_dir.next_entry().await? {
         let corim = rats_corim::Corim::from_file(entry.path())?;
         measurement_corpus.push(DeserializedArtifactData {
             name: format!("production-{}", corim.id),

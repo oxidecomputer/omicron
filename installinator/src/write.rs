@@ -32,6 +32,7 @@ use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
 use slog::{Logger, info, warn};
 use tokio::{
+    fs,
     fs::File,
     io::{AsyncWrite, AsyncWriteExt},
     task::JoinSet,
@@ -209,8 +210,11 @@ enum DriveWriteProgress {
     /// We succeeded in writing the host phase 2 image, but failed to write the
     /// control plane `attempts` times.
     ControlPlaneFailed,
-    /// We succeeded in writing both the host phase 2 image and the control
-    /// plane image.
+    /// We succeeded in writing host phase 2 and control plane but failed to
+    /// write the reference measurements.
+    MeasurementCorpusFailed,
+    /// We succeeded in writing both the host phase 2 image, the control
+    /// plane image, and reference measurements.
     Done,
 }
 
@@ -351,8 +355,11 @@ impl<'a> ArtifactWriter<'a> {
                                     *progress =
                                         DriveWriteProgress::ControlPlaneFailed;
                                 }
-                                WriteComponent::Unknown
-                                | WriteComponent::MeasurementCorpus => {
+                                WriteComponent::MeasurementCorpus => {
+                                    *progress =
+                                        DriveWriteProgress::MeasurementCorpusFailed;
+                                }
+                                WriteComponent::Unknown => {
                                     unreachable!(
                                         "we should never generate an unknown component"
                                     )
@@ -416,7 +423,8 @@ impl SlotWriteContext<'_> {
                     control_plane_transport,
                 );
             }
-            DriveWriteProgress::ControlPlaneFailed => {
+            DriveWriteProgress::ControlPlaneFailed
+            | DriveWriteProgress::MeasurementCorpusFailed => {
                 self.register_control_plane_step(
                     engine,
                     control_plane_transport,
@@ -657,7 +665,7 @@ struct ControlPlaneZoneWriteContext<'a> {
     zones: &'a ControlPlaneZoneImages,
     host_phase_2_id: &'a ArtifactHashId,
     control_plane_id: &'a ArtifactHashId,
-    measurement_corpus: &'a Vec<MeasurementToWrite>,
+    measurement_corpus: &'a [MeasurementToWrite],
     mupdate_id: MupdateUuid,
     mupdate_override_uuid: MupdateOverrideUuid,
 }
@@ -811,13 +819,17 @@ impl ControlPlaneZoneWriteContext<'_> {
                 ControlPlaneZonesStepId::CreateMeasurementDir,
                 "Creating measurement directory".to_string(),
                 async move |_cx| {
-                    if !std::fs::exists(self.measurement_directory)
-                        .map_err(|error| WriteError::CreateDirError { error })?
+                    if let Err(e) =
+                        fs::create_dir(self.measurement_directory).await
                     {
-                        std::fs::create_dir(self.measurement_directory)
-                            .map_err(|error| WriteError::CreateDirError {
-                                error,
-                            })?;
+                        match e.kind() {
+                            std::io::ErrorKind::AlreadyExists => {}
+                            _ => {
+                                return Err(WriteError::CreateDirError {
+                                    error: e,
+                                });
+                            }
+                        }
                     }
                     StepSuccess::new(()).into()
                 },
@@ -848,19 +860,11 @@ impl ControlPlaneZoneWriteContext<'_> {
                     )
                     .await?;
 
-                    StepSuccess::new(transport)
-                        .with_message(format!(
-                            "{out_path} written with mupdate UUID: {}",
-                            self.mupdate_id,
-                        ))
-                        .into()
+                    StepSuccess::new(transport).into()
                 },
             )
             .register();
 
-        // This might make sense to move to a separate step once reconfigurator
-        // work is complete. For now, just treat this as another step in the
-        // control plane
         for data in self.measurement_corpus {
             let name = data.name.clone();
             let out_path = self.measurement_directory.join(&name);
@@ -937,7 +941,7 @@ impl ControlPlaneZoneWriteContext<'_> {
     }
 
     async fn omicron_measurement_manifest_artifact(&self) -> BufList {
-        let zones = compute_measurement_hashes(&self.measurement_corpus).await;
+        let zones = compute_measurement_hashes(self.measurement_corpus).await;
 
         let omicron_zone_manifest = OmicronZoneManifest {
             source: OmicronZoneManifestSource::Installinator {
@@ -973,7 +977,7 @@ impl ControlPlaneZoneWriteContext<'_> {
 ///
 /// Panics if the runtime shuts down causing a task abort, or a task panics.
 async fn compute_measurement_hashes(
-    images: &Vec<MeasurementToWrite>,
+    images: &[MeasurementToWrite],
 ) -> IdOrdMap<OmicronZoneFileMetadata> {
     let mut tasks = JoinSet::new();
     for m in images {

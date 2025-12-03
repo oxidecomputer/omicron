@@ -7,8 +7,8 @@ use std::{collections::HashMap, fmt};
 use anyhow::anyhow;
 use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
 use nexus_sled_agent_shared::inventory::{
-    BootPartitionContents, BootPartitionDetails, ZoneKind,
-    ZoneManifestBootInventory,
+    BootPartitionContents, BootPartitionDetails, ManifestBootInventory,
+    ZoneKind,
 };
 use nexus_types::{
     deployment::{
@@ -422,7 +422,7 @@ pub(crate) struct NoopConvertZoneInfo {
 impl NoopConvertZoneInfo {
     fn new(
         zone: &BlueprintZoneConfig,
-        zone_manifest: &ZoneManifestBootInventory,
+        zone_manifest: &ManifestBootInventory,
         artifacts_by_hash: &HashMap<ArtifactHash, &TufArtifactMeta>,
     ) -> Self {
         let file_name = zone.kind().artifact_in_install_dataset();

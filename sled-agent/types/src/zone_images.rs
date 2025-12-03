@@ -6,6 +6,9 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use nexus_sled_agent_shared::inventory::ManifestBootInventory;
+use nexus_sled_agent_shared::inventory::ManifestInventory;
+use nexus_sled_agent_shared::inventory::ManifestNonBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
@@ -15,9 +18,6 @@ use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use omicron_common::update::{
     MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
 };
@@ -69,7 +69,7 @@ impl ResolverStatus {
     }
 }
 
-/// Describes the current state of zone manifests.
+/// Describes the current state of measurement manifests.
 #[derive(Clone, Debug)]
 pub struct MeasurementManifestStatus {
     /// The path to the measurement manifest JSON on the boot disk.
@@ -89,7 +89,7 @@ type MeasurementEntry =
 
 impl MeasurementManifestStatus {
     /// Convert this status to the inventory format.
-    pub fn to_inventory(&self) -> ZoneManifestInventory {
+    pub fn to_inventory(&self) -> ManifestInventory {
         let boot_inventory = match &self.boot_disk_result {
             Ok(artifacts_result) => Ok(artifacts_result.to_boot_inventory()),
             Err(error) => Err(InlineErrorChain::new(error).to_string()),
@@ -98,7 +98,7 @@ impl MeasurementManifestStatus {
         let non_boot_status = self
             .non_boot_disk_metadata
             .iter()
-            .map(|info| ZoneManifestNonBootInventory {
+            .map(|info| ManifestNonBootInventory {
                 zpool_id: info.zpool_id,
                 path: info.path.clone(),
                 is_valid: info.result.is_valid(),
@@ -106,7 +106,7 @@ impl MeasurementManifestStatus {
             })
             .collect();
 
-        ZoneManifestInventory {
+        ManifestInventory {
             boot_disk_path: self.boot_disk_path.clone(),
             boot_inventory,
             non_boot_status,
@@ -167,7 +167,7 @@ pub struct ZoneManifestStatus {
 
 impl ZoneManifestStatus {
     /// Convert this status to the inventory format.
-    pub fn to_inventory(&self) -> ZoneManifestInventory {
+    pub fn to_inventory(&self) -> ManifestInventory {
         let boot_inventory = match &self.boot_disk_result {
             Ok(artifacts_result) => Ok(artifacts_result.to_boot_inventory()),
             Err(error) => Err(InlineErrorChain::new(error).to_string()),
@@ -176,7 +176,7 @@ impl ZoneManifestStatus {
         let non_boot_status = self
             .non_boot_disk_metadata
             .iter()
-            .map(|info| ZoneManifestNonBootInventory {
+            .map(|info| ManifestNonBootInventory {
                 zpool_id: info.zpool_id,
                 path: info.path.clone(),
                 is_valid: info.result.is_valid(),
@@ -184,7 +184,7 @@ impl ZoneManifestStatus {
             })
             .collect();
 
-        ZoneManifestInventory {
+        ManifestInventory {
             boot_disk_path: self.boot_disk_path.clone(),
             boot_inventory,
             non_boot_status,
@@ -274,11 +274,11 @@ impl ZoneManifestArtifactsResult {
     }
 
     /// Converts this result to the inventory format, used for the boot disk.
-    pub fn to_boot_inventory(&self) -> ZoneManifestBootInventory {
+    pub fn to_boot_inventory(&self) -> ManifestBootInventory {
         let artifacts =
             self.data.iter().map(|artifact| artifact.to_inventory()).collect();
 
-        ZoneManifestBootInventory { source: self.manifest.source, artifacts }
+        ManifestBootInventory { source: self.manifest.source, artifacts }
     }
 }
 

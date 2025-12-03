@@ -262,7 +262,10 @@ pub enum WriteError {
         error: Box<NestedEngineError<ControlPlaneZonesSpec>>,
     },
     #[error("error creating directory")]
-    CreateDirError { #[source] error: std::io::Error },
+    CreateDirError {
+        #[source]
+        error: std::io::Error,
+    },
 }
 
 impl From<NestedEngineError<ControlPlaneZonesSpec>> for WriteError {
