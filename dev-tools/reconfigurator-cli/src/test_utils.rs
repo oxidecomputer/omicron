@@ -202,9 +202,10 @@ impl ReconfiguratorCliTestState {
         })
     }
 
-    /// State change helper: edit the latest blueprint in an abnormal way that
-    /// cannot be done via `BlueprintBuilder`, then insert the edited blueprint
-    /// as the latest.
+    /// State change helper: create a new latest blueprint that is a clone of
+    /// the current latest blueprint (but with a its ID and parent ID updated),
+    /// then pass it to `f` which is allowed to edit it in abnormal ways that
+    /// cannot be done via `BlueprintBuilder`.
     pub fn blueprint_edit_latest_low_level<F>(
         &mut self,
         description: &str,
@@ -223,13 +224,13 @@ impl ReconfiguratorCliTestState {
                 .expect("always have a latest blueprint");
             let mut blueprint = parent_blueprint.clone();
 
-            // Perform whatever modifications the caller wants.
-            f(&mut blueprint)?;
-
             // Update metadata fields to make this a new blueprint.
             blueprint.id = rng.next_blueprint();
             blueprint.parent_blueprint_id = Some(parent_blueprint.id);
             blueprint.time_created = now_db_precision();
+
+            // Perform whatever modifications the caller wants.
+            f(&mut blueprint)?;
 
             let blueprint = Arc::new(blueprint);
             system.add_blueprint(Arc::clone(&blueprint))?;

@@ -1546,9 +1546,10 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
     // and decommissioned sleds. (When we add more kinds of
     // non-provisionable states in the future, we'll have to add more
     // sleds.)
-    let (example, mut blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).build();
-    let collection = example.collection;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| Ok(builder.nsleds(5).nexus_count(5)))
+        .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // This blueprint should only have 5 Nexus zones: one on each sled.
     assert_eq!(blueprint1.sleds.len(), 5);
@@ -1561,95 +1562,75 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
 
     // Arbitrarily choose some of the sleds and mark them non-provisionable
     // in various ways.
-    let mut builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-    let mut sleds_iter = builder.sleds_mut().iter_mut();
+    let nonprovisionable_sled_id;
+    let expunged_sled_id;
+    let decommissioned_sled_id;
+    {
+        let mut sleds_iter = blueprint1.sleds();
+        nonprovisionable_sled_id = sleds_iter.next().unwrap();
+        expunged_sled_id = sleds_iter.next().unwrap();
+        decommissioned_sled_id = sleds_iter.next().unwrap();
+    }
 
-    let nonprovisionable_sled_id = {
-        let (sled_id, details) = sleds_iter.next().expect("no sleds");
-        details.policy = SledPolicy::InService {
-            provision_policy: SledProvisionPolicy::NonProvisionable,
-        };
-        *sled_id
-    };
+    // We need to mark the decommissioned sled as such in the blueprint; it's
+    // not possible (outside of tests!) to have the database record a sled in
+    // the `Decommissioned` state without a blueprint having caused that change.
+    let blueprint1a = sim
+        .blueprint_edit_latest("decommission sled", |builder| {
+            builder.expunge_sled(decommissioned_sled_id).unwrap();
+            builder.set_sled_decommissioned(decommissioned_sled_id).unwrap();
+            Ok(())
+        })
+        .expect("decommissioned sled");
+
+    sim.change_state("make sleds non-provisionable", |state| {
+        // Change the sled policy for the nonprovisionable sled.
+        let description = state.system_mut().description_mut();
+        description
+            .sled_set_policy(
+                nonprovisionable_sled_id,
+                SledPolicy::InService {
+                    provision_policy: SledProvisionPolicy::NonProvisionable,
+                },
+            )
+            .expect("set policy");
+
+        // Expunge the expunged and decommissioned sleds.
+        description
+            .sled_expunge(expunged_sled_id)
+            .expect("expunged sled")
+            .sled_expunge(decommissioned_sled_id)
+            .expect("expunged sled");
+
+        // Mark the updated state on the decommissioned sled.
+        description
+            .sled_set_state(decommissioned_sled_id, SledState::Decommissioned)
+            .expect("set state");
+
+        // Change to a high number of target Nexus zones. The
+        // number (9) is chosen such that:
+        //
+        // * we start with 5 sleds with 1 Nexus each
+        // * we take two sleds out of service (one expunged, one
+        //   decommissioned), so we're down to 3 in-service Nexuses: we need to
+        //   add 6 to get to the new policy target of 9
+        // * of the remaining 3 sleds, only 2 are eligible for provisioning
+        // * each of those 2 sleds should get exactly 3 new Nexuses
+        description.set_target_nexus_zone_count(9);
+
+        // Disable addition of zone types we're not checking for below.
+        description.set_target_internal_dns_zone_count(0);
+        description.set_target_crucible_pantry_zone_count(0);
+
+        Ok(())
+    })
+    .expect("changed state");
+
     println!("1 -> 2: marked non-provisionable {nonprovisionable_sled_id}");
-    let expunged_sled_id = {
-        let (sled_id, _) = sleds_iter.next().expect("no sleds");
-        // We need to call builder.expunge_sled(), but can't while
-        // iterating; we defer that work until after we're done with
-        // `sleds_iter`.
-        *sled_id
-    };
     println!("1 -> 2: expunged {expunged_sled_id}");
-    let decommissioned_sled_id = {
-        let (sled_id, details) = sleds_iter.next().expect("no sleds");
-        details.state = SledState::Decommissioned;
-
-        // Drop the mutable borrow on the builder so we can call
-        // `builder.expunge_sled()`
-        let sled_id = *sled_id;
-        // Let's also properly expunge the sled and its disks. We can't have
-        // a decommissioned sled that is not expunged also.
-        builder.expunge_sled(&sled_id).unwrap();
-
-        // Decommissioned sleds can only occur if their zones have been
-        // expunged, so lie and pretend like that already happened
-        // (otherwise the planner will rightfully fail to generate a new
-        // blueprint, because we're feeding it invalid inputs).
-        for mut zone in &mut blueprint1.sleds.get_mut(&sled_id).unwrap().zones {
-            zone.disposition = BlueprintZoneDisposition::Expunged {
-                as_of_generation: Generation::new(),
-                ready_for_cleanup: false,
-            };
-        }
-
-        // Similarly, a sled can only have gotten into the `Decommissioned`
-        // state via blueprints. If the database says the sled is
-        // decommissioned but the parent blueprint says it's still active,
-        // that's an invalid state that the planner will reject.
-        blueprint1
-            .sleds
-            .get_mut(&sled_id)
-            .expect("found state in parent blueprint")
-            .state = SledState::Decommissioned;
-
-        sled_id
-    };
-    // Actually expunge the sled (the work that was deferred during iteration
-    // above)
-    builder.expunge_sled(&expunged_sled_id).unwrap();
     println!("1 -> 2: decommissioned {decommissioned_sled_id}");
 
-    // Now run the planner with a high number of target Nexus zones. The
-    // number (9) is chosen such that:
-    //
-    // * we start with 5 sleds with 1 Nexus each
-    // * we take two sleds out of service (one expunged, one
-    //   decommissioned), so we're down to 3 in-service Nexuses: we need to
-    //   add 6 to get to the new policy target of 9
-    // * of the remaining 3 sleds, only 2 are eligible for provisioning
-    // * each of those 2 sleds should get exactly 3 new Nexuses
-    builder.policy_mut().target_nexus_zone_count = 9;
-
-    // Disable addition of zone types we're not checking for below.
-    builder.policy_mut().target_internal_dns_zone_count = 0;
-    builder.policy_mut().target_crucible_pantry_zone_count = 0;
-
-    let input = builder.build();
-    let mut blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
-
+    let mut blueprint2 = sim.run_planner().expect("planning succeeded");
     // Define a time_created for consistent output across runs.
     blueprint2.time_created = DateTime::<Utc>::UNIX_EPOCH;
 
@@ -1658,7 +1639,7 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
         &blueprint2.display().to_string(),
     );
 
-    let summary = blueprint2.diff_since_blueprint(&blueprint1);
+    let summary = blueprint2.diff_since_blueprint(&blueprint1a);
     println!(
         "1 -> 2 (added additional Nexus zones, take 2 sleds out of service):"
     );

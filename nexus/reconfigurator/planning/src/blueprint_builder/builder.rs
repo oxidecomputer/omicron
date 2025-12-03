@@ -919,7 +919,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Expunge everything on a sled.
-    pub(crate) fn expunge_sled(
+    pub fn expunge_sled(
         &mut self,
         sled_id: SledUuid,
     ) -> Result<(), Error> {

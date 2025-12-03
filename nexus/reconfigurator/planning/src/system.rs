@@ -519,6 +519,17 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Set the state for a sled in the system.
+    pub fn sled_set_state(
+        &mut self,
+        sled_id: SledUuid,
+        state: SledState,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+        sled.state = state;
+        Ok(self)
+    }
+
     /// Set the policy for a sled in the system.
     pub fn sled_set_policy(
         &mut self,
@@ -527,6 +538,21 @@ impl SystemDescription {
     ) -> anyhow::Result<&mut Self> {
         let sled = self.get_sled_mut(sled_id)?;
         sled.policy = policy;
+        Ok(self)
+    }
+
+    /// Expunge a sled and all its disks.
+    pub fn sled_expunge(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.get_sled_mut(sled_id)?;
+
+        sled.policy = SledPolicy::Expunged;
+        for disk in sled.resources_mut().zpools.values_mut() {
+            disk.policy = PhysicalDiskPolicy::Expunged;
+        }
+
         Ok(self)
     }
 
