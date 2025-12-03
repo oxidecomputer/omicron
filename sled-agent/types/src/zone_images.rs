@@ -138,7 +138,6 @@ impl MeasurementManifestStatus {
                         },
                     ));
                 }
-                // XXX FIXME I think we want the file name here too for error reporting
                 ArtifactReadResult::Error(err) => {
                     results.push(Err(ManifestHashError::ReadArtifact(
                         err.clone(),
