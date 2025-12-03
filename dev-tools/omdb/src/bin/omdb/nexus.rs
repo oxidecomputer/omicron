@@ -2610,8 +2610,6 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
 
             if let Some(SupportBundleCollectionReport {
                 bundle,
-                listed_in_service_sleds,
-                listed_sps,
                 activated_in_db_ok,
                 mut steps,
                 ereports,
@@ -2619,12 +2617,6 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
             {
                 println!("    Support Bundle Collection Report:");
                 println!("      Bundle ID: {bundle}");
-                println!(
-                    "      Bundle was able to list in-service sleds: {listed_in_service_sleds}"
-                );
-                println!(
-                    "      Bundle was able to list service processors: {listed_sps}"
-                );
 
                 #[derive(Tabled)]
                 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]

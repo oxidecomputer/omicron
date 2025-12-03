@@ -629,15 +629,6 @@ impl CompletedCollectionStep {
                 report.ereports = Some(status);
                 Status::Ok
             }
-            CollectionStepOutput::SavingSpDumps { listed_sps } => {
-                report.listed_sps = listed_sps;
-                Status::Ok
-            }
-            CollectionStepOutput::SpawnSleds { extra_steps } => {
-                report.listed_in_service_sleds = true;
-                steps.extend(extra_steps);
-                Status::Ok
-            }
             CollectionStepOutput::Spawn { extra_steps } => {
                 steps.extend(extra_steps);
                 Status::Ok
@@ -664,14 +655,7 @@ enum CollectionStepOutput {
     // It may have still saved a partial set of data to the bundle.
     Failed(anyhow::Error),
     Ereports(SupportBundleEreportStatus),
-    SavingSpDumps { listed_sps: bool },
-    // NOTE: The distinction between this and "Spawn" is pretty artificial -
-    // it's just to preserve a part of the report which says "we tried to
-    // list in-service sleds".
-    //
-    // If we changed the collection report, this could easily be combined
-    // with the "Spawn" variant.
-    SpawnSleds { extra_steps: Vec<CollectionStep> },
+    // The step spawned additional steps to execute
     Spawn { extra_steps: Vec<CollectionStep> },
     // The step completed with nothing to report, and no follow-up steps
     None,
@@ -1149,7 +1133,7 @@ impl BundleCollection {
             format!("failed to save SP dump from: {} {}", sp.type_, sp.slot)
         })?;
 
-        Ok(CollectionStepOutput::SavingSpDumps { listed_sps: true })
+        Ok(CollectionStepOutput::None)
     }
 
     // Perform the work of collecting the support bundle into a temporary directory
@@ -1185,25 +1169,25 @@ impl BundleCollection {
 
         let steps: Vec<CollectionStep> = vec![
             CollectionStep::new(
-                "bundle id",
+                SupportBundleCollectionStep::STEP_BUNDLE_ID,
                 Box::new(|collection, dir| {
                     collection.collect_bundle_id(dir).boxed()
                 }),
             ),
             CollectionStep::new(
-                "reconfigurator state",
+                SupportBundleCollectionStep::STEP_RECONFIGURATOR_STATE,
                 Box::new(|collection, dir| {
                     collection.collect_reconfigurator_state(dir).boxed()
                 }),
             ),
             CollectionStep::new(
-                "ereports",
+                SupportBundleCollectionStep::STEP_EREPORTS,
                 Box::new(|collection, dir| {
                     collection.collect_ereports(dir).boxed()
                 }),
             ),
             CollectionStep::new(
-                "sled cubby info",
+                SupportBundleCollectionStep::STEP_SLED_CUBBY_INFO,
                 Box::new({
                     let all_sleds = all_sleds.clone();
                     let mgs_client = mgs_client.clone();
@@ -1222,7 +1206,7 @@ impl BundleCollection {
                 }),
             ),
             CollectionStep::new(
-                "spawn steps to query all SP dumps",
+                SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS,
                 Box::new({
                     let mgs_client = mgs_client.clone();
                     move |collection, dir| {
@@ -1236,7 +1220,7 @@ impl BundleCollection {
                 }),
             ),
             CollectionStep::new(
-                "spawn steps to query all sleds",
+                SupportBundleCollectionStep::STEP_SPAWN_SLEDS,
                 Box::new({
                     let all_sleds = all_sleds.clone();
                     move |collection, _| {
@@ -1286,7 +1270,7 @@ impl BundleCollection {
             ));
         }
 
-        return Ok(CollectionStepOutput::SpawnSleds { extra_steps });
+        return Ok(CollectionStepOutput::Spawn { extra_steps });
     }
 
     // Collect data from a sled, storing it into a directory that will
@@ -2425,8 +2409,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
         assert_eq!(
             report.ereports,
@@ -2502,8 +2494,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         let observed_bundle = datastore
@@ -2591,8 +2591,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle1.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         // This is observable by checking the state of bundle1 and bundle2:
@@ -2614,8 +2622,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle2.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         // After another collection request, we'll see that both bundles have
@@ -2742,8 +2758,16 @@ mod test {
             .expect("Collection should have succeeded under test")
             .expect("Collecting the bundle should have generated a report");
         assert_eq!(report.bundle, bundle.id.into());
-        assert!(report.listed_in_service_sleds);
-        assert!(report.listed_sps);
+        // Verify that we spawned steps to query sleds and SPs
+        let step_names: Vec<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS)
+        );
+        assert!(
+            step_names
+                .contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS)
+        );
         assert!(report.activated_in_db_ok);
 
         // Cancel the bundle after collection has completed
