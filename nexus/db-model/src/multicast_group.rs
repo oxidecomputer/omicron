@@ -120,24 +120,90 @@ impl_enum_type!(
     Left => b"left"
 );
 
+impl MulticastGroupState {
+    pub const ALL_STATES: &'static [Self] =
+        &[Self::Creating, Self::Active, Self::Deleting, Self::Deleted];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Creating => "Creating",
+            Self::Active => "Active",
+            Self::Deleting => "Deleting",
+            Self::Deleted => "Deleted",
+        }
+    }
+}
+
 impl std::fmt::Display for MulticastGroupState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            MulticastGroupState::Creating => "Creating",
-            MulticastGroupState::Active => "Active",
-            MulticastGroupState::Deleting => "Deleting",
-            MulticastGroupState::Deleted => "Deleted",
-        })
+        f.write_str(self.label())
+    }
+}
+
+/// Error returned when parsing a `MulticastGroupState` from a string.
+#[derive(Debug)]
+pub struct MulticastGroupStateParseError(());
+
+impl std::fmt::Display for MulticastGroupStateParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid multicast group state")
+    }
+}
+
+impl std::error::Error for MulticastGroupStateParseError {}
+
+impl std::str::FromStr for MulticastGroupState {
+    type Err = MulticastGroupStateParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        for &v in Self::ALL_STATES {
+            if s.eq_ignore_ascii_case(v.label()) {
+                return Ok(v);
+            }
+        }
+        Err(MulticastGroupStateParseError(()))
+    }
+}
+
+impl MulticastGroupMemberState {
+    pub const ALL_STATES: &'static [Self] =
+        &[Self::Joining, Self::Joined, Self::Left];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Joining => "Joining",
+            Self::Joined => "Joined",
+            Self::Left => "Left",
+        }
     }
 }
 
 impl std::fmt::Display for MulticastGroupMemberState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            MulticastGroupMemberState::Joining => "Joining",
-            MulticastGroupMemberState::Joined => "Joined",
-            MulticastGroupMemberState::Left => "Left",
-        })
+        f.write_str(self.label())
+    }
+}
+
+/// Error returned when parsing a `MulticastGroupMemberState` from a string.
+#[derive(Debug)]
+pub struct MulticastGroupMemberStateParseError(());
+
+impl std::fmt::Display for MulticastGroupMemberStateParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid multicast group member state")
+    }
+}
+
+impl std::error::Error for MulticastGroupMemberStateParseError {}
+
+impl std::str::FromStr for MulticastGroupMemberState {
+    type Err = MulticastGroupMemberStateParseError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        for &v in Self::ALL_STATES {
+            if s.eq_ignore_ascii_case(v.label()) {
+                return Ok(v);
+            }
+        }
+        Err(MulticastGroupMemberStateParseError(()))
     }
 }
 

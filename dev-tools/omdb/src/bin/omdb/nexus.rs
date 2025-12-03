@@ -60,6 +60,7 @@ use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::InventoryLoadStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
+use nexus_types::internal_api::background::MulticastGroupReconcilerStatus;
 use nexus_types::internal_api::background::ProbeDistributorStatus;
 use nexus_types::internal_api::background::ReadOnlyRegionReplacementStartStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -1191,6 +1192,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
         "lookup_region_port" => {
             print_task_lookup_region_port(details);
         }
+        "multicast_reconciler" => {
+            print_task_multicast_reconciler(details);
+        }
         "phantom_disks" => {
             print_task_phantom_disks(details);
         }
@@ -2105,6 +2109,76 @@ fn print_task_lookup_region_port(details: &serde_json::Value) {
             error, details,
         ),
     }
+}
+
+fn print_task_multicast_reconciler(details: &serde_json::Value) {
+    let status = match serde_json::from_value::<MulticastGroupReconcilerStatus>(
+        details.clone(),
+    ) {
+        Err(error) => {
+            eprintln!(
+                "warning: failed to interpret task details: {error:?}: {details:?}"
+            );
+            return;
+        }
+        Ok(status) => status,
+    };
+
+    if status.disabled {
+        println!("    multicast feature is disabled");
+        return;
+    }
+
+    const GROUPS_CREATED: &str = "groups created (Creating->Active):";
+    const GROUPS_DELETED: &str = "groups deleted (cleanup):";
+    const GROUPS_VERIFIED: &str = "groups verified (Active):";
+    const EMPTY_GROUPS_MARKED: &str = "empty groups marked for deletion:";
+    const MEMBERS_PROCESSED: &str = "members processed:";
+    const MEMBERS_DELETED: &str = "members deleted:";
+    const WIDTH: usize = const_max_len(&[
+        GROUPS_CREATED,
+        GROUPS_DELETED,
+        GROUPS_VERIFIED,
+        EMPTY_GROUPS_MARKED,
+        MEMBERS_PROCESSED,
+        MEMBERS_DELETED,
+    ]) + 1;
+    const NUM_WIDTH: usize = 3;
+
+    if !status.errors.is_empty() {
+        println!(
+            "    task did not complete successfully! ({} errors)",
+            status.errors.len()
+        );
+        for error in &status.errors {
+            println!("    > {error}");
+        }
+    }
+
+    println!(
+        "    {GROUPS_CREATED:<WIDTH$}{:>NUM_WIDTH$}",
+        status.groups_created
+    );
+    println!(
+        "    {GROUPS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
+        status.groups_deleted
+    );
+    println!(
+        "    {GROUPS_VERIFIED:<WIDTH$}{:>NUM_WIDTH$}",
+        status.groups_verified
+    );
+    println!(
+        "    {EMPTY_GROUPS_MARKED:<WIDTH$}{:>NUM_WIDTH$}",
+        status.empty_groups_marked
+    );
+    println!(
+        "    {MEMBERS_PROCESSED:<WIDTH$}{:>NUM_WIDTH$}",
+        status.members_processed
+    );
+    println!(
+        "    {MEMBERS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
+        status.members_deleted
+    );
 }
 
 fn print_task_phantom_disks(details: &serde_json::Value) {
