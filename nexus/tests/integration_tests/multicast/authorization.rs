@@ -2052,12 +2052,12 @@ async fn test_silo_cannot_use_unlinked_pool(
     let error = NexusRequest::new(
         RequestBuilder::new(client, http::Method::POST, member_add_url)
             .body(Some(&member_params))
-            .expect_status(Some(StatusCode::NOT_FOUND)),
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .authn_as(AuthnMode::SiloUser(user_b.id))
     .execute()
     .await
-    .expect("User B should get 404 when pool is not linked to their silo");
+    .expect("User B should get 400 when no pool is linked to their silo");
 
     // Verify the error indicates no pool was found
     let error_body: dropshot::HttpErrorResponseBody =
@@ -2065,7 +2065,7 @@ async fn test_silo_cannot_use_unlinked_pool(
     assert!(
         error_body.message.contains("pool")
             || error_body.message.contains("multicast"),
-        "Error should indicate pool not found, got: {}",
+        "Error should indicate no pool available, got: {}",
         error_body.message
     );
 }

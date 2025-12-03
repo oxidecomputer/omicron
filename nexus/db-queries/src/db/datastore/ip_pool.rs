@@ -313,8 +313,18 @@ impl DataStore {
     /// Look up any IP pool by pool type linked to the caller's silo.
     ///
     /// Prefers the default pool if one exists. If no default exists, falls
-    /// back to any linked pool, selecting alphabetically by name. Returns an
-    /// error if no pool of the given type is linked to the caller's silo.
+    /// back to any linked pool, selecting alphabetically by name (arbitrary
+    /// tie-breaker, not semantically meaningful). Returns an error if no pool
+    /// of the given type is linked to the caller's silo.
+    ///
+    /// Note: For multicast pools, this method does not distinguish between
+    /// ASM (224/4) and SSM (232/8) pools.
+    /// - For SSM multicast groups (with `source_ips`), use
+    ///   [`Self::ip_pools_fetch_ssm_multicast`] to ensure an SSM-range pool is
+    ///   selected.
+    /// - For ASM multicast groups (no `source_ips`), use
+    ///   [`Self::ip_pools_fetch_asm_multicast`] to ensure an ASM-range pool is
+    ///   selected when no explicit pool or IP is provided.
     async fn ip_pools_fetch_any_by_type(
         &self,
         opctx: &OpContext,
@@ -356,6 +366,148 @@ impl DataStore {
                     authz::IpPool::new(authz::FLEET, ip_pool.id(), lookup_type);
                 (authz_pool, ip_pool)
             })
+    }
+
+    /// Look up an SSM multicast pool linked to the caller's silo.
+    ///
+    /// Per [RFC 4607], Source-Specific Multicast (SSM) addresses (IPv4 232/8,
+    /// IPv6 ff3x::/32) are used when source IPs are specified. This method
+    /// finds pools with ranges in these SSM address spaces, which is required
+    /// when creating a multicast group with `source_ips` but without an
+    /// explicit pool or IP address.
+    ///
+    /// Prefers the default pool if one exists. If no default exists, falls
+    /// back to any linked SSM pool, selecting alphabetically by name (arbitrary
+    /// tie-breaker).
+    ///
+    /// [RFC 4607]: https://datatracker.ietf.org/doc/html/rfc4607
+    pub async fn ip_pools_fetch_ssm_multicast(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_range;
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+        let lookup_type =
+            LookupType::ByOther("SSM multicast pool for current silo".into());
+
+        // We need to find multicast pools with SSM ranges.
+        // SSM ranges are: IPv4 232.0.0.0/8, IPv6 ff3x::/32
+        let pools: Vec<(IpPool, IpPoolRange, bool)> = ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .inner_join(
+                ip_pool_range::table
+                    .on(ip_pool_range::ip_pool_id.eq(ip_pool::id)),
+            )
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool_range::time_deleted.is_null())
+            .filter(ip_pool::pool_type.eq(IpPoolType::Multicast))
+            .order((ip_pool_resource::is_default.desc(), ip_pool::name.asc()))
+            .select((
+                IpPool::as_select(),
+                IpPoolRange::as_select(),
+                ip_pool_resource::is_default,
+            ))
+            .load_async::<(IpPool, IpPoolRange, bool)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // Find the first pool with an SSM range (already ordered by preference)
+        for (pool, range, _is_default) in pools {
+            let is_ssm = match range.first_address {
+                IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
+                IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+            };
+
+            if is_ssm {
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
+                return Ok((authz_pool, pool));
+            }
+        }
+
+        // No SSM pool found
+        Err(public_error_from_diesel_lookup(
+            DieselError::NotFound,
+            ResourceType::IpPool,
+            &lookup_type,
+        ))
+    }
+
+    /// Look up an ASM multicast pool linked to the caller's silo.
+    ///
+    /// ASM (Any-Source Multicast) addresses are multicast ranges that are not
+    /// in the SSM spaces (IPv4 232/8, IPv6 ff3x::/32). This method finds pools
+    /// with ranges outside those SSM address spaces. Use this when creating a
+    /// multicast group without `source_ips` and without an explicit pool or IP
+    /// address, to ensure an ASM-range pool is selected.
+    ///
+    /// Prefers the default pool if one exists. If no default exists, falls
+    /// back to any linked ASM pool, selecting alphabetically by name
+    /// (arbitrary tie-breaker).
+    pub async fn ip_pools_fetch_asm_multicast(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<(authz::IpPool, IpPool)> {
+        use nexus_db_schema::schema::ip_pool;
+        use nexus_db_schema::schema::ip_pool_range;
+        use nexus_db_schema::schema::ip_pool_resource;
+
+        let authz_silo_id = opctx.authn.silo_required()?.id();
+        let lookup_type =
+            LookupType::ByOther("ASM multicast pool for current silo".into());
+
+        let pools: Vec<(IpPool, IpPoolRange, bool)> = ip_pool::table
+            .inner_join(ip_pool_resource::table)
+            .inner_join(
+                ip_pool_range::table
+                    .on(ip_pool_range::ip_pool_id.eq(ip_pool::id)),
+            )
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .filter(ip_pool_resource::resource_id.eq(authz_silo_id))
+            .filter(ip_pool::time_deleted.is_null())
+            .filter(ip_pool_range::time_deleted.is_null())
+            .filter(ip_pool::pool_type.eq(IpPoolType::Multicast))
+            .order((ip_pool_resource::is_default.desc(), ip_pool::name.asc()))
+            .select((
+                IpPool::as_select(),
+                IpPoolRange::as_select(),
+                ip_pool_resource::is_default,
+            ))
+            .load_async::<(IpPool, IpPoolRange, bool)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        for (pool, range, _is_default) in pools {
+            let is_ssm = match range.first_address {
+                IpNetwork::V4(net) => IPV4_SSM_SUBNET.contains(net.network()),
+                IpNetwork::V6(net) => IPV6_SSM_SUBNET.contains(net.network()),
+            };
+
+            if !is_ssm {
+                let authz_pool =
+                    authz::IpPool::new(authz::FLEET, pool.id(), lookup_type);
+                return Ok((authz_pool, pool));
+            }
+        }
+
+        Err(public_error_from_diesel_lookup(
+            DieselError::NotFound,
+            ResourceType::IpPool,
+            &lookup_type,
+        ))
     }
 
     /// Look up internal service IP Pools for both IP versions.
@@ -427,10 +579,8 @@ impl DataStore {
                 // Verify it's the correct pool type
                 if pool_record.pool_type != pool_type {
                     return Err(Error::invalid_request(&format!(
-                        "Pool '{}' is not a {} pool (type: {})",
-                        pool_record.identity.name,
-                        pool_type,
-                        pool_record.pool_type
+                        "Pool '{}' is not a {pool_type} pool (type: {})",
+                        pool_record.identity.name, pool_record.pool_type
                     )));
                 }
 
@@ -3138,6 +3288,269 @@ mod test {
             .await
             .unwrap();
         assert_eq!(ipv6_capacity, 10); // ff01::1 to ff01::a
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_ip_pools_fetch_ssm_multicast() {
+        let logctx = dev::test_setup_log("test_ip_pools_fetch_ssm_multicast");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Initially no SSM pool - should fail
+        let error =
+            datastore.ip_pools_fetch_ssm_multicast(&opctx).await.unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create ASM pool with name that comes first alphabetically
+        // ASM uses 224.x.x.x range
+        let asm_identity = IdentityMetadataCreateParams {
+            name: "aaa-asm-multicast-pool".parse().unwrap(),
+            description: "ASM multicast pool".to_string(),
+        };
+        let asm_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &asm_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create ASM multicast IP pool");
+
+        let authz_asm_pool = authz::IpPool::new(
+            authz::FLEET,
+            asm_pool.id(),
+            LookupType::ById(asm_pool.id()),
+        );
+
+        // Add ASM range (224.x.x.x)
+        let asm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 1, 1, 1),
+                Ipv4Addr::new(224, 1, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_asm_pool, &asm_pool, &asm_range)
+            .await
+            .expect("Could not add ASM multicast range");
+
+        // Link ASM pool to silo
+        let asm_link = IpPoolResource {
+            ip_pool_id: asm_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, asm_link)
+            .await
+            .expect("Should link ASM multicast pool to silo");
+
+        // Even with ASM pool linked, fetch_ssm should still fail (no SSM pool)
+        let error =
+            datastore.ip_pools_fetch_ssm_multicast(&opctx).await.unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create SSM pool with name that comes after alphabetical ordering
+        // SSM uses 232.x.x.x range
+        let ssm_identity = IdentityMetadataCreateParams {
+            name: "zzz-ssm-multicast-pool".parse().unwrap(),
+            description: "SSM multicast pool".to_string(),
+        };
+        let ssm_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &ssm_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create SSM multicast IP pool");
+
+        let authz_ssm_pool = authz::IpPool::new(
+            authz::FLEET,
+            ssm_pool.id(),
+            LookupType::ById(ssm_pool.id()),
+        );
+
+        // Add SSM range (232.x.x.x)
+        let ssm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(232, 1, 1, 1),
+                Ipv4Addr::new(232, 1, 1, 10),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_ssm_pool, &ssm_pool, &ssm_range)
+            .await
+            .expect("Could not add SSM multicast range");
+
+        // Link SSM pool to silo
+        let ssm_link = IpPoolResource {
+            ip_pool_id: ssm_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, ssm_link)
+            .await
+            .expect("Should link SSM multicast pool to silo");
+
+        // `ip_pools_fetch_ssm_multicast`` should succeed and return the SSM pool
+        let (_, found_pool) = datastore
+            .ip_pools_fetch_ssm_multicast(&opctx)
+            .await
+            .expect("Should find SSM multicast pool");
+        assert_eq!(found_pool.id(), ssm_pool.id());
+        assert_eq!(
+            found_pool.identity.name.to_string(),
+            "zzz-ssm-multicast-pool"
+        );
+
+        db.terminate().await;
+        logctx.cleanup_successful();
+    }
+
+    /// Verify ASM pool selection selects pools whose ranges are not SSM
+    /// (e.g., IPv4 224/4 but not 232/8), and does not get confused by
+    /// alphabetical ordering or the presence of SSM pools.
+    #[tokio::test]
+    async fn test_ip_pools_fetch_asm_multicast() {
+        let logctx = dev::test_setup_log("test_ip_pools_fetch_asm_multicast");
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
+        // Initially no ASM pool - should fail
+        let error =
+            datastore.ip_pools_fetch_asm_multicast(&opctx).await.unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create SSM pool first with a name that would sort first if chosen
+        let ssm_identity = IdentityMetadataCreateParams {
+            name: "a-ssm-multicast-pool".parse().unwrap(),
+            description: "SSM multicast pool".to_string(),
+        };
+        let ssm_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &ssm_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create SSM multicast IP pool");
+
+        let authz_ssm_pool = authz::IpPool::new(
+            authz::FLEET,
+            ssm_pool.id(),
+            LookupType::ById(ssm_pool.id()),
+        );
+
+        // Add SSM range (232.x.x.x)
+        let ssm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(232, 2, 2, 2),
+                Ipv4Addr::new(232, 2, 2, 20),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_ssm_pool, &ssm_pool, &ssm_range)
+            .await
+            .expect("Could not add SSM multicast range");
+
+        // Link SSM pool to silo
+        let ssm_link = IpPoolResource {
+            ip_pool_id: ssm_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, ssm_link)
+            .await
+            .expect("Should link SSM pool to silo");
+
+        // With only SSM pool linked, ASM lookup should still fail
+        let error =
+            datastore.ip_pools_fetch_asm_multicast(&opctx).await.unwrap_err();
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // Create ASM pool and link
+        let asm_identity = IdentityMetadataCreateParams {
+            name: "zzz-asm-multicast-pool".parse().unwrap(),
+            description: "ASM multicast pool".to_string(),
+        };
+        let asm_pool = datastore
+            .ip_pool_create(
+                &opctx,
+                IpPool::new_multicast(
+                    &asm_identity,
+                    IpVersion::V4,
+                    IpPoolReservationType::ExternalSilos,
+                ),
+            )
+            .await
+            .expect("Should create ASM multicast IP pool");
+
+        let authz_asm_pool = authz::IpPool::new(
+            authz::FLEET,
+            asm_pool.id(),
+            LookupType::ById(asm_pool.id()),
+        );
+
+        // Add ASM range (224.x.x.x)
+        let asm_range = IpRange::V4(
+            Ipv4Range::new(
+                Ipv4Addr::new(224, 3, 3, 3),
+                Ipv4Addr::new(224, 3, 3, 15),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_asm_pool, &asm_pool, &asm_range)
+            .await
+            .expect("Could not add ASM multicast range");
+
+        // Link ASM pool to silo
+        let asm_link = IpPoolResource {
+            ip_pool_id: asm_pool.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: authz_silo.id(),
+            is_default: false,
+        };
+        datastore
+            .ip_pool_link_silo(&opctx, asm_link)
+            .await
+            .expect("Should link ASM pool to silo");
+
+        // ASM fetcher should now return the ASM pool
+        let (_, found_pool) = datastore
+            .ip_pools_fetch_asm_multicast(&opctx)
+            .await
+            .expect("Should find ASM multicast pool");
+        assert_eq!(found_pool.id(), asm_pool.id());
+        assert_eq!(
+            found_pool.identity.name.to_string(),
+            "zzz-asm-multicast-pool"
+        );
 
         db.terminate().await;
         logctx.cleanup_successful();
