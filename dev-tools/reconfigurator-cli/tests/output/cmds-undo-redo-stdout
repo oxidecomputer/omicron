@@ -1,0 +1,292 @@
+using provided RNG seed: reconfigurator-cli-test
+> # Test undo/redo functionality for the operation log
+
+> load-example --seed test-undo-redo --nsleds 2 --ndisks-per-sled 3
+loaded example system with:
+- collection: 44ce0631-f53e-4d2e-83ec-f8d6f99f6915
+- blueprint: 2c015447-ddb0-4885-99f5-f8c0022e63da
+
+
+> op log
+@  22608af0 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+
+> # Make some changes to create an operation history.
+> sled-add
+added sled 1d4e6291-2272-4c6b-b1c8-161404173e5d (serial: serial2)
+
+> sled-add
+added sled 164b2c79-0330-4c99-9de9-82d20209ae24 (serial: serial3)
+
+> silo-add test-silo
+
+> log
+@  a887277f (generation 4)
+│  reconfigurator-cli silo-add
+│
+○  c7f48fbf (generation 3)
+│  reconfigurator-cli sled-add: 164b2c79-0330-4c99-9de9-82d20209ae24 (serial: serial3)
+│
+○  ac7a3cd0 (generation 2)
+│  reconfigurator-cli sled-add: 1d4e6291-2272-4c6b-b1c8-161404173e5d (serial: serial2)
+│
+○  a6dcc37c (generation 1)
+│  reconfigurator-cli load-example
+│
+○  00000000 (generation 0)
+   root state
+
+
+> op log
+@  c5958a67 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli silo-add
+○  05930b3c <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 164b2c79-0330-4c99-9de9-82d20209ae24 (serial: serial3)
+○  71a23fa4 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 1d4e6291-2272-4c6b-b1c8-161404173e5d (serial: serial2)
+○  22608af0 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+
+> # First, undo the silo-add.
+> undo
+created operation 5c4684eb: undo to 05930b3c
+
+> log
+@  c7f48fbf (generation 3)
+│  reconfigurator-cli sled-add: 164b2c79-0330-4c99-9de9-82d20209ae24 (serial: serial3)
+│
+○  ac7a3cd0 (generation 2)
+│  reconfigurator-cli sled-add: 1d4e6291-2272-4c6b-b1c8-161404173e5d (serial: serial2)
+│
+○  a6dcc37c (generation 1)
+│  reconfigurator-cli load-example
+│
+○  00000000 (generation 0)
+   root state
+
+
+> op log
+@  5c4684eb <REDACTED_TIMESTAMP>
+│  undo to 05930b3c
+○  c5958a67 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli silo-add
+○  05930b3c <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 164b2c79-0330-4c99-9de9-82d20209ae24 (serial: serial3)
+○  71a23fa4 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 1d4e6291-2272-4c6b-b1c8-161404173e5d (serial: serial2)
+○  22608af0 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+
+> # Verify we can undo multiple times: undo the sled-add.
+> undo
+created operation e2abb4bc: undo to 71a23fa4
+
+> op log
+@  e2abb4bc <REDACTED_TIMESTAMP>
+│  undo to 71a23fa4
+○  5c4684eb <REDACTED_TIMESTAMP>
+│  undo to 05930b3c
+○  c5958a67 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli silo-add
+○  05930b3c <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 164b2c79-0330-4c99-9de9-82d20209ae24 (serial: serial3)
+○  71a23fa4 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 1d4e6291-2272-4c6b-b1c8-161404173e5d (serial: serial2)
+○  22608af0 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+
+> # Redo the sled-add we just undid.
+> redo
+created operation 5ec33797: redo to 5c4684eb
+
+> op log
+@  5ec33797 <REDACTED_TIMESTAMP>
+│  redo to 5c4684eb
+○  e2abb4bc <REDACTED_TIMESTAMP>
+│  undo to 71a23fa4
+○  5c4684eb <REDACTED_TIMESTAMP>
+│  undo to 05930b3c
+○  c5958a67 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli silo-add
+○  05930b3c <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 164b2c79-0330-4c99-9de9-82d20209ae24 (serial: serial3)
+○  71a23fa4 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 1d4e6291-2272-4c6b-b1c8-161404173e5d (serial: serial2)
+○  22608af0 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+
+> # Redo again to restore the silo-add.
+> redo
+created operation 52f67a5a: redo to c5958a67
+
+> op log
+@  52f67a5a <REDACTED_TIMESTAMP>
+│  redo to c5958a67
+○  5ec33797 <REDACTED_TIMESTAMP>
+│  redo to 5c4684eb
+○  e2abb4bc <REDACTED_TIMESTAMP>
+│  undo to 71a23fa4
+○  5c4684eb <REDACTED_TIMESTAMP>
+│  undo to 05930b3c
+○  c5958a67 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli silo-add
+○  05930b3c <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 164b2c79-0330-4c99-9de9-82d20209ae24 (serial: serial3)
+○  71a23fa4 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 1d4e6291-2272-4c6b-b1c8-161404173e5d (serial: serial2)
+○  22608af0 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+
+> # Make a new change.
+> silo-add another-silo
+
+> op log
+@  f7c311c2 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli silo-add
+○  52f67a5a <REDACTED_TIMESTAMP>
+│  redo to c5958a67
+○  5ec33797 <REDACTED_TIMESTAMP>
+│  redo to 5c4684eb
+○  e2abb4bc <REDACTED_TIMESTAMP>
+│  undo to 71a23fa4
+○  5c4684eb <REDACTED_TIMESTAMP>
+│  undo to 05930b3c
+○  c5958a67 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli silo-add
+○  05930b3c <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 164b2c79-0330-4c99-9de9-82d20209ae24 (serial: serial3)
+○  71a23fa4 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli sled-add: 1d4e6291-2272-4c6b-b1c8-161404173e5d (serial: serial2)
+○  22608af0 <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+
+> # Try to undo when we're already at the root. This should fail.
+> op wipe
+wiped operation log
+
+> op log
+@  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+> undo
+error: cannot undo: already at root operation
+
+
+> # Try to undo twice with one operation available.
+> load-example --seed test-undo-redo --nsleds 1
+loaded example system with:
+- collection: 44ce0631-f53e-4d2e-83ec-f8d6f99f6915
+- blueprint: 2c015447-ddb0-4885-99f5-f8c0022e63da
+
+> op log
+@  f1a9356d <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+> undo
+created operation ac313fb0: undo to 00000000
+
+> undo
+error: cannot undo: already at root operation
+
+
+> # This redo should work.
+> redo
+created operation 10d122d4: redo to f1a9356d
+
+> op log
+@  10d122d4 <REDACTED_TIMESTAMP>
+│  redo to f1a9356d
+○  ac313fb0 <REDACTED_TIMESTAMP>
+│  undo to 00000000
+○  f1a9356d <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+
+> # We're out of undos, so this redo should fail.
+> redo
+error: cannot redo: no redo available
+
+
+> # Do another undo and redo.
+> undo
+created operation 02e35bfb: undo to 00000000
+
+> redo
+created operation 03e83a20: redo to f1a9356d
+
+> op log
+@  03e83a20 <REDACTED_TIMESTAMP>
+│  redo to f1a9356d
+○  02e35bfb <REDACTED_TIMESTAMP>
+│  undo to 00000000
+○  10d122d4 <REDACTED_TIMESTAMP>
+│  redo to f1a9356d
+○  ac313fb0 <REDACTED_TIMESTAMP>
+│  undo to 00000000
+○  f1a9356d <REDACTED_TIMESTAMP>
+│  add state: reconfigurator-cli load-example
+○  00000000 <REDACTED_TIMESTAMP>
+   initialize simulator
+
+
+
+> # Test op log with the --verbose flag.
+> op log -n 5 --verbose
+@  03e83a20-ce0d-4bb5-a34a-1f3c8f51961a <REDACTED_TIMESTAMP>
+│  redo to f1a9356d-1aa0-4ea4-9609-5ba747f8ea01
+│    @ 2d296288-6fbc-4acb-8669-97fb8f38e5b7 (gen 1)
+○  02e35bfb-f9d0-4cec-8ad1-4c74dff01aaa <REDACTED_TIMESTAMP>
+│  undo to 00000000-0000-0000-0000-000000000000
+○  10d122d4-5e75-4ffc-99f0-4f3d884894bd <REDACTED_TIMESTAMP>
+│  redo to f1a9356d-1aa0-4ea4-9609-5ba747f8ea01
+│    @ 2d296288-6fbc-4acb-8669-97fb8f38e5b7 (gen 1)
+○  ac313fb0-b627-4b81-82c5-432e6ca46836 <REDACTED_TIMESTAMP>
+│  undo to 00000000-0000-0000-0000-000000000000
+○  f1a9356d-1aa0-4ea4-9609-5ba747f8ea01 <REDACTED_TIMESTAMP>
+   add state: reconfigurator-cli load-example
+     @ 2d296288-6fbc-4acb-8669-97fb8f38e5b7 (gen 1)
+
+
+> log
+@  2d296288 (generation 1)
+│  reconfigurator-cli load-example
+│
+○  00000000 (generation 0)
+   root state
+
+

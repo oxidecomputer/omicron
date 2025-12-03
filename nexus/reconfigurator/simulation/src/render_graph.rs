@@ -68,6 +68,18 @@ impl Simulator {
         render_graph(states, options)
     }
 
+    /// Render the operation log as a graph.
+    ///
+    /// Operations are shown in reverse chronological order (newest first) as a
+    /// linear chain.
+    pub fn render_operation_graph(
+        &self,
+        limit: Option<usize>,
+        verbose: bool,
+    ) -> String {
+        render_operation_graph(self, limit, verbose)
+    }
+
     /// Collect all states in depth-first order, preserving linear sequences
     /// while showing branches at their merge points.
     fn collect_states_dfs(
@@ -228,6 +240,101 @@ fn render_graph(
 
         let row = renderer.next_row(state.id(), parents, glyph.into(), message);
 
+        output.push_str(&row);
+    }
+
+    output
+}
+
+/// Render the operation log as a graph.
+///
+/// Operations are shown in reverse chronological order (newest first) as a
+/// linear chain (branches are not allowed or supported in the operation graph).
+pub(crate) fn render_operation_graph(
+    simulator: &Simulator,
+    limit: Option<usize>,
+    verbose: bool,
+) -> String {
+    let mut output = String::new();
+
+    let mut renderer = GraphRowRenderer::new()
+        .output()
+        .with_min_row_height(0)
+        .build_box_drawing();
+
+    // limited_ops is in reverse order, so that the most recent operation is
+    // shown first.
+    let limited_ops: Vec<_> = if let Some(limit) = limit {
+        // Take the last `limit` operations.
+        simulator.operations().rev().take(limit).collect()
+    } else {
+        simulator.operations().rev().collect()
+    };
+
+    for (op_index, op) in limited_ops.iter().enumerate() {
+        let shown_first = op_index == 0;
+        let shown_last = op_index == limited_ops.len() - 1;
+
+        let parents = if shown_last {
+            Vec::new()
+        } else {
+            // "next" here is really previous, i.e. next in the reversed list of
+            // operations.
+            let next_op = limited_ops[op_index + 1];
+            vec![Ancestor::Parent(next_op.id())]
+        };
+
+        let glyph = if shown_first { "@" } else { "○" };
+
+        let mut message = String::new();
+        let timestamp =
+            op.timestamp().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        swrite!(
+            message,
+            "{} {}\n{}",
+            DisplayUuidPrefix::new(op.id(), verbose),
+            timestamp,
+            op.description(verbose),
+        );
+        // Remove trailing newlines and add one at the end.
+        while message.ends_with('\n') {
+            message.pop();
+        }
+        message.push('\n');
+
+        // If verbose is true, show heads at this operation.
+        if verbose && !op.heads().is_empty() {
+            let current = op.current();
+
+            // Show the current head first with an @ marker.
+            if let Some(state) = simulator.get_state(current) {
+                swriteln!(
+                    message,
+                    "  @ {} (gen {})",
+                    current,
+                    state.generation()
+                );
+            }
+
+            // Show other heads with *.
+            for head in op.heads() {
+                if *head != current {
+                    if let Some(state) = simulator.get_state(*head) {
+                        swriteln!(
+                            message,
+                            "  * {} (gen {})",
+                            head,
+                            state.generation()
+                        );
+                    }
+                }
+            }
+        }
+
+        // We choose to have a more compact view than render_graph here, without
+        // a blank line between operations.
+
+        let row = renderer.next_row(op.id(), parents, glyph.into(), message);
         output.push_str(&row);
     }
 
