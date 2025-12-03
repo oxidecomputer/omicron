@@ -57,6 +57,9 @@ struct RunAllArgs {
     /// Override the nexus configuration file.
     #[clap(long, default_value = DEFAULT_NEXUS_CONFIG)]
     nexus_config: Utf8PathBuf,
+    /// Number of "racks" to launch
+    #[clap(long, default_value_t = 1)]
+    count: u8,
 }
 
 impl RunAllArgs {
@@ -78,121 +81,166 @@ impl RunAllArgs {
             if_exists: dropshot::ConfigLoggingIfExists::Fail,
         };
 
-        if let Some(p) = self.nexus_listen_port {
-            config
-                .deployment
-                .dropshot_external
-                .dropshot
-                .bind_address
-                .set_port(p);
-        }
+        let mut contexts = vec![];
 
-        println!("omicron-dev: setting up all services ... ");
-        let cptestctx = nexus_test_utils::omicron_dev_setup_with_config::<
-            omicron_nexus::Server,
-        >(&mut config, 0, self.gateway_config.clone())
-        .await
-        .context("error setting up services")?;
+        for n in 0..self.count {
+            if self.count > 1 {
+                config
+                    .deployment
+                    .dropshot_external
+                    .dropshot
+                    .bind_address
+                    .set_ip("0.0.0.0".parse().unwrap());
+                config
+                    .deployment
+                    .dropshot_external
+                    .dropshot
+                    .bind_address
+                    .set_port(0);
 
-        println!("omicron-dev: Adding disks to first sled agent");
+                config.deployment.dropshot_internal.bind_address.set_port(0);
+                config.deployment.dropshot_lockstep.bind_address.set_port(0);
+                config.deployment.techport_external_server_port = 0;
+            } else {
+                if let Some(p) = self.nexus_listen_port {
+                    config
+                        .deployment
+                        .dropshot_external
+                        .dropshot
+                        .bind_address
+                        .set_port(p);
+                }
+            }
 
-        // This is how our integration tests are identifying that "disks exist"
-        // within the database.
-        //
-        // This inserts:
-        // - DEFAULT_ZPOOL_COUNT zpools, each of which contains:
-        //   - A crucible dataset
-        //   - A debug dataset
-        DiskTest::new(&cptestctx).await;
+            println!("\nomicron-dev: setting up all services for rack {n}... ");
+            let cptestctx =
+                nexus_test_utils::omicron_dev_setup_with_config::<
+                    omicron_nexus::Server,
+                >(&mut config, 1, self.gateway_config.clone())
+                .await
+                .context("error setting up services")?;
 
-        println!("omicron-dev: services are running.");
+            println!("omicron-dev: Adding disks to first sled agent");
 
-        // Print out basic information about what was started.
-        // NOTE: The stdout strings here are not intended to be stable, but they
-        // are used by the test suite.
-        let addr = cptestctx.external_client.bind_address;
-        println!("omicron-dev: nexus external API:     {:?}", addr);
-        println!(
-            "omicron-dev: nexus internal API:     {:?}",
-            cptestctx.server.get_http_server_internal_address(),
-        );
-        println!(
-            "omicron-dev: nexus lockstep API:     {:?}",
-            cptestctx.server.get_http_server_lockstep_address(),
-        );
-        println!(
-            "omicron-dev: cockroachdb pid:        {}",
-            cptestctx.database.pid(),
-        );
-        println!(
-            "omicron-dev: cockroachdb URL:        {}",
-            cptestctx.database.pg_config()
-        );
-        println!(
-            "omicron-dev: cockroachdb directory:  {}",
-            cptestctx.database.temp_dir().display()
-        );
-        println!(
-            "omicron-dev: clickhouse native addr: {}",
-            cptestctx.clickhouse.native_address(),
-        );
-        println!(
-            "omicron-dev: clickhouse http addr:   {}",
-            cptestctx.clickhouse.http_address(),
-        );
-        println!(
-            "omicron-dev: internal DNS HTTP:      http://{}",
-            cptestctx.internal_dns.dropshot_server.local_addr()
-        );
-        println!(
-            "omicron-dev: internal DNS:           {}",
-            cptestctx.internal_dns.dns_server.local_address()
-        );
-        println!(
-            "omicron-dev: external DNS name:      {}",
-            cptestctx.external_dns_zone_name,
-        );
-        println!(
-            "omicron-dev: external DNS HTTP:      http://{}",
-            cptestctx.external_dns.dropshot_server.local_addr()
-        );
-        println!(
-            "omicron-dev: external DNS:           {}",
-            cptestctx.external_dns.dns_server.local_address()
-        );
-        println!(
-            "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
-            cptestctx.external_dns.dns_server.local_address().ip(),
-            cptestctx.external_dns.dns_server.local_address().port(),
-            cptestctx.silo_name,
-            cptestctx.external_dns_zone_name,
-        );
-        for (location, gateway) in &cptestctx.gateway {
+            // This is how our integration tests are identifying that "disks exist"
+            // within the database.
+            //
+            // This inserts:
+            // - DEFAULT_ZPOOL_COUNT zpools, each of which contains:
+            //   - A crucible dataset
+            //   - A debug dataset
+            DiskTest::new(&cptestctx).await;
+
+            println!("omicron-dev: services are running.");
+
+            // Print out basic information about what was started.
+            // NOTE: The stdout strings here are not intended to be stable, but they
+            // are used by the test suite.
+            let addr = cptestctx.external_client.bind_address;
+            println!("omicron-dev: nexus external API:     {:?}", addr);
             println!(
-                "omicron-dev: management gateway:     {} ({})",
-                gateway.client.baseurl(),
-                location,
+                "omicron-dev: nexus internal API:     {:?}",
+                cptestctx.server.get_http_server_internal_address(),
             );
+            println!(
+                "omicron-dev: nexus lockstep API:     {:?}",
+                cptestctx.server.get_http_server_lockstep_address(),
+            );
+            println!(
+                "omicron-dev: cockroachdb pid:        {}",
+                cptestctx.database.pid(),
+            );
+            println!(
+                "omicron-dev: cockroachdb URL:        {}",
+                cptestctx.database.pg_config()
+            );
+            println!(
+                "omicron-dev: cockroachdb directory:  {}",
+                cptestctx.database.temp_dir().display()
+            );
+            println!(
+                "omicron-dev: clickhouse native addr: {}",
+                cptestctx.clickhouse.native_address(),
+            );
+            println!(
+                "omicron-dev: clickhouse http addr:   {}",
+                cptestctx.clickhouse.http_address(),
+            );
+            println!(
+                "omicron-dev: internal DNS HTTP:      http://{}",
+                cptestctx.internal_dns.dropshot_server.local_addr()
+            );
+            println!(
+                "omicron-dev: internal DNS:           {}",
+                cptestctx.internal_dns.dns_server.local_address()
+            );
+            println!(
+                "omicron-dev: external DNS name:      {}",
+                cptestctx.external_dns_zone_name,
+            );
+            println!(
+                "omicron-dev: external DNS HTTP:      http://{}",
+                cptestctx.external_dns.dropshot_server.local_addr()
+            );
+            println!(
+                "omicron-dev: external DNS:           {}",
+                cptestctx.external_dns.dns_server.local_address()
+            );
+            println!(
+                "omicron-dev:   e.g. `dig @{} -p {} {}.sys.{}`",
+                cptestctx.external_dns.dns_server.local_address().ip(),
+                cptestctx.external_dns.dns_server.local_address().port(),
+                cptestctx.silo_name,
+                cptestctx.external_dns_zone_name,
+            );
+            for (location, gateway) in &cptestctx.gateway {
+                println!(
+                    "omicron-dev: management gateway:     {} ({})",
+                    gateway.client.baseurl(),
+                    location,
+                );
+            }
+            for (location, dendrite) in
+                cptestctx.dendrite.read().unwrap().iter()
+            {
+                println!(
+                    "omicron-dev: dendrite:               http://[::1]:{} ({})",
+                    dendrite.port, location,
+                );
+            }
+            for (location, mgd) in &cptestctx.mgd {
+                println!(
+                    "omicron-dev: maghemite:              http://[::1]:{} ({})",
+                    mgd.port, location,
+                );
+            }
+            println!(
+                "omicron-dev: silo name:              {}",
+                cptestctx.silo_name,
+            );
+            println!(
+                "omicron-dev: privileged user name:   {}",
+                cptestctx.user_name.as_ref(),
+            );
+            println!(
+                "omicron-dev: privileged password:    {}",
+                cptestctx.password
+            );
+            contexts.push(cptestctx);
         }
-        println!(
-            "omicron-dev: silo name:              {}",
-            cptestctx.silo_name,
-        );
-        println!(
-            "omicron-dev: privileged user name:   {}",
-            cptestctx.user_name.as_ref(),
-        );
-        println!("omicron-dev: privileged password:    {}", cptestctx.password);
 
         // Wait for a signal.
         let caught_signal = signal_stream.next().await;
         assert_eq!(caught_signal.unwrap(), SIGINT);
         eprintln!(
             "omicron-dev: caught signal, shutting down and removing \
-            temporary directory"
+             temporary directory"
         );
 
-        cptestctx.teardown().await;
+        for context in contexts {
+            context.teardown().await;
+        }
+
         Ok(())
     }
 }
