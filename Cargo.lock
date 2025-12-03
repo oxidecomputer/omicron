@@ -5115,6 +5115,7 @@ dependencies = [
  "itertools 0.14.0",
  "libc",
  "macaddr",
+ "nix 0.30.1",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
@@ -5131,6 +5132,7 @@ dependencies = [
  "slog-error-chain",
  "smf 0.2.3",
  "thiserror 2.0.17",
+ "tofino",
  "tokio",
  "toml 0.8.23",
  "uuid",
@@ -5173,7 +5175,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.0",
+ "hashbrown 0.15.4",
  "serde",
  "serde_core",
 ]
@@ -8799,6 +8801,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sha3",
+ "signal-hook",
  "sled-agent-api",
  "sled-agent-client",
  "sled-agent-config-reconciler",
@@ -8950,7 +8953,7 @@ dependencies = [
  "getrandom 0.2.15",
  "getrandom 0.3.4",
  "group",
- "hashbrown 0.16.0",
+ "hashbrown 0.15.4",
  "heck 0.4.1",
  "hickory-proto 0.25.2",
  "hmac",
@@ -13064,6 +13067,7 @@ dependencies = [
  "tofino",
  "tokio",
  "uuid",
+ "zone 0.3.1",
 ]
 
 [[package]]
@@ -14301,7 +14305,7 @@ dependencies = [
 [[package]]
 name = "tofino"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tofino?branch=main#1b66b89c3727d2191082df057b068ec52560e334"
+source = "git+https://github.com/oxidecomputer/tofino#7e56ab6e9a64ebae27cd97cd6e10ebf2cfdc3a33"
 dependencies = [
  "anyhow",
  "cc",

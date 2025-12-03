@@ -84,6 +84,7 @@ serde_human_bytes.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 sha3.workspace = true
+signal-hook.workspace = true
 sled-agent-api.workspace = true
 sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
