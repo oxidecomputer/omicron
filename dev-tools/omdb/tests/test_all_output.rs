@@ -299,7 +299,6 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             "001de000-5110-4000-8000-000000000000",
             "001de000-05e4-4000-8000-000000004007",
         ],
-
         // This operation will set the "db_metadata_nexus" state to quiesced.
         //
         // This would normally only be set by a Nexus as it shuts itself down;
