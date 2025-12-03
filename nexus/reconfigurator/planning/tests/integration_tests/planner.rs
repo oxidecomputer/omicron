@@ -2906,7 +2906,7 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
 
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     logctx.cleanup_successful();
@@ -2917,12 +2917,11 @@ fn test_internal_dns_zone_replaced_after_marked_for_cleanup() {
     static TEST_NAME: &str =
         "planner_internal_dns_zone_replaced_after_marked_for_cleanup";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&log, TEST_NAME).build();
-    let mut collection = example.collection;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // Find a internal DNS zone we'll use for our test.
     let (sled_id, internal_dns_config) = blueprint1
@@ -2938,38 +2937,22 @@ fn test_internal_dns_zone_replaced_after_marked_for_cleanup() {
         .expect("found an Internal DNS zone");
 
     // Expunge the disk used by the internal DNS zone.
-    let input = {
-        let internal_dns_zpool = &internal_dns_config.filesystem_pool;
-        let mut builder = example
-            .system
-            .to_planning_input_builder()
-            .expect("created PlanningInputBuilder");
-        builder
-            .sleds_mut()
-            .get_mut(&sled_id)
-            .expect("input has all sleds")
-            .resources
+    sim.change_description("expunge Nexus's disk", |desc| {
+        desc.get_sled_mut(sled_id)
+            .unwrap()
+            .resources_mut()
             .zpools
-            .get_mut(&internal_dns_zpool.id())
-            .expect("input has internal DNS disk")
+            .get_mut(&internal_dns_config.filesystem_pool.id())
+            .unwrap()
             .policy = PhysicalDiskPolicy::Expunged;
-        builder.build()
-    };
+        Ok(())
+    })
+    .unwrap();
 
     // Run the planner. It should expunge all zones on the disk we just
     // expunged, including our DNS zone, but not mark them as ready for
     // cleanup yet.
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "expunge disk",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("planned");
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
 
     // Helper to extract the DNS zone's disposition in a blueprint.
     let get_dns_disposition = |bp: &Blueprint| {
@@ -3005,38 +2988,22 @@ fn test_internal_dns_zone_replaced_after_marked_for_cleanup() {
     // Running the planner again should make no changes until the inventory
     // reports that the zone is not running and that the sled has seen a
     // new-enough generation.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // Make the inventory changes necessary for cleanup to proceed.
-    {
-        let config = &mut collection.sled_agents.get_mut(&sled_id).unwrap();
-        config.ledgered_sled_config = Some(bp2_config.clone());
-        config.last_reconciliation = Some(
-            ConfigReconcilerInventory::debug_assume_success(bp2_config.clone()),
-        );
-    }
+    sim.deploy_configs_to_active_sleds("deploy bp2", &blueprint2)
+        .expect("deployed configs");
+    sim.generate_inventory("inventory reflecting bp2")
+        .expect("generated inventory");
 
     // Run the planner. It should mark our internal DNS zone as ready for
     // cleanup now that the inventory conditions are satisfied, and also
     // place a new internal DNS zone now that the original subnet is free to
     // reuse.
-    let blueprint3 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint2,
-        &input,
-        "removed Nexus zone from inventory",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("planned");
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
 
     assert_eq!(
         get_dns_disposition(&blueprint3),
@@ -3071,12 +3038,9 @@ fn test_internal_dns_zone_replaced_after_marked_for_cleanup() {
     }
     assert_eq!(added_count, 1);
 
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint3,
-        &input,
-        &collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     logctx.cleanup_successful();
