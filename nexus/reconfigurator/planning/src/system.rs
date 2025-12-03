@@ -8,6 +8,7 @@
 use anyhow::{Context, anyhow, bail, ensure};
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
@@ -123,6 +124,8 @@ pub struct SystemDescription {
     internal_dns_version: Generation,
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
+    clickhouse_keeper_cluster_membership:
+        BTreeSet<ClickhouseKeeperClusterMembership>,
     oximeter_read_policy: OximeterReadPolicy,
     cockroachdb_settings: CockroachDbSettings,
     tuf_repo: TufRepoPolicy,
@@ -217,6 +220,7 @@ impl SystemDescription {
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
+            clickhouse_keeper_cluster_membership: BTreeSet::new(),
             oximeter_read_policy: OximeterReadPolicy::new(1),
             cockroachdb_settings: CockroachDbSettings::empty(),
             tuf_repo: TufRepoPolicy::initial(),
@@ -329,6 +333,14 @@ impl SystemDescription {
     /// Set the clickhouse policy
     pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
         self.clickhouse_policy = Some(policy);
+        self
+    }
+
+    pub fn add_clickhouse_keeper_cluster_membership(
+        &mut self,
+        membership: ClickhouseKeeperClusterMembership,
+    ) -> &mut Self {
+        self.clickhouse_keeper_cluster_membership.insert(membership);
         self
     }
 
@@ -1112,6 +1124,11 @@ impl SystemDescription {
                     // responses to inventory collection aren't necessary yet.
                 }
             }
+        }
+
+        for membership in &self.clickhouse_keeper_cluster_membership {
+            builder
+                .found_clickhouse_keeper_cluster_membership(membership.clone());
         }
 
         Ok(builder)

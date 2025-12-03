@@ -28,6 +28,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintSource;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::external_api::views::SledPolicy;
+use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::Logger;
 
@@ -206,6 +207,25 @@ impl ReconfiguratorCliTestState {
         })
     }
 
+    /// State change helper: create a new latest inventory collection, then pass
+    /// it to `f` which is allowed to edit it in abnormal ways that cannot be
+    /// done via `CollectionBuilder`.
+    pub fn inventory_edit_latest_low_level<F, T>(
+        &mut self,
+        description: &str,
+        f: F,
+    ) -> anyhow::Result<T>
+    where
+        F: FnOnce(&mut Collection) -> anyhow::Result<T>,
+    {
+        self.change_state(description, |state| {
+            let mut collection = state.to_collection_builder()?.build();
+            let result = f(&mut collection)?;
+            state.system_mut().add_collection(collection)?;
+            Ok(result)
+        })
+    }
+
     /// State change helper: edit the latest blueprint, inserting a new latest
     /// blueprint.
     pub fn blueprint_edit_latest<F>(
@@ -239,7 +259,7 @@ impl ReconfiguratorCliTestState {
     }
 
     /// State change helper: create a new latest blueprint that is a clone of
-    /// the current latest blueprint (but with a its ID and parent ID updated),
+    /// the current latest blueprint (but with a new ID and correct parent ID),
     /// then pass it to `f` which is allowed to edit it in abnormal ways that
     /// cannot be done via `BlueprintBuilder`.
     pub fn blueprint_edit_latest_low_level<F>(

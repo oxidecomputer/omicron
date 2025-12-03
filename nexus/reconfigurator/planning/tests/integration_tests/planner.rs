@@ -2258,7 +2258,8 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     sim.generate_inventory_customized("add membership", |builder| {
         builder.found_clickhouse_keeper_cluster_membership(membership);
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
 
     let blueprint4 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint4.diff_since_blueprint(&blueprint3);
@@ -2355,7 +2356,8 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     sim.generate_inventory_customized("add membership", |builder| {
         builder.found_clickhouse_keeper_cluster_membership(membership);
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
 
     let blueprint7 = sim.run_planner().expect("planning succeeded");
     let bp7_config = blueprint7.clickhouse_cluster_config.as_ref().unwrap();
@@ -2388,7 +2390,8 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
     sim.generate_inventory_customized("add membership", |builder| {
         builder.found_clickhouse_keeper_cluster_membership(membership);
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
 
     let blueprint8 = sim.run_planner().expect("planning succeeded");
     let bp8_config = blueprint8.clickhouse_cluster_config.as_ref().unwrap();
@@ -2410,41 +2413,26 @@ fn test_plan_deploy_all_clickhouse_cluster_nodes() {
 fn test_expunge_clickhouse_clusters() {
     static TEST_NAME: &str = "planner_expunge_clickhouse_clusters";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&log, TEST_NAME).build();
-    let mut collection = example.collection;
-
-    let mut input_builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded example system");
 
     let target_keepers = 3;
     let target_servers = 2;
 
     // Enable clickhouse clusters via policy
-    input_builder.policy_mut().clickhouse_policy =
-        Some(clickhouse_policy(ClickhouseMode::Both {
+    sim.change_description("enable clickhouse cluster", |desc| {
+        desc.clickhouse_policy(clickhouse_policy(ClickhouseMode::Both {
             target_servers,
             target_keepers,
         }));
-    let input = input_builder.build();
+        Ok(())
+    })
+    .unwrap();
 
     // Create a new blueprint to deploy all our clickhouse zones
-    let mut blueprint2 = Planner::new_based_on(
-        log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
 
     // We should see zones for 3 clickhouse keepers, and 2 servers created
     let active_zones: Vec<_> = blueprint2
@@ -2468,43 +2456,54 @@ fn test_expunge_clickhouse_clusters() {
 
     // Directly manipulate the blueprint and inventory so that the
     // clickhouse clusters are stable
-    let config = blueprint2.clickhouse_cluster_config.as_mut().unwrap();
-    config.max_used_keeper_id = (u64::from(target_keepers)).into();
-    config.keepers = keeper_zone_ids
-        .iter()
-        .enumerate()
-        .map(|(i, zone_id)| (*zone_id, KeeperId(i as u64)))
-        .collect();
-    config.highest_seen_keeper_leader_committed_log_index = 1;
+    let blueprint2a = sim
+        .blueprint_edit_latest_low_level("stable cluster", |blueprint2| {
+            let config = blueprint2.clickhouse_cluster_config.as_mut().unwrap();
+            config.max_used_keeper_id = (u64::from(target_keepers)).into();
+            config.keepers = keeper_zone_ids
+                .iter()
+                .enumerate()
+                .map(|(i, zone_id)| (*zone_id, KeeperId(i as u64)))
+                .collect();
+            config.highest_seen_keeper_leader_committed_log_index = 1;
+            Ok(())
+        })
+        .unwrap();
 
-    let raft_config: BTreeSet<_> = config.keepers.values().cloned().collect();
-
-    collection.clickhouse_keeper_cluster_membership = config
+    let raft_config: BTreeSet<_> = blueprint2a
+        .clickhouse_cluster_config
+        .as_ref()
+        .unwrap()
         .keepers
         .values()
-        .map(|keeper_id| ClickhouseKeeperClusterMembership {
-            queried_keeper: *keeper_id,
-            leader_committed_log_index: 1,
-            raft_config: raft_config.clone(),
-        })
+        .cloned()
         .collect();
 
-    // Let's run the planner. The blueprint shouldn't change with regards to
-    // clickhouse as our inventory reflects our desired state.
-    let blueprint3 = Planner::new_based_on(
-        log.clone(),
-        &blueprint2,
-        &input,
-        "test_blueprint3",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+    sim.change_description("adjust membership", |desc| {
+        for keeper_id in blueprint2a
+            .clickhouse_cluster_config
+            .as_ref()
+            .unwrap()
+            .keepers
+            .values()
+        {
+            desc.add_clickhouse_keeper_cluster_membership(
+                ClickhouseKeeperClusterMembership {
+                    queried_keeper: *keeper_id,
+                    leader_committed_log_index: 1,
+                    raft_config: raft_config.clone(),
+                },
+            );
+        }
+        Ok(())
+    })
+    .unwrap();
+    sim.generate_inventory("inventory with new cluster membership").unwrap();
+
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
 
     assert_eq!(
-        blueprint2.clickhouse_cluster_config,
+        blueprint2a.clickhouse_cluster_config,
         blueprint3.clickhouse_cluster_config
     );
 
@@ -2524,22 +2523,13 @@ fn test_expunge_clickhouse_clusters() {
         .unwrap();
 
     // Expunge a keeper zone
-    let mut builder = input.into_builder();
-    builder.expunge_sled(&sled_id).unwrap();
-    let input = builder.build();
+    sim.change_description("expunge keeper zone", |desc| {
+        desc.sled_expunge(sled_id)?;
+        Ok(())
+    })
+    .unwrap();
 
-    let blueprint4 = Planner::new_based_on(
-        log.clone(),
-        &blueprint3,
-        &input,
-        "test_blueprint4",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp4")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
-
+    let blueprint4 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint4.diff_since_blueprint(&blueprint3);
     assert_contents(
         "tests/output/planner_expunge_clickhouse_clusters_3_4.txt",
@@ -2560,17 +2550,7 @@ fn test_expunge_clickhouse_clusters() {
 
     // Planning again will not change the keeper state because we haven't
     // updated the inventory
-    let blueprint5 = Planner::new_based_on(
-        log.clone(),
-        &blueprint4,
-        &input,
-        "test_blueprint5",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp5")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+    let blueprint5 = sim.run_planner().expect("planning succeeded");
 
     assert_eq!(
         blueprint4.clickhouse_cluster_config,
@@ -2579,30 +2559,28 @@ fn test_expunge_clickhouse_clusters() {
 
     // Updating the inventory to reflect the removed keeper results in a new one
     // being added
+    sim.inventory_edit_latest_low_level("adjust membership", |collection| {
+        println!("{:?}", collection.clickhouse_keeper_cluster_membership);
+        println!("xxx {expunged_keeper_id}");
+        // Remove the keeper for the expunged zone
+        collection
+            .clickhouse_keeper_cluster_membership
+            .retain(|m| m.queried_keeper != *expunged_keeper_id);
 
-    // Remove the keeper for the expunged zone
-    collection
-        .clickhouse_keeper_cluster_membership
-        .retain(|m| m.queried_keeper != *expunged_keeper_id);
+        // Update the inventory on at least one of the remaining nodes.
+        let mut existing = collection
+            .clickhouse_keeper_cluster_membership
+            .pop_first()
+            .unwrap();
+        existing.leader_committed_log_index = 3;
+        existing.raft_config = config.keepers.values().cloned().collect();
+        collection.clickhouse_keeper_cluster_membership.insert(existing);
 
-    // Update the inventory on at least one of the remaining nodes.
-    let mut existing =
-        collection.clickhouse_keeper_cluster_membership.pop_first().unwrap();
-    existing.leader_committed_log_index = 3;
-    existing.raft_config = config.keepers.values().cloned().collect();
-    collection.clickhouse_keeper_cluster_membership.insert(existing);
+        Ok(())
+    })
+    .unwrap();
 
-    let blueprint6 = Planner::new_based_on(
-        log.clone(),
-        &blueprint5,
-        &input,
-        "test_blueprint6",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp6")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("plan");
+    let blueprint6 = sim.run_planner().expect("planning succeeded");
 
     let diff = blueprint6.diff_since_blueprint(&blueprint5);
     assert_contents(
