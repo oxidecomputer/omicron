@@ -17,15 +17,15 @@ use camino_tempfile_ext::{
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::update::{
-    MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
-    OmicronZoneManifestSource,
+    MupdateOverrideInfo, OmicronFileManifest, OmicronFileManifestSource,
+    OmicronFileMetadata,
 };
 use omicron_uuid_kinds::{InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid};
 use sha2::{Digest, Sha256};
 use sled_agent_types::zone_images::{
     ArcIoError, ArcSerdeJsonError, ArtifactReadResult,
-    InstallMetadataReadError, ZoneManifestArtifactResult,
-    ZoneManifestArtifactsResult, ManifestHashError,
+    InstallMetadataReadError, ManifestHashError, ZoneManifestArtifactResult,
+    ZoneManifestArtifactsResult,
 };
 use tufaceous_artifact::ArtifactHash;
 
@@ -40,9 +40,9 @@ impl OverridePaths {
     fn for_uuid(uuid: InternalZpoolUuid) -> Self {
         let install_dataset =
             Utf8PathBuf::from(format!("pool/int/{uuid}/install"));
-        let zones_json = install_dataset.join(OmicronZoneManifest::FILE_NAME);
+        let zones_json = install_dataset.join(OmicronFileManifest::FILE_NAME);
         let measurements_json =
-            install_dataset.join(OmicronZoneManifest::MEASUREMENT_FILE_NAME);
+            install_dataset.join(OmicronFileManifest::MEASUREMENT_FILE_NAME);
         let mupdate_override_json =
             install_dataset.join(MupdateOverrideInfo::FILE_NAME);
         Self {
@@ -154,9 +154,9 @@ impl WriteInstallDatasetContext {
         errors
             .insert_unique(ZoneContentError {
                 zone_kind: ZoneKind::InternalDns,
-                error: ManifestHashError::ReadArtifact(
-                    ArcIoError::new(io::Error::from(io::ErrorKind::NotFound)),
-                ),
+                error: ManifestHashError::ReadArtifact(ArcIoError::new(
+                    io::Error::from(io::ErrorKind::NotFound),
+                )),
             })
             .unwrap();
 
@@ -189,21 +189,21 @@ impl WriteInstallDatasetContext {
         }
     }
 
-    pub fn zone_manifest(&self) -> OmicronZoneManifest {
+    pub fn zone_manifest(&self) -> OmicronFileManifest {
         let source = if self.write_zone_manifest_to_disk {
-            OmicronZoneManifestSource::Installinator {
+            OmicronFileManifestSource::Installinator {
                 mupdate_id: self.mupdate_id,
             }
         } else {
-            OmicronZoneManifestSource::SledAgent
+            OmicronFileManifestSource::SledAgent
         };
-        OmicronZoneManifest {
+        OmicronFileManifest {
             source,
             zones: self
                 .zones
                 .iter()
                 .filter_map(|zone| {
-                    zone.include_in_json.then(|| OmicronZoneFileMetadata {
+                    zone.include_in_json.then(|| OmicronFileMetadata {
                         file_name: zone
                             .zone_kind
                             .artifact_in_install_dataset()
@@ -254,7 +254,7 @@ impl WriteInstallDatasetContext {
             })?;
             // No need to create intermediate directories with
             // camino-tempfile-ext.
-            dir.child(OmicronZoneManifest::FILE_NAME).write_str(&json)?;
+            dir.child(OmicronFileManifest::FILE_NAME).write_str(&json)?;
         }
 
         let info = self.override_info();

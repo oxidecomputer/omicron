@@ -13,7 +13,7 @@ use nexus_sled_agent_shared::inventory::{
     ManifestBootInventory, ZoneArtifactInventory, ZoneKind,
 };
 use omicron_common::{
-    api::external::TufRepoDescription, update::OmicronZoneManifestSource,
+    api::external::TufRepoDescription, update::OmicronFileManifestSource,
 };
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::KnownArtifactKind;
@@ -59,7 +59,7 @@ impl SimTufRepoDescription {
 #[derive(Clone, Debug)]
 pub struct SimTufRepoSource {
     description: TufRepoDescription,
-    manifest_source: OmicronZoneManifestSource,
+    manifest_source: OmicronFileManifestSource,
     message: String,
     known_artifact_id_names: BTreeSet<String>,
     error_artifact_id_names: BTreeSet<String>,
@@ -71,7 +71,7 @@ impl SimTufRepoSource {
     /// The message should be of the form "from repo at ..." or "to target release".
     pub fn new(
         description: TufRepoDescription,
-        manifest_source: OmicronZoneManifestSource,
+        manifest_source: OmicronFileManifestSource,
         message: String,
     ) -> anyhow::Result<Self> {
         let mut unknown = BTreeSet::new();

@@ -8,7 +8,7 @@ use crate::mupdate_override::AllMupdateOverrides;
 use crate::zone_manifest::AllZoneManifests;
 use camino::Utf8PathBuf;
 use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-use omicron_common::update::OmicronZoneManifest;
+use omicron_common::update::OmicronFileManifest;
 use omicron_uuid_kinds::MupdateOverrideUuid;
 use sled_agent_config_reconciler::InternalDisks;
 use sled_agent_config_reconciler::InternalDisksWithBootDisk;
@@ -113,12 +113,12 @@ impl ResolverInner {
 
         let zone_manifests = AllZoneManifests::read_all(
             &log,
-            OmicronZoneManifest::FILE_NAME,
+            OmicronFileManifest::FILE_NAME,
             &internal_disks,
         );
         let measurement_manifests = AllZoneManifests::read_all_measurements(
             &log,
-            OmicronZoneManifest::MEASUREMENT_FILE_NAME,
+            OmicronFileManifest::MEASUREMENT_FILE_NAME,
             &internal_disks,
         );
         let mupdate_overrides =
@@ -151,9 +151,9 @@ mod tests {
         HostPhase2PreparedContents, ResolverStatusExt,
     };
     use sled_agent_types::zone_images::{
-        MupdateOverrideReadError, OmicronZoneFileSource,
+        ManifestHashError, MupdateOverrideReadError, OmicronZoneFileSource,
         OmicronZoneImageLocation, RAMDISK_IMAGE_PATH, ZoneImageLocationError,
-        ZoneManifestReadError, ManifestHashError,
+        ZoneManifestReadError,
     };
     use sled_agent_zone_images_examples::{
         BOOT_PATHS, BOOT_UUID, WriteInstallDatasetContext, deserialize_error,

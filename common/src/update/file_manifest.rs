@@ -10,17 +10,18 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::ArtifactHash;
 
-/// Describes the set of Omicron zones written out into an install dataset.
+/// Describes a set of files written out into an install dataset.
+/// This is currently used for zones and reference measurements
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
-pub struct OmicronZoneManifest {
+pub struct OmicronFileManifest {
     /// The source of the manifest.
-    pub source: OmicronZoneManifestSource,
+    pub source: OmicronFileManifestSource,
 
     /// Omicron zone file names and hashes.
-    pub zones: IdOrdMap<OmicronZoneFileMetadata>,
+    pub zones: IdOrdMap<OmicronFileMetadata>,
 }
 
-impl OmicronZoneManifest {
+impl OmicronFileManifest {
     /// The name of the file.
     pub const FILE_NAME: &str = "zones.json";
 
@@ -33,7 +34,7 @@ impl OmicronZoneManifest {
     Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
 )]
 #[serde(tag = "source", rename_all = "snake_case")]
-pub enum OmicronZoneManifestSource {
+pub enum OmicronFileManifestSource {
     /// The manifest was written out by installinator and the mupdate process.
     Installinator {
         /// The UUID of the mupdate.
@@ -46,13 +47,13 @@ pub enum OmicronZoneManifestSource {
     SledAgent,
 }
 
-impl fmt::Display for OmicronZoneManifestSource {
+impl fmt::Display for OmicronFileManifestSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OmicronZoneManifestSource::Installinator { mupdate_id } => {
+            OmicronFileManifestSource::Installinator { mupdate_id } => {
                 write!(f, "installinator (mupdate ID: {})", mupdate_id)
             }
-            OmicronZoneManifestSource::SledAgent => {
+            OmicronFileManifestSource::SledAgent => {
                 write!(f, "sled-agent")
             }
         }
@@ -61,7 +62,7 @@ impl fmt::Display for OmicronZoneManifestSource {
 
 /// Information about an Omicron zone file written out to the install dataset.
 ///
-/// Part of [`OmicronZoneManifest`].
+/// Part of [`OmicronFileManifest`].
 #[derive(
     Clone,
     Debug,
@@ -73,7 +74,7 @@ impl fmt::Display for OmicronZoneManifestSource {
     Serialize,
     JsonSchema,
 )]
-pub struct OmicronZoneFileMetadata {
+pub struct OmicronFileMetadata {
     /// The file name.
     pub file_name: String,
 
@@ -84,7 +85,7 @@ pub struct OmicronZoneFileMetadata {
     pub hash: ArtifactHash,
 }
 
-impl IdOrdItem for OmicronZoneFileMetadata {
+impl IdOrdItem for OmicronFileMetadata {
     type Key<'a> = &'a str;
 
     #[inline]

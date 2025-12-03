@@ -19,7 +19,7 @@ use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::update::{
-    MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
+    MupdateOverrideInfo, OmicronFileManifest, OmicronFileManifestSource,
 };
 use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::InternalZpoolUuid;
@@ -84,8 +84,7 @@ pub struct MeasurementManifestStatus {
     pub non_boot_disk_metadata: IdOrdMap<ZoneManifestNonBootInfo>,
 }
 
-type MeasurementEntry =
-    Result<(String, ArtifactHash), ManifestHashError>;
+type MeasurementEntry = Result<(String, ArtifactHash), ManifestHashError>;
 
 impl MeasurementManifestStatus {
     /// Convert this status to the inventory format.
@@ -116,10 +115,10 @@ impl MeasurementManifestStatus {
     pub fn all_measurements(
         &self,
     ) -> Result<Vec<MeasurementEntry>, ManifestHashError> {
-        let artifacts_result =
-            self.boot_disk_result.as_ref().map_err(|err| {
-                ManifestHashError::ReadBootDisk(err.clone())
-            })?;
+        let artifacts_result = self
+            .boot_disk_result
+            .as_ref()
+            .map_err(|err| ManifestHashError::ReadBootDisk(err.clone()))?;
 
         let mut results = Vec::new();
         for artifact in artifacts_result.data.clone() {
@@ -129,14 +128,12 @@ impl MeasurementManifestStatus {
                         .push(Ok((artifact.file_name, artifact.expected_hash)));
                 }
                 ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
-                    results.push(Err(
-                        ManifestHashError::SizeHashMismatch {
-                            expected_size: artifact.expected_size,
-                            expected_hash: artifact.expected_hash,
-                            actual_size,
-                            actual_hash,
-                        },
-                    ));
+                    results.push(Err(ManifestHashError::SizeHashMismatch {
+                        expected_size: artifact.expected_size,
+                        expected_hash: artifact.expected_hash,
+                        actual_size,
+                        actual_hash,
+                    }));
                 }
                 ArtifactReadResult::Error(err) => {
                     results.push(Err(ManifestHashError::ReadArtifact(
@@ -197,10 +194,10 @@ impl ZoneManifestStatus {
         &self,
         kind: ZoneKind,
     ) -> Result<ArtifactHash, ManifestHashError> {
-        let artifacts_result =
-            self.boot_disk_result.as_ref().map_err(|err| {
-                ManifestHashError::ReadBootDisk(err.clone())
-            })?;
+        let artifacts_result = self
+            .boot_disk_result
+            .as_ref()
+            .map_err(|err| ManifestHashError::ReadBootDisk(err.clone()))?;
 
         let file_name = kind.artifact_in_install_dataset();
         let artifact = &artifacts_result
@@ -254,7 +251,7 @@ pub enum ManifestHashError {
 /// [`Self::is_valid`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZoneManifestArtifactsResult {
-    pub manifest: OmicronZoneManifest,
+    pub manifest: OmicronFileManifest,
     pub data: IdOrdMap<ZoneManifestArtifactResult>,
 }
 
@@ -282,7 +279,7 @@ impl ZoneManifestArtifactsResult {
 }
 
 pub struct ZoneManifestArtifactsDisplay<'a> {
-    source: &'a OmicronZoneManifestSource,
+    source: &'a OmicronFileManifestSource,
     artifacts: &'a IdOrdMap<ZoneManifestArtifactResult>,
 }
 

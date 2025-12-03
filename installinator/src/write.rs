@@ -24,8 +24,8 @@ use installinator_common::{
 use omicron_common::{
     disk::M2Slot,
     update::{
-        MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
-        OmicronZoneManifestSource,
+        MupdateOverrideInfo, OmicronFileManifest, OmicronFileManifestSource,
+        OmicronFileMetadata,
     },
 };
 use omicron_uuid_kinds::{MupdateOverrideUuid, MupdateUuid};
@@ -766,7 +766,7 @@ impl ControlPlaneZoneWriteContext<'_> {
 
                     let out_path = self
                         .output_directory
-                        .join(OmicronZoneManifest::FILE_NAME);
+                        .join(OmicronFileManifest::FILE_NAME);
 
                     write_artifact_impl(
                         WriteComponent::ControlPlane,
@@ -848,7 +848,7 @@ impl ControlPlaneZoneWriteContext<'_> {
 
                     let out_path = self
                         .measurement_directory
-                        .join(OmicronZoneManifest::MEASUREMENT_FILE_NAME);
+                        .join(OmicronFileManifest::MEASUREMENT_FILE_NAME);
 
                     write_artifact_impl(
                         WriteComponent::MeasurementCorpus,
@@ -943,8 +943,8 @@ impl ControlPlaneZoneWriteContext<'_> {
     async fn omicron_measurement_manifest_artifact(&self) -> BufList {
         let zones = compute_measurement_hashes(self.measurement_corpus).await;
 
-        let omicron_zone_manifest = OmicronZoneManifest {
-            source: OmicronZoneManifestSource::Installinator {
+        let omicron_zone_manifest = OmicronFileManifest {
+            source: OmicronFileManifestSource::Installinator {
                 mupdate_id: self.mupdate_id,
             },
             zones,
@@ -957,8 +957,8 @@ impl ControlPlaneZoneWriteContext<'_> {
     async fn omicron_zone_manifest_artifact(&self) -> BufList {
         let zones = compute_zone_hashes(&self.zones).await;
 
-        let omicron_zone_manifest = OmicronZoneManifest {
-            source: OmicronZoneManifestSource::Installinator {
+        let omicron_zone_manifest = OmicronFileManifest {
+            source: OmicronFileManifestSource::Installinator {
                 mupdate_id: self.mupdate_id,
             },
             zones,
@@ -978,7 +978,7 @@ impl ControlPlaneZoneWriteContext<'_> {
 /// Panics if the runtime shuts down causing a task abort, or a task panics.
 async fn compute_measurement_hashes(
     images: &[MeasurementToWrite],
-) -> IdOrdMap<OmicronZoneFileMetadata> {
+) -> IdOrdMap<OmicronFileMetadata> {
     let mut tasks = JoinSet::new();
     for m in images {
         let file_name = m.name.clone();
@@ -990,7 +990,7 @@ async fn compute_measurement_hashes(
                 hasher.update(&d);
             }
             let hash = hasher.finalize();
-            OmicronZoneFileMetadata {
+            OmicronFileMetadata {
                 file_name,
                 file_size: u64::try_from(data.num_bytes()).unwrap(),
                 hash: ArtifactHash(hash.into()),
@@ -1018,7 +1018,7 @@ async fn compute_measurement_hashes(
 /// Panics if the runtime shuts down causing a task abort, or a task panics.
 async fn compute_zone_hashes(
     images: &ControlPlaneZoneImages,
-) -> IdOrdMap<OmicronZoneFileMetadata> {
+) -> IdOrdMap<OmicronFileMetadata> {
     let mut tasks = JoinSet::new();
     for (file_name, data) in &images.zones {
         let file_name = file_name.clone();
@@ -1029,7 +1029,7 @@ async fn compute_zone_hashes(
             let mut hasher = Sha256::new();
             hasher.update(&data);
             let hash = hasher.finalize();
-            OmicronZoneFileMetadata {
+            OmicronFileMetadata {
                 file_name,
                 file_size: u64::try_from(data.len()).unwrap(),
                 hash: ArtifactHash(hash.into()),
