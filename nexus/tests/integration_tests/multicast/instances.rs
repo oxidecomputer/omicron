@@ -614,6 +614,9 @@ async fn test_multicast_group_instance_state_transitions(
 async fn test_multicast_group_persistence_through_stop_start(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    ensure_multicast_test_ready(cptestctx).await;
+
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
@@ -808,6 +811,9 @@ async fn test_multicast_group_persistence_through_stop_start(
 async fn test_multicast_concurrent_operations(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    ensure_multicast_test_ready(cptestctx).await;
+
     let client = &cptestctx.external_client;
 
     // Create project and pools in parallel
@@ -1106,6 +1112,9 @@ async fn test_multicast_member_cleanup_instance_never_started(
 async fn test_multicast_group_membership_during_migration(
     cptestctx: &ControlPlaneTestContext,
 ) {
+    // Ensure inventory and DPD are ready before creating instances with multicast groups
+    ensure_multicast_test_ready(cptestctx).await;
+
     let client = &cptestctx.external_client;
     let lockstep_client = &cptestctx.lockstep_client;
     let nexus = &cptestctx.server.server_context().nexus;
