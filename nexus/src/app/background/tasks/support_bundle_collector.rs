@@ -124,10 +124,10 @@ struct BundleRequest {
     // The set of data to be included within this bundle.
     data_selection: HashSet<BundleDataCategory>,
 
-    // The set of sets to be included within this bundle.
+    // The set of sleds to be included within this bundle.
     //
     // NOTE: This selection is only considered if "data_selection" requests
-    // data from specific sleds.
+    // data from sleds.
     sled_selection: HashSet<SledSelection>,
 
     // The set of ereports to be included within this bundle.
