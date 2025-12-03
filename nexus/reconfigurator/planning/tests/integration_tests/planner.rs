@@ -2036,9 +2036,9 @@ fn test_crucible_pantry() {
     let logctx = test_setup_log(TEST_NAME);
 
     // Use our example system as a starting point.
-    let (example, blueprint1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-    let collection = example.collection;
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // We should start with CRUCIBLE_PANTRY_REDUNDANCY pantries spread out
     // to at most 1 per sled. Find one of the sleds running one.
@@ -2059,28 +2059,8 @@ fn test_crucible_pantry() {
     // should immediately replace the zone with one on another
     // (non-expunged) sled.
     let expunged_sled_id = pantry_sleds[0];
-
-    let mut input_builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-    input_builder
-        .sleds_mut()
-        .get_mut(&expunged_sled_id)
-        .expect("can't find sled")
-        .policy = SledPolicy::Expunged;
-    let input = input_builder.build();
-    let blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "test_blueprint2",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to re-plan");
+    sim.sled_expunge("expunge first pantry sled", expunged_sled_id).unwrap();
+    let blueprint2 = sim.run_planner().expect("planning succeeded");
 
     let diff = blueprint2.diff_since_blueprint(&blueprint1);
     println!("1 -> 2 (expunged sled):\n{}", diff.display());
@@ -2095,12 +2075,9 @@ fn test_crucible_pantry() {
     );
 
     // Test a no-op planning iteration.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     logctx.cleanup_successful();
