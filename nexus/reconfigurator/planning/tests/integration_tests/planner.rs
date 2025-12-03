@@ -15,7 +15,6 @@ use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator
 use nexus_reconfigurator_planning::example::ExampleSystem;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::example::SimRngState;
-use nexus_reconfigurator_planning::example::example;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_simulation::BlueprintId;
@@ -2724,18 +2723,14 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
     static TEST_NAME: &str =
         "planner_zones_marked_ready_for_cleanup_based_on_inventory";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
-
-    // Don't start more internal DNS zones (which the planner would, as a
-    // side effect of our test details).
-    let input = {
-        let mut builder = input.into_builder();
-        builder.policy_mut().target_internal_dns_zone_count = 0;
-        builder.build()
-    };
+    //
+    // Don't start internal DNS zones (not part of this test, and causes noise).
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| builder.internal_dns_count(0))
+        .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // Find a Nexus zone we'll use for our test.
     let (sled_id, nexus_config) = blueprint1
@@ -2749,54 +2744,51 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
         .expect("found a Nexus zone");
 
     // Expunge the disk used by the Nexus zone.
-    let input = {
-        let nexus_zpool = &nexus_config.filesystem_pool;
-        let mut builder = input.into_builder();
-        builder
-            .sleds_mut()
-            .get_mut(&sled_id)
-            .expect("input has all sleds")
-            .resources
+    sim.change_description("expunge Nexus's disk", |desc| {
+        desc.get_sled_mut(sled_id)
+            .unwrap()
+            .resources_mut()
             .zpools
-            .get_mut(&nexus_zpool.id())
-            .expect("input has Nexus disk")
+            .get_mut(&nexus_config.filesystem_pool.id())
+            .unwrap()
             .policy = PhysicalDiskPolicy::Expunged;
-        builder.build()
-    };
+        Ok(())
+    })
+    .unwrap();
 
     // Run the planner. It should expunge all zones on the disk we just
     // expunged, including our Nexus zone, but not mark them as ready for
     // cleanup yet.
-    let mut blueprint2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint1,
-        &input,
-        "expunge disk",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("planned");
+    let _pre_blueprint2 = sim.run_planner().expect("planning succeeded");
 
     // Mark the disk we expected as "ready for cleanup"; this isn't what
     // we're testing, and failing to do this will interfere with some of the
     // checks we do below.
-    for mut disk in blueprint2.sleds.get_mut(&sled_id).unwrap().disks.iter_mut()
-    {
-        match disk.disposition {
-            BlueprintPhysicalDiskDisposition::InService => (),
-            BlueprintPhysicalDiskDisposition::Expunged {
-                as_of_generation,
-                ..
-            } => {
-                disk.disposition = BlueprintPhysicalDiskDisposition::Expunged {
-                    as_of_generation,
-                    ready_for_cleanup: true,
-                };
-            }
-        }
-    }
+    let blueprint2 = sim
+        .blueprint_edit_latest_low_level(
+            "manually mark disk ready for cleanup",
+            |bp| {
+                for mut disk in
+                    bp.sleds.get_mut(&sled_id).unwrap().disks.iter_mut()
+                {
+                    match disk.disposition {
+                        BlueprintPhysicalDiskDisposition::InService => (),
+                        BlueprintPhysicalDiskDisposition::Expunged {
+                            as_of_generation,
+                            ..
+                        } => {
+                            disk.disposition =
+                                BlueprintPhysicalDiskDisposition::Expunged {
+                                    as_of_generation,
+                                    ready_for_cleanup: true,
+                                };
+                        }
+                    }
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
 
     // Helper to extract the Nexus zone's disposition in a blueprint.
     let get_nexus_disposition = |bp: &Blueprint| {
@@ -2830,91 +2822,72 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
     // * new config is reconciled, but zone is in an error state (expect
     //   no changes)
     eprintln!("planning with no inventory change...");
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
+
     eprintln!("planning with config ledgered but not reconciled...");
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &{
-            let mut collection = collection.clone();
-            collection
-                .sled_agents
-                .get_mut(&sled_id)
-                .unwrap()
-                .ledgered_sled_config = Some(bp2_sled_config.clone());
-            collection
-        },
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("ledger sled config", |collection| {
+        collection
+            .sled_agents
+            .get_mut(&sled_id)
+            .unwrap()
+            .ledgered_sled_config = Some(bp2_sled_config.clone());
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
-    eprintln!(
-        "planning with config ledgered but \
-             zones failed to shut down..."
-    );
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint2,
-        &input,
-        &{
-            let mut collection = collection.clone();
-            collection
-                .sled_agents
-                .get_mut(&sled_id)
-                .unwrap()
-                .ledgered_sled_config = Some(bp2_sled_config.clone());
-            let mut reconciliation =
-                ConfigReconcilerInventory::debug_assume_success(
-                    bp2_sled_config.clone(),
-                );
-            // For all the zones that are in bp2_config but not
-            // bp2_sled_config (i.e., zones that should have been shut
-            // down), insert an error result in the reconciliation.
-            for zone in &bp2_config.zones {
-                reconciliation.zones.entry(zone.id).or_insert_with(|| {
-                    ConfigReconcilerInventoryResult::Err {
-                        message: "failed to shut down".to_string(),
-                    }
-                });
-            }
-            collection
-                .sled_agents
-                .get_mut(&sled_id)
-                .unwrap()
-                .last_reconciliation = Some(reconciliation);
-            collection
-        },
-        TEST_NAME,
+
+    eprintln!("planning with config ledgered but zones failed to shut down...");
+    sim.inventory_edit_latest_low_level("ledger sled config", |collection| {
+        collection
+            .sled_agents
+            .get_mut(&sled_id)
+            .unwrap()
+            .ledgered_sled_config = Some(bp2_sled_config.clone());
+        let mut reconciliation =
+            ConfigReconcilerInventory::debug_assume_success(
+                bp2_sled_config.clone(),
+            );
+        // For all the zones that are in bp2_config but not
+        // bp2_sled_config (i.e., zones that should have been shut
+        // down), insert an error result in the reconciliation.
+        for zone in &bp2_config.zones {
+            reconciliation.zones.entry(zone.id).or_insert_with(|| {
+                ConfigReconcilerInventoryResult::Err {
+                    message: "failed to shut down".to_string(),
+                }
+            });
+        }
+        collection.sled_agents.get_mut(&sled_id).unwrap().last_reconciliation =
+            Some(reconciliation);
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // Now make both changes to the inventory.
-    {
+    sim.inventory_edit_latest_low_level("ledger sled config", |collection| {
         let mut config = collection.sled_agents.get_mut(&sled_id).unwrap();
         config.ledgered_sled_config = Some(bp2_sled_config.clone());
         config.last_reconciliation =
             Some(ConfigReconcilerInventory::debug_assume_success(
                 bp2_sled_config.clone(),
             ));
-    }
+        Ok(())
+    })
+    .unwrap();
 
     // Run the planner. It mark our Nexus zone as ready for cleanup now that
     // the inventory conditions are satisfied.
-    let blueprint3 = Planner::new_based_on(
-        logctx.log.clone(),
-        &blueprint2,
-        &input,
-        "removed Nexus zone from inventory",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("created planner")
-    .plan()
-    .expect("planned");
+    let blueprint3 = sim.run_planner().expect("planning succeeded");
 
     assert_eq!(
         get_nexus_disposition(&blueprint3),
@@ -2931,12 +2904,9 @@ fn test_zones_marked_ready_for_cleanup_based_on_inventory() {
         bp2_sled_config.generation
     );
 
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint3,
-        &input,
-        &collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs
     );
 
     logctx.cleanup_successful();
