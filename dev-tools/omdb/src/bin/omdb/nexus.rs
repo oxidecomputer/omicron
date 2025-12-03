@@ -2626,17 +2626,33 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                     "      Bundle was able to list service processors: {listed_sps}"
                 );
 
+                #[derive(Tabled)]
+                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                struct StepRow {
+                    step_name: String,
+                    start_time: String,
+                    duration: String,
+                    status: String,
+                }
+
                 steps.sort_unstable_by_key(|s| s.start);
-                for step in steps {
-                    let duration = (step.end - step.start)
-                        .to_std()
-                        .unwrap_or(Duration::from_millis(0));
-                    println!(
-                        "      Step {} ({}ms): {}",
-                        step.name,
-                        duration.as_millis(),
-                        step.status
-                    );
+                let rows: Vec<StepRow> = steps
+                    .into_iter()
+                    .map(|step| {
+                        let duration = (step.end - step.start)
+                            .to_std()
+                            .unwrap_or(Duration::from_millis(0));
+                        StepRow {
+                            step_name: step.name,
+                            start_time: step.start.to_rfc3339(),
+                            duration: format!("{:.3}s", duration.as_secs_f64()),
+                            status: step.status.to_string(),
+                        }
+                    })
+                    .collect();
+
+                if !rows.is_empty() {
+                    println!("\n{}", tabled::Table::new(rows));
                 }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"

@@ -500,6 +500,17 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
             errors: Vec::new()
         })
     );
+
+    // Verify that steps were recorded with reasonable timing data
+    assert!(!report.steps.is_empty(), "Should have recorded some steps");
+    for step in &report.steps {
+        assert!(
+            step.end >= step.start,
+            "Step '{}' end time should be >= start time",
+            step.name
+        );
+    }
+
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
 
@@ -601,6 +612,17 @@ async fn test_support_bundle_range_requests(
             errors: Vec::new()
         })
     );
+
+    // Verify that steps were recorded with reasonable timing data
+    assert!(!report.steps.is_empty(), "Should have recorded some steps");
+    for step in &report.steps {
+        assert!(
+            step.end >= step.start,
+            "Step '{}' end time should be >= start time",
+            step.name
+        );
+    }
+
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
 

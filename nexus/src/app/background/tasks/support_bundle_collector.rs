@@ -1117,7 +1117,7 @@ impl BundleCollection {
         let mut extra_steps: Vec<CollectionStep> = vec![];
         for sp in get_available_sps(&mgs_client).await? {
             extra_steps.push(CollectionStep::new(
-                "SP dump",
+                format!("SP dump for {:?}", sp),
                 Box::new({
                     let mgs_client = mgs_client.clone();
                     move |collection, dir| {
@@ -1273,7 +1273,7 @@ impl BundleCollection {
             }
 
             extra_steps.push(CollectionStep::new(
-                "sled data",
+                format!("sled data for sled {}", sled.id()),
                 Box::new({
                     let sled = sled.clone();
                     move |collection, dir| {
