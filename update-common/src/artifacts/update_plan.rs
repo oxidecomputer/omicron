@@ -295,9 +295,14 @@ impl<'a> UpdatePlanBuilder<'a> {
                 )
                 .await
             }
-            KnownArtifactKind::Zone | KnownArtifactKind::MeasurementCorpus => {
+            KnownArtifactKind::Zone => {
                 // We don't currently support repos with already split-out
                 // zones.
+                self.add_unknown_artifact(artifact_id, artifact_hash, stream)
+                    .await
+            }
+            KnownArtifactKind::MeasurementCorpus => {
+                // This is handled via the installinator document
                 self.add_unknown_artifact(artifact_id, artifact_hash, stream)
                     .await
             }
