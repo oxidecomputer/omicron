@@ -1137,7 +1137,7 @@ async fn test_default_pool_on_implicit_creation(
         "/v1/multicast-groups/{group_name}/members?project={project_name}"
     );
 
-    // Case: Joining when no multicast pool exists - should fail with 404 (pool not found)
+    // Case: Joining when no multicast pool exists - should fail with 400 (no pool available)
     let member_params = MulticastGroupMemberAdd {
         instance: NameOrId::Name(instance_name.parse().unwrap()),
         source_ips: None,
@@ -1146,7 +1146,7 @@ async fn test_default_pool_on_implicit_creation(
         client,
         &member_add_url,
         &member_params,
-        StatusCode::NOT_FOUND,
+        StatusCode::BAD_REQUEST,
     )
     .await;
 

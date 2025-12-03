@@ -21,7 +21,7 @@ use diesel::result::{
 };
 use ipnetwork::IpNetwork;
 use ref_cast::RefCast;
-use slog::{error, info};
+use slog::{debug, error, info};
 use uuid::Uuid;
 
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
@@ -339,35 +339,94 @@ impl DataStore {
 
     /// Allocate an external multicast group from an IP Pool.
     ///
-    /// See [`Self::allocate_external_multicast_group_on_conn`] for the connection-reusing variant.
+    /// See [`Self::allocate_external_multicast_group_on_conn`] for the
+    /// connection-reusing variant.
     pub(crate) async fn allocate_external_multicast_group(
         &self,
         opctx: &OpContext,
         params: MulticastGroupAllocationParams,
     ) -> CreateResult<ExternalMulticastGroup> {
         let group_id = Uuid::new_v4();
-        let authz_pool = self
-            .resolve_pool_for_allocation(
+
+        // Determine if this is an SSM request (source_ips provided) or an
+        // implicit ASM request (no sources, no explicit pool/IP)
+        let sources_empty =
+            params.source_ips.as_ref().map(|v| v.is_empty()).unwrap_or(true);
+        let needs_ssm_pool =
+            !sources_empty && params.pool.is_none() && params.ip.is_none();
+        let needs_asm_pool =
+            sources_empty && params.pool.is_none() && params.ip.is_none();
+
+        // Select the appropriate pool:
+        // - If `source_ips` provided without explicit pool/IP, find an SSM pool.
+        // - If no `source_ips` and no explicit pool/IP, find an ASM pool.
+        // - Otherwise (explicit pool or explicit IP provided), fall back to
+        //   generic resolution via `resolve_pool_for_allocation` which validates
+        //   linkage and type. ASM/SSM semantics are still enforced below.
+        let authz_pool = if needs_ssm_pool {
+            let (authz_pool, _) = self
+                .ip_pools_fetch_ssm_multicast(opctx)
+                .await
+                .map_err(|_| {
+                    external::Error::invalid_request(concat!(
+                        "No SSM multicast pool linked to your silo. ",
+                        "Create a multicast pool with SSM ranges ",
+                        "(IPv4 232/8, IPv6 ff3x::/32) and link it to ",
+                        "your silo, or provide an explicit SSM address.",
+                    ))
+                })?;
+            opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+            authz_pool
+        } else if needs_asm_pool {
+            let (authz_pool, _) = self
+                .ip_pools_fetch_asm_multicast(opctx)
+                .await
+                .map_err(|_| {
+                    external::Error::invalid_request(concat!(
+                        "No ASM multicast pool linked to your silo. ",
+                        "Create a multicast pool with ASM ranges ",
+                        "(IPv4 224/4 excluding 232/8, or IPv6 ffxx::/16 ",
+                        "excluding ff3x::/32) and link it to your silo, ",
+                        "or provide an explicit ASM address.",
+                    ))
+                })?;
+            opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+            authz_pool
+        } else {
+            self.resolve_pool_for_allocation(
                 opctx,
                 params.pool,
                 IpPoolType::Multicast,
             )
-            .await?;
+            .await?
+        };
+
+        debug!(
+            opctx.log,
+            "multicast group allocation";
+            "pool_selection" => if needs_ssm_pool { "ssm" } else if needs_asm_pool { "asm" } else { "explicit" },
+            "pool_id" => %authz_pool.id(),
+        );
 
         // Enforce ASM/SSM semantics when allocating from a pool:
         // - If sources are provided without an explicit IP (implicit allocation),
         //   the pool must be SSM so we allocate an SSM address.
         // - If the pool is SSM and sources are empty/missing, reject.
-        let sources_empty =
-            params.source_ips.as_ref().map(|v| v.is_empty()).unwrap_or(true);
-
         let pool_is_ssm =
             self.multicast_pool_is_ssm(opctx, authz_pool.id()).await?;
 
+        // Note: When needs_ssm_pool was true, we already fetched an SSM pool,
+        // so this check only triggers for explicitly-provided pools.
         if !sources_empty && params.ip.is_none() && !pool_is_ssm {
             let pool_id = authz_pool.id();
             return Err(external::Error::invalid_request(&format!(
-                "Cannot allocate SSM multicast group from ASM pool {pool_id}. Choose a multicast pool with SSM ranges (IPv4 232/8, IPv6 FF3x::/32) or provide an explicit SSM address."
+                concat!(
+                    "Cannot allocate SSM multicast group from ASM pool {}. ",
+                    "Choose a multicast pool with SSM ranges ",
+                    "(IPv4 232/8, IPv6 ff3x::/32) or provide an explicit ",
+                    "SSM address."
+                ),
+                pool_id
             )));
         }
 
