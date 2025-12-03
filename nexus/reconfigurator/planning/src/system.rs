@@ -124,6 +124,7 @@ pub struct SystemDescription {
     external_dns_version: Generation,
     clickhouse_policy: Option<ClickhousePolicy>,
     oximeter_read_policy: OximeterReadPolicy,
+    cockroachdb_settings: CockroachDbSettings,
     tuf_repo: TufRepoPolicy,
     old_repo: TufRepoPolicy,
     planner_config: PlannerConfig,
@@ -217,6 +218,7 @@ impl SystemDescription {
             external_dns_version: Generation::new(),
             clickhouse_policy: None,
             oximeter_read_policy: OximeterReadPolicy::new(1),
+            cockroachdb_settings: CockroachDbSettings::empty(),
             tuf_repo: TufRepoPolicy::initial(),
             old_repo: TufRepoPolicy::initial(),
             planner_config: PlannerConfig::default(),
@@ -327,6 +329,14 @@ impl SystemDescription {
     /// Set the clickhouse policy
     pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
         self.clickhouse_policy = Some(policy);
+        self
+    }
+
+    pub fn set_cockroachdb_settings(
+        &mut self,
+        settings: CockroachDbSettings,
+    ) -> &mut Self {
+        self.cockroachdb_settings = settings;
         self
     }
 
@@ -1135,7 +1145,7 @@ impl SystemDescription {
             policy,
             self.internal_dns_version,
             self.external_dns_version,
-            CockroachDbSettings::empty(),
+            self.cockroachdb_settings.clone(),
         );
         builder.set_active_nexus_zones(self.active_nexus_zones.clone());
         builder.set_not_yet_nexus_zones(self.not_yet_nexus_zones.clone());

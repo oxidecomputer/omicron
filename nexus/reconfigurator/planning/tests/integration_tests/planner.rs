@@ -1932,11 +1932,9 @@ fn test_ensure_preserve_downgrade_option() {
     static TEST_NAME: &str = "planner_ensure_preserve_downgrade_option";
     let logctx = test_setup_log(TEST_NAME);
 
-    let (example, bp1) =
-        ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
-    let collection = example.collection;
-    let input = example.input;
-    let mut builder = input.into_builder();
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example().expect("loaded default example system");
+    let bp1 = sim.assert_latest_blueprint_is_blippy_clean();
     assert!(bp1.cockroachdb_fingerprint.is_empty());
     assert_eq!(
         bp1.cockroachdb_setting_preserve_downgrade,
@@ -1945,22 +1943,17 @@ fn test_ensure_preserve_downgrade_option() {
 
     // If `preserve_downgrade_option` is unset and the current cluster
     // version matches `POLICY`, we ensure it is set.
-    builder.set_cockroachdb_settings(CockroachDbSettings {
-        state_fingerprint: "bp2".to_owned(),
-        version: CockroachDbClusterVersion::POLICY.to_string(),
-        preserve_downgrade: String::new(),
-    });
-    let bp2 = Planner::new_based_on(
-        logctx.log.clone(),
-        &bp1,
-        &builder.clone().build(),
-        "initial settings",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp2")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
+    sim.change_description("change crdb settings", |desc| {
+        desc.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "bp2".to_owned(),
+            version: CockroachDbClusterVersion::POLICY.to_string(),
+            preserve_downgrade: String::new(),
+        });
+        Ok(())
+    })
+    .unwrap();
+
+    let bp2 = sim.run_planner().expect("planning succeeded");
     assert_eq!(bp2.cockroachdb_fingerprint, "bp2");
     assert_eq!(
         bp2.cockroachdb_setting_preserve_downgrade,
@@ -1972,22 +1965,17 @@ fn test_ensure_preserve_downgrade_option() {
     // it is set. (During a "tock" release, `POLICY == NEWLY_INITIALIZED`
     // and this won't be materially different than the above test, but it
     // shouldn't need to change when moving to a "tick" release.)
-    builder.set_cockroachdb_settings(CockroachDbSettings {
-        state_fingerprint: "bp3".to_owned(),
-        version: CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
-        preserve_downgrade: String::new(),
-    });
-    let bp3 = Planner::new_based_on(
-        logctx.log.clone(),
-        &bp1,
-        &builder.clone().build(),
-        "initial settings",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp3")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
+    sim.change_description("change crdb settings", |desc| {
+        desc.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "bp3".to_owned(),
+            version: CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            preserve_downgrade: String::new(),
+        });
+        Ok(())
+    })
+    .unwrap();
+
+    let bp3 = sim.run_planner().expect("planning succeeded");
     assert_eq!(bp3.cockroachdb_fingerprint, "bp3");
     assert_eq!(
         bp3.cockroachdb_setting_preserve_downgrade,
@@ -1996,23 +1984,18 @@ fn test_ensure_preserve_downgrade_option() {
 
     // When we run the planner again after setting the setting, the inputs
     // will change; we should still be ensuring the setting.
-    builder.set_cockroachdb_settings(CockroachDbSettings {
-        state_fingerprint: "bp4".to_owned(),
-        version: CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
-        preserve_downgrade: CockroachDbClusterVersion::NEWLY_INITIALIZED
-            .to_string(),
-    });
-    let bp4 = Planner::new_based_on(
-        logctx.log.clone(),
-        &bp1,
-        &builder.clone().build(),
-        "after ensure",
-        &collection,
-        PlannerRng::from_seed((TEST_NAME, "bp4")),
-    )
-    .expect("failed to create planner")
-    .plan()
-    .expect("failed to plan");
+    sim.change_description("change crdb settings", |desc| {
+        desc.set_cockroachdb_settings(CockroachDbSettings {
+            state_fingerprint: "bp4".to_owned(),
+            version: CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
+            preserve_downgrade: CockroachDbClusterVersion::NEWLY_INITIALIZED
+                .to_string(),
+        });
+        Ok(())
+    })
+    .unwrap();
+
+    let bp4 = sim.run_planner().expect("planning succeeded");
     assert_eq!(bp4.cockroachdb_fingerprint, "bp4");
     assert_eq!(
         bp4.cockroachdb_setting_preserve_downgrade,
@@ -2026,25 +2009,17 @@ fn test_ensure_preserve_downgrade_option() {
         CockroachDbClusterVersion::NEWLY_INITIALIZED.to_string(),
         "definitely not a real cluster version".to_owned(),
     ] {
-        builder.set_cockroachdb_settings(CockroachDbSettings {
-            state_fingerprint: "bp5".to_owned(),
-            version: "definitely not a real cluster version".to_owned(),
-            preserve_downgrade: preserve_downgrade.clone(),
-        });
-        let bp5 = Planner::new_based_on(
-            logctx.log.clone(),
-            &bp1,
-            &builder.clone().build(),
-            "unknown version",
-            &collection,
-            PlannerRng::from_seed((
-                TEST_NAME,
-                format!("bp5-{}", preserve_downgrade),
-            )),
-        )
-        .expect("failed to create planner")
-        .plan()
-        .expect("failed to plan");
+        sim.change_description("change crdb settings", |desc| {
+            desc.set_cockroachdb_settings(CockroachDbSettings {
+                state_fingerprint: "bp5".to_owned(),
+                version: "definitely not a real cluster version".to_owned(),
+                preserve_downgrade: preserve_downgrade.clone(),
+            });
+            Ok(())
+        })
+        .unwrap();
+
+        let bp5 = sim.run_planner().expect("planning succeeded");
         assert_eq!(bp5.cockroachdb_fingerprint, "bp5");
         assert_eq!(
             bp5.cockroachdb_setting_preserve_downgrade,
