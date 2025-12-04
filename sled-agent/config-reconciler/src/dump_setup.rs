@@ -1099,19 +1099,21 @@ impl DumpSetupWorker {
             .as_ref()
             .ok_or(ArchiveLogsError::NoDebugDirYet)?;
         let oxz_zones = self.zone_invoker.get_zones().await?;
+
         for zone in oxz_zones {
-            let logdir = if zone.global() {
-                zone.path.join("var/svc/log")
+            let zone_root = if zone.global() {
+                zone.path().to_owned()
             } else {
-                zone.path().join("root/var/svc/log")
+                zone.path().join("root")
             };
+            let logdir = zone_root.join("var/svc/log");
             let zone_name = zone.name();
             self.archive_logs_from_zone_path(
                 debug_dir, logdir, "*.log", zone_name, false,
             )
             .await?;
 
-            let adm_logdir = zone.path.join("var/adm");
+            let adm_logdir = zone_root.join("var/adm");
             self.archive_logs_from_zone_path(
                 debug_dir, adm_logdir, "messages", zone_name, false,
             )
