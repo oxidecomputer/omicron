@@ -82,7 +82,6 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use reconfigurator_cli::test_utils::ReconfiguratorCliTestState;
 use semver::Version;
-use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -4589,16 +4588,12 @@ fn test_update_internal_dns() {
 fn test_update_all_zones() {
     static TEST_NAME: &str = "update_all_zones";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let mut rng = SimRngState::from_seed(TEST_NAME);
-    let (mut example, blueprint1) =
-        ExampleSystemBuilder::new_with_rng(&logctx.log, rng.next_system_rng())
-            .with_target_release_0_0_1()
-            .expect("set target release to 0.0.1")
-            .build();
-    verify_blueprint(&blueprint1, &example.input);
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
+        .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // All zones should be sourced from the 0.0.1 repo by default.
     assert!(
@@ -4636,13 +4631,12 @@ fn test_update_all_zones() {
         },
         artifacts: create_zone_artifacts_at_version(&version),
     });
-    example.system.set_target_release_and_old_repo(description);
 
-    let input_builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
-    example.input = input_builder.build();
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release_and_old_repo(description);
+        Ok(())
+    })
+    .unwrap();
 
     /// Expected number of planner iterations required to converge.
     /// If incidental planner work changes this value occasionally,
@@ -4656,22 +4650,9 @@ fn test_update_all_zones() {
 
     let mut parent = blueprint1;
     for i in 2..=MAX_PLANNING_ITERATIONS {
-        update_collection_from_blueprint(&mut example, &parent);
+        sim_update_collection_from_blueprint(&mut sim, &parent);
 
-        let blueprint_name = format!("blueprint{i}");
-        let blueprint = Planner::new_based_on(
-            log.clone(),
-            &parent,
-            &example.input,
-            &blueprint_name,
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
-        )
-        .expect("can't create planner")
-        .plan()
-        .unwrap_or_else(|err| {
-            panic!("can't re-plan after {i} iterations: {err}")
-        });
+        let blueprint = sim.run_planner().expect("planning succeeded");
 
         let BlueprintSource::Planner(report) = &blueprint.source else {
             panic!("unexpected source: {:?}", blueprint.source);
