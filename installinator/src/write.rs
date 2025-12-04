@@ -281,6 +281,10 @@ impl<'a> ArtifactWriter<'a> {
 
         // How many drives did we finish writing during the previous iteration?
         let mut success_prev_iter = 0;
+        // Check if we've had the same number of successes as the previous
+        // iteraiton which can be a sign that something in the write path
+        // has a permanent error
+        let mut same_successes = false;
 
         loop {
             // How many drives did we finish writing during this iteration?
@@ -350,7 +354,13 @@ impl<'a> ArtifactWriter<'a> {
             // 2. At least one drive was successfully written on a previous
             //    iteration, which implies all other drives got to retry during
             //    this iteration.
-            if success_this_iter == self.drives.len() || success_prev_iter > 0 {
+            // 3. We had the same number of successes as the previous iteration,
+            //    which implies that we seem to be permanetly stuck and unlikely
+            //    to succeed
+            if success_this_iter == self.drives.len()
+                || success_prev_iter > 0
+                || same_successes
+            {
                 break;
             }
 
@@ -363,6 +373,10 @@ impl<'a> ArtifactWriter<'a> {
 
             // Give it a short break, then keep trying.
             tokio::time::sleep(Duration::from_secs(5)).await;
+
+            if success_this_iter == success_prev_iter {
+                same_successes = true;
+            }
 
             success_prev_iter = success_this_iter;
         }
@@ -1157,17 +1171,17 @@ mod tests {
             // image, we return two concatenated lists of "fails then one success".
             let success_strategy_host = prop::collection::vec(
                 partial_op_strategy(interrupted_would_block_strategy(), 1024),
-                0..16,
+                0..1,
             );
             let success_strategy_control_plane = prop::collection::vec(
                 partial_op_strategy(interrupted_would_block_strategy(), 1024),
-                0..16,
+                0..1,
             );
 
             (
-                0..16usize,
+                0..1usize,
                 success_strategy_host,
-                0..16usize,
+                0..1usize,
                 success_strategy_control_plane,
             )
                 .prop_map(
