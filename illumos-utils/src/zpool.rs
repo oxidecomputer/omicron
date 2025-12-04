@@ -208,6 +208,7 @@ pub struct PathInPool {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 struct UnhealthyZpool {
+    // TODO-K: Should this be ZpoolName?
     pool: String,
     status: ZpoolHealth,
     action: String,
@@ -232,6 +233,7 @@ impl FromStr for UnhealthyZpool {
     // TODO_K: Actually parse the result
     fn from_str(_s: &str) -> Result<Self, Self::Err> {
         Ok(UnhealthyZpool {
+            // TODO-K: Should this be a ZpoolOrRamdisk?
             pool: "hi".to_string(),
             status: ZpoolHealth::Degraded,
             action: "hi".to_string(),
