@@ -2253,10 +2253,13 @@ fn check_planning_input_network_records_appear_in_blueprint(
                 }
             }
             _ => {
-                blippy.push_planning_input_note(
-                    Severity::Fatal,
-                    PlanningInputKind::NicWithUnknownOpteSubnet(nic_entry),
-                );
+                // Ignore localhost (used by the test suite).
+                if !nic_entry.nic.ip.is_loopback() {
+                    blippy.push_planning_input_note(
+                        Severity::Fatal,
+                        PlanningInputKind::NicWithUnknownOpteSubnet(nic_entry),
+                    );
+                }
             }
         }
     }

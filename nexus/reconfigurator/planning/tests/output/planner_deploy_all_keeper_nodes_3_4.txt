@@ -1,5 +1,5 @@
-from: blueprint 6b09c2dc-ce57-4a8f-b24e-a82a816c7e6f
-to:   blueprint 92fa943c-7dd4-48c3-9447-c9d0665744b6
+from: blueprint 4f8f183a-a089-4edf-b49e-7a6bed1e4e00
+to:   blueprint 05119bc0-c631-4270-b5e7-3fa48c828b46
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
@@ -20,21 +20,21 @@ to:   blueprint 92fa943c-7dd4-48c3-9447-c9d0665744b6
     max used server id:::::::::::::::::::::::::::::   2 (unchanged)
     max used keeper id:::::::::::::::::::::::::::::   3 (unchanged)
     cluster name:::::::::::::::::::::::::::::::::::   oximeter_cluster (unchanged)
-    cluster secret:::::::::::::::::::::::::::::::::   6a984e2e-20be-4ed9-b572-d7ef063c67f7 (unchanged)
+    cluster secret:::::::::::::::::::::::::::::::::   b1c93fa0-34f1-429a-a797-bc3f959e0c52 (unchanged)
     highest seen keeper leader committed log index:   0 (unchanged)
 
     clickhouse keepers at generation 2:
     ------------------------------------------------
     zone id                                keeper id
     ------------------------------------------------
-    008bd6de-5ed5-42e6-833a-34a31a56810c   1        
-    5b4ba456-07ab-4805-8614-2487018c9a9b   2        
-    ea8a8fc6-bbeb-4c5f-8dc6-d401f24d6b14   3        
+    833e69d0-483f-4fa5-98bf-ef6b8ce3b6cd   1        
+    93cb09e2-d007-45be-8b5c-3f0b2faa4f88   2        
+    c7e9e905-c2ea-4d67-8b85-d6e26c91baa1   3        
 
     clickhouse servers at generation 2:
     ------------------------------------------------
     zone id                                server id
     ------------------------------------------------
-    6fbe9485-9778-4bef-baac-5b085de70180   1        
-    7bca28a1-7737-4458-8a29-171add6958c1   2        
+    18ce3bdb-ab00-4810-b39a-33b734b23fef   1        
+    2c3a2e01-b5dd-4da5-a97e-57250d5d7cf1   2        
 

@@ -1,5 +1,5 @@
-from: blueprint 4d4e6c38-cd95-4c4e-8f45-6af4d686964b
-to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
+from: blueprint 2c4d059d-6498-49ca-8052-6e696a675f6e
+to:   blueprint 86df79ea-8652-477a-960e-32c21f46d255
 
  MODIFIED SLEDS:
 
@@ -271,9 +271,9 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     oxp_a418c5d3-0f97-4aeb-8c52-6470aa125689/crypt/local_storage                                            254a9728-478b-413e-91e0-8336b8a2725e   in service    none      none          off        
     oxp_e00f9534-a77a-4c43-a1ee-f722d460871a/crypt/local_storage                                            0029459f-41b2-48f6-b614-12a1cc38b6d4   in service    none      none          off        
     oxp_ea92ab5e-5d3d-484a-85d7-017e02123bbf/crypt/local_storage                                            018f13b2-657a-461d-9985-d75911646290   in service    none      none          off        
-+   oxp_6a169bd3-ca82-420a-8188-f1588f16e31c/crypt/zone/oxz_nexus_7672a79a-ebdd-4a6f-a3e2-09d907e0caf0      13edd9c4-1bb6-47de-b06d-c68471357c4e   in service    none      none          off        
-+   oxp_0d938cd4-8f29-4659-866d-3b37a01ceb53/crypt/zone/oxz_nexus_77b8bbd4-c33b-4348-b26e-f2efcd24b22f      7a6fcad2-a9ce-4c2b-a296-afba3e8d8281   in service    none      none          off        
-+   oxp_27ee446c-0c58-4010-969f-f417b9b6668f/crypt/zone/oxz_nexus_a250a1d8-713a-458d-a6ba-b31e0e2c83e2      09e32b77-5287-4230-97fe-68e60acca9ec   in service    none      none          off        
++   oxp_27ee446c-0c58-4010-969f-f417b9b6668f/crypt/zone/oxz_nexus_22eca316-8e96-47fe-906e-3e3b7fa095d1      a92ee1b7-7d07-49fb-adf8-6b3df41644d8   in service    none      none          off        
++   oxp_6a169bd3-ca82-420a-8188-f1588f16e31c/crypt/zone/oxz_nexus_98b09738-2a6f-49d9-b8e7-17f28ef7e99a      eaa09523-6cc1-48d1-9600-8fa16f8fb063   in service    none      none          off        
++   oxp_0d938cd4-8f29-4659-866d-3b37a01ceb53/crypt/zone/oxz_nexus_e31799f0-fc53-4c09-b2c9-1c6dc3201ea7      02c1ac49-f165-44e1-9bd7-0b0460947619   in service    none      none          off        
 
 
     omicron zones:
@@ -292,9 +292,9 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     crucible       f4f656b8-9757-4897-9a9b-bc781539f6c8   install dataset   in service    fd00:1122:3344:104::25
     internal_ntp   556b42ed-9abf-49c3-a918-5a24029c3ad5   install dataset   in service    fd00:1122:3344:104::21
     nexus          babe5d8a-2023-4e7d-8c32-6f0e79d7a6a5   install dataset   in service    fd00:1122:3344:104::22
-+   nexus          7672a79a-ebdd-4a6f-a3e2-09d907e0caf0   install dataset   in service    fd00:1122:3344:104::2f
-+   nexus          77b8bbd4-c33b-4348-b26e-f2efcd24b22f   install dataset   in service    fd00:1122:3344:104::2d
-+   nexus          a250a1d8-713a-458d-a6ba-b31e0e2c83e2   install dataset   in service    fd00:1122:3344:104::2e
++   nexus          22eca316-8e96-47fe-906e-3e3b7fa095d1   install dataset   in service    fd00:1122:3344:104::2e
++   nexus          98b09738-2a6f-49d9-b8e7-17f28ef7e99a   install dataset   in service    fd00:1122:3344:104::2f
++   nexus          e31799f0-fc53-4c09-b2c9-1c6dc3201ea7   install dataset   in service    fd00:1122:3344:104::2d
 
 
   sled affab35f-600a-4109-8ea0-34a067a4e0bc (active, config generation 2 -> 3):
@@ -379,9 +379,9 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     oxp_d0840205-ad0d-4a80-9f92-2cbf647223b4/crypt/local_storage                                            fbe13603-0983-456d-beda-5e94d82d8f6c   in service    none      none          off        
     oxp_f1cc143f-567d-47fb-b736-80b2e8b7aa0c/crypt/local_storage                                            9635deea-a680-4019-9a68-532447e98ca5   in service    none      none          off        
     oxp_f4576361-7afd-4fad-ab44-18eeb91d0f3d/crypt/local_storage                                            02cb1e8c-5d0e-4785-a595-cfc4d6b45013   in service    none      none          off        
-+   oxp_230d9b9f-da2d-4743-ac76-e50d88425976/crypt/zone/oxz_nexus_520f6728-6d89-4c1c-8184-7aa1cb6ca91d      4e3e27b7-82a2-4744-ae81-f5d89a658537   in service    none      none          off        
-+   oxp_045598ac-9ee0-4e3c-9596-602c332bc406/crypt/zone/oxz_nexus_89db59d6-5292-4f0b-a1f7-ea30a6496755      5db7f328-bc54-41f8-8fd5-3f874c1fe564   in service    none      none          off        
-+   oxp_322c457b-b710-4234-b67f-af69f5393a17/crypt/zone/oxz_nexus_be32ae3c-c47d-4324-8814-3c0014aa1a8b      01b58751-7482-4937-8bb0-5ca46868ad40   in service    none      none          off        
++   oxp_045598ac-9ee0-4e3c-9596-602c332bc406/crypt/zone/oxz_nexus_2d04099c-aea6-4aee-acfb-0d324e706ffd      74fae19c-c5dc-4a87-bf6d-99c9815a7ffd   in service    none      none          off        
++   oxp_230d9b9f-da2d-4743-ac76-e50d88425976/crypt/zone/oxz_nexus_38e19cd2-1795-4930-901c-639bcfe989df      4978b783-c523-4ae5-bddf-78aa53500d90   in service    none      none          off        
++   oxp_322c457b-b710-4234-b67f-af69f5393a17/crypt/zone/oxz_nexus_51c5bc7d-b51b-4798-be4c-fbe0b8f97bc0      5e35181e-7654-468e-9ae0-a67b04ad437f   in service    none      none          off        
 
 
     omicron zones:
@@ -400,9 +400,9 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     crucible       e72c7fa8-0d86-4885-8fe3-36528e768f91   install dataset   in service    fd00:1122:3344:101::2b
     internal_ntp   8a906dd3-8716-4fa9-b03f-d3e934ca1598   install dataset   in service    fd00:1122:3344:101::21
     nexus          9146e72b-7558-454c-9ab5-1a9d7fb08c9f   install dataset   in service    fd00:1122:3344:101::22
-+   nexus          520f6728-6d89-4c1c-8184-7aa1cb6ca91d   install dataset   in service    fd00:1122:3344:101::2e
-+   nexus          89db59d6-5292-4f0b-a1f7-ea30a6496755   install dataset   in service    fd00:1122:3344:101::2d
-+   nexus          be32ae3c-c47d-4324-8814-3c0014aa1a8b   install dataset   in service    fd00:1122:3344:101::2f
++   nexus          2d04099c-aea6-4aee-acfb-0d324e706ffd   install dataset   in service    fd00:1122:3344:101::2d
++   nexus          38e19cd2-1795-4930-901c-639bcfe989df   install dataset   in service    fd00:1122:3344:101::2e
++   nexus          51c5bc7d-b51b-4798-be4c-fbe0b8f97bc0   install dataset   in service    fd00:1122:3344:101::2f
 
 
  COCKROACHDB SETTINGS:
