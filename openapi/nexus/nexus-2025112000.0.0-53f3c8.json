@@ -18410,80 +18410,36 @@
       },
       "DiskCreate": {
         "description": "Create-time parameters for a `Disk`",
-        "oneOf": [
-          {
-            "description": "Create-time identity-related parameters",
-            "type": "object",
-            "properties": {
-              "description": {
-                "type": "string"
-              },
-              "disk_source": {
-                "description": "The initial source for this disk",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/DiskSource"
-                  }
-                ]
-              },
-              "name": {
-                "$ref": "#/components/schemas/Name"
-              },
-              "size": {
-                "description": "The total size of the Disk (in bytes)",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ByteCount"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible"
-                ]
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "disk_source": {
+            "description": "The initial source for this disk",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DiskSource"
               }
-            },
-            "required": [
-              "description",
-              "disk_source",
-              "name",
-              "size",
-              "type"
             ]
           },
-          {
-            "description": "Create-time identity-related parameters",
-            "type": "object",
-            "properties": {
-              "description": {
-                "type": "string"
-              },
-              "name": {
-                "$ref": "#/components/schemas/Name"
-              },
-              "size": {
-                "description": "The total size of the Disk (in bytes)",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ByteCount"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "local_storage"
-                ]
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "size": {
+            "description": "The total size of the Disk (in bytes)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
               }
-            },
-            "required": [
-              "description",
-              "name",
-              "size",
-              "type"
             ]
           }
+        },
+        "required": [
+          "description",
+          "disk_source",
+          "name",
+          "size"
         ]
       },
       "DiskPath": {
@@ -18524,7 +18480,7 @@
         ]
       },
       "DiskSource": {
-        "description": "Different sources for a Crucible Disk",
+        "description": "Different sources for a disk",
         "oneOf": [
           {
             "description": "Create a blank disk",
@@ -18814,8 +18770,7 @@
       "DiskType": {
         "type": "string",
         "enum": [
-          "crucible",
-          "local_storage"
+          "crucible"
         ]
       },
       "Distributiondouble": {
@@ -21223,22 +21178,6 @@
           "ncpus"
         ]
       },
-      "InstanceDiskAttach": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "description": "A disk name to attach",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Name"
-              }
-            ]
-          }
-        },
-        "required": [
-          "name"
-        ]
-      },
       "InstanceDiskAttachment": {
         "description": "Describe the instance's disks at creation time",
         "oneOf": [
@@ -21246,8 +21185,27 @@
             "description": "During instance creation, create and attach disks",
             "type": "object",
             "properties": {
-              "content": {
-                "$ref": "#/components/schemas/DiskCreate"
+              "description": {
+                "type": "string"
+              },
+              "disk_source": {
+                "description": "The initial source for this disk",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DiskSource"
+                  }
+                ]
+              },
+              "name": {
+                "$ref": "#/components/schemas/Name"
+              },
+              "size": {
+                "description": "The total size of the Disk (in bytes)",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ByteCount"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -21257,7 +21215,10 @@
               }
             },
             "required": [
-              "content",
+              "description",
+              "disk_source",
+              "name",
+              "size",
               "type"
             ]
           },
@@ -21265,8 +21226,13 @@
             "description": "During instance creation, attach this disk",
             "type": "object",
             "properties": {
-              "content": {
-                "$ref": "#/components/schemas/InstanceDiskAttach"
+              "name": {
+                "description": "A disk name to attach",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                ]
               },
               "type": {
                 "type": "string",
@@ -21276,7 +21242,7 @@
               }
             },
             "required": [
-              "content",
+              "name",
               "type"
             ]
           }
