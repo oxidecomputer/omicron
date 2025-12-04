@@ -111,7 +111,7 @@ pub(super) async fn cmd_db_whatis(
         .context("querying information_schema for unique UUID columns")?;
 
     // Search separately for each UUID provided on the command line.
-    for uuid in &args.uuids {
+    for &uuid in &args.uuids {
         let mut found = false;
 
         // For each unique UUID column that we found above, see if there's a row
@@ -125,7 +125,7 @@ pub(super) async fn cmd_db_whatis(
             let table_column =
                 format!("{}.{}", col.table_name, col.column_name);
             if args.debug {
-                eprintln!("checking table {:?}", table_column);
+                eprintln!("checking table {table_column:?}");
             }
 
             // `sql_query()` requires extracting the results with a struct.
@@ -136,21 +136,21 @@ pub(super) async fn cmd_db_whatis(
             }
 
             let exists_result: ExistsResult = diesel::sql_query(&check_query)
-                .bind::<diesel::sql_types::Uuid, _>(*uuid)
+                .bind::<diesel::sql_types::Uuid, _>(uuid)
                 .get_result_async(&*conn)
                 .await
                 .with_context(|| {
-                    format!("checking {} for UUID {}", table_column, *uuid)
+                    format!("checking {table_column} for UUID {uuid}")
                 })?;
 
             if exists_result.exists {
-                println!("{} found in {}", *uuid, table_column);
+                println!("{uuid} found in {table_column}");
                 found = true;
             }
         }
 
         if !found {
-            println!("{} not found in any unique UUID column", uuid);
+            println!("{uuid} not found in any unique UUID column");
         }
     }
 
