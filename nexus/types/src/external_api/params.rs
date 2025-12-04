@@ -1402,7 +1402,7 @@ pub struct InstanceUpdate {
 }
 
 #[inline]
-fn bool_true() -> bool {
+pub fn bool_true() -> bool {
     true
 }
 
@@ -1410,7 +1410,7 @@ fn bool_true() -> bool {
 // `UserData::deserialize()` below.
 pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB
 
-struct UserData;
+pub struct UserData;
 impl UserData {
     pub fn serialize<S>(
         data: &Vec<u8>,

@@ -5184,7 +5184,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f"
 dependencies = [
  "equivalent",
- "hashbrown 0.15.4",
+ "hashbrown 0.16.0",
  "serde",
  "serde_core",
 ]
@@ -6876,8 +6876,11 @@ dependencies = [
  "openapiv3",
  "oximeter-types 0.1.0",
  "oxql-types",
+ "schemars 0.8.22",
  "scim2-rs",
+ "serde",
  "tufaceous-artifact",
+ "uuid",
 ]
 
 [[package]]

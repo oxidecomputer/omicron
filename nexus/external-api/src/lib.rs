@@ -33,6 +33,9 @@ use omicron_common::api::external::{
 };
 use openapiv3::OpenAPI;
 
+/// Copies of data types that changed between versions
+mod v2025112000;
+
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
     // YYYYMMDDNN. Here, NN is a two-digit number starting at 00 for a
@@ -61,6 +64,7 @@ api_versions!([
     // |  date-based version should be at the top of the list.
     // v
     // (next_yyyymmddnn, IDENT),
+    (2025120300, LOCAL_STORAGE),
     (2025112000, INITIAL),
 ]);
 
@@ -1414,9 +1418,32 @@ pub trait NexusExternalApi {
     // TODO-correctness See note about instance create.  This should be async.
     /// Create a disk
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/disks",
-        tags = ["disks"]
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_disk_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_disk: TypedBody<v2025112000::DiskCreate>,
+    ) -> Result<HttpResponseCreated<Disk>, HttpError> {
+        Self::disk_create(
+            rqctx,
+            query_params,
+            new_disk.map(Into::into),
+        )
+        .await
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create a disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn disk_create(
         rqctx: RequestContext<Self::Context>,
@@ -1518,9 +1545,30 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2025112000::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(
+            rqctx,
+            query_params,
+            new_instance.map(Into::into),
+        ).await
+    }
+
+    /// Create instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
