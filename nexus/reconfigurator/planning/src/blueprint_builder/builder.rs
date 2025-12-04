@@ -919,10 +919,7 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Expunge everything on a sled.
-    pub fn expunge_sled(
-        &mut self,
-        sled_id: SledUuid,
-    ) -> Result<(), Error> {
+    pub fn expunge_sled(&mut self, sled_id: SledUuid) -> Result<(), Error> {
         let editor = self.sled_editors.get_mut(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!("tried to expunge unknown sled {sled_id}"))
         })?;
