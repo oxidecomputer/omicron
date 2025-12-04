@@ -52,10 +52,10 @@ impl std::fmt::Display for BaseboardId {
 
 #[derive(Debug, thiserror::Error)]
 #[error("Baseboard is of unknown type")]
-pub struct UnknownError;
+pub struct UnknownBaseboardError;
 
 impl TryFrom<sled_hardware_types::Baseboard> for BaseboardId {
-    type Error = UnknownError;
+    type Error = UnknownBaseboardError;
 
     fn try_from(
         value: sled_hardware_types::Baseboard,
@@ -70,7 +70,7 @@ impl TryFrom<sled_hardware_types::Baseboard> for BaseboardId {
                 part_number: model,
                 serial_number: identifier,
             }),
-            Baseboard::Unknown => Err(UnknownError),
+            Baseboard::Unknown => Err(UnknownBaseboardError),
         }
     }
 }

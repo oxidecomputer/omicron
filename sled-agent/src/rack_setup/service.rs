@@ -1510,9 +1510,11 @@ async fn init_trust_quorum(
         u8::try_from(members.len()).unwrap() / 2 + 1,
     );
 
+    let initial_epoch = trust_quorum_protocol::Epoch(1);
+
     let msg = trust_quorum_protocol::ReconfigureMsg {
         rack_id,
-        epoch: trust_quorum_protocol::Epoch(1),
+        epoch: initial_epoch,
         last_committed_epoch: None,
         members: members.clone(),
         threshold,
@@ -1554,9 +1556,7 @@ async fn init_trust_quorum(
     // Continue to commit at all nodes until done
 
     // Commit at this node.
-    trust_quorum_handle
-        .commit(rack_id, trust_quorum_protocol::Epoch(1))
-        .await?;
+    trust_quorum_handle.commit(rack_id, initial_epoch).await?;
 
     // Proxy commit at the rest of the nodes
     //
@@ -1570,10 +1570,7 @@ async fn init_trust_quorum(
         members.iter().filter(|&id| id != trust_quorum_handle.baseboard_id())
     {
         info!(log, "RSS: Attempting to commit initial trust quorum at {id}");
-        match proxy
-            .commit(id.clone(), rack_id, trust_quorum_protocol::Epoch(1))
-            .await?
-        {
+        match proxy.commit(id.clone(), rack_id, initial_epoch).await? {
             trust_quorum::CommitStatus::Committed => {
                 info!(log, "RSS: Committed initial trust quorum at {id}");
                 let _ = acked.insert(id.clone());
