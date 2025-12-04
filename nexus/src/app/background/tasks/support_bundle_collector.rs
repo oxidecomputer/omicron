@@ -225,7 +225,7 @@ impl BundleRequest {
         self.data_selection.contains(BundleDataCategory::HostInfo)
     }
 
-    fn include_sled(&self, id: SledUuid) -> bool {
+    fn include_sled_host_info(&self, id: SledUuid) -> bool {
         let selection =
             match self.data_selection.get(BundleDataCategory::HostInfo) {
                 Some(BundleData::HostInfo(selection)) => selection,
@@ -1293,7 +1293,7 @@ impl BundleCollection {
 
         let mut extra_steps: Vec<(&'static str, CollectionStepFn)> = vec![];
         for sled in all_sleds {
-            if !self.request.include_sled(sled.id()) {
+            if !self.request.include_sled_host_info(sled.id()) {
                 continue;
             }
 
@@ -1325,9 +1325,7 @@ impl BundleCollection {
         sled: &nexus_db_model::Sled,
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
-        if !self.request.include_host_info()
-            || !self.request.include_sled(sled.id())
-        {
+        if !self.request.include_sled_host_info(sled.id()) {
             return Ok(CollectionStepOutput::None);
         }
 
