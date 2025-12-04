@@ -40,35 +40,24 @@ pub fn new_trust_quorum_config(
             0,
             0,
         ),
-        tq_ledger_paths: trust_quorum_state_paths(cluster_dataset_paths)?,
-        network_config_ledger_paths: trust_quorum_network_config_paths(
+        tq_ledger_paths: trust_quorum_paths(
             cluster_dataset_paths,
+            TRUST_QUORUM_STATE_FILE,
+        )?,
+        network_config_ledger_paths: trust_quorum_paths(
+            cluster_dataset_paths,
+            TRUST_QUORUM_NETWORK_CONFIG_FILE,
         )?,
         sprockets: sprockets_config,
     })
 }
 
-fn trust_quorum_state_paths(
+fn trust_quorum_paths(
     cluster_dataset_paths: &[Utf8PathBuf],
+    filename: &str,
 ) -> Result<Vec<Utf8PathBuf>, StartError> {
-    let paths: Vec<_> = cluster_dataset_paths
-        .iter()
-        .map(|p| p.join(TRUST_QUORUM_STATE_FILE))
-        .collect();
-
-    if paths.is_empty() {
-        return Err(StartError::MissingM2Paths(CLUSTER_DATASET));
-    }
-    Ok(paths)
-}
-
-fn trust_quorum_network_config_paths(
-    cluster_dataset_paths: &[Utf8PathBuf],
-) -> Result<Vec<Utf8PathBuf>, StartError> {
-    let paths: Vec<_> = cluster_dataset_paths
-        .iter()
-        .map(|p| p.join(TRUST_QUORUM_NETWORK_CONFIG_FILE))
-        .collect();
+    let paths: Vec<_> =
+        cluster_dataset_paths.iter().map(|p| p.join(filename)).collect();
 
     if paths.is_empty() {
         return Err(StartError::MissingM2Paths(CLUSTER_DATASET));
