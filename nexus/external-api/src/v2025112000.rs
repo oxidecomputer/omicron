@@ -17,6 +17,78 @@ pub enum DiskType {
     Crucible,
 }
 
+impl From<DiskType> for external::DiskType {
+    fn from(old: DiskType) -> external::DiskType {
+        match old {
+            DiskType::Crucible => external::DiskType::Virtual,
+        }
+    }
+}
+
+/// View of a Disk
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Disk {
+    #[serde(flatten)]
+    pub identity: external::IdentityMetadata,
+    pub project_id: Uuid,
+    /// ID of snapshot from which disk was created, if any
+    pub snapshot_id: Option<Uuid>,
+    /// ID of image from which disk was created, if any
+    pub image_id: Option<Uuid>,
+    pub size: external::ByteCount,
+    pub block_size: external::ByteCount,
+    pub state: external::DiskState,
+    pub device_path: String,
+    pub disk_type: DiskType,
+}
+
+impl From<Disk> for external::Disk {
+    fn from(old: Disk) -> external::Disk {
+        external::Disk {
+            identity: old.identity,
+            project_id: old.project_id,
+            snapshot_id: old.snapshot_id,
+            image_id: old.image_id,
+            size: old.size,
+            block_size: old.block_size,
+            state: old.state,
+            device_path: old.device_path,
+            disk_type: old.disk_type.into(),
+        }
+    }
+}
+
+impl TryFrom<external::Disk> for Disk {
+    type Error = dropshot::HttpError;
+
+    fn try_from(new: external::Disk) -> Result<Disk, Self::Error> {
+        Ok(Disk {
+            identity: new.identity,
+            project_id: new.project_id,
+            snapshot_id: new.snapshot_id,
+            image_id: new.image_id,
+            size: new.size,
+            block_size: new.block_size,
+            state: new.state,
+            device_path: new.device_path,
+            disk_type: match new.disk_type {
+                external::DiskType::Virtual => DiskType::Crucible,
+
+                _ => {
+                    // Cannot display any other variant for this old client
+                    return Err(dropshot::HttpError::for_client_error(
+                        Some(String::from("Not Acceptable")),
+                        dropshot::ClientErrorStatusCode::NOT_ACCEPTABLE,
+                        String::from(
+                            "disk type variant not supported for client version",
+                        ),
+                    ));
+                }
+            },
+        })
+    }
+}
+
 /// Different sources for a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -41,17 +113,21 @@ pub enum DiskSource {
 impl From<DiskSource> for params::DiskSource {
     fn from(old: DiskSource) -> params::DiskSource {
         match old {
-            DiskSource::Blank { block_size } =>
-                params::DiskSource::Blank { block_size },
+            DiskSource::Blank { block_size } => {
+                params::DiskSource::Blank { block_size }
+            }
 
-            DiskSource::Snapshot { snapshot_id } =>
-                params::DiskSource::Snapshot { snapshot_id },
+            DiskSource::Snapshot { snapshot_id } => {
+                params::DiskSource::Snapshot { snapshot_id }
+            }
 
-            DiskSource::Image { image_id } =>
-                params::DiskSource::Image { image_id },
+            DiskSource::Image { image_id } => {
+                params::DiskSource::Image { image_id }
+            }
 
-            DiskSource::ImportingBlocks { block_size } =>
-                params::DiskSource::ImportingBlocks { block_size },
+            DiskSource::ImportingBlocks { block_size } => {
+                params::DiskSource::ImportingBlocks { block_size }
+            }
         }
     }
 }
@@ -96,11 +172,13 @@ pub enum InstanceDiskAttachment {
 impl From<InstanceDiskAttachment> for params::InstanceDiskAttachment {
     fn from(old: InstanceDiskAttachment) -> params::InstanceDiskAttachment {
         match old {
-            InstanceDiskAttachment::Create(create) =>
-                params::InstanceDiskAttachment::Create(create.into()),
+            InstanceDiskAttachment::Create(create) => {
+                params::InstanceDiskAttachment::Create(create.into())
+            }
 
-            InstanceDiskAttachment::Attach(attach) =>
-                params::InstanceDiskAttachment::Attach(attach),
+            InstanceDiskAttachment::Attach(attach) => {
+                params::InstanceDiskAttachment::Attach(attach)
+            }
         }
     }
 }
