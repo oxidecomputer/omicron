@@ -6,6 +6,9 @@
 
 use crate::{ExecutionError, PFEXEC, execute_async};
 use camino::{Utf8Path, Utf8PathBuf};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use std::str::FromStr;
 use tokio::process::Command;
 
@@ -60,7 +63,10 @@ pub struct GetInfoError {
     err: Error,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum ZpoolHealth {
     /// The device is online and functioning.
     Online,
@@ -198,6 +204,51 @@ pub struct PathInPool {
     pub path: Utf8PathBuf,
 }
 
+// TODO-K: Make sure all of this makes sense
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+struct UnhealthyZpool {
+    pool: String,
+    status: ZpoolHealth,
+    action: String,
+    scan: String,
+    config: UnhealthyZpoolConfig,
+    errors: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+struct UnhealthyZpoolConfig {
+    name: String,
+    state: ZpoolHealth,
+    read: u64,
+    write: u64,
+    cksum: u64,
+}
+
+impl FromStr for UnhealthyZpool {
+    type Err = ParseError;
+
+    // TODO_K: Actually parse the result
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        Ok(UnhealthyZpool {
+            pool: "hi".to_string(),
+            status: ZpoolHealth::Degraded,
+            action: "hi".to_string(),
+            scan: "hi".to_string(),
+            config: UnhealthyZpoolConfig {
+                name: "hi".to_string(),
+                state: ZpoolHealth::Degraded,
+                read: 0,
+                write: 0,
+                cksum: 0,
+            },
+            errors: "hi".to_string(),
+        })
+    }
+}
+// TODO-K: Make sure this makes sense up to here
+
 /// Wraps commands for interacting with ZFS pools.
 pub struct Zpool(());
 
@@ -328,6 +379,19 @@ impl Zpool {
         let zpool = stdout.parse::<ZpoolInfo>().map_err(|err| {
             GetInfoError { name: name.to_string(), err: err.into() }
         })?;
+        Ok(zpool)
+    }
+
+    pub async fn status_unhealthy() -> Result<Vec<UnhealthyZpool>, ListError> {
+        let mut command = Command::new(ZPOOL);
+        let cmd = command.args(&["status", "-x"]);
+
+        let output = execute_async(cmd).await.map_err(Error::from)?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let zpool = stdout
+            .lines()
+            .filter_map(|line| line.parse::<UnhealthyZpool>().ok())
+            .collect();
         Ok(zpool)
     }
 }
