@@ -9,14 +9,7 @@ use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use clickhouse_admin_types::KeeperId;
 use expectorate::assert_contents;
 use iddqd::IdOrdMap;
-use nexus_reconfigurator_blippy::Blippy;
-use nexus_reconfigurator_blippy::BlippyReportSortKey;
 use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
-use nexus_reconfigurator_planning::example::ExampleSystem;
-use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
-use nexus_reconfigurator_planning::example::SimRngState;
-use nexus_reconfigurator_planning::planner::Planner;
-use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_simulation::BlueprintId;
 use nexus_reconfigurator_simulation::CollectionId;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
@@ -39,7 +32,6 @@ use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
-use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::TargetReleaseDescription;
 use nexus_types::deployment::blueprint_zone_type;
@@ -115,18 +107,6 @@ fn assert_blueprint_diff_is_empty(bp1: &Blueprint, bp2: &Blueprint) {
             "expected empty blueprint diff, but got nonempty diff:\n{}",
             summary.display()
         );
-    }
-}
-
-/// Checks various conditions that should be true for all blueprints
-fn verify_blueprint(blueprint: &Blueprint, planning_input: &PlanningInput) {
-    let blippy_report = Blippy::new(blueprint, planning_input)
-        .into_report(BlippyReportSortKey::Kind);
-    if !blippy_report.notes().is_empty() {
-        eprintln!("{}", blueprint.display());
-        eprintln!("---");
-        eprintln!("{}", blippy_report.display());
-        panic!("expected blippy report for blueprint to have no notes");
     }
 }
 
@@ -3020,51 +3000,6 @@ fn sim_update_collection_from_blueprint(
 
     sim.generate_inventory("inventory with latest configs")
         .expect("generated inventory");
-}
-
-/// Manually update the example system's inventory collection's zones
-/// from a blueprint.
-fn update_collection_from_blueprint(
-    example: &mut ExampleSystem,
-    blueprint: &Blueprint,
-) {
-    for (&sled_id, config) in blueprint.sleds.iter() {
-        example
-            .system
-            .sled_set_omicron_config(
-                sled_id,
-                config.clone().into_in_service_sled_config(),
-            )
-            .expect("can't set sled config");
-    }
-    example.collection =
-        example.system.to_collection_builder().unwrap().build();
-
-    update_input_with_nexus_at_generation(
-        example,
-        blueprint,
-        blueprint.nexus_generation,
-    )
-}
-
-fn update_input_with_nexus_at_generation(
-    example: &mut ExampleSystem,
-    blueprint: &Blueprint,
-    active_generation: Generation,
-) {
-    let active_nexus_zones =
-        get_nexus_ids_at_generation(&blueprint, active_generation);
-    let not_yet_nexus_zones =
-        get_nexus_ids_at_generation(&blueprint, active_generation.next());
-
-    let mut input = std::mem::replace(
-        &mut example.input,
-        nexus_types::deployment::PlanningInputBuilder::empty_input(),
-    )
-    .into_builder();
-    input.set_active_nexus_zones(active_nexus_zones);
-    input.set_not_yet_nexus_zones(not_yet_nexus_zones);
-    example.input = input.build();
 }
 
 macro_rules! fake_zone_artifact {
