@@ -90,7 +90,7 @@ impl Disk {
         runtime_initial: DiskRuntimeState,
         disk_type: DiskType,
     ) -> Self {
-        let identity = DiskIdentity::new(disk_id, params.identity().clone());
+        let identity = DiskIdentity::new(disk_id, params.identity.clone());
 
         Self {
             identity,
@@ -98,7 +98,7 @@ impl Disk {
             project_id,
             runtime_state: runtime_initial,
             slot: None,
-            size: params.size().into(),
+            size: params.size.into(),
             block_size,
             disk_type,
         }

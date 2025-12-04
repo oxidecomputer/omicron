@@ -388,13 +388,15 @@ pub static DEMO_DISK_URL: LazyLock<String> = LazyLock::new(|| {
 });
 pub static DEMO_DISK_CREATE: LazyLock<params::DiskCreate> =
     LazyLock::new(|| {
-        params::DiskCreate::Crucible {
+        params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            disk_backend: params::DiskBackend::Virtual {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(4096).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(
                 // divide by at least two to leave space for snapshot blocks
@@ -408,13 +410,15 @@ pub static DEMO_IMPORT_DISK_NAME: LazyLock<Name> =
     LazyLock::new(|| "demo-import-disk".parse().unwrap());
 pub static DEMO_IMPORT_DISK_CREATE: LazyLock<params::DiskCreate> =
     LazyLock::new(|| {
-        params::DiskCreate::Crucible {
+        params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: DEMO_IMPORT_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
-            disk_source: params::DiskSource::ImportingBlocks {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            disk_backend: params::DiskBackend::Virtual {
+                disk_source: params::DiskSource::ImportingBlocks {
+                    block_size: params::BlockSize::try_from(4096).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(
                 // divide by at least two to leave space for snapshot blocks

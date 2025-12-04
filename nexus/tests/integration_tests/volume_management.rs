@@ -144,12 +144,16 @@ async fn create_base_disk(
     base_disk_name: &Name,
 ) -> external::Disk {
     let disk_size = ByteCount::from_gibibytes_u32(2);
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -404,12 +408,16 @@ async fn test_snapshot_prevents_other_disk(
     // means the region wasn't deleted.
     let disk_size = ByteCount::from_gibibytes_u32(10);
     let next_disk_name: Name = "next-disk".parse().unwrap();
-    let next_disk = params::DiskCreate::Crucible {
+    let next_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: next_disk_name.clone(),
             description: String::from("will fail"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -470,13 +478,15 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
     // Create a blank disk
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let first_disk_name: Name = "first-disk".parse().unwrap();
-    let first_disk = params::DiskCreate::Crucible {
+    let first_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -512,13 +522,15 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
 
     // Create another blank disk
     let second_disk_name: Name = "second-disk".parse().unwrap();
-    let second_disk = params::DiskCreate::Crucible {
+    let second_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -605,13 +617,15 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
     // Create a blank disk
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let first_disk_name: Name = "first-disk".parse().unwrap();
-    let first_disk = params::DiskCreate::Crucible {
+    let first_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -647,13 +661,15 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
 
     // Create another blank disk
     let second_disk_name: Name = "second-disk".parse().unwrap();
-    let second_disk = params::DiskCreate::Crucible {
+    let second_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -735,13 +751,15 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
     // Create a blank disk
     let disk_size = ByteCount::from_gibibytes_u32(1);
     let layer_1_disk_name: Name = "layer-1-disk".parse().unwrap();
-    let layer_1_disk = params::DiskCreate::Crucible {
+    let layer_1_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: layer_1_disk_name.clone(),
             description: String::from("layer 1"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -777,13 +795,15 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
 
     // Create a layer 2 disk out of the layer 1 snapshot
     let layer_2_disk_name: Name = "layer-2-disk".parse().unwrap();
-    let layer_2_disk = params::DiskCreate::Crucible {
+    let layer_2_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: layer_2_disk_name.clone(),
             description: String::from("layer 2"),
         },
-        disk_source: params::DiskSource::Snapshot {
-            snapshot_id: layer_1_snapshot.identity.id,
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Snapshot {
+                snapshot_id: layer_1_snapshot.identity.id,
+            },
         },
         size: disk_size,
     };
@@ -819,13 +839,15 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
 
     // Create a layer 3 disk out of the layer 2 snapshot
     let layer_3_disk_name: Name = "layer-3-disk".parse().unwrap();
-    let layer_3_disk = params::DiskCreate::Crucible {
+    let layer_3_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: layer_3_disk_name.clone(),
             description: String::from("layer 3"),
         },
-        disk_source: params::DiskSource::Snapshot {
-            snapshot_id: layer_2_snapshot.identity.id,
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Snapshot {
+                snapshot_id: layer_2_snapshot.identity.id,
+            },
         },
         size: disk_size,
     };
@@ -1172,13 +1194,15 @@ async fn delete_image_test(
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("all your base disk are belong to us"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -2467,13 +2491,15 @@ async fn test_disk_create_saga_unwinds_correctly(
         .set_region_creation_error(true);
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -2511,13 +2537,15 @@ async fn test_snapshot_create_saga_unwinds_correctly(
     // Create a disk
 
     let disk_size = ByteCount::from_gibibytes_u32(2);
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -3311,13 +3339,15 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    let disk = params::DiskCreate::Crucible {
+    let disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: "disk".parse().unwrap(),
             description: String::from("disk"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(2),
     };

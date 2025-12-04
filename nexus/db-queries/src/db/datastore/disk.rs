@@ -271,7 +271,7 @@ impl Into<api::external::Disk> for Disk {
                     block_size: disk.block_size.into(),
                     state: disk.state().into(),
                     device_path,
-                    disk_type: api::external::DiskType::Crucible,
+                    disk_type: api::external::DiskType::Virtual,
                 }
             }
 
@@ -291,7 +291,7 @@ impl Into<api::external::Disk> for Disk {
                     block_size: disk.block_size.into(),
                     state: disk.state().into(),
                     device_path,
-                    disk_type: api::external::DiskType::LocalStorage,
+                    disk_type: api::external::DiskType::Local,
                 }
             }
         }
@@ -1472,12 +1472,14 @@ mod tests {
             block_size: params::BlockSize::try_from(512).unwrap(),
         };
 
-        let create_params = params::DiskCreate::Crucible {
+        let create_params = params::DiskCreate {
             identity: external::IdentityMetadataCreateParams {
                 name: "first-post".parse().unwrap(),
                 description: "just trying things out".to_string(),
             },
-            disk_source: disk_source.clone(),
+            disk_backend: params::DiskBackend::Virtual {
+                disk_source: disk_source.clone(),
+            },
             size: external::ByteCount::from(2147483648),
         };
 

@@ -120,13 +120,15 @@ async fn create_disk_with_state_importing_blocks(client: &ClientTestContext) {
     let _disk: Disk = object_create(
         client,
         &url,
-        &params::DiskCreate::Crucible {
+        &params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: DISK_NAME.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::ImportingBlocks {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: params::DiskBackend::Virtual {
+                disk_source: params::DiskSource::ImportingBlocks {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(1),
         },
@@ -347,13 +349,15 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
-    let new_disk = params::DiskCreate::Crucible {
+    let new_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::ImportingBlocks {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::ImportingBlocks {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };

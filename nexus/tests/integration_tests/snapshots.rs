@@ -100,12 +100,16 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -211,12 +215,16 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -308,12 +316,16 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -398,13 +410,15 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     // Create a blank disk
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -459,13 +473,15 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this snapshot
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let snap_disk_name: Name = "snap-disk".parse().unwrap();
-    let snap_disk = params::DiskCreate::Crucible {
+    let snap_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: snap_disk_name.clone(),
             description: String::from("snapshot of 'sells rainsticks'"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -601,14 +617,16 @@ async fn test_reject_creating_disk_from_snapshot(
     // Reject where block size doesn't evenly divide total size
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate::Crucible {
+            .body(Some(&params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "bad-disk".parse().unwrap(),
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Virtual {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(
@@ -633,14 +651,16 @@ async fn test_reject_creating_disk_from_snapshot(
     // Reject where size of snapshot is greater than the disk's
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate::Crucible {
+            .body(Some(&params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "bad-disk".parse().unwrap(),
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Virtual {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
@@ -666,14 +686,16 @@ async fn test_reject_creating_disk_from_snapshot(
     // the size
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate::Crucible {
+            .body(Some(&params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "bad-disk".parse().unwrap(),
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Virtual {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(
@@ -763,14 +785,16 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     // this anyway.
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate::Crucible {
+            .body(Some(&params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "bad-disk".parse().unwrap(),
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Virtual {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(
@@ -852,14 +876,16 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
         format!("/v1/disks?project={}", second_project.identity.name);
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &second_disks_url)
-            .body(Some(&params::DiskCreate::Crucible {
+            .body(Some(&params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "stolen-disk".parse().unwrap(),
                     description: String::from("stolen disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Virtual {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
@@ -888,13 +914,15 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     let disk_size =
         ByteCount::try_from(gibibytes * 1024 * 1024 * 1024).unwrap();
     let base_disk_name: Name = "base-disk".parse().unwrap();
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -959,12 +987,16 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
     // Create a disk from this image
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -1252,13 +1284,15 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
     // Create a blank disk
     let disk_size = ByteCount::from_gibibytes_u32(2);
     let base_disk_name: Name = "base-disk".parse().unwrap();
-    let base_disk = params::DiskCreate::Crucible {
+    let base_disk = params::DiskCreate {
         identity: IdentityMetadataCreateParams {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Virtual {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };

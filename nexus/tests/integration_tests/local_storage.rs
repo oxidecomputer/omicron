@@ -60,7 +60,7 @@ async fn test_reject_creating_local_storage_disk(
     // local storage disks have a block size of 4096)
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate::LocalStorage {
+            .body(Some(&params::DiskCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: "bad-disk".parse().unwrap(),
                     description: String::from("bad disk"),
@@ -70,6 +70,8 @@ async fn test_reject_creating_local_storage_disk(
                     2 * MIN_DISK_SIZE_BYTES + 512,
                 )
                 .unwrap(),
+
+                disk_backend: params::DiskBackend::Local {},
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -89,7 +91,7 @@ async fn test_reject_creating_local_storage_disk(
     // the size
     let error = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate::LocalStorage {
+            .body(Some(&params::DiskCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: "bad-disk".parse().unwrap(),
                     description: String::from("bad disk"),
@@ -99,6 +101,8 @@ async fn test_reject_creating_local_storage_disk(
                     2 * MIN_DISK_SIZE_BYTES + 4096,
                 )
                 .unwrap(),
+
+                disk_backend: params::DiskBackend::Local {},
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -148,13 +152,15 @@ async fn test_create_large_local_storage_disk(
 
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
-            .body(Some(&params::DiskCreate::LocalStorage {
+            .body(Some(&params::DiskCreate {
                 identity: external::IdentityMetadataCreateParams {
                     name: "chonk-disk".parse().unwrap(),
                     description: String::from("chonk"),
                 },
 
                 size: large_disk_size,
+
+                disk_backend: params::DiskBackend::Local {},
             }))
             .expect_status(Some(StatusCode::CREATED)),
     )

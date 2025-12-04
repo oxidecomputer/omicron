@@ -548,13 +548,15 @@ pub async fn create_disk(
     object_create(
         client,
         &url,
-        &params::DiskCreate::Crucible {
+        &params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: params::DiskBackend::Virtual {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(1),
         },
@@ -572,12 +574,14 @@ pub async fn create_disk_from_snapshot(
     object_create(
         client,
         &url,
-        &params::DiskCreate::Crucible {
+        &params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Snapshot { snapshot_id },
+            disk_backend: params::DiskBackend::Virtual {
+                disk_source: params::DiskSource::Snapshot { snapshot_id },
+            },
             size: ByteCount::from_gibibytes_u32(1),
         },
     )

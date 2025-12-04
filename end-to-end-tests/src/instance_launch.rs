@@ -5,10 +5,9 @@ use anyhow::{Context as _, Result, ensure};
 use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, ExternalIp, ExternalIpCreate,
-    InstanceCpuCount, InstanceCreate, InstanceDiskAttach,
-    InstanceDiskAttachment, InstanceNetworkInterfaceAttachment, InstanceState,
-    SshKeyCreate,
+    ByteCount, DiskBackend, DiskCreate, DiskSource, ExternalIp,
+    ExternalIpCreate, InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
+    InstanceNetworkInterfaceAttachment, InstanceState, SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
 use russh::{ChannelMsg, Disconnect};
@@ -43,12 +42,12 @@ async fn instance_launch() -> Result<()> {
         .client
         .disk_create()
         .project(ctx.project_name.clone())
-        .body(DiskCreate::Crucible {
+        .body(DiskCreate {
             name: disk_name.clone(),
             description: String::new(),
-            disk_source: DiskSource::Image {
+            disk_backend: DiskBackend::Virtual(DiskSource::Image {
                 image_id: ctx.get_silo_image_id("debian11").await?,
-            },
+            }),
             size: ByteCount(2048 * 1024 * 1024),
         })
         .send()
@@ -67,9 +66,9 @@ async fn instance_launch() -> Result<()> {
             hostname: "localshark".parse().unwrap(), // 🦈
             memory: ByteCount(1024 * 1024 * 1024),
             ncpus: InstanceCpuCount(2),
-            boot_disk: Some(InstanceDiskAttachment::Attach(
-                InstanceDiskAttach { name: disk_name.clone() },
-            )),
+            boot_disk: Some(InstanceDiskAttachment::Attach {
+                name: disk_name.clone(),
+            }),
             disks: Vec::new(),
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],

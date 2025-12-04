@@ -110,8 +110,8 @@ impl NexusSaga for SagaDiskCreate {
 
         builder.append(space_account_action());
 
-        match &params.create_params {
-            params::DiskCreate::Crucible { .. } => {
+        match &params.create_params.disk_backend {
+            params::DiskBackend::Virtual { .. } => {
                 builder.append(create_crucible_disk_record_action());
                 builder.append(regions_alloc_action());
                 builder.append(regions_ensure_undo_action());
@@ -119,26 +119,24 @@ impl NexusSaga for SagaDiskCreate {
                 builder.append(create_volume_record_action());
             }
 
-            params::DiskCreate::LocalStorage { .. } => {
+            params::DiskBackend::Local {} => {
                 builder.append(create_local_storage_disk_record_action());
             }
         }
 
         builder.append(finalize_disk_record_action());
 
-        match &params.create_params {
-            params::DiskCreate::Crucible { disk_source, .. } => {
-                match disk_source {
-                    params::DiskSource::ImportingBlocks { .. } => {
-                        builder.append(get_pantry_address_action());
-                        builder.append(call_pantry_attach_for_disk_action());
-                    }
-
-                    _ => {}
+        match &params.create_params.disk_backend {
+            params::DiskBackend::Virtual { disk_source } => match disk_source {
+                params::DiskSource::ImportingBlocks { .. } => {
+                    builder.append(get_pantry_address_action());
+                    builder.append(call_pantry_attach_for_disk_action());
                 }
-            }
 
-            params::DiskCreate::LocalStorage { .. } => {
+                _ => {}
+            },
+
+            params::DiskBackend::Local {} => {
                 // nothing to do!
             }
         }
@@ -162,14 +160,14 @@ async fn sdc_create_crucible_disk_record(
         &params.serialized_authn,
     );
 
-    let disk_source = match &params.create_params {
-        params::DiskCreate::Crucible { disk_source, .. } => disk_source,
+    let disk_source = match &params.create_params.disk_backend {
+        params::DiskBackend::Virtual { disk_source } => disk_source,
 
-        params::DiskCreate::LocalStorage { .. } => {
+        params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
             // `make_saga_dag`!
             return Err(ActionError::action_failed(Error::internal_error(
-                "wrong DiskCreate variant!",
+                "wrong DiskBackend variant!",
             )));
         }
     };
@@ -289,16 +287,16 @@ async fn sdc_create_local_storage_disk_record(
         &params.serialized_authn,
     );
 
-    let block_size = match &params.create_params {
-        params::DiskCreate::Crucible { .. } => {
+    let block_size = match &params.create_params.disk_backend {
+        params::DiskBackend::Virtual { .. } => {
             // This should be unreachable given the match performed in
             // `make_saga_dag`!
             return Err(ActionError::action_failed(Error::internal_error(
-                "wrong DiskCreate variant!",
+                "wrong DiskBackend variant!",
             )));
         }
 
-        params::DiskCreate::LocalStorage { .. } => {
+        params::DiskBackend::Local {} => {
             // All LocalStorage disks have a block size of 4k
             db::model::BlockSize::AdvancedFormat
         }
@@ -315,7 +313,7 @@ async fn sdc_create_local_storage_disk_record(
 
     let disk_type_local_storage = db::model::DiskTypeLocalStorage::new(
         disk_id,
-        params.create_params.size(),
+        params.create_params.size,
     )
     .map_err(ActionError::action_failed)?;
 
@@ -366,14 +364,14 @@ async fn sdc_alloc_regions(
 
     let strategy = &osagactx.nexus().default_region_allocation_strategy;
 
-    let disk_source = match &params.create_params {
-        params::DiskCreate::Crucible { disk_source, .. } => disk_source,
+    let disk_source = match &params.create_params.disk_backend {
+        params::DiskBackend::Virtual { disk_source } => disk_source,
 
-        params::DiskCreate::LocalStorage { .. } => {
+        params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
             // `make_saga_dag`!
             return Err(ActionError::action_failed(Error::internal_error(
-                "wrong DiskCreate variant!",
+                "wrong DiskBackend variant!",
             )));
         }
     };
@@ -384,7 +382,7 @@ async fn sdc_alloc_regions(
             &opctx,
             volume_id,
             &disk_source,
-            params.create_params.size(),
+            params.create_params.size,
             &strategy,
         )
         .await
@@ -427,7 +425,7 @@ async fn sdc_account_space(
             &opctx,
             disk_id,
             params.project_id,
-            params.create_params.size().into(),
+            params.create_params.size.into(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -451,7 +449,7 @@ async fn sdc_account_space_undo(
             &opctx,
             disk_id,
             params.project_id,
-            params.create_params.size().into(),
+            params.create_params.size.into(),
         )
         .await
         .map_err(ActionError::action_failed)?;
@@ -494,14 +492,14 @@ async fn sdc_regions_ensure(
         &params.serialized_authn,
     );
 
-    let disk_source = match &params.create_params {
-        params::DiskCreate::Crucible { disk_source, .. } => disk_source,
+    let disk_source = match &params.create_params.disk_backend {
+        params::DiskBackend::Virtual { disk_source } => disk_source,
 
-        params::DiskCreate::LocalStorage { .. } => {
+        params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
             // `make_saga_dag`!
             return Err(ActionError::action_failed(Error::internal_error(
-                "wrong DiskCreate variant!",
+                "wrong DiskBackend variant!",
             )));
         }
     };
@@ -796,8 +794,8 @@ async fn sdc_finalize_disk_record(
     // Project.  So this shouldn't break in practice.  However, that's brittle.
     // It would be better if this were better guaranteed.
 
-    match params.create_params {
-        params::DiskCreate::Crucible { disk_source, .. } => {
+    match params.create_params.disk_backend {
+        params::DiskBackend::Virtual { disk_source } => {
             let disk_created = db::datastore::Disk::Crucible(
                 sagactx
                     .lookup::<db::datastore::CrucibleDisk>("crucible_disk")?,
@@ -830,7 +828,7 @@ async fn sdc_finalize_disk_record(
             Ok(disk_created)
         }
 
-        params::DiskCreate::LocalStorage { .. } => {
+        params::DiskBackend::Local {} => {
             let disk_created = db::datastore::Disk::LocalStorage(
                 sagactx.lookup::<db::datastore::LocalStorageDisk>(
                     "local_storage_disk",
@@ -1012,13 +1010,15 @@ pub(crate) mod test {
     const PROJECT_NAME: &str = "springfield-squidport";
 
     pub fn new_disk_create_params() -> params::DiskCreate {
-        params::DiskCreate::Crucible {
+        params::DiskCreate {
             identity: IdentityMetadataCreateParams {
                 name: DISK_NAME.parse().expect("Invalid disk name"),
                 description: "My disk".to_string(),
             },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize(512),
+            disk_backend: params::DiskBackend::Virtual {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize(512),
+                },
             },
             size: ByteCount::from_gibibytes_u32(1),
         }

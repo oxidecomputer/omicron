@@ -156,18 +156,18 @@ impl super::Nexus {
         authz_project: &authz::Project,
         params: &params::DiskCreate,
     ) -> Result<(), Error> {
-        let block_size: u64 = match &params {
-            params::DiskCreate::Crucible { disk_source, size, .. } => {
+        let block_size: u64 = match &params.disk_backend {
+            params::DiskBackend::Virtual { disk_source, .. } => {
                 self.validate_crucible_disk_create_params(
                     opctx,
                     &authz_project,
                     &disk_source,
-                    *size,
+                    params.size,
                 )
                 .await?
             }
 
-            params::DiskCreate::LocalStorage { .. } => {
+            params::DiskBackend::Local { .. } => {
                 // All LocalStorage disks have a 4k block size
                 4096
             }
@@ -175,7 +175,7 @@ impl super::Nexus {
 
         // Reject disks where the block size doesn't evenly divide the
         // total size
-        if (params.size().to_bytes() % block_size) != 0 {
+        if (params.size.to_bytes() % block_size) != 0 {
             return Err(Error::invalid_value(
                 "size and block_size",
                 format!(
@@ -187,7 +187,7 @@ impl super::Nexus {
 
         // Reject disks where the size isn't at least
         // MIN_DISK_SIZE_BYTES
-        if params.size().to_bytes() < u64::from(MIN_DISK_SIZE_BYTES) {
+        if params.size.to_bytes() < u64::from(MIN_DISK_SIZE_BYTES) {
             return Err(Error::invalid_value(
                 "size",
                 format!(
@@ -199,7 +199,7 @@ impl super::Nexus {
 
         // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
         // divide the size
-        if (params.size().to_bytes() % u64::from(MIN_DISK_SIZE_BYTES)) != 0 {
+        if (params.size.to_bytes() % u64::from(MIN_DISK_SIZE_BYTES)) != 0 {
             return Err(Error::invalid_value(
                 "size",
                 format!(
@@ -210,13 +210,13 @@ impl super::Nexus {
         }
 
         // Check for disk type specific restrictions
-        match &params {
-            params::DiskCreate::Crucible { .. } => {
+        match &params.disk_backend {
+            params::DiskBackend::Virtual { .. } => {
                 // Reject disks where the size is greated than
                 // MAX_DISK_SIZE_BYTES. This restriction will be changed or
                 // removed when multi-subvolume Volumes can be created by Nexus,
                 // or if the region allocation algorithm changes.
-                if params.size().to_bytes() > MAX_DISK_SIZE_BYTES {
+                if params.size.to_bytes() > MAX_DISK_SIZE_BYTES {
                     return Err(Error::invalid_value(
                         "size",
                         format!(
@@ -227,7 +227,7 @@ impl super::Nexus {
                 }
             }
 
-            params::DiskCreate::LocalStorage { size, .. } => {
+            params::DiskBackend::Local {} => {
                 // If a user requests some outlandish number of TB for local
                 // storage, and there isn't a sled allocation that can fulfill
                 // this, instance create will work but instance start (which
@@ -261,7 +261,8 @@ impl super::Nexus {
                 // returned to a user with a non-500 error, and validation
                 // failure in a saga will only show up as a 500.
 
-                if let Err(e) = DiskTypeLocalStorage::new(Uuid::new_v4(), *size)
+                if let Err(e) =
+                    DiskTypeLocalStorage::new(Uuid::new_v4(), params.size)
                 {
                     return Err(Error::invalid_value(
                         "size",
