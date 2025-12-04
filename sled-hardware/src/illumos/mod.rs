@@ -28,6 +28,8 @@ mod sysconf;
 
 pub use partitions::{NvmeFormattingError, ensure_partition_layout};
 
+const TOFINO_MONITOR: &'static str = "/opt/oxide/sled-agent/tofino-monitor";
+
 #[derive(thiserror::Error, Debug)]
 enum Error {
     #[error("Failed to access devinfo: {0}")]
@@ -86,16 +88,29 @@ pub fn is_oxide_sled() -> anyhow::Result<bool> {
     Ok(OxideSled::try_from_root_node_name(&root.node_name()).is_some())
 }
 
-// A snapshot of information about the underlying Tofino device
+// A snapshot of information about the underlying Tofino device.
+//
+// This snapshot tells us whether there is a tofino visible to Illumos and
+// accessible to us in userspace.  We would expect both to be true or both to be
+// false.
+//
+// Note: this doesn't specifically tell us whether there is a sidecar connected
+// to the system, but it tells us if there is a sidecar we can use.  The
+// distinction largely comes down to whether the driver has successfully
+// recognized the device and initialized itself.  The three-way relationship
+// between PCI hotplug, device driver management, and zones is fragile enough
+// that we can get stuck in a state that requires a gimlet reboot to fix.
 #[derive(Copy, Clone)]
 struct TofinoSnapshot {
+    // Is there a Tofino ASIC visible in the device tree
     exists: bool,
-    driver_loaded: bool,
+    // Are we able to access the ASIC through the device driver
+    available: bool,
 }
 
 impl TofinoSnapshot {
     fn new() -> Self {
-        Self { exists: false, driver_loaded: false }
+        Self { exists: false, available: false }
     }
 }
 
@@ -251,17 +266,18 @@ impl HardwareView {
         updates: &mut Vec<HardwareUpdate>,
     ) {
         match self.tofino {
-            TofinoView::Real(TofinoSnapshot { driver_loaded, exists }) => {
+            TofinoView::Real(TofinoSnapshot { available, exists }) => {
                 use HardwareUpdate::*;
                 // Identify if the Tofino device changed power states.
                 if exists != polled_hw.tofino.exists {
                     updates.push(TofinoDeviceChange);
                 }
 
-                // Identify if the Tofino driver was recently loaded/unloaded.
-                match (driver_loaded, polled_hw.tofino.driver_loaded) {
-                    (false, true) => updates.push(TofinoLoaded),
-                    (true, false) => updates.push(TofinoUnloaded),
+                // Identify if the Tofino asic recently became available or
+                // unavailable.
+                match (available, polled_hw.tofino.available) {
+                    (false, true) => updates.push(TofinoAvailable),
+                    (true, false) => updates.push(TofinoUnavailable),
                     _ => (),
                 };
 
@@ -341,10 +357,9 @@ fn slot_is_boot_disk(
 }
 
 fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
-    let (exists, driver_loaded) = match tofino::get_tofino_from_devinfo(devinfo)
-    {
+    let (exists, available) = match tofino::get_tofino_from_devinfo(devinfo) {
         Ok(None) => (false, false),
-        Ok(Some(node)) => (node.has_asic(), node.has_driver()),
+        Ok(Some(node)) => (node.has_asic(), node.is_available()),
         Err(e) => {
             error!(log, "failed to get tofino state: {e:?}");
             (false, false)
@@ -353,11 +368,11 @@ fn get_tofino_snapshot(log: &Logger, devinfo: &mut DevInfo) -> TofinoSnapshot {
     if exists {
         debug!(
             log,
-            "Found tofino node, with driver {}loaded",
-            if driver_loaded { "" } else { "not " }
+            "Found tofino node, with asic {}available",
+            if available { "" } else { "un" }
         );
     }
-    TofinoSnapshot { exists, driver_loaded }
+    TofinoSnapshot { exists, available }
 }
 
 fn get_dev_path_of_whole_disk(
@@ -686,7 +701,55 @@ fn poll_device_tree(
     Ok(())
 }
 
-async fn hardware_tracking_task(
+// Using an external process, watch for the disappearance of a tofino device.
+fn monitor_tofino(log: slog::Logger, tx: broadcast::Sender<HardwareUpdate>) {
+    match std::fs::exists(TOFINO_MONITOR) {
+        Err(_) | Ok(false) => {
+            error!(&log, "tofino monitor tool not found at {}", TOFINO_MONITOR);
+            return;
+        }
+        _ => {}
+    };
+
+    loop {
+        let mut child = match std::process::Command::new(TOFINO_MONITOR).spawn()
+        {
+            Ok(c) => {
+                debug!(
+                    &log,
+                    "launched tofino monitor process as pid {}",
+                    c.id()
+                );
+                c
+            }
+            Err(e) => {
+                error!(&log, "failed to launch tofino monitor: {e:?}");
+                return;
+            }
+        };
+
+        // This child process should only exit if it has seen a tofino ASIC and
+        // then received a "tofino removed" event from the kernel.  If that
+        // happens, it should exit cleanly with an exit code of 0.  If the child
+        // exits for any other reason, we don't know what it means, and can only
+        // log the event for posterity.  In either case, we send a message to
+        // the hardware monitor task indicating that the Tofino is gone, and it
+        // will perform any necessary cleanup.  This cleanup will include
+        // shutting down the switch zone if, for some reason, it still exists.
+        match child.wait() {
+            Err(e) => error!(&log, "failed to collect exit status: {e:?}"),
+            Ok(s) => info!(&log, "child exited with code: {:?}", s.code()),
+        }
+        let _ = tx.send(HardwareUpdate::TofinoUnavailable);
+
+        // By the time we get here, the switch zone should be gone and the
+        // device tree cleaned up.  Still, it doesn't hurt to give things a
+        // moment to stabilize before restarting the monitor.
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+}
+
+fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
     nonsled_observed_disks: Vec<UnparsedDisk>,
@@ -701,7 +764,7 @@ async fn hardware_tracking_task(
                 warn!(log, "Failed to query device tree: {err}");
             }
         }
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        std::thread::sleep(std::time::Duration::from_secs(5));
     }
 }
 
@@ -789,12 +852,20 @@ impl HardwareManager {
             }
         };
 
+        // We poll the device tree to detect new tofinos and disks.  This
+        // polling also detects devices that have gone away, but we need to
+        // respond to a tofino disappearance more quickly than a regular polling
+        // interval will allow.  To that end, we fire off a task that maintains a
+        // device contract with the kernel to handle those disappearances.
+        let log2 = log.clone();
+        let tx2 = tx.clone();
+        std::thread::spawn(move || monitor_tofino(log2, tx2));
+
         let log2 = log.clone();
         let inner2 = inner.clone();
         let tx2 = tx.clone();
-        tokio::task::spawn(async move {
+        std::thread::spawn(move || {
             hardware_tracking_task(log2, inner2, nonsled_observed_disks, tx2)
-                .await
         });
 
         Ok(Self { log, inner, tx })
@@ -839,12 +910,10 @@ impl HardwareManager {
         }
     }
 
-    pub fn is_scrimlet_driver_loaded(&self) -> bool {
+    pub fn is_scrimlet_asic_available(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         match inner.tofino {
-            TofinoView::Real(TofinoSnapshot { driver_loaded, .. }) => {
-                driver_loaded
-            }
+            TofinoView::Real(TofinoSnapshot { available, .. }) => available,
             TofinoView::Stub { active } => active,
         }
     }
