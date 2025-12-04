@@ -22,6 +22,7 @@ use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::system::SledBuilder;
 use nexus_reconfigurator_planning::system::SystemDescription;
 use nexus_reconfigurator_simulation::BlueprintId;
+use nexus_reconfigurator_simulation::CollectionId;
 use nexus_reconfigurator_simulation::SimState;
 use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::errors::KeyError;
@@ -76,6 +77,13 @@ impl ReconfiguratorCliTestState {
     ) -> Result<&Arc<Blueprint>, KeyError> {
         let state = self.sim.current_state();
         state.system().resolve_and_get_blueprint(id)
+    }
+
+    /// Get the specified inventory collection.
+    pub fn inventory(&self, id: CollectionId) -> Result<&Collection, KeyError> {
+        let system = self.current_state().system();
+        let id = system.resolve_collection_id(id)?;
+        system.get_collection(&id)
     }
 
     /// Run the blueprint planner, using the latest blueprint and inventory

@@ -18,6 +18,7 @@ use nexus_reconfigurator_planning::example::SimRngState;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_simulation::BlueprintId;
+use nexus_reconfigurator_simulation::CollectionId;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -3793,15 +3794,18 @@ fn test_update_cockroach() {
         },
     )
     .unwrap();
+
+    // Note that we use `InputUnchanged` here because we just updated the
+    // collection.
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // Validate that we do not flip back to the 0.0.1 artifact after
     // performing the update.
     sim.inventory_edit_latest_low_level(
-        "valid cockroach status",
+        "invalid cockroach status",
         |collection| {
             collection.cockroach_status = create_valid_looking_status();
             collection
@@ -3816,7 +3820,7 @@ fn test_update_cockroach() {
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     logctx.cleanup_successful();
@@ -3826,33 +3830,27 @@ fn test_update_cockroach() {
 fn test_update_boundary_ntp() {
     static TEST_NAME: &str = "update_boundary_ntp";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let mut rng = SimRngState::from_seed(TEST_NAME);
-    let (mut example, mut blueprint) =
-        ExampleSystemBuilder::new_with_rng(&logctx.log, rng.next_system_rng())
-            .with_target_release_0_0_1()
-            .expect("set target release to 0.0.1")
-            .build();
-    verify_blueprint(&blueprint, &example.input);
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
+        .expect("loaded example system");
 
     // The example system creates three internal NTP zones, and zero
     // boundary NTP zones. This is a little arbitrary, but we're checking it
     // here: the lack of boundary NTP zones means we need to perform some
     // manual promotion of "internal -> boundary NTP", as documented below.
 
+    let collection = sim.inventory(CollectionId::Latest).unwrap();
     assert_eq!(
-        example
-            .collection
+        collection
             .all_running_omicron_zones()
             .filter(|zone_config| { zone_config.zone_type.is_ntp() })
             .count(),
         3,
     );
     assert_eq!(
-        example
-            .collection
+        collection
             .all_running_omicron_zones()
             .filter(|zone_config| { zone_config.zone_type.is_boundary_ntp() })
             .count(),
@@ -3867,61 +3865,67 @@ fn test_update_boundary_ntp() {
     // that already exists. We'll perform a manual promotion first, then
     // ask for the other boundary NTP zones.
 
-    {
-        let mut zone = blueprint
-            .sleds
-            .values_mut()
-            .flat_map(|config| config.zones.iter_mut())
-            .find(|z| z.zone_type.is_ntp())
+    let blueprint = sim
+        .blueprint_edit_latest_low_level("manually promote NTP zone", |bp| {
+            let mut zone = bp
+                .sleds
+                .values_mut()
+                .flat_map(|config| config.zones.iter_mut())
+                .find(|z| z.zone_type.is_ntp())
+                .unwrap();
+            let address = match zone.zone_type {
+                BlueprintZoneType::InternalNtp(
+                    blueprint_zone_type::InternalNtp { address },
+                ) => address,
+                _ => panic!("should be internal NTP?"),
+            };
+            let ip_config = PrivateIpConfig::new_ipv6(
+                Ipv6Addr::LOCALHOST,
+                Ipv6Net::new(Ipv6Addr::LOCALHOST, 64).unwrap(),
+            )
             .unwrap();
-        let address = match zone.zone_type {
-            BlueprintZoneType::InternalNtp(
-                blueprint_zone_type::InternalNtp { address },
-            ) => address,
-            _ => panic!("should be internal NTP?"),
-        };
-        let ip_config = PrivateIpConfig::new_ipv6(
-            Ipv6Addr::LOCALHOST,
-            Ipv6Net::new(Ipv6Addr::LOCALHOST, 64).unwrap(),
-        )
-        .unwrap();
 
-        // The contents here are all lies, but it's just stored
-        // as plain-old-data for the purposes of this test, so
-        // it doesn't need to be real.
-        zone.zone_type =
-            BlueprintZoneType::BoundaryNtp(blueprint_zone_type::BoundaryNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-                nic: NetworkInterface {
-                    id: Uuid::new_v4(),
-                    kind: NetworkInterfaceKind::Service { id: Uuid::new_v4() },
-                    name: "ntp-0".parse().unwrap(),
-                    ip_config,
-                    mac: MacAddr::random_system(),
-                    vni: Vni::SERVICES_VNI,
-                    primary: true,
-                    slot: 0,
+            // The contents here are all lies, but it's just stored
+            // as plain-old-data for the purposes of this test, so
+            // it doesn't need to be real.
+            zone.zone_type = BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp {
+                    address,
+                    ntp_servers: vec![],
+                    dns_servers: vec![],
+                    domain: None,
+                    nic: NetworkInterface {
+                        id: Uuid::new_v4(),
+                        kind: NetworkInterfaceKind::Service {
+                            id: Uuid::new_v4(),
+                        },
+                        name: "ntp-0".parse().unwrap(),
+                        ip_config,
+                        mac: MacAddr::random_system(),
+                        vni: Vni::SERVICES_VNI,
+                        primary: true,
+                        slot: 0,
+                    },
+                    external_ip: OmicronZoneExternalSnatIp {
+                        id: ExternalIpUuid::new_v4(),
+                        snat_cfg: SourceNatConfig::new(
+                            IpAddr::V6(Ipv6Addr::LOCALHOST),
+                            0,
+                            0x4000 - 1,
+                        )
+                        .unwrap(),
+                    },
                 },
-                external_ip: OmicronZoneExternalSnatIp {
-                    id: ExternalIpUuid::new_v4(),
-                    snat_cfg: SourceNatConfig::new(
-                        IpAddr::V6(Ipv6Addr::LOCALHOST),
-                        0,
-                        0x4000 - 1,
-                    )
-                    .unwrap(),
-                },
-            });
-    }
-    update_collection_from_blueprint(&mut example, &blueprint);
+            );
+            Ok(())
+        })
+        .unwrap();
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
 
     // We should have one boundary NTP zone now.
     assert_eq!(
-        example
-            .collection
+        sim.inventory(CollectionId::Latest)
+            .unwrap()
             .all_running_omicron_zones()
             .filter(|zone_config| { zone_config.zone_type.is_boundary_ntp() })
             .count(),
@@ -3929,24 +3933,12 @@ fn test_update_boundary_ntp() {
     );
 
     // Use that boundary NTP zone to promote others.
-    example.system.set_target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
-    example.input = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder")
-        .build();
-    let blueprint_name = "blueprint_with_boundary_ntp";
-    let new_blueprint = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        &blueprint_name,
-        &example.collection,
-        rng.next_planner_rng(),
-    )
-    .expect("can't create planner")
-    .plan()
-    .unwrap_or_else(|err| panic!("can't plan to include boundary NTP: {err}"));
+    sim.change_description("make more boundary NTP zones", |desc| {
+        desc.set_target_boundary_ntp_zone_count(BOUNDARY_NTP_REDUNDANCY);
+        Ok(())
+    })
+    .unwrap();
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
 
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
@@ -3954,45 +3946,31 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), BOUNDARY_NTP_REDUNDANCY - 1);
     }
-    blueprint = new_blueprint;
-    update_collection_from_blueprint(&mut example, &blueprint);
+    let blueprint = new_blueprint;
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
 
     assert_eq!(
-        example
-            .collection
+        sim.inventory(CollectionId::Latest)
+            .unwrap()
             .all_running_omicron_zones()
             .filter(|zone_config| { zone_config.zone_type.is_boundary_ntp() })
             .count(),
         BOUNDARY_NTP_REDUNDANCY
     );
 
-    let planner = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        TEST_NAME,
-        &example.collection,
-        rng.next_planner_rng(),
-    )
-    .expect("can't create planner");
-    let new_blueprint = planner.plan().expect("planning succeeded");
-    verify_blueprint(&new_blueprint, &example.input);
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
         assert_eq!(summary.total_zones_added(), 0);
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), BOUNDARY_NTP_REDUNDANCY - 1);
     }
-    blueprint = new_blueprint;
-    update_collection_from_blueprint(&mut example, &blueprint);
+    let blueprint = new_blueprint;
 
     // We should have started with no specified TUF repo and nothing to do.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // All zones should be sourced from the 0.0.1 repo by default.
@@ -4035,6 +4013,12 @@ fn test_update_boundary_ntp() {
         },
         artifacts,
     });
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release_and_old_repo(description);
+        Ok(())
+    })
+    .unwrap();
+    /*
     example.system.set_target_release_and_old_repo(description);
 
     example.input = example
@@ -4042,11 +4026,34 @@ fn test_update_boundary_ntp() {
         .to_planning_input_builder()
         .expect("created PlanningInputBuilder")
         .build();
+        */
 
     // Manually update all zones except boundary NTP
     //
     // We just specified a new TUF repo, everything is going to shift from
     // the 0.0.1 repo to this new repo.
+    let blueprint = sim
+        .blueprint_edit_latest_low_level(
+            "update zones other than Nexus and pantry",
+            |bp| {
+                for mut zone in bp
+                    .sleds
+                    .values_mut()
+                    .flat_map(|config| config.zones.iter_mut())
+                    .filter(|z| !z.zone_type.is_boundary_ntp())
+                {
+                    zone.image_source = BlueprintZoneImageSource::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: version.clone(),
+                        },
+                        hash: fake_hash,
+                    };
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+    /*
     for mut zone in blueprint
         .sleds
         .values_mut()
@@ -4060,7 +4067,8 @@ fn test_update_boundary_ntp() {
             hash: fake_hash,
         };
     }
-    update_collection_from_blueprint(&mut example, &blueprint);
+    */
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
 
     // Some helper predicates for the assertions below.
     let is_old_boundary_ntp = |zone: &BlueprintZoneConfig| -> bool {
@@ -4117,66 +4125,75 @@ fn test_update_boundary_ntp() {
         collection.ntp_timesync = ntp_timesync;
     };
 
+    let sim_set_valid_looking_timesync =
+        |sim: &mut ReconfiguratorCliTestState| {
+            sim.inventory_edit_latest_low_level(
+                "valid NTP status",
+                |collection| {
+                    set_valid_looking_timesync(collection);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        };
+
     // If we have missing info in our inventory, the
     // planner will not update any boundary NTP zones.
-    example.collection.ntp_timesync = IdOrdMap::new();
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("no timesync status", |collection| {
+        collection.ntp_timesync = IdOrdMap::new();
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // If we don't have enough info from boundary NTP nodes, we'll refuse to
     // update.
-    set_valid_looking_timesync(&mut example.collection);
-    let boundary_ntp_zone = example
-        .collection
-        .all_running_omicron_zones()
-        .find_map(|z| {
-            if let OmicronZoneType::BoundaryNtp { .. } = z.zone_type {
-                Some(z.id)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    example.collection.ntp_timesync.remove(&boundary_ntp_zone);
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("too few NTP zones", |collection| {
+        set_valid_looking_timesync(collection);
+        let boundary_ntp_zone = collection
+            .all_running_omicron_zones()
+            .find_map(|z| {
+                if let OmicronZoneType::BoundaryNtp { .. } = z.zone_type {
+                    Some(z.id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        collection.ntp_timesync.remove(&boundary_ntp_zone);
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // If we don't have enough explicitly synced nodes, we'll refuse to
     // update.
-    set_valid_looking_timesync(&mut example.collection);
-    let boundary_ntp_zone = example
-        .collection
-        .all_running_omicron_zones()
-        .find_map(|z| {
-            if let OmicronZoneType::BoundaryNtp { .. } = z.zone_type {
-                Some(z.id)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    example
-        .collection
-        .ntp_timesync
-        .get_mut(&boundary_ntp_zone)
-        .unwrap()
-        .synced = false;
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("unsynced NTP zones", |collection| {
+        set_valid_looking_timesync(collection);
+        let boundary_ntp_zone = collection
+            .all_running_omicron_zones()
+            .find_map(|z| {
+                if let OmicronZoneType::BoundaryNtp { .. } = z.zone_type {
+                    Some(z.id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        collection.ntp_timesync.get_mut(&boundary_ntp_zone).unwrap().synced =
+            false;
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // Once all nodes are timesync'd, we can start to update boundary NTP
@@ -4184,7 +4201,7 @@ fn test_update_boundary_ntp() {
     //
     // We'll update one zone at a time, from the 0.0.1 artifact to the new
     // TUF repo artifact.
-    set_valid_looking_timesync(&mut example.collection);
+    sim_set_valid_looking_timesync(&mut sim);
 
     //
     // Step 1:
@@ -4192,17 +4209,7 @@ fn test_update_boundary_ntp() {
     // * Expunge old boundary NTP. This is treated as a "modified zone", here
     // and below.
     //
-    let new_blueprint = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        "test_blueprint_expunge_old_boundary_ntp",
-        &example.collection,
-        rng.next_planner_rng(),
-    )
-    .expect("can't create planner")
-    .plan()
-    .expect("plan for trivial TUF repo");
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
@@ -4216,9 +4223,9 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 1);
     }
-    blueprint = new_blueprint;
-    update_collection_from_blueprint(&mut example, &blueprint);
-    set_valid_looking_timesync(&mut example.collection);
+    let blueprint = new_blueprint;
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
+    sim_set_valid_looking_timesync(&mut sim);
 
     // NOTE: This is a choice! The current planner is opting to reduce the
     // redundancy count of boundary NTP zones for the duration of the
@@ -4240,17 +4247,7 @@ fn test_update_boundary_ntp() {
     // + Add it back as a boundary NTP zone
     //
 
-    let new_blueprint = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        "test_blueprint_boundary_ntp_add_internal_and_promote_one",
-        &example.collection,
-        rng.next_planner_rng(),
-    )
-    .expect("can't create planner")
-    .plan()
-    .expect("plan for trivial TUF repo");
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
@@ -4265,9 +4262,9 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 2);
     }
-    blueprint = new_blueprint;
-    update_collection_from_blueprint(&mut example, &blueprint);
-    set_valid_looking_timesync(&mut example.collection);
+    let blueprint = new_blueprint;
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
+    sim_set_valid_looking_timesync(&mut sim);
 
     assert_eq!(old_boundary_ntp_count(&blueprint), 1);
     assert_eq!(up_to_date_boundary_ntp_count(&blueprint), 1);
@@ -4282,17 +4279,7 @@ fn test_update_boundary_ntp() {
     // * Finish expunging the internal NTP zone (started in prior step)
     //
 
-    let new_blueprint = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        "test_blueprint_boundary_ntp_expunge_the_other_one",
-        &example.collection,
-        rng.next_planner_rng(),
-    )
-    .expect("can't create planner")
-    .plan()
-    .expect("plan for trivial TUF repo");
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
@@ -4306,9 +4293,9 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 2);
     }
-    blueprint = new_blueprint;
-    update_collection_from_blueprint(&mut example, &blueprint);
-    set_valid_looking_timesync(&mut example.collection);
+    let blueprint = new_blueprint;
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
+    sim_set_valid_looking_timesync(&mut sim);
 
     assert_eq!(old_boundary_ntp_count(&blueprint), 0);
     assert_eq!(up_to_date_boundary_ntp_count(&blueprint), 1);
@@ -4325,17 +4312,7 @@ fn test_update_boundary_ntp() {
     //   artifact
     //
 
-    let new_blueprint = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        "test_blueprint_boundary_ntp_promotion",
-        &example.collection,
-        rng.next_planner_rng(),
-    )
-    .expect("can't create planner")
-    .plan()
-    .expect("plan for trivial TUF repo");
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
@@ -4349,9 +4326,9 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 1);
     }
-    blueprint = new_blueprint;
-    update_collection_from_blueprint(&mut example, &blueprint);
-    set_valid_looking_timesync(&mut example.collection);
+    let blueprint = new_blueprint;
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
+    sim_set_valid_looking_timesync(&mut sim);
 
     assert_eq!(old_boundary_ntp_count(&blueprint), 0);
     assert_eq!(up_to_date_boundary_ntp_count(&blueprint), 2);
@@ -4363,17 +4340,7 @@ fn test_update_boundary_ntp() {
     // * Finish clearing out expunged internal NTP zones (added in prior step)
     //
 
-    let new_blueprint = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        "test_blueprint_boundary_ntp_finish_expunging",
-        &example.collection,
-        rng.next_planner_rng(),
-    )
-    .expect("can't create planner")
-    .plan()
-    .expect("plan for trivial TUF repo");
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
         eprintln!(
@@ -4387,32 +4354,33 @@ fn test_update_boundary_ntp() {
         assert_eq!(summary.total_zones_removed(), 0);
         assert_eq!(summary.total_zones_modified(), 1);
     }
-    blueprint = new_blueprint;
-    update_collection_from_blueprint(&mut example, &blueprint);
-    set_valid_looking_timesync(&mut example.collection);
+    let blueprint = new_blueprint;
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
+    sim_set_valid_looking_timesync(&mut sim);
 
     assert_eq!(old_boundary_ntp_count(&blueprint), 0);
     assert_eq!(up_to_date_boundary_ntp_count(&blueprint), 2);
 
     // Validate that we have no further changes to make, once all Boundary
     // NTP zones have been updated.
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    //
+    // Note that we use `InputUnchanged` here because we just updated the
+    // collection.
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // Validate that we do not flip back to the 0.0.1 artifact after
     // performing the update, even if we lose timesync data.
-    example.collection.ntp_timesync = IdOrdMap::new();
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("no timesync status", |collection| {
+        collection.ntp_timesync = IdOrdMap::new();
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     logctx.cleanup_successful();
