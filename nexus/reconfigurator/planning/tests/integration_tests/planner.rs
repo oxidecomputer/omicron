@@ -3541,16 +3541,12 @@ fn test_update_crucible_pantry_before_nexus() {
 fn test_update_cockroach() {
     static TEST_NAME: &str = "update_cockroach";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let mut rng = SimRngState::from_seed(TEST_NAME);
-    let (mut example, mut blueprint) =
-        ExampleSystemBuilder::new_with_rng(&logctx.log, rng.next_system_rng())
-            .with_target_release_0_0_1()
-            .expect("set target release to 0.0.1")
-            .build();
-    verify_blueprint(&blueprint, &example.input);
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
+        .expect("loaded example system");
+    let mut blueprint = sim.assert_latest_blueprint_is_blippy_clean();
 
     // Update the example system and blueprint, as a part of test set-up.
     //
@@ -3558,30 +3554,18 @@ fn test_update_cockroach() {
 
     // If this assertion breaks - which would be okay - we should delete all
     // these planning steps explicitly including a base set of CRDB zones.
-    assert_eq!(
-        example.system.target_cockroachdb_zone_count(),
-        0,
-        "We expect the system is initialized without cockroach zones"
-    );
-    let mut input_builder = example.input.clone().into_builder();
-    input_builder.policy_mut().target_cockroachdb_zone_count =
-        COCKROACHDB_REDUNDANCY;
-    example.input = input_builder.build();
-    example.system.set_target_cockroachdb_zone_count(COCKROACHDB_REDUNDANCY);
+    sim.change_description("ask for cockroach nodes", |desc| {
+        assert_eq!(
+            desc.target_cockroachdb_zone_count(),
+            0,
+            "We expect the system is initialized without cockroach zones"
+        );
+        desc.set_target_cockroachdb_zone_count(COCKROACHDB_REDUNDANCY);
+        Ok(())
+    })
+    .unwrap();
 
-    let blueprint_name = "blueprint_with_cockroach";
-    let new_blueprint = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        &blueprint_name,
-        &example.collection,
-        PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
-    )
-    .expect("can't create planner")
-    .plan()
-    .unwrap_or_else(|_| panic!("can't plan to include Cockroach nodes"));
-
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
         assert_eq!(summary.total_zones_added(), COCKROACHDB_REDUNDANCY);
@@ -3589,15 +3573,12 @@ fn test_update_cockroach() {
         assert_eq!(summary.total_zones_modified(), 0);
     }
     blueprint = new_blueprint;
-    update_collection_from_blueprint(&mut example, &blueprint);
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
 
     // We should have started with no specified TUF repo and nothing to do.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // All zones should be sourced from the initial 0.0.1 target release by
@@ -3642,34 +3623,38 @@ fn test_update_cockroach() {
         },
         artifacts,
     });
-    example.system.set_target_release_and_old_repo(description);
-
-    example.input = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder")
-        .build();
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release_and_old_repo(description);
+        Ok(())
+    })
+    .unwrap();
 
     // Manually update all zones except Cockroach
     //
     // We just specified a new TUF repo, everything is going to shift from
     // the initial 0.0.1 repo to this new repo.
-    for mut zone in blueprint
-        .sleds
-        .values_mut()
-        .flat_map(|config| config.zones.iter_mut())
-        .filter(|z| !z.zone_type.is_cockroach())
-    {
-        zone.image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintArtifactVersion::Available {
-                version: version.clone(),
-            },
-            hash: fake_hash,
-        };
-    }
-    update_collection_from_blueprint(&mut example, &blueprint);
+    blueprint = sim
+        .blueprint_edit_latest_low_level("update non-crdb zones", |bp| {
+            for mut zone in bp
+                .sleds
+                .values_mut()
+                .flat_map(|config| config.zones.iter_mut())
+                .filter(|z| !z.zone_type.is_cockroach())
+            {
+                zone.image_source = BlueprintZoneImageSource::Artifact {
+                    version: BlueprintArtifactVersion::Available {
+                        version: version.clone(),
+                    },
+                    hash: fake_hash,
+                };
+            }
+            Ok(())
+        })
+        .unwrap();
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
 
     // Some helper predicates for the assertions below.
+    const GOAL_REDUNDANCY: u64 = COCKROACHDB_REDUNDANCY as u64;
     let is_old_cockroach = |zone: &BlueprintZoneConfig| -> bool {
         zone.zone_type.is_cockroach()
             && matches!(
@@ -3699,65 +3684,66 @@ fn test_update_cockroach() {
 
     // If we have missing info in our inventory, the
     // planner will not update any Cockroach zones.
-    example.collection.cockroach_status = BTreeMap::new();
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("no cockroach status", |collection| {
+        collection.cockroach_status = BTreeMap::new();
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // If we don't have valid statuses from enough internal DNS zones, we
     // will refuse to update.
-    example.collection.cockroach_status = create_valid_looking_status();
-    example.collection.cockroach_status.pop_first();
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level(
+        "too few cockroach statuses",
+        |collection| {
+            collection.cockroach_status = create_valid_looking_status();
+            collection.cockroach_status.pop_first();
+            Ok(())
+        },
+    )
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
-
-    const GOAL_REDUNDANCY: u64 = COCKROACHDB_REDUNDANCY as u64;
 
     // If we have any non-zero "ranges_underreplicated" in in our inventory,
     // the planner will not update any Cockroach zones.
-    example.collection.cockroach_status = create_valid_looking_status();
-    *example
-        .collection
-        .cockroach_status
-        .get_mut(&cockroach_admin_types::NodeId("1".to_string()))
-        .unwrap() = CockroachStatus {
-        ranges_underreplicated: Some(1),
-        liveness_live_nodes: Some(GOAL_REDUNDANCY),
-    };
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level(
+        "ranges underreplicated",
+        |collection| {
+            collection.cockroach_status = create_valid_looking_status();
+            *collection.cockroach_status.values_mut().next().unwrap() =
+                CockroachStatus {
+                    ranges_underreplicated: Some(1),
+                    liveness_live_nodes: Some(GOAL_REDUNDANCY),
+                };
+            Ok(())
+        },
+    )
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // If we don't have enough live nodes, we won't update Cockroach zones.
-    example.collection.cockroach_status = create_valid_looking_status();
-    *example
-        .collection
-        .cockroach_status
-        .get_mut(&cockroach_admin_types::NodeId("1".to_string()))
-        .unwrap() = CockroachStatus {
-        ranges_underreplicated: Some(0),
-        liveness_live_nodes: Some(GOAL_REDUNDANCY - 1),
-    };
-
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("too few live nodes", |collection| {
+        collection.cockroach_status = create_valid_looking_status();
+        *collection.cockroach_status.values_mut().next().unwrap() =
+            CockroachStatus {
+                ranges_underreplicated: Some(0),
+                liveness_live_nodes: Some(GOAL_REDUNDANCY - 1),
+            };
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // Once we have zero underreplicated ranges, we can start to update
@@ -3767,23 +3753,18 @@ fn test_update_cockroach() {
     // the new TUF repo artifact.
     for i in 1..=COCKROACHDB_REDUNDANCY {
         // Keep setting this value in a loop;
-        // "update_collection_from_blueprint" resets it.
-        example.collection.cockroach_status = create_valid_looking_status();
+        // "sim_update_collection_from_blueprint" resets it.
+        sim.inventory_edit_latest_low_level(
+            "valid cockroach status",
+            |collection| {
+                collection.cockroach_status = create_valid_looking_status();
+                Ok(())
+            },
+        )
+        .unwrap();
 
         println!("Updating cockroach {i} of {COCKROACHDB_REDUNDANCY}");
-        let new_blueprint = Planner::new_based_on(
-            log.clone(),
-            &blueprint,
-            &example.input,
-            &format!("test_blueprint_cockroach_{i}"),
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, "bp_crdb")),
-        )
-        .expect("can't create planner")
-        .plan()
-        .expect("plan for trivial TUF repo");
-
-        blueprint = new_blueprint;
+        blueprint = sim.run_planner().expect("planning succeeded");
 
         assert_eq!(
             blueprint
@@ -3799,38 +3780,43 @@ fn test_update_cockroach() {
                 .count(),
             i
         );
-        update_collection_from_blueprint(&mut example, &blueprint);
+        sim_update_collection_from_blueprint(&mut sim, &blueprint);
     }
 
     // Validate that we have no further changes to make, once all Cockroach
     // zones have been updated.
-    example.collection.cockroach_status = create_valid_looking_status();
-
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level(
+        "valid cockroach status",
+        |collection| {
+            collection.cockroach_status = create_valid_looking_status();
+            Ok(())
+        },
+    )
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // Validate that we do not flip back to the 0.0.1 artifact after
     // performing the update.
-    example.collection.cockroach_status = create_valid_looking_status();
-    example
-        .collection
-        .cockroach_status
-        .values_mut()
-        .next()
-        .unwrap()
-        .ranges_underreplicated = Some(1);
-
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level(
+        "valid cockroach status",
+        |collection| {
+            collection.cockroach_status = create_valid_looking_status();
+            collection
+                .cockroach_status
+                .values_mut()
+                .next()
+                .unwrap()
+                .ranges_underreplicated = Some(1);
+            Ok(())
+        },
+    )
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     logctx.cleanup_successful();
