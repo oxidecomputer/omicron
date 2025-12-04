@@ -89,6 +89,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::sync::Arc;
 use tufaceous_artifact::ArtifactHash;
 use tufaceous_artifact::ArtifactKind;
 use tufaceous_artifact::ArtifactVersion;
@@ -179,7 +180,7 @@ enum AssertPlanningMakesNoChangesMode {
 fn sim_assert_planning_makes_no_changes(
     sim: &mut ReconfiguratorCliTestState,
     mode: AssertPlanningMakesNoChangesMode,
-) -> Blueprint {
+) -> Arc<Blueprint> {
     // Get the latest blueprint.
     let blueprint = sim
         .blueprint(BlueprintId::Latest)
@@ -191,18 +192,7 @@ fn sim_assert_planning_makes_no_changes(
             // Nothing to do!
         }
         AssertPlanningMakesNoChangesMode::DeployLatestConfigs => {
-            // Ensure all sleds have the latest configs deployed, emulating
-            // blueprint execution.
-            sim.deploy_configs_to_active_sleds(
-                "deploy latest configs to all sleds",
-                &blueprint,
-            )
-            .expect("deployed configs");
-
-            // Ensure our planning input will see an inventory with the configs
-            // we just deployed.
-            sim.generate_inventory("inventory with latest configs")
-                .expect("generated inventory");
+            sim_update_collection_from_blueprint(sim, &blueprint);
         }
     }
 
@@ -318,13 +308,7 @@ fn test_basic_add_sled() {
     assert_blueprint_diff_is_empty(&blueprint3, &blueprint4);
 
     // Now update the inventory to have the requested NTP zone.
-    //
-    // TODO: mutating example.system doesn't automatically update
-    // example.collection -- this should be addressed via API improvements.
-    sim.deploy_configs_to_active_sleds("add NTP zone", &blueprint3)
-        .expect("deployed configs");
-    sim.generate_inventory("inventory with new NTP zone")
-        .expect("generated inventory");
+    sim_update_collection_from_blueprint(&mut sim, &blueprint3);
 
     // Check that the next step is to add Crucible zones
     let blueprint5 = sim.run_planner().expect("planning succeeded");
@@ -593,13 +577,7 @@ fn test_spread_internal_dns_zones_across_sleds() {
     assert_eq!(nexpunged, 2);
 
     // Deploy this blueprint and generate a new inventory from it.
-    sim.deploy_configs_to_active_sleds(
-        "deploy latest configs to all sleds",
-        &blueprint2,
-    )
-    .expect("deployed configs");
-    sim.generate_inventory("inventory with latest configs")
-        .expect("generated inventory");
+    sim_update_collection_from_blueprint(&mut sim, &blueprint2);
 
     // The planner should put new zones back in their places.
     let blueprint3 = sim.run_planner().expect("planning succeeded");
@@ -1139,10 +1117,7 @@ fn test_disk_add_expunge_decommission() {
 
     // Let's update the inventory to reflect that the sled-agent
     // has learned about the expungement.
-    sim.deploy_configs_to_active_sleds("deploy disk expungement", &blueprint2)
-        .expect("deployed configs");
-    sim.generate_inventory("inventory with expunged disk")
-        .expect("generated inventory");
+    sim_update_collection_from_blueprint(&mut sim, &blueprint2);
 
     let blueprint3 = sim.run_planner().expect("planning succeeded");
     let diff = blueprint3.diff_since_blueprint(&blueprint2);
@@ -1350,10 +1325,7 @@ fn test_disk_expungement_removes_zones_durable_zpool() {
     // Let's update the inventory to reflect that the sled-agent
     // has learned about the expungement. Re-planning should flip the
     // `ready_for_cleanup` bit to true for our modified zone.
-    sim.deploy_configs_to_active_sleds("deploy disk expungement", &blueprint2)
-        .expect("deployed configs");
-    sim.generate_inventory("inventory with expunged disk")
-        .expect("generated inventory");
+    sim_update_collection_from_blueprint(&mut sim, &blueprint2);
     let blueprint3 = sim.run_planner().expect("planning succeeded");
     let summary = blueprint3.diff_since_blueprint(&blueprint2);
     assert_eq!(summary.total_zones_added(), 0);
@@ -1605,7 +1577,10 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
 
     let mut blueprint2 = sim.run_planner().expect("planning succeeded");
     // Define a time_created for consistent output across runs.
-    blueprint2.time_created = DateTime::<Utc>::UNIX_EPOCH;
+    {
+        let blueprint2 = Arc::make_mut(&mut blueprint2);
+        blueprint2.time_created = DateTime::<Utc>::UNIX_EPOCH;
+    }
 
     assert_contents(
         "tests/output/planner_nonprovisionable_bp2.txt",
@@ -1688,7 +1663,8 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
     // * removing sleds
     // * for modified sleds' zone config generation, both a bump and the
     //   generation staying the same (the latter should produce a warning)
-    let mut blueprint2a = blueprint2.clone();
+    let mut blueprint2a = Arc::clone(&blueprint2);
+    let blueprint2a = Arc::make_mut(&mut blueprint2a);
 
     enum NextCrucibleMutate {
         Modify,
@@ -1752,7 +1728,6 @@ fn test_nexus_allocation_skips_nonprovisionable_sleds() {
         expunged_sled.sled_agent_generation.next();
 
     blueprint2a.sleds.remove(&decommissioned_sled_id);
-
     blueprint2a.external_dns_version = blueprint2a.external_dns_version.next();
 
     let diff = blueprint2a.diff_since_blueprint(&blueprint2);
@@ -1834,8 +1809,12 @@ fn planner_decommissions_sleds() {
     .unwrap();
 
     let mut blueprint2 = sim.run_planner().expect("planning succeeded");
+
     // Define a time_created for consistent output across runs.
-    blueprint2.time_created = DateTime::<Utc>::UNIX_EPOCH;
+    {
+        let blueprint2 = Arc::make_mut(&mut blueprint2);
+        blueprint2.time_created = DateTime::<Utc>::UNIX_EPOCH;
+    }
 
     assert_contents(
         "tests/output/planner_decommissions_sleds_bp2.txt",
@@ -1877,10 +1856,7 @@ fn planner_decommissions_sleds() {
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
-    assert_eq!(
-        summary.diff.sleds.unchanged().count(),
-        ExampleSystemBuilder::DEFAULT_N_SLEDS
-    );
+    assert_eq!(summary.diff.sleds.unchanged().count(), blueprint1.sleds.len());
 
     // Test a no-op planning iteration.
     sim_assert_planning_makes_no_changes(
@@ -1912,10 +1888,7 @@ fn planner_decommissions_sleds() {
     assert_eq!(summary.diff.sleds.added.len(), 0);
     assert_eq!(summary.diff.sleds.removed.len(), 0);
     assert_eq!(summary.diff.sleds.modified().count(), 0);
-    assert_eq!(
-        summary.diff.sleds.unchanged().count(),
-        ExampleSystemBuilder::DEFAULT_N_SLEDS
-    );
+    assert_eq!(summary.diff.sleds.unchanged().count(), blueprint1.sleds.len(),);
 
     // Test a no-op planning iteration.
     sim_assert_planning_makes_no_changes(
@@ -2994,10 +2967,7 @@ fn test_internal_dns_zone_replaced_after_marked_for_cleanup() {
     );
 
     // Make the inventory changes necessary for cleanup to proceed.
-    sim.deploy_configs_to_active_sleds("deploy bp2", &blueprint2)
-        .expect("deployed configs");
-    sim.generate_inventory("inventory reflecting bp2")
-        .expect("generated inventory");
+    sim_update_collection_from_blueprint(&mut sim, &blueprint2);
 
     // Run the planner. It should mark our internal DNS zone as ready for
     // cleanup now that the inventory conditions are satisfied, and also
@@ -3044,6 +3014,42 @@ fn test_internal_dns_zone_replaced_after_marked_for_cleanup() {
     );
 
     logctx.cleanup_successful();
+}
+
+/// Deploy all configs (simulating blueprint execution) then generate a new
+/// inventory collection that sees them.
+fn sim_update_collection_from_blueprint(
+    sim: &mut ReconfiguratorCliTestState,
+    blueprint: &Blueprint,
+) {
+    sim.deploy_configs_to_active_sleds(
+        "deploy latest configs to all sleds",
+        &blueprint,
+    )
+    .expect("deployed configs");
+
+    let active_nexus_zones =
+        get_nexus_ids_at_generation(&blueprint, blueprint.nexus_generation);
+    let not_yet_nexus_zones = get_nexus_ids_at_generation(
+        &blueprint,
+        blueprint.nexus_generation.next(),
+    );
+    sim.change_state("update active Nexus zones", |state| {
+        // TODO-cleanup `sim.change_description()` also has
+        // `set_{active,not_yet}_nexus_zones()` methods, but those don't take
+        // effect. Why not?
+        state
+            .config_mut()
+            .set_explicit_active_nexus_zones(Some(active_nexus_zones));
+        state
+            .config_mut()
+            .set_explicit_not_yet_nexus_zones(Some(not_yet_nexus_zones));
+        Ok(())
+    })
+    .unwrap();
+
+    sim.generate_inventory("inventory with latest configs")
+        .expect("generated inventory");
 }
 
 /// Manually update the example system's inventory collection's zones
@@ -3193,24 +3199,17 @@ fn create_zone_artifacts_at_version(
 fn test_update_crucible_pantry_before_nexus() {
     static TEST_NAME: &str = "update_crucible_pantry_before_nexus";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let mut rng = SimRngState::from_seed(TEST_NAME);
-    let (mut example, mut blueprint1) =
-        ExampleSystemBuilder::new_with_rng(&logctx.log, rng.next_system_rng())
-            .with_target_release_0_0_1()
-            .expect("set target release to 0.0.1")
-            .build();
-    verify_blueprint(&blueprint1, &example.input);
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
+        .expect("loaded example system");
+    let blueprint1 = sim.assert_latest_blueprint_is_blippy_clean();
 
     // We should start with nothing to do.
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint1,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     // All zones should be sourced from the initial 0.0.1 target release by
@@ -3248,12 +3247,11 @@ fn test_update_crucible_pantry_before_nexus() {
         },
         artifacts,
     });
-    example.system.set_target_release_and_old_repo(description);
-
-    let mut input_builder = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder");
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release_and_old_repo(description);
+        Ok(())
+    })
+    .unwrap();
 
     // Some helper predicates for the assertions below.
     let is_old_nexus = |zone: &BlueprintZoneConfig| -> bool {
@@ -3284,31 +3282,39 @@ fn test_update_crucible_pantry_before_nexus() {
     };
 
     // Manually update all zones except CruciblePantry and Nexus.
-    for mut zone in blueprint1
-        .sleds
-        .values_mut()
-        .flat_map(|config| config.zones.iter_mut())
-        .filter(|z| {
-            !z.zone_type.is_nexus() && !z.zone_type.is_crucible_pantry()
-        })
-    {
-        zone.image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintArtifactVersion::Available {
-                version: version.clone(),
+    let blueprint2 = sim
+        .blueprint_edit_latest_low_level(
+            "update zones other than Nexus and pantry",
+            |bp| {
+                for mut zone in bp
+                    .sleds
+                    .values_mut()
+                    .flat_map(|config| config.zones.iter_mut())
+                    .filter(|z| {
+                        !z.zone_type.is_nexus()
+                            && !z.zone_type.is_crucible_pantry()
+                    })
+                {
+                    zone.image_source = BlueprintZoneImageSource::Artifact {
+                        version: BlueprintArtifactVersion::Available {
+                            version: version.clone(),
+                        },
+                        hash: fake_hash,
+                    };
+                }
+                Ok(())
             },
-            hash: fake_hash,
-        };
-    }
+        )
+        .unwrap();
 
     let expected_new_nexus_zones =
-        input_builder.policy_mut().target_nexus_zone_count;
+        sim.current_description().target_nexus_zone_count();
     let expected_pantries =
-        input_builder.policy_mut().target_crucible_pantry_zone_count;
-    example.input = input_builder.build();
+        sim.current_description().target_crucible_pantry_zone_count();
 
     // We should now have iterations of expunge/cleanup/add iterations for
     // the Crucible Pantry zones.
-    let mut parent = blueprint1;
+    let mut parent = blueprint2;
 
     let mut old_pantries = expected_pantries;
     let mut expunging_pantries = 0;
@@ -3322,20 +3328,8 @@ fn test_update_crucible_pantry_before_nexus() {
         let blueprint_name = format!("expunging_crucible_pantry_{i}");
         i += 1;
 
-        update_collection_from_blueprint(&mut example, &parent);
-        let blueprint = Planner::new_based_on(
-            log.clone(),
-            &parent,
-            &example.input,
-            &blueprint_name,
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
-        )
-        .expect("can't create planner")
-        .plan()
-        .unwrap_or_else(|err| {
-            panic!("can't re-plan: {}", InlineErrorChain::new(&err))
-        });
+        sim_update_collection_from_blueprint(&mut sim, &parent);
+        let blueprint = sim.run_planner().expect("planning succeeded");
 
         {
             let summary = blueprint.diff_since_blueprint(&parent);
@@ -3419,18 +3413,8 @@ fn test_update_crucible_pantry_before_nexus() {
     );
 
     // Nexus should deploy new zones, but keep the old ones running.
-    update_collection_from_blueprint(&mut example, &blueprint);
-    let new_blueprint = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        "test_blueprint_new_nexus",
-        &example.collection,
-        PlannerRng::from_seed((TEST_NAME, "test_blueprint_new_nexus")),
-    )
-    .expect("Can't create planner")
-    .plan()
-    .expect("Can't re-plan for new Nexus zones");
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
         let mut modified_sleds = 0;
@@ -3461,32 +3445,8 @@ fn test_update_crucible_pantry_before_nexus() {
     assert_eq!(active_nexus_zones.len(), NEXUS_REDUNDANCY);
     assert_eq!(not_yet_nexus_zones.len(), NEXUS_REDUNDANCY);
 
-    update_collection_from_blueprint(&mut example, &blueprint);
-
-    // This is a replacement for the reconfigurator executor, which
-    // would normally propagate records for these zones into the
-    // database.
-    let mut input = std::mem::replace(
-        &mut example.input,
-        nexus_types::deployment::PlanningInputBuilder::empty_input(),
-    )
-    .into_builder();
-    input.set_active_nexus_zones(active_nexus_zones);
-    input.set_not_yet_nexus_zones(not_yet_nexus_zones);
-    example.input = input.build();
-
-    let blueprint_name = "blueprint_to_bump_nexus_gen".to_string();
-    let new_blueprint = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &example.input,
-        &blueprint_name,
-        &example.collection,
-        PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
-    )
-    .expect("can't create planner")
-    .plan()
-    .unwrap_or_else(|_| panic!("can't re-plan"));
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
+    let new_blueprint = sim.run_planner().expect("planning succeeded");
     {
         let summary = new_blueprint.diff_since_blueprint(&blueprint);
         assert!(summary.has_changes(), "Should have bumped nexus generation");
@@ -3500,19 +3460,8 @@ fn test_update_crucible_pantry_before_nexus() {
 
     let mut parent = blueprint;
     for i in 9..=12 {
-        update_collection_from_blueprint(&mut example, &parent);
-        let blueprint_name = format!("blueprint{i}");
-        let blueprint = Planner::new_based_on(
-            log.clone(),
-            &parent,
-            &example.input,
-            &blueprint_name,
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, &blueprint_name)),
-        )
-        .expect("can't create planner")
-        .plan()
-        .unwrap_or_else(|_| panic!("can't re-plan after {i} iterations"));
+        sim_update_collection_from_blueprint(&mut sim, &parent);
+        let blueprint = sim.run_planner().expect("planning succeeded");
 
         {
             let summary = blueprint.diff_since_blueprint(&parent);
@@ -3580,13 +3529,9 @@ fn test_update_crucible_pantry_before_nexus() {
         0,
     );
 
-    update_collection_from_blueprint(&mut example, &blueprint12);
-    assert_planning_makes_no_changes(
-        &logctx.log,
-        &blueprint12,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
     );
 
     logctx.cleanup_successful();
