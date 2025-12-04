@@ -816,7 +816,7 @@ impl ControlPlaneZoneWriteContext<'_> {
         engine
             .new_step(
                 WriteComponent::ControlPlane,
-                ControlPlaneZonesStepId::CreateMeasurementDir,
+                ControlPlaneZonesStepId::MeasurementCorpus,
                 "Creating measurement directory".to_string(),
                 async move |_cx| {
                     if let Err(e) =
@@ -839,7 +839,7 @@ impl ControlPlaneZoneWriteContext<'_> {
         transport = engine
             .new_step(
                 WriteComponent::ControlPlane,
-                ControlPlaneZonesStepId::ZoneManifest,
+                ControlPlaneZonesStepId::MeasurementCorpus,
                 "Writing measurement manifest",
                 async move |cx| {
                     let transport = transport.into_value(cx.token()).await;
