@@ -203,36 +203,6 @@ fn sim_assert_planning_makes_no_changes(
     new_blueprint
 }
 
-#[track_caller]
-pub(crate) fn assert_planning_makes_no_changes(
-    log: &Logger,
-    blueprint: &Blueprint,
-    input: &PlanningInput,
-    collection: &Collection,
-    test_name: &'static str,
-) {
-    let planner = Planner::new_based_on(
-        log.clone(),
-        &blueprint,
-        &input,
-        test_name,
-        &collection,
-        PlannerRng::from_entropy(),
-    )
-    .expect("created planner");
-    let child_blueprint =
-        planner.plan().expect("planning should have succeded");
-    verify_blueprint(&child_blueprint, &input);
-    let summary = child_blueprint.diff_since_blueprint(&blueprint);
-    eprintln!(
-        "diff between blueprints (expected no changes):\n{}",
-        summary.display()
-    );
-    assert_eq!(summary.diff.sleds.added.len(), 0);
-    assert_eq!(summary.diff.sleds.removed.len(), 0);
-    assert_eq!(summary.diff.sleds.modified().count(), 0);
-}
-
 /// Runs through a basic sequence of blueprints for adding a sled
 #[test]
 fn test_basic_add_sled() {
@@ -3692,7 +3662,7 @@ fn test_update_cockroach() {
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // If we don't have valid statuses from enough internal DNS zones, we
@@ -3708,7 +3678,7 @@ fn test_update_cockroach() {
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // If we have any non-zero "ranges_underreplicated" in in our inventory,
@@ -3728,7 +3698,7 @@ fn test_update_cockroach() {
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // If we don't have enough live nodes, we won't update Cockroach zones.
@@ -3744,7 +3714,7 @@ fn test_update_cockroach() {
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // Once we have zero underreplicated ranges, we can start to update
@@ -4018,56 +3988,29 @@ fn test_update_boundary_ntp() {
         Ok(())
     })
     .unwrap();
-    /*
-    example.system.set_target_release_and_old_repo(description);
-
-    example.input = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder")
-        .build();
-        */
 
     // Manually update all zones except boundary NTP
     //
     // We just specified a new TUF repo, everything is going to shift from
     // the 0.0.1 repo to this new repo.
     let blueprint = sim
-        .blueprint_edit_latest_low_level(
-            "update zones other than Nexus and pantry",
-            |bp| {
-                for mut zone in bp
-                    .sleds
-                    .values_mut()
-                    .flat_map(|config| config.zones.iter_mut())
-                    .filter(|z| !z.zone_type.is_boundary_ntp())
-                {
-                    zone.image_source = BlueprintZoneImageSource::Artifact {
-                        version: BlueprintArtifactVersion::Available {
-                            version: version.clone(),
-                        },
-                        hash: fake_hash,
-                    };
-                }
-                Ok(())
-            },
-        )
+        .blueprint_edit_latest_low_level("manually update zones", |bp| {
+            for mut zone in bp
+                .sleds
+                .values_mut()
+                .flat_map(|config| config.zones.iter_mut())
+                .filter(|z| !z.zone_type.is_boundary_ntp())
+            {
+                zone.image_source = BlueprintZoneImageSource::Artifact {
+                    version: BlueprintArtifactVersion::Available {
+                        version: version.clone(),
+                    },
+                    hash: fake_hash,
+                };
+            }
+            Ok(())
+        })
         .unwrap();
-    /*
-    for mut zone in blueprint
-        .sleds
-        .values_mut()
-        .flat_map(|config| config.zones.iter_mut())
-        .filter(|z| !z.zone_type.is_boundary_ntp())
-    {
-        zone.image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintArtifactVersion::Available {
-                version: version.clone(),
-            },
-            hash: fake_hash,
-        };
-    }
-    */
     sim_update_collection_from_blueprint(&mut sim, &blueprint);
 
     // Some helper predicates for the assertions below.
@@ -4146,7 +4089,7 @@ fn test_update_boundary_ntp() {
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // If we don't have enough info from boundary NTP nodes, we'll refuse to
@@ -4169,7 +4112,7 @@ fn test_update_boundary_ntp() {
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // If we don't have enough explicitly synced nodes, we'll refuse to
@@ -4193,7 +4136,7 @@ fn test_update_boundary_ntp() {
     .unwrap();
     sim_assert_planning_makes_no_changes(
         &mut sim,
-        AssertPlanningMakesNoChangesMode::DeployLatestConfigs,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // Once all nodes are timesync'd, we can start to update boundary NTP
@@ -4390,16 +4333,12 @@ fn test_update_boundary_ntp() {
 fn test_update_internal_dns() {
     static TEST_NAME: &str = "update_internal_dns";
     let logctx = test_setup_log(TEST_NAME);
-    let log = logctx.log.clone();
 
     // Use our example system.
-    let mut rng = SimRngState::from_seed(TEST_NAME);
-    let (mut example, mut blueprint) =
-        ExampleSystemBuilder::new_with_rng(&logctx.log, rng.next_system_rng())
-            .with_target_release_0_0_1()
-            .expect("set target release to 0.0.1")
-            .build();
-    verify_blueprint(&blueprint, &example.input);
+    let mut sim = ReconfiguratorCliTestState::new(TEST_NAME, &logctx.log);
+    sim.load_example_customized(|builder| builder.with_target_release_0_0_1())
+        .expect("loaded example system");
+    let blueprint = sim.assert_latest_blueprint_is_blippy_clean();
 
     // All zones should be sourced from the initial TUF repo by default.
     assert!(
@@ -4441,32 +4380,35 @@ fn test_update_internal_dns() {
         },
         artifacts,
     });
-    example.system.set_target_release_and_old_repo(description);
-
-    example.input = example
-        .system
-        .to_planning_input_builder()
-        .expect("created PlanningInputBuilder")
-        .build();
+    sim.change_description("set new target release", |desc| {
+        desc.set_target_release_and_old_repo(description);
+        Ok(())
+    })
+    .unwrap();
 
     // Manually update all zones except Internal DNS
     //
     // We just specified a new TUF repo, everything is going to shift from
     // the 0.0.1 repo to this new repo.
-    for mut zone in blueprint
-        .sleds
-        .values_mut()
-        .flat_map(|config| config.zones.iter_mut())
-        .filter(|z| !z.zone_type.is_internal_dns())
-    {
-        zone.image_source = BlueprintZoneImageSource::Artifact {
-            version: BlueprintArtifactVersion::Available {
-                version: version.clone(),
-            },
-            hash: fake_hash,
-        };
-    }
-    update_collection_from_blueprint(&mut example, &blueprint);
+    let mut blueprint = sim
+        .blueprint_edit_latest_low_level("manually update zones", |bp| {
+            for mut zone in bp
+                .sleds
+                .values_mut()
+                .flat_map(|config| config.zones.iter_mut())
+                .filter(|z| !z.zone_type.is_internal_dns())
+            {
+                zone.image_source = BlueprintZoneImageSource::Artifact {
+                    version: BlueprintArtifactVersion::Available {
+                        version: version.clone(),
+                    },
+                    hash: fake_hash,
+                };
+            }
+            Ok(())
+        })
+        .unwrap();
+    sim_update_collection_from_blueprint(&mut sim, &blueprint);
 
     // Some helper predicates for the assertions below.
     let is_old_internal_dns = |zone: &BlueprintZoneConfig| -> bool {
@@ -4501,58 +4443,58 @@ fn test_update_internal_dns() {
 
     // If we have missing info in our inventory, the
     // planner will not update any Internal DNS zones.
-    example.collection.internal_dns_generation_status = IdOrdMap::new();
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("no status", |collection| {
+        collection.internal_dns_generation_status = IdOrdMap::new();
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // If we're missing info from even a single zone, we
     // will still refuse to update.
-    example.collection.internal_dns_generation_status =
-        create_valid_looking_status(&blueprint);
-    let first_zone = example
-        .collection
-        .internal_dns_generation_status
-        .iter()
-        .next()
-        .unwrap()
-        .zone_id;
-    example
-        .collection
-        .internal_dns_generation_status
-        .remove(&first_zone)
-        .expect("Could not remove one status");
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("missing node status", |collection| {
+        collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        let first_zone = collection
+            .internal_dns_generation_status
+            .iter()
+            .next()
+            .unwrap()
+            .zone_id;
+        collection
+            .internal_dns_generation_status
+            .remove(&first_zone)
+            .expect("Could not remove one status");
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // If we have any out-of-sync generations in our inventory,
     // the planner will not update Internal DNS zones.
-    example.collection.internal_dns_generation_status =
-        create_valid_looking_status(&blueprint);
-    // I'd rather have the generation be "too low", but we also reject
-    // generations that are "too far ahead", so this works.
-    example
-        .collection
-        .internal_dns_generation_status
-        .iter_mut()
-        .next()
-        .unwrap()
-        .generation = blueprint.internal_dns_version.next();
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("out of sync gen", |collection| {
+        collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        // I'd rather have the generation be "too low", but we also reject
+        // generations that are "too far ahead", so this works.
+        collection
+            .internal_dns_generation_status
+            .iter_mut()
+            .next()
+            .unwrap()
+            .generation = blueprint.internal_dns_version.next();
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // Once we have valid DNS statuses, we can start to update Internal DNS
@@ -4561,25 +4503,19 @@ fn test_update_internal_dns() {
     // We'll update one zone at a time, from the 0.0.1 artifact to the new
     // TUF repo artifact.
     for i in 1..=INTERNAL_DNS_REDUNDANCY {
-        example.collection.internal_dns_generation_status =
-            create_valid_looking_status(&blueprint);
+        sim.inventory_edit_latest_low_level("valid status", |collection| {
+            collection.internal_dns_generation_status =
+                create_valid_looking_status(&blueprint);
+            Ok(())
+        })
+        .unwrap();
 
         // First blueprint: Remove an internal DNS zone
 
         println!(
             "Updating internal DNS {i} of {INTERNAL_DNS_REDUNDANCY} (expunge)"
         );
-        let new_blueprint = Planner::new_based_on(
-            log.clone(),
-            &blueprint,
-            &example.input,
-            &format!("test_blueprint_internal_dns_{i}_removal"),
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, "bp_dns")),
-        )
-        .expect("can't create planner")
-        .plan()
-        .expect("plan for trivial TUF repo");
+        let new_blueprint = sim.run_planner().expect("planning succeeded");
         {
             let summary = new_blueprint.diff_since_blueprint(&blueprint);
             assert_eq!(summary.total_zones_added(), 0);
@@ -4587,25 +4523,14 @@ fn test_update_internal_dns() {
             assert_eq!(summary.total_zones_modified(), 1);
         }
         blueprint = new_blueprint;
-        update_collection_from_blueprint(&mut example, &blueprint);
-        verify_blueprint(&blueprint, &example.input);
+        sim_update_collection_from_blueprint(&mut sim, &blueprint);
 
         // Next blueprint: Add an (updated) internal DNS zone back
 
         println!(
             "Updating internal DNS {i} of {INTERNAL_DNS_REDUNDANCY} (add)"
         );
-        let new_blueprint = Planner::new_based_on(
-            log.clone(),
-            &blueprint,
-            &example.input,
-            &format!("test_blueprint_internal_dns_{i}_addition"),
-            &example.collection,
-            PlannerRng::from_seed((TEST_NAME, "bp_dns")),
-        )
-        .expect("can't create planner")
-        .plan()
-        .expect("plan for trivial TUF repo");
+        let new_blueprint = sim.run_planner().expect("planning succeeded");
         {
             let summary = new_blueprint.diff_since_blueprint(&blueprint);
             assert_eq!(summary.total_zones_added(), 1);
@@ -4613,8 +4538,7 @@ fn test_update_internal_dns() {
             assert_eq!(summary.total_zones_modified(), 1);
         }
         blueprint = new_blueprint;
-        update_collection_from_blueprint(&mut example, &blueprint);
-        verify_blueprint(&blueprint, &example.input);
+        sim_update_collection_from_blueprint(&mut sim, &blueprint);
 
         assert_eq!(
             blueprint
@@ -4634,25 +4558,27 @@ fn test_update_internal_dns() {
 
     // Validate that we have no further changes to make, once all Internal
     // DNS zones have been updated.
-    example.collection.internal_dns_generation_status =
-        create_valid_looking_status(&blueprint);
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("valid status", |collection| {
+        collection.internal_dns_generation_status =
+            create_valid_looking_status(&blueprint);
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     // Validate that we do not flip back to the 0.0.1 artifact after
     // performing the update.
-    example.collection.internal_dns_generation_status = IdOrdMap::new();
-    assert_planning_makes_no_changes(
-        &log,
-        &blueprint,
-        &example.input,
-        &example.collection,
-        TEST_NAME,
+    sim.inventory_edit_latest_low_level("empty status", |collection| {
+        collection.internal_dns_generation_status = IdOrdMap::new();
+        Ok(())
+    })
+    .unwrap();
+    sim_assert_planning_makes_no_changes(
+        &mut sim,
+        AssertPlanningMakesNoChangesMode::InputUnchanged,
     );
 
     logctx.cleanup_successful();
