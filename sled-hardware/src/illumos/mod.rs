@@ -645,19 +645,8 @@ fn poll_device_tree(
                     // returning this error. Each sled agent has to be uniquely
                     // identified for multiple non-sleds to work.
                     if inner.baseboard.is_none() {
-                        let pc_baseboard = Baseboard::new_pc(
-                            gethostname().into_string().unwrap_or_else(|_| {
-                                Uuid::new_v4().simple().to_string()
-                            }),
-                            root_node.clone(),
-                        );
-
-                        info!(
-                            log,
-                            "Generated i86pc baseboard {:?}", pc_baseboard
-                        );
-
-                        inner.baseboard = Some(pc_baseboard);
+                        inner.baseboard =
+                            Some(get_pc_baseboard(log, root_node.as_str()));
                     }
                 }
 
@@ -749,7 +738,77 @@ fn monitor_tofino(log: slog::Logger, tx: broadcast::Sender<HardwareUpdate>) {
     }
 }
 
-fn hardware_tracking_task(
+/// Return a `Baseboard` for non-Oxide hardware
+///
+/// The device tree is not populated with `Baseboard` information on non-Oxide
+/// hardware. Therefore we must construct one. For backwards compatibility
+/// with the Canada region we continue to use the hostname as the serial number
+/// in the common case. However, first we check the smbios type1 table to see
+/// if we are running in a4x2. If so we use the configured information from
+/// the smbios. This allows us to match the generated certificates used for
+/// sprockets so that trust quorum works in a4x2.
+fn get_pc_baseboard(log: &Logger, root_node: &str) -> Baseboard {
+    let pc_baseboard = read_smbios(log).unwrap_or_else(|| {
+        Baseboard::new_pc(
+            gethostname()
+                .into_string()
+                .unwrap_or_else(|_| Uuid::new_v4().simple().to_string()),
+            root_node.to_string(),
+        )
+    });
+    info!(log, "Generated i86pc baseboard {:?}", pc_baseboard);
+    pc_baseboard
+}
+
+/// Read the smbios type 1 information. If the manufacturer is "a4x2" then construct
+/// and return a `Baseboard`. Otherwise, return None.
+fn read_smbios(log: &Logger) -> Option<Baseboard> {
+    let output = std::process::Command::new("/usr/sbin/smbios")
+        .args(["-t", "1"])
+        .output()
+        .ok()?;
+
+    parse_smbios_output(log, String::from_utf8(output.stdout).ok()?)
+}
+
+/// Parse the smbios input returning a `Baseboard` if the manufacturer is `a4x2`
+/// and parsing completes successfully.
+fn parse_smbios_output(log: &Logger, output: String) -> Option<Baseboard> {
+    let mut iter = output.lines().skip(3);
+
+    let log = log.new(o!("component" => "HardwareManager: parse_smbios"));
+
+    // Parse manufacturer
+    let mut manufacturer_iter = iter.next()?.split(":");
+    if manufacturer_iter.next()?.trim() != "Manufacturer" {
+        info!(log, "Missing manufacturer key: skipping");
+        return None;
+    }
+    if manufacturer_iter.next()?.trim() != "a4x2" {
+        info!(log, "Manufacturer is not a4x2: skipping");
+        return None;
+    }
+
+    // Parse Product
+    let mut product_iter = iter.next()?.split(":");
+    if product_iter.next()?.trim() != "Product" {
+        info!(log, "Missing product key: skipping");
+        return None;
+    }
+    let product = product_iter.next()?.trim().to_string();
+
+    // Parse Serial Number
+    let mut serial_iter = iter.nth(1)?.split(":");
+    if serial_iter.next()?.trim() != "Serial Number" {
+        info!(log, "Missing serial number key: skipping");
+        return None;
+    }
+    let serial_number = serial_iter.next()?.trim().to_string();
+
+    Some(Baseboard::new_pc(serial_number, product))
+}
+
+async fn hardware_tracking_task(
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
     nonsled_observed_disks: Vec<UnparsedDisk>,
@@ -926,5 +985,57 @@ impl HardwareManager {
         // start monitoring, and then query for the initial state?
         //
         // This could simplify the `SledAgent::monitor` function?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::illumos::parse_smbios_output;
+    use omicron_test_utils::dev::test_setup_log;
+
+    #[test]
+    fn parse_smbios_valid() {
+        let logctx = test_setup_log("parse_smbios_valid");
+
+        let output = "\
+ID    SIZE TYPE
+1     372  SMB_TYPE_SYSTEM (type 1) (system information)
+
+  Manufacturer: a4x2
+  Product: PPP-PPPPPPP
+  Version: 0
+  Serial Number: 0000000000
+
+  UUID: faaad566-debf-d311-01a6-9c6b00871b75
+  UUID (Endian-corrected): 66d5aafa-bfde-11d3-01a6-9c6b00871b75
+  Wake-Up Event: 0x6 (power switch)
+  SKU Number: To be filled by O.E.M.
+  Family: To be filled by O.E.M.
+"
+        .to_string();
+
+        let baseboard = parse_smbios_output(&logctx.log, output).unwrap();
+        assert_eq!(baseboard.model(), "PPP-PPPPPPP");
+        assert_eq!(baseboard.identifier(), "0000000000");
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn parse_smbios_invalid() {
+        let logctx = test_setup_log("parse_smbios_invalid");
+
+        let output = "\
+ID    SIZE TYPE
+1     372  SMB_TYPE_SYSTEM (type 1) (system information)
+
+dfadfasdfasdfdf  Manufacturer: a4x2
+  Product: PPP-PPPPPPP
+  Version: 0
+  Serial Number: 0000000000
+"
+        .to_string();
+
+        assert!(parse_smbios_output(&logctx.log, output).is_none());
+        logctx.cleanup_successful();
     }
 }
