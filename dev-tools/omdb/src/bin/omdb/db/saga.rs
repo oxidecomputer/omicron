@@ -181,7 +181,7 @@ impl From<Saga> for SagaRow {
         } = saga;
         Self {
             id: id.0.into(),
-            current_sec: if let Some(current_sec) = saga.current_sec {
+            current_sec: if let Some(current_sec) = current_sec {
                 current_sec.0.to_string()
             } else {
                 String::from("-")
@@ -721,13 +721,14 @@ async fn cmd_sagas_show(
     datastore: &DataStore,
     SagaShowArgs { saga_id }: SagaShowArgs,
 ) -> anyhow::Result<()> {
-    use nexus_db_schema::schema::saga_node_event::dsl;
     let conn = datastore.pool_connection_for_tests().await?;
     let mut nodes = Vec::new();
     let mut paginator =
         Paginator::new(SQL_BATCH_SIZE, dropshot::PaginationOrder::Ascending);
 
     while let Some(p) = paginator.next() {
+        use nexus_db_schema::schema::saga_node_event::dsl;
+
         let batch = paginated(
             dsl::saga_node_event,
             dsl::event_time,
@@ -737,11 +738,24 @@ async fn cmd_sagas_show(
         .order_by(dsl::event_time)
         .select(SagaNodeEvent::as_select())
         .load_async(&*conn)
-        .await?;
+        .await
+        .with_context(|| format!("error fetching saga nodes for {saga_id}"))?;
         paginator =
             p.found_batch(&batch, &|node: &SagaNodeEvent| node.event_time);
         nodes.extend(batch);
     }
+
+    let saga = {
+        use nexus_db_schema::schema::saga::dsl;
+        dsl::saga
+            .filter(dsl::id.eq(saga_id))
+            .select(Saga::as_select())
+            .first_async(&*conn)
+            .await
+            .with_context(|| format!("error fetching saga {saga_id}"))?
+    };
+
+    print_saga_nodes(Some(saga), nodes);
 
     Ok(())
 }
