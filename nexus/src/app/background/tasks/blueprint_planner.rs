@@ -59,7 +59,7 @@ pub struct BlueprintPlanner {
     rx_config: Receiver<ReconfiguratorConfigLoaderState>,
     rx_inventory: Receiver<Option<Arc<Collection>>>,
     rx_blueprint: Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
-    tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    tx_blueprint: Sender<Option<(BlueprintTarget, Arc<Blueprint>)>>,
     blueprint_limit: u64,
 }
 
@@ -99,7 +99,7 @@ impl BlueprintPlanner {
 
     pub fn watcher(
         &self,
-    ) -> watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>> {
+    ) -> watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>> {
         self.tx_blueprint.subscribe()
     }
 
@@ -313,7 +313,7 @@ impl BlueprintPlanner {
 
         // We have a new target!
 
-        self.tx_blueprint.send_replace(Some(Arc::new((target, blueprint))));
+        self.tx_blueprint.send_replace(Some((target, Arc::new(blueprint))));
         Ok(BlueprintPlannerStatus::Targeted {
             parent_blueprint_id,
             blueprint_id,
