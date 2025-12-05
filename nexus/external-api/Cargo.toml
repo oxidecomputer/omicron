@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 chrono.workspace = true
 dropshot.workspace = true
 dropshot-api-manager-types.workspace = true
@@ -22,5 +23,8 @@ openapiv3.workspace = true
 oximeter-types.workspace = true
 oxql-types.workspace = true
 omicron-uuid-kinds.workspace = true
+schemars.workspace = true
 scim2-rs.workspace = true
+serde.workspace = true
 tufaceous-artifact.workspace = true
+uuid.workspace = true

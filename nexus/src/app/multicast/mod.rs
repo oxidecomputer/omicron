@@ -485,11 +485,11 @@ impl super::Nexus {
             ));
         }
 
-        // Authorize: Read on group, Modify on instance
-        let (.., authz_group) =
-            group_lookup.lookup_for(authz::Action::Read).await?;
+        // Authorize: Modify on instance (checked first), Read on group
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_group) =
+            group_lookup.lookup_for(authz::Action::Read).await?;
 
         // Idempotent: if member doesn't exist, return success
         let member = match self
