@@ -18439,7 +18439,7 @@
               "type": {
                 "type": "string",
                 "enum": [
-                  "crucible"
+                  "distributed"
                 ]
               }
             },
@@ -18522,7 +18522,7 @@
         ]
       },
       "DiskSource": {
-        "description": "Different sources for a Virtual Disk",
+        "description": "Different sources for a Distributed Disk",
         "oneOf": [
           {
             "description": "Create a blank disk",

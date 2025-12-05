@@ -1731,7 +1731,7 @@ impl From<DiskVariant> for PhysicalDiskKind {
     }
 }
 
-/// Different sources for a Virtual Disk
+/// Different sources for a Distributed Disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiskSource {
@@ -1758,7 +1758,7 @@ pub enum DiskSource {
 pub enum DiskBackend {
     Local {},
 
-    Crucible {
+    Distributed {
         /// The initial source for this disk
         disk_source: DiskSource,
     },

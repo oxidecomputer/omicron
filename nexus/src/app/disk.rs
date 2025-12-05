@@ -157,7 +157,7 @@ impl super::Nexus {
         params: &params::DiskCreate,
     ) -> Result<(), Error> {
         let block_size: u64 = match &params.disk_backend {
-            params::DiskBackend::Crucible { disk_source, .. } => {
+            params::DiskBackend::Distributed { disk_source, .. } => {
                 self.validate_crucible_disk_create_params(
                     opctx,
                     &authz_project,
@@ -211,7 +211,7 @@ impl super::Nexus {
 
         // Check for disk type specific restrictions
         match &params.disk_backend {
-            params::DiskBackend::Crucible { .. } => {
+            params::DiskBackend::Distributed { .. } => {
                 // Reject disks where the size is greated than
                 // MAX_DISK_SIZE_BYTES. This restriction will be changed or
                 // removed when multi-subvolume Volumes can be created by Nexus,

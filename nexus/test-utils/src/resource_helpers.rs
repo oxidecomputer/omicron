@@ -553,7 +553,7 @@ pub async fn create_disk(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_backend: params::DiskBackend::Crucible {
+            disk_backend: params::DiskBackend::Distributed {
                 disk_source: params::DiskSource::Blank {
                     block_size: params::BlockSize::try_from(512).unwrap(),
                 },
@@ -579,7 +579,7 @@ pub async fn create_disk_from_snapshot(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_backend: params::DiskBackend::Crucible {
+            disk_backend: params::DiskBackend::Distributed {
                 disk_source: params::DiskSource::Snapshot { snapshot_id },
             },
             size: ByteCount::from_gibibytes_u32(1),

@@ -111,7 +111,7 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(space_account_action());
 
         match &params.create_params.disk_backend {
-            params::DiskBackend::Crucible { .. } => {
+            params::DiskBackend::Distributed { .. } => {
                 builder.append(create_crucible_disk_record_action());
                 builder.append(regions_alloc_action());
                 builder.append(regions_ensure_undo_action());
@@ -127,7 +127,7 @@ impl NexusSaga for SagaDiskCreate {
         builder.append(finalize_disk_record_action());
 
         match &params.create_params.disk_backend {
-            params::DiskBackend::Crucible { disk_source } => {
+            params::DiskBackend::Distributed { disk_source } => {
                 match disk_source {
                     params::DiskSource::ImportingBlocks { .. } => {
                         builder.append(get_pantry_address_action());
@@ -163,7 +163,7 @@ async fn sdc_create_crucible_disk_record(
     );
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Crucible { disk_source } => disk_source,
+        params::DiskBackend::Distributed { disk_source } => disk_source,
 
         params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
@@ -290,7 +290,7 @@ async fn sdc_create_local_storage_disk_record(
     );
 
     let block_size = match &params.create_params.disk_backend {
-        params::DiskBackend::Crucible { .. } => {
+        params::DiskBackend::Distributed { .. } => {
             // This should be unreachable given the match performed in
             // `make_saga_dag`!
             return Err(ActionError::action_failed(Error::internal_error(
@@ -367,7 +367,7 @@ async fn sdc_alloc_regions(
     let strategy = &osagactx.nexus().default_region_allocation_strategy;
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Crucible { disk_source } => disk_source,
+        params::DiskBackend::Distributed { disk_source } => disk_source,
 
         params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
@@ -495,7 +495,7 @@ async fn sdc_regions_ensure(
     );
 
     let disk_source = match &params.create_params.disk_backend {
-        params::DiskBackend::Crucible { disk_source } => disk_source,
+        params::DiskBackend::Distributed { disk_source } => disk_source,
 
         params::DiskBackend::Local {} => {
             // This should be unreachable given the match performed in
@@ -797,7 +797,7 @@ async fn sdc_finalize_disk_record(
     // It would be better if this were better guaranteed.
 
     match params.create_params.disk_backend {
-        params::DiskBackend::Crucible { disk_source } => {
+        params::DiskBackend::Distributed { disk_source } => {
             let disk_created = db::datastore::Disk::Crucible(
                 sagactx
                     .lookup::<db::datastore::CrucibleDisk>("crucible_disk")?,
@@ -1017,7 +1017,7 @@ pub(crate) mod test {
                 name: DISK_NAME.parse().expect("Invalid disk name"),
                 description: "My disk".to_string(),
             },
-            disk_backend: params::DiskBackend::Crucible {
+            disk_backend: params::DiskBackend::Distributed {
                 disk_source: params::DiskSource::Blank {
                     block_size: params::BlockSize(512),
                 },

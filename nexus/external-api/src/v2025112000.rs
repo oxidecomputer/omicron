@@ -150,7 +150,7 @@ impl From<DiskCreate> for params::DiskCreate {
     fn from(old: DiskCreate) -> params::DiskCreate {
         params::DiskCreate {
             identity: old.identity,
-            disk_backend: params::DiskBackend::Crucible {
+            disk_backend: params::DiskBackend::Distributed {
                 disk_source: old.disk_source.into(),
             },
             size: old.size,

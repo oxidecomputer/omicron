@@ -2612,7 +2612,7 @@ async fn test_instance_using_image_from_other_project_fails(
                             name: "stolen".parse().unwrap(),
                             description: "i stole an image".into(),
                         },
-                        disk_backend: params::DiskBackend::Crucible {
+                        disk_backend: params::DiskBackend::Distributed {
                             disk_source: params::DiskSource::Image {
                                 image_id: image.identity.id,
                             },
@@ -4100,7 +4100,7 @@ async fn test_instance_create_attach_disks(
                     ),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
-                disk_backend: params::DiskBackend::Crucible {
+                disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Blank {
                         block_size: params::BlockSize::try_from(512).unwrap(),
                     },
@@ -4117,7 +4117,7 @@ async fn test_instance_create_attach_disks(
                     ),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
-                disk_backend: params::DiskBackend::Crucible {
+                disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Blank {
                         block_size: params::BlockSize::try_from(512).unwrap(),
                     },
@@ -4217,7 +4217,7 @@ async fn test_instance_create_attach_disks_undo(
                     description: String::from("probably data"),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
-                disk_backend: params::DiskBackend::Crucible {
+                disk_backend: params::DiskBackend::Distributed {
                     disk_source: params::DiskSource::Blank {
                         block_size: params::BlockSize::try_from(512).unwrap(),
                     },

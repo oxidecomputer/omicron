@@ -125,7 +125,7 @@ async fn create_disk_with_state_importing_blocks(client: &ClientTestContext) {
                 name: DISK_NAME.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_backend: params::DiskBackend::Crucible {
+            disk_backend: params::DiskBackend::Distributed {
                 disk_source: params::DiskSource::ImportingBlocks {
                     block_size: params::BlockSize::try_from(512).unwrap(),
                 },
@@ -354,7 +354,7 @@ async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
             name: DISK_NAME.parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::ImportingBlocks {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },

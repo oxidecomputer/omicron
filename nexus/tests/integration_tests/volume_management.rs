@@ -149,7 +149,7 @@ async fn create_base_disk(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
@@ -413,7 +413,7 @@ async fn test_snapshot_prevents_other_disk(
             name: next_disk_name.clone(),
             description: String::from("will fail"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
@@ -483,7 +483,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
@@ -527,7 +527,7 @@ async fn test_multiple_disks_multiple_snapshots_order_1(
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
@@ -622,7 +622,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
             name: first_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
@@ -666,7 +666,7 @@ async fn test_multiple_disks_multiple_snapshots_order_2(
             name: second_disk_name.clone(),
             description: String::from("disk 1"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
@@ -756,7 +756,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             name: layer_1_disk_name.clone(),
             description: String::from("layer 1"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
@@ -800,7 +800,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             name: layer_2_disk_name.clone(),
             description: String::from("layer 2"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Snapshot {
                 snapshot_id: layer_1_snapshot.identity.id,
             },
@@ -844,7 +844,7 @@ async fn prepare_for_test_multiple_layers_of_snapshots(
             name: layer_3_disk_name.clone(),
             description: String::from("layer 3"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Snapshot {
                 snapshot_id: layer_2_snapshot.identity.id,
             },
@@ -1199,7 +1199,7 @@ async fn delete_image_test(
             name: base_disk_name.clone(),
             description: String::from("all your base disk are belong to us"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
@@ -2496,7 +2496,7 @@ async fn test_disk_create_saga_unwinds_correctly(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
@@ -2542,7 +2542,7 @@ async fn test_snapshot_create_saga_unwinds_correctly(
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },
@@ -3344,7 +3344,7 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
             name: "disk".parse().unwrap(),
             description: String::from("disk"),
         },
-        disk_backend: params::DiskBackend::Crucible {
+        disk_backend: params::DiskBackend::Distributed {
             disk_source: params::DiskSource::Blank {
                 block_size: params::BlockSize::try_from(512).unwrap(),
             },

@@ -1477,7 +1477,7 @@ mod tests {
                 name: "first-post".parse().unwrap(),
                 description: "just trying things out".to_string(),
             },
-            disk_backend: params::DiskBackend::Crucible {
+            disk_backend: params::DiskBackend::Distributed {
                 disk_source: disk_source.clone(),
             },
             size: external::ByteCount::from(2147483648),
