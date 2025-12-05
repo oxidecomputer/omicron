@@ -2375,7 +2375,6 @@ fn cmd_blueprint_plan(
         .context("failed to construct planning input")?;
     let planner = Planner::new_based_on(
         sim.log.clone(),
-        parent_blueprint,
         &planning_input,
         creator,
         collection,

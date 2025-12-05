@@ -294,8 +294,6 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     .expect("planning input");
     let planner = Planner::new_based_on(
         log.clone(),
-        // TODO john remove dup arg
-        planning_input.parent_blueprint(),
         &planning_input,
         "live test suite",
         &latest_collection,
