@@ -13,6 +13,8 @@ use anyhow::Context;
 use anyhow::anyhow;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
+use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
 use diesel::prelude::*;
@@ -29,6 +31,11 @@ use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::pagination::paginated;
 use owo_colors::OwoColorize;
+use petgraph::Graph;
+use petgraph::graph::NodeIndex;
+use serde::Deserialize;
+use serde::Serialize;
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tabled::Tabled;
@@ -138,29 +145,7 @@ async fn cmd_sagas_running(
 
     let sagas = get_all_sagas_in_state(&conn, SagaState::Running).await?;
 
-    #[derive(Tabled)]
-    struct SagaRow {
-        id: Uuid,
-        current_sec: String,
-        time_created: String,
-        name: String,
-        state: String,
-    }
-
-    let rows: Vec<_> = sagas
-        .into_iter()
-        .map(|saga: Saga| SagaRow {
-            id: saga.id.0.into(),
-            current_sec: if let Some(current_sec) = saga.current_sec {
-                current_sec.0.to_string()
-            } else {
-                String::from("-")
-            },
-            time_created: datetime_rfc3339_concise(&saga.time_created),
-            name: saga.name,
-            state: format!("{:?}", saga.saga_state),
-        })
-        .collect();
+    let rows: Vec<_> = sagas.into_iter().map(SagaRow::from).collect();
 
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::psql())
@@ -169,6 +154,43 @@ async fn cmd_sagas_running(
     println!("{}", table);
 
     Ok(())
+}
+
+#[derive(Tabled)]
+struct SagaRow {
+    id: Uuid,
+    current_sec: String,
+    #[tabled(display_with = "datetime_rfc3339_concise")]
+    time_created: DateTime<Utc>,
+    name: String,
+    state: String,
+}
+
+impl From<Saga> for SagaRow {
+    fn from(saga: Saga) -> Self {
+        let Saga {
+            id,
+            creator: _,
+            time_created,
+            name,
+            saga_dag: _,
+            saga_state,
+            current_sec,
+            adopt_generation: _,
+            adopt_time: _,
+        } = saga;
+        Self {
+            id: id.0.into(),
+            current_sec: if let Some(current_sec) = saga.current_sec {
+                current_sec.0.to_string()
+            } else {
+                String::from("-")
+            },
+            time_created,
+            name,
+            state: format!("{saga_state:?}"),
+        }
+    }
 }
 
 async fn cmd_sagas_inject_error(
@@ -735,9 +757,11 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
     if let Some(saga) = saga {
         let dag = saga.saga_dag.clone();
 
-        // print_sagas(vec![saga], true);
-        println!();
+        let table = tabled::Table::new(Some(SagaRow::from(saga)))
+            .with(tabled::settings::Style::psql())
+            .to_string();
 
+        println!("{table}\n");
         println!("DAG: {}", dag);
         println!();
     }
