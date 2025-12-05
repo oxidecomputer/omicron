@@ -185,6 +185,7 @@ mod ereport;
 mod saga;
 mod sitrep;
 mod user_data_export;
+mod whatis;
 
 const NO_ACTIVE_PROPOLIS_MSG: &str = "<no active Propolis>";
 const NOT_ON_SLED_MSG: &str = "<not on any sled>";
@@ -419,6 +420,11 @@ enum DbCommands {
     Zpool(ZpoolArgs),
     /// Commands for querying and interacting with user data export objects
     UserDataExport(user_data_export::UserDataExportArgs),
+    /// Given a UUID, try to figure out what type of object it refers to
+    ///
+    /// More precisely, `omdb db whatis` reports tables containing a unique UUID
+    /// column with the specified value.
+    Whatis(whatis::WhatisArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -1490,6 +1496,9 @@ impl DbArgs {
                     }
                     DbCommands::UserDataExport(args) => {
                         args.exec(&omdb, &opctx, &datastore).await
+                    }
+                    DbCommands::Whatis(args) => {
+                        whatis::cmd_db_whatis(&datastore, args).await
                     }
                 }
             }

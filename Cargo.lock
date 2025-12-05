@@ -8842,6 +8842,8 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.8.23",
+ "trust-quorum",
+ "trust-quorum-protocol",
  "tufaceous-artifact",
  "tufaceous-brand-metadata",
  "usdt 0.5.0",
