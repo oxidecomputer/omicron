@@ -1758,7 +1758,7 @@ pub enum DiskSource {
 pub enum DiskBackend {
     Local {},
 
-    Virtual {
+    Crucible {
         /// The initial source for this disk
         disk_source: DiskSource,
     },

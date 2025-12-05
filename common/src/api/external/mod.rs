@@ -1433,7 +1433,7 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DiskType {
-    Virtual,
+    Crucible,
     Local,
 }
 

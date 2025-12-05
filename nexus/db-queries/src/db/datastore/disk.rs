@@ -271,7 +271,7 @@ impl Into<api::external::Disk> for Disk {
                     block_size: disk.block_size.into(),
                     state: disk.state().into(),
                     device_path,
-                    disk_type: api::external::DiskType::Virtual,
+                    disk_type: api::external::DiskType::Crucible,
                 }
             }
 
@@ -1477,7 +1477,7 @@ mod tests {
                 name: "first-post".parse().unwrap(),
                 description: "just trying things out".to_string(),
             },
-            disk_backend: params::DiskBackend::Virtual {
+            disk_backend: params::DiskBackend::Crucible {
                 disk_source: disk_source.clone(),
             },
             size: external::ByteCount::from(2147483648),

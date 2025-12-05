@@ -161,7 +161,7 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Virtual {
+        disk_backend: params::DiskBackend::Crucible {
             disk_source: params::DiskSource::Image {
                 image_id: alpine_image.identity.id,
             },
@@ -202,7 +202,7 @@ async fn test_make_disk_from_other_project_image_fails(
             name: "stolen-disk".parse().unwrap(),
             description: String::from("yoink"),
         },
-        disk_backend: params::DiskBackend::Virtual {
+        disk_backend: params::DiskBackend::Crucible {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },
@@ -255,7 +255,7 @@ async fn test_make_disk_from_image_too_small(
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_backend: params::DiskBackend::Virtual {
+        disk_backend: params::DiskBackend::Crucible {
             disk_source: params::DiskSource::Image {
                 image_id: alpine_image.identity.id,
             },
@@ -425,7 +425,7 @@ async fn test_image_from_other_project_snapshot_fails(
             name: "disk".parse().unwrap(),
             description: "meow".into(),
         },
-        disk_backend: params::DiskBackend::Virtual {
+        disk_backend: params::DiskBackend::Crucible {
             disk_source: params::DiskSource::Image {
                 image_id: image.identity.id,
             },

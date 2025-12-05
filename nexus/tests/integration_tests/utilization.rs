@@ -146,7 +146,7 @@ async fn test_utilization_view(cptestctx: &ControlPlaneTestContext) {
                     description: "".into(),
                 },
                 size: ByteCount::from_gibibytes_u32(2),
-                disk_backend: params::DiskBackend::Virtual {
+                disk_backend: params::DiskBackend::Crucible {
                     disk_source: params::DiskSource::Blank {
                         block_size: params::BlockSize::try_from(512).unwrap(),
                     },
