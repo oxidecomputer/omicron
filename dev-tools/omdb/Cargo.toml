@@ -63,7 +63,7 @@ oxide-tokio-rt.workspace = true
 oximeter-client.workspace = true
 oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
 oxnet.workspace = true
-petgraph.workspace = true
+petgraph = { workspace = true, features = ["serde-1"] }
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 ratatui.workspace = true
