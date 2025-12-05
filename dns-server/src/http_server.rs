@@ -11,9 +11,9 @@ use dns_service_client::{
     ERROR_CODE_UPDATE_IN_PROGRESS,
 };
 use dropshot::RequestContext;
-use internal_dns_types::{
-    v1::{self, config::TranslationError as V1TranslationError},
-    v2::{self, config::TranslationError as V2TranslationError},
+use internal_dns_types_migrations::{
+    v1, v2,
+    v2::config::{V1ToV2TranslationError, V2ToV1TranslationError},
 };
 
 pub struct Context {
@@ -45,7 +45,7 @@ impl DnsServerApi for DnsServerApiImpl {
         let result = Self::dns_config_get(rqctx).await?;
         match result.0.try_into() {
             Ok(config) => Ok(dropshot::HttpResponseOk(config)),
-            Err(V2TranslationError::IncompatibleRecord) => {
+            Err(V2ToV1TranslationError::IncompatibleRecord) => {
                 Err(dropshot::HttpError::for_bad_request(
                     None,
                     ERROR_CODE_INCOMPATIBLE_RECORD.to_string(),
@@ -70,7 +70,7 @@ impl DnsServerApi for DnsServerApiImpl {
     {
         let provided_config = match rq.into_inner().try_into() {
             Ok(config) => config,
-            Err(V1TranslationError::GenerationTooLarge) => {
+            Err(V1ToV2TranslationError::GenerationTooLarge) => {
                 return Err(dropshot::HttpError::for_bad_request(
                     None,
                     ERROR_CODE_INCOMPATIBLE_RECORD.to_string(),

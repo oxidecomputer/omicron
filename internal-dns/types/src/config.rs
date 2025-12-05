@@ -71,7 +71,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 
 // "v2" types are the most recent, so we re-export them here for dependents that
 // just want "latest".
-pub use crate::v2::config::*;
+pub use internal_dns_types_migrations::v2::config::*;
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
