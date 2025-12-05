@@ -189,7 +189,6 @@ impl BlueprintPlanner {
         // Generate a new blueprint.
         let planner = Planner::new_based_on(
             opctx.log.clone(),
-            &parent,
             &input,
             "blueprint_planner",
             &collection,

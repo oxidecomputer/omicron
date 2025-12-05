@@ -189,16 +189,12 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
-        let (_, parent_blueprint) =
-            self.db_datastore.blueprint_target_get_current_full(opctx).await?;
-
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let inventory = planning_context.inventory.ok_or_else(|| {
             Error::internal_error("no recent inventory collection found")
         })?;
         let planner = Planner::new_based_on(
             opctx.log.clone(),
-            &parent_blueprint,
             &planning_context.planning_input,
             &planning_context.creator,
             &inventory,
