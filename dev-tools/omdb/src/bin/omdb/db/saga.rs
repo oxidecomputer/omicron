@@ -716,8 +716,8 @@ enum StenoNode {
 }
 
 async fn cmd_sagas_show(
-    omdb: &Omdb,
-    opctx: &OpContext,
+    _omdb: &Omdb,
+    _opctx: &OpContext,
     datastore: &DataStore,
     SagaShowArgs { saga_id }: SagaShowArgs,
 ) -> anyhow::Result<()> {
