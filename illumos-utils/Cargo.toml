@@ -25,6 +25,7 @@ ipnetwork.workspace = true
 itertools.workspace = true
 libc.workspace = true
 macaddr.workspace = true
+nix.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 oxide-vpc.workspace = true
@@ -40,6 +41,7 @@ tokio.workspace = true
 uuid.workspace = true
 whoami.workspace = true
 zone.workspace = true
+tofino.workspace = true
 
 omicron-workspace-hack.workspace = true
 
