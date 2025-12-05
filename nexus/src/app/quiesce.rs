@@ -882,7 +882,7 @@ mod test {
         };
         let blueprint_id = blueprint.id;
         let (_, blueprint_rx) =
-            watch::channel(Some(Arc::new((bp_target, blueprint))));
+            watch::channel(Some((bp_target, Arc::new(blueprint))));
 
         // Insert active records for the Nexus instances.
         let conn =

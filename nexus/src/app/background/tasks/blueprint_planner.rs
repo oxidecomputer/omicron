@@ -457,7 +457,7 @@ mod test {
             TargetBlueprintLoader::new(datastore.clone(), tx_loader);
         let mut rx_loader = bp_loader.watcher();
         bp_loader.activate(&opctx).await;
-        let (_initial_target, initial_blueprint) = &*rx_loader
+        let (_initial_target, initial_blueprint) = rx_loader
             .borrow_and_update()
             .clone()
             .expect("no initial blueprint");
@@ -527,14 +527,14 @@ mod test {
 
         // Load and check the new target blueprint.
         bp_loader.activate(&opctx).await;
-        let (target, blueprint) = &*rx_loader
+        let (mut target, blueprint) = rx_loader
             .borrow_and_update()
             .clone()
             .expect("failed to load blueprint");
         assert_eq!(target.target_id, blueprint.id);
         assert_eq!(target.target_id, blueprint_id);
         assert!(
-            blueprint.diff_since_blueprint(initial_blueprint).has_changes()
+            blueprint.diff_since_blueprint(&initial_blueprint).has_changes()
         );
 
         // Planning again should not change the plan, because nothing has changed.
@@ -553,7 +553,6 @@ mod test {
         );
 
         // Enable execution.
-        let mut target = *target;
         target.enabled = true;
         datastore
             .blueprint_target_set_current_enabled(&opctx, target)
@@ -562,14 +561,14 @@ mod test {
 
         // Ping the loader again so it gets the updated target.
         bp_loader.activate(&opctx).await;
-        let (target, blueprint) = &*rx_loader
+        let (target, blueprint) = rx_loader
             .borrow_and_update()
             .clone()
             .expect("failed to re-load blueprint");
         assert_eq!(target.target_id, blueprint.id);
         assert_eq!(target.target_id, blueprint_id);
         assert!(
-            blueprint.diff_since_blueprint(initial_blueprint).has_changes()
+            blueprint.diff_since_blueprint(&initial_blueprint).has_changes()
         );
 
         // Trigger an inventory collection.

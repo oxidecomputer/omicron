@@ -209,7 +209,7 @@ mod test {
 
     fn create_blueprint(
         parent_blueprint_id: BlueprintUuid,
-    ) -> (BlueprintTarget, Blueprint) {
+    ) -> (BlueprintTarget, Arc<Blueprint>) {
         let id = BlueprintUuid::new_v4();
         (
             BlueprintTarget {
@@ -217,7 +217,7 @@ mod test {
                 enabled: true,
                 time_made_target: now_db_precision(),
             },
-            Blueprint {
+            Arc::new(Blueprint {
                 id,
                 sleds: BTreeMap::new(),
                 pending_mgs_updates: PendingMgsUpdates::new(),
@@ -236,7 +236,7 @@ mod test {
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
                 source: BlueprintSource::Test,
-            },
+            }),
         )
     }
 
