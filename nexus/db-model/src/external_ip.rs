@@ -26,7 +26,7 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::ProbeExternalIp;
 use nexus_types::external_api::shared::ProbeExternalIpKind;
 use nexus_types::external_api::views;
-use nexus_types::inventory::SourceNatConfig;
+use nexus_types::inventory::SourceNatConfigGeneric;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::internal::shared::SourceNatConfigError;
@@ -170,7 +170,7 @@ impl TryFrom<&'_ ExternalIp> for OmicronZoneExternalIp {
         match row.kind {
             IpKind::SNat => Ok(Self::Snat(OmicronZoneExternalSnatIp {
                 id: ExternalIpUuid::from_untyped_uuid(row.id),
-                snat_cfg: SourceNatConfig::new(
+                snat_cfg: SourceNatConfigGeneric::new(
                     row.ip.ip(),
                     row.first_port.0,
                     row.last_port.0,
@@ -231,7 +231,7 @@ pub struct FloatingIp {
 }
 
 impl TryFrom<ExternalIp>
-    for omicron_common::api::internal::shared::SourceNatConfig
+    for omicron_common::api::internal::shared::SourceNatConfigGeneric
 {
     type Error = SourceNatConfigError;
 

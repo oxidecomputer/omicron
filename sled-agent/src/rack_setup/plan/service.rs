@@ -38,7 +38,7 @@ use omicron_common::address::{
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, PrivateIpConfig,
-    PrivateIpConfigError, SourceNatConfig, SourceNatConfigError,
+    PrivateIpConfigError, SourceNatConfigError, SourceNatConfigGeneric,
 };
 use omicron_common::backoff::{
     BackoffError, retry_notify_ext, retry_policy_internal_service_aggressive,
@@ -225,7 +225,7 @@ pub fn from_ipaddr_to_external_floating_ip(
 }
 
 pub fn from_source_nat_config_to_external_snat_ip(
-    snat_cfg: SourceNatConfig,
+    snat_cfg: SourceNatConfigGeneric,
 ) -> OmicronZoneExternalSnatIp {
     // This is pretty weird: IP IDs don't exist yet, so it's fine for us
     // to make them up (Nexus will record them as a part of the
@@ -1242,7 +1242,7 @@ impl ServicePortBuilder {
     fn next_snat(
         &mut self,
         svc_id: OmicronZoneUuid,
-    ) -> Result<(NetworkInterface, SourceNatConfig), PlanError> {
+    ) -> Result<(NetworkInterface, SourceNatConfigGeneric), PlanError> {
         use omicron_common::address::{
             NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
         };
@@ -1261,7 +1261,7 @@ impl ServicePortBuilder {
         }
 
         let snat_cfg =
-            match SourceNatConfig::new(snat_ip, first_port, last_port) {
+            match SourceNatConfigGeneric::new(snat_ip, first_port, last_port) {
                 Ok(cfg) => cfg,
                 // We know our port pair is aligned, making this unreachable.
                 Err(err @ SourceNatConfigError::UnalignedPortPair { .. }) => {

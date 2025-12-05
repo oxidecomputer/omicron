@@ -829,7 +829,7 @@ mod tests {
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
     use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::shared::IpRange;
-    use nexus_types::inventory::SourceNatConfig;
+    use nexus_types::inventory::SourceNatConfigGeneric;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1388,8 +1388,12 @@ mod tests {
         let ip_10_0_0_3_snat_0 =
             OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
                 id: ip_10_0_0_3.id(),
-                snat_cfg: SourceNatConfig::new(ip_10_0_0_3.ip(), 0, 16383)
-                    .unwrap(),
+                snat_cfg: SourceNatConfigGeneric::new(
+                    ip_10_0_0_3.ip(),
+                    0,
+                    16383,
+                )
+                .unwrap(),
             });
         let err = context
             .db.datastore()
@@ -1410,7 +1414,7 @@ mod tests {
         let ip_10_0_0_1_snat_32768 =
             OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
                 id: ExternalIpUuid::new_v4(),
-                snat_cfg: SourceNatConfig::new(
+                snat_cfg: SourceNatConfigGeneric::new(
                     "10.0.0.1".parse().unwrap(),
                     32768,
                     49151,
@@ -1462,7 +1466,7 @@ mod tests {
         let ip_10_0_0_1_snat_49152 =
             OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
                 id: ip_10_0_0_1_snat_32768.id(),
-                snat_cfg: SourceNatConfig::new(
+                snat_cfg: SourceNatConfigGeneric::new(
                     ip_10_0_0_1_snat_32768.ip(),
                     49152,
                     65535,
@@ -1786,7 +1790,7 @@ mod tests {
             id: ExternalIpUuid::from_untyped_uuid(uuid::uuid!(
                 "cd7bf0bc-72f6-497d-89b9-787039da448a"
             )),
-            snat_cfg: SourceNatConfig::new(
+            snat_cfg: SourceNatConfigGeneric::new(
                 "10.0.0.1".parse().unwrap(),
                 0,
                 (1 << 14) - 1,
@@ -2057,7 +2061,7 @@ mod tests {
         let id = ExternalIpUuid::new_v4();
         let snat = OmicronZoneExternalIp::Snat(OmicronZoneExternalSnatIp {
             id,
-            snat_cfg: SourceNatConfig::new(
+            snat_cfg: SourceNatConfigGeneric::new(
                 expected_addr,
                 first_port,
                 last_port,

@@ -18,6 +18,7 @@ use macaddr::MacAddr6;
 use omicron_common::address::IPV4_MULTICAST_RANGE;
 use omicron_common::address::IPV6_MULTICAST_RANGE;
 use omicron_common::api::external;
+use omicron_common::api::internal::shared::ExternalIpConfig;
 use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
 use omicron_common::api::internal::shared::NetworkInterface;
@@ -33,7 +34,8 @@ use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigV4;
+use omicron_common::api::internal::shared::SourceNatConfigV6;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::DelRouterEntryReq;
@@ -131,14 +133,7 @@ impl PortManagerInner {
 /// Parameters needed to create and configure an OPTE port.
 pub struct PortCreateParams<'a> {
     pub nic: &'a NetworkInterface,
-    // TODO-completeness: These should ideally be grouped together into a type
-    // that ensures they're all of the same IP version, and that the IP stack
-    // for the external and VPC-private addresses match.
-    //
-    // See https://github.com/oxidecomputer/omicron/issues/9318.
-    pub source_nat: Option<SourceNatConfig>,
-    pub ephemeral_ip: Option<IpAddr>,
-    pub floating_ips: &'a [IpAddr],
+    pub external_ips: &'a Option<ExternalIpConfig>,
     pub firewall_rules: &'a [ResolvedVpcFirewallRule],
     pub dhcp_config: DhcpCfg,
 }
@@ -147,180 +142,171 @@ impl<'a> TryFrom<&PortCreateParams<'a>> for IpCfg {
     type Error = Error;
 
     fn try_from(params: &PortCreateParams) -> Result<IpCfg, Error> {
-        match &params.nic.ip_config {
-            PrivateIpConfig::V4(v4) => {
-                build_opte_ipv4_config(
-                    v4,
-                    params.source_nat.as_ref(),
-                    params.ephemeral_ip.as_ref(),
-                    &params.floating_ips,
-                    /* is_ipv4_only = */ true,
-                )
-                .map(IpCfg::Ipv4)
-            }
-            PrivateIpConfig::V6(v6) => {
-                build_opte_ipv6_config(
-                    v6,
-                    params.source_nat.as_ref(),
-                    params.ephemeral_ip.as_ref(),
-                    &params.floating_ips,
-                    /* is_ipv6_only = */ true,
-                )
-                .map(IpCfg::Ipv6)
-            }
-            PrivateIpConfig::DualStack { v4, v6 } => {
-                let ipv4 = build_opte_ipv4_config(
-                    v4,
-                    params.source_nat.as_ref(),
-                    params.ephemeral_ip.as_ref(),
-                    &params.floating_ips,
-                    /* is_ipv4_only = */ false,
-                )?;
-                let ipv6 = build_opte_ipv6_config(
-                    v6,
-                    params.source_nat.as_ref(),
-                    params.ephemeral_ip.as_ref(),
-                    &params.floating_ips,
-                    /* is_ipv6_only = */ false,
-                )?;
-                Ok(IpCfg::DualStack { ipv4, ipv6 })
-            }
-        }
+        omicron_to_opte_ip_config(&params.nic.ip_config, params.external_ips)
     }
+}
+
+fn omicron_to_opte_ip_config(
+    private_ips: &PrivateIpConfig,
+    external_ips: &Option<ExternalIpConfig>,
+) -> Result<IpCfg, Error> {
+    let cfg = match (private_ips, external_ips) {
+        // Private and public IPv4 configuration
+        (
+            PrivateIpConfig::V4(private_v4),
+            Some(ExternalIpConfig::V4(external_v4)),
+        ) => IpCfg::Ipv4(build_opte_ipv4_config(
+            private_v4,
+            external_v4.source_nat().as_ref(),
+            external_v4.ephemeral_ip().as_ref(),
+            external_v4.floating_ips(),
+        )),
+        // Only private IPv4 configuration
+        (PrivateIpConfig::V4(private_v4), None) => {
+            IpCfg::Ipv4(build_opte_ipv4_config(private_v4, None, None, &[]))
+        }
+        // Private and public IPv6 configuration
+        (
+            PrivateIpConfig::V6(private_v6),
+            Some(ExternalIpConfig::V6(external_v6)),
+        ) => IpCfg::Ipv6(build_opte_ipv6_config(
+            private_v6,
+            external_v6.source_nat().as_ref(),
+            external_v6.ephemeral_ip().as_ref(),
+            external_v6.floating_ips(),
+        )),
+        // Only private IPv6 configuration
+        (PrivateIpConfig::V6(private_v6), None) => {
+            IpCfg::Ipv6(build_opte_ipv6_config(private_v6, None, None, &[]))
+        }
+        // Private and public dual-stack configuration
+        (
+            PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
+            Some(ExternalIpConfig::DualStack {
+                v4: external_v4,
+                v6: external_v6,
+            }),
+        ) => {
+            let ipv4 = build_opte_ipv4_config(
+                private_v4,
+                external_v4.source_nat().as_ref(),
+                external_v4.ephemeral_ip().as_ref(),
+                external_v4.floating_ips(),
+            );
+            let ipv6 = build_opte_ipv6_config(
+                private_v6,
+                external_v6.source_nat().as_ref(),
+                external_v6.ephemeral_ip().as_ref(),
+                external_v6.floating_ips(),
+            );
+            IpCfg::DualStack { ipv4, ipv6 }
+        }
+        // Only private dual-stack configuration.
+        (
+            PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
+            None,
+        ) => {
+            let ipv4 = build_opte_ipv4_config(private_v4, None, None, &[]);
+            let ipv6 = build_opte_ipv6_config(private_v6, None, None, &[]);
+            IpCfg::DualStack { ipv4, ipv6 }
+        }
+        // Private dual-stack, public IPv4 configuration.
+        (
+            PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
+            Some(ExternalIpConfig::V4(external_v4)),
+        ) => {
+            let ipv4 = build_opte_ipv4_config(
+                private_v4,
+                external_v4.source_nat().as_ref(),
+                external_v4.ephemeral_ip().as_ref(),
+                external_v4.floating_ips(),
+            );
+            let ipv6 = build_opte_ipv6_config(private_v6, None, None, &[]);
+            IpCfg::DualStack { ipv4, ipv6 }
+        }
+        // Private dual-stack, public IPv6 configuration.
+        (
+            PrivateIpConfig::DualStack { v4: private_v4, v6: private_v6 },
+            Some(ExternalIpConfig::V6(external_v6)),
+        ) => {
+            let ipv4 = build_opte_ipv4_config(private_v4, None, None, &[]);
+            let ipv6 = build_opte_ipv6_config(
+                private_v6,
+                external_v6.source_nat().as_ref(),
+                external_v6.ephemeral_ip().as_ref(),
+                external_v6.floating_ips(),
+            );
+            IpCfg::DualStack { ipv4, ipv6 }
+        }
+        // Cannot have external config of a different version, either
+        // because we are single-stack but of the wrong version, or
+        // dual-stack public, but single-stack private.
+        (PrivateIpConfig::V6(_), Some(ExternalIpConfig::V4(_)))
+        | (PrivateIpConfig::V4(_), Some(ExternalIpConfig::V6(_)))
+        | (
+            PrivateIpConfig::V6(_) | PrivateIpConfig::V4(_),
+            Some(ExternalIpConfig::DualStack { .. }),
+        ) => return Err(Error::InvalidPortIpConfig),
+    };
+    Ok(cfg)
 }
 
 fn build_opte_ipv4_config(
     v4: &PrivateIpv4Config,
-    source_nat: Option<&SourceNatConfig>,
-    ephemeral_ip: Option<&IpAddr>,
-    floating_ips: &[IpAddr],
-    is_ipv4_only: bool,
-) -> Result<Ipv4Cfg, Error> {
+    source_nat: Option<&SourceNatConfigV4>,
+    ephemeral_ip: Option<&Ipv4Addr>,
+    floating_ips: &[Ipv4Addr],
+) -> Ipv4Cfg {
     let gateway_ip = v4.opte_gateway().into();
     let vpc_subnet = Ipv4Cidr::from(Ipv4Network::from(*v4.subnet()));
     let private_ip = (*v4.ip()).into();
-    let external_ips = build_external_ipv4_config(
-        source_nat,
-        ephemeral_ip,
-        floating_ips,
-        is_ipv4_only,
-    )?;
-    Ok(Ipv4Cfg { vpc_subnet, private_ip, gateway_ip, external_ips })
+    let external_ips =
+        build_external_ipv4_config(source_nat, ephemeral_ip, floating_ips);
+    Ipv4Cfg { vpc_subnet, private_ip, gateway_ip, external_ips }
 }
 
 fn build_opte_ipv6_config(
     v6: &PrivateIpv6Config,
-    source_nat: Option<&SourceNatConfig>,
-    ephemeral_ip: Option<&IpAddr>,
-    floating_ips: &[IpAddr],
-    is_ipv6_only: bool,
-) -> Result<Ipv6Cfg, Error> {
+    source_nat: Option<&SourceNatConfigV6>,
+    ephemeral_ip: Option<&Ipv6Addr>,
+    floating_ips: &[Ipv6Addr],
+) -> Ipv6Cfg {
     let gateway_ip = v6.opte_gateway().into();
     let vpc_subnet = Ipv6Cidr::from(Ipv6Network::from(*v6.subnet()));
     let private_ip = (*v6.ip()).into();
-    let external_ips = build_external_ipv6_config(
-        source_nat,
-        ephemeral_ip,
-        floating_ips,
-        is_ipv6_only,
-    )?;
-    Ok(Ipv6Cfg { vpc_subnet, private_ip, gateway_ip, external_ips })
+    let external_ips =
+        build_external_ipv6_config(source_nat, ephemeral_ip, floating_ips);
+    Ipv6Cfg { vpc_subnet, private_ip, gateway_ip, external_ips }
 }
 
 // Build an ExternalIpCfg from parameters.
 fn build_external_ipv4_config(
-    source_nat: Option<&SourceNatConfig>,
-    ephemeral_ip: Option<&IpAddr>,
-    floating_ips: &[IpAddr],
-    is_ipv4_only: bool,
-) -> Result<ExternalIpCfg<oxide_vpc::api::Ipv4Addr>, Error> {
-    let snat = match source_nat {
-        None => None,
-        Some(snat) => match snat.ip {
-            IpAddr::V4(ipv4) => Some(SNat4Cfg {
-                external_ip: ipv4.into(),
-                ports: snat.port_range(),
-            }),
-            IpAddr::V6(_) => {
-                if is_ipv4_only {
-                    return Err(Error::InvalidPortIpConfig);
-                }
-                None
-            }
-        },
-    };
-    let ephemeral_ip = match ephemeral_ip {
-        Some(IpAddr::V4(ipv4)) => Some((*ipv4).into()),
-        Some(IpAddr::V6(_)) => {
-            if is_ipv4_only {
-                return Err(Error::InvalidPortIpConfig);
-            }
-            None
-        }
-        None => None,
-    };
-    let floating_ips = floating_ips
-        .iter()
-        .filter_map(|ip| match ip {
-            IpAddr::V4(ipv4) => Some(Ok((*ipv4).into())),
-            IpAddr::V6(_) => {
-                if is_ipv4_only {
-                    Some(Err(Error::InvalidPortIpConfig))
-                } else {
-                    None
-                }
-            }
-        })
-        .collect::<Result<_, _>>()?;
-    Ok(ExternalIpCfg { snat, ephemeral_ip, floating_ips })
+    source_nat: Option<&SourceNatConfigV4>,
+    ephemeral_ip: Option<&Ipv4Addr>,
+    floating_ips: &[Ipv4Addr],
+) -> ExternalIpCfg<oxide_vpc::api::Ipv4Addr> {
+    let snat = source_nat.map(|snat| SNat4Cfg {
+        external_ip: snat.ip.into(),
+        ports: snat.port_range(),
+    });
+    let ephemeral_ip = ephemeral_ip.copied().map(Into::into);
+    let floating_ips = floating_ips.iter().copied().map(Into::into).collect();
+    ExternalIpCfg { snat, ephemeral_ip, floating_ips }
 }
 
 // Build an OPTE External IPv6 configuration from parameters.
 fn build_external_ipv6_config(
-    source_nat: Option<&SourceNatConfig>,
-    ephemeral_ip: Option<&IpAddr>,
-    floating_ips: &[IpAddr],
-    is_ipv6_only: bool,
-) -> Result<ExternalIpCfg<oxide_vpc::api::Ipv6Addr>, Error> {
-    let snat = match source_nat {
-        None => None,
-        Some(snat) => match snat.ip {
-            IpAddr::V6(ipv6) => Some(SNat6Cfg {
-                external_ip: ipv6.into(),
-                ports: snat.port_range(),
-            }),
-            IpAddr::V4(_) => {
-                if is_ipv6_only {
-                    return Err(Error::InvalidPortIpConfig);
-                }
-                None
-            }
-        },
-    };
-    let ephemeral_ip = match ephemeral_ip {
-        Some(IpAddr::V6(ipv6)) => Some((*ipv6).into()),
-        Some(IpAddr::V4(_)) => {
-            if is_ipv6_only {
-                return Err(Error::InvalidPortIpConfig);
-            }
-            None
-        }
-        None => None,
-    };
-    let floating_ips = floating_ips
-        .iter()
-        .filter_map(|ip| match ip {
-            IpAddr::V6(ipv6) => Some(Ok((*ipv6).into())),
-            IpAddr::V4(_) => {
-                if is_ipv6_only {
-                    Some(Err(Error::InvalidPortIpConfig))
-                } else {
-                    None
-                }
-            }
-        })
-        .collect::<Result<_, _>>()?;
-    Ok(ExternalIpCfg { snat, ephemeral_ip, floating_ips })
+    source_nat: Option<&SourceNatConfigV6>,
+    ephemeral_ip: Option<&Ipv6Addr>,
+    floating_ips: &[Ipv6Addr],
+) -> ExternalIpCfg<oxide_vpc::api::Ipv6Addr> {
+    let snat = source_nat.map(|snat| SNat6Cfg {
+        external_ip: snat.ip.into(),
+        ports: snat.port_range(),
+    });
+    let ephemeral_ip = ephemeral_ip.copied().map(Into::into);
+    let floating_ips = floating_ips.iter().copied().map(Into::into).collect();
+    ExternalIpCfg { snat, ephemeral_ip, floating_ips }
 }
 
 /// The port manager controls all OPTE ports on a single host.
@@ -354,14 +340,8 @@ impl PortManager {
         params: PortCreateParams,
     ) -> Result<(Port, PortTicket), Error> {
         let ip_cfg = IpCfg::try_from(&params)?;
-        let PortCreateParams {
-            nic,
-            source_nat,
-            ephemeral_ip,
-            floating_ips,
-            firewall_rules,
-            dhcp_config,
-        } = params;
+        let PortCreateParams { nic, external_ips, firewall_rules, dhcp_config } =
+            params;
         let is_service =
             matches!(nic.kind, NetworkInterfaceKind::Service { .. });
         let is_instance =
@@ -438,13 +418,9 @@ impl PortManager {
                 // `Instance::refresh_external_ips_inner`), and to prevent updates
                 // racing with nexus before an instance/port are reachable from their
                 // respective managers.
-                self.external_ips_ensure_port(
-                    &port,
-                    nic.id,
-                    source_nat,
-                    ephemeral_ip,
-                    floating_ips,
-                )?;
+                if let Some(eips) = external_ips {
+                    self.external_ips_ensure_port(&port, nic.id, eips)?;
+                }
             }
             (port, ticket)
         };
@@ -732,22 +708,14 @@ impl PortManager {
         &self,
         nic_id: Uuid,
         nic_kind: NetworkInterfaceKind,
-        source_nat: Option<SourceNatConfig>,
-        ephemeral_ip: Option<IpAddr>,
-        floating_ips: &[IpAddr],
+        external_ips: &ExternalIpConfig,
     ) -> Result<(), Error> {
         let ports = self.inner.ports.lock().unwrap();
         let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
             Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
         })?;
 
-        self.external_ips_ensure_port(
-            port,
-            nic_id,
-            source_nat,
-            ephemeral_ip,
-            floating_ips,
-        )
+        self.external_ips_ensure_port(port, nic_id, external_ips)
     }
 
     /// Ensure external IPs for an OPTE port are up to date.
@@ -755,55 +723,26 @@ impl PortManager {
         &self,
         port: &Port,
         nic_id: Uuid,
-        source_nat: Option<SourceNatConfig>,
-        ephemeral_ip: Option<IpAddr>,
-        floating_ips: &[IpAddr],
+        external_ips: &ExternalIpConfig,
     ) -> Result<(), Error> {
         let egw_lock = self.inner.eip_gateways.lock().unwrap();
         let inet_gw_map = egw_lock.get(&nic_id).cloned();
         drop(egw_lock);
 
-        let has_ipv4_stack = port.ipv4_addr().is_some();
-        let has_ipv6_stack = port.ipv6_addr().is_some();
-        let external_ips_v4 = build_external_ipv4_config(
-            source_nat.as_ref(),
-            ephemeral_ip.as_ref(),
-            floating_ips,
-            has_ipv4_stack,
-        )?;
-        let external_ips_v6 = build_external_ipv6_config(
-            source_nat.as_ref(),
-            ephemeral_ip.as_ref(),
-            floating_ips,
-            has_ipv6_stack,
-        )?;
-
-        // The above functions building the external address configuration only
-        // fail if we're provided external addresses from an IP version we don't
-        // have a VPC-private IP stack for. E.g., IPv6 external IPs for an
-        // IPv4-only interface. If we're provided IPv6 external IPs and we have
-        // both an IPv4 and IPv6 interface, then those methods succeed, but
-        // return an `ExternalIpCfg` where all the fields are empty.
-        //
-        // However, the `SetExternalIpsReq` method accepts an _option_ around
-        // those values. Those should be None if there are zero addresses of the
-        // corresponding version in the parameters. In that case, all the fields
-        // of the `ExternalIpCfg`s are None or empty. This function does that
-        // conversion for us.
-        fn convert_empty_ip_cfg<T>(
-            cfg: ExternalIpCfg<T>,
-        ) -> Option<ExternalIpCfg<T>> {
-            if cfg.snat.is_none()
-                && cfg.ephemeral_ip.is_none()
-                && cfg.floating_ips.is_empty()
-            {
-                None
-            } else {
-                Some(cfg)
-            }
-        }
-        let external_ips_v4 = convert_empty_ip_cfg(external_ips_v4);
-        let external_ips_v6 = convert_empty_ip_cfg(external_ips_v6);
+        let external_ips_v4 = external_ips.ipv4_config().map(|v4| {
+            build_external_ipv4_config(
+                v4.source_nat().as_ref(),
+                v4.ephemeral_ip().as_ref(),
+                v4.floating_ips(),
+            )
+        });
+        let external_ips_v6 = external_ips.ipv6_config().map(|v6| {
+            build_external_ipv6_config(
+                v6.source_nat().as_ref(),
+                v6.ephemeral_ip().as_ref(),
+                v6.floating_ips(),
+            )
+        });
 
         let inet_gw_map = if let Some(map) = inet_gw_map {
             Some(
@@ -1115,26 +1054,36 @@ impl Drop for PortTicket {
 
 #[cfg(test)]
 mod tests {
+    use super::PortCreateParams;
+    use super::PortManager;
     use crate::opte::Handle;
-
-    use super::{PortCreateParams, PortManager};
     use macaddr::MacAddr6;
-    use omicron_common::api::{
-        external::{MacAddr, Vni},
-        internal::shared::{
-            InternetGatewayRouterTarget, NetworkInterface,
-            NetworkInterfaceKind, PrivateIpConfig, PrivateIpv4Config,
-            PrivateIpv6Config, ResolvedVpcRoute, ResolvedVpcRouteSet,
-            RouterTarget, RouterVersion, SourceNatConfig,
-        },
-    };
+    use omicron_common::api::external::{MacAddr, Vni};
+    use omicron_common::api::internal::shared::ExternalIpConfig;
+    use omicron_common::api::internal::shared::ExternalIpConfigBuilder;
+    use omicron_common::api::internal::shared::InternetGatewayRouterTarget;
+    use omicron_common::api::internal::shared::NetworkInterface;
+    use omicron_common::api::internal::shared::NetworkInterfaceKind;
+    use omicron_common::api::internal::shared::PrivateIpConfig;
+    use omicron_common::api::internal::shared::PrivateIpv4Config;
+    use omicron_common::api::internal::shared::PrivateIpv6Config;
+    use omicron_common::api::internal::shared::ResolvedVpcRoute;
+    use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
+    use omicron_common::api::internal::shared::RouterTarget;
+    use omicron_common::api::internal::shared::RouterVersion;
+    use omicron_common::api::internal::shared::SourceNatConfigV4;
+    use omicron_common::api::internal::shared::SourceNatConfigV6;
     use omicron_test_utils::dev::test_setup_log;
-    use oxide_vpc::api::{DhcpCfg, IpCfg, Ipv4Cidr, Ipv6Cidr};
-    use oxnet::{IpNet, Ipv4Net, Ipv6Net};
-    use std::{
-        collections::HashSet,
-        net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    };
+    use oxide_vpc::api::DhcpCfg;
+    use oxide_vpc::api::IpCfg;
+    use oxide_vpc::api::Ipv4Cidr;
+    use oxide_vpc::api::Ipv6Cidr;
+    use oxnet::IpNet;
+    use oxnet::Ipv4Net;
+    use oxnet::Ipv6Net;
+    use std::collections::HashSet;
+    use std::net::Ipv4Addr;
+    use std::net::Ipv6Addr;
     use uuid::Uuid;
 
     // Regression for https://github.com/oxidecomputer/omicron/issues/7541.
@@ -1175,8 +1124,18 @@ mod tests {
         let ip_config1 =
             PrivateIpConfig::new_ipv4(private_ipv4_addr1, private_subnet)
                 .unwrap();
-        let public_ipv4_addr0 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 4));
-        let public_ipv4_addr1 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5));
+        let public_ipv4_addr0 = Ipv4Addr::new(10, 0, 0, 4);
+        let public_ipv4_addr1 = Ipv4Addr::new(10, 0, 0, 5);
+        let external_ip_config0 = Some(
+            ExternalIpConfigBuilder::new()
+                .with_source_nat(
+                    SourceNatConfigV4::new(public_ipv4_addr0, 0, MAX_PORT)
+                        .unwrap(),
+                )
+                .build()
+                .unwrap()
+                .into(),
+        );
         const MAX_PORT: u16 = (1 << 14) - 1;
         let (port0, _ticket0) = manager
             .create_port(PortCreateParams {
@@ -1192,12 +1151,7 @@ mod tests {
                     primary: true,
                     slot: 0,
                 },
-                source_nat: Some(
-                    SourceNatConfig::new(public_ipv4_addr0, 0, MAX_PORT)
-                        .unwrap(),
-                ),
-                ephemeral_ip: None,
-                floating_ips: &[],
+                external_ips: &external_ip_config0,
                 firewall_rules: &[],
                 dhcp_config: DhcpCfg {
                     hostname: None,
@@ -1351,6 +1305,16 @@ mod tests {
         // this point on creation, but not the other port since we don't modify
         // it when we create this second port. That happens when we call
         // `vpc_routes_ensure` below.
+        let external_ip_config1 = Some(
+            ExternalIpConfigBuilder::new()
+                .with_source_nat(
+                    SourceNatConfigV4::new(public_ipv4_addr1, 0, MAX_PORT)
+                        .unwrap(),
+                )
+                .build()
+                .unwrap()
+                .into(),
+        );
         let (port1, _ticket1) = manager
             .create_port(PortCreateParams {
                 nic: &NetworkInterface {
@@ -1365,12 +1329,7 @@ mod tests {
                     primary: true,
                     slot: 0,
                 },
-                source_nat: Some(
-                    SourceNatConfig::new(public_ipv4_addr1, 0, MAX_PORT)
-                        .unwrap(),
-                ),
-                ephemeral_ip: None,
-                floating_ips: &[],
+                external_ips: &external_ip_config1,
                 firewall_rules: &[],
                 dhcp_config: DhcpCfg {
                     hostname: None,
@@ -1530,13 +1489,17 @@ mod tests {
             primary: true,
             slot: 0,
         };
-        let source_nat =
-            SourceNatConfig::new(IpAddr::V4(ext_ip), 0, 16383).unwrap();
+        let source_nat = SourceNatConfigV4::new(ext_ip, 0, 16383).unwrap();
+        let external_ips = Some(
+            ExternalIpConfigBuilder::new()
+                .with_source_nat(source_nat)
+                .build()
+                .unwrap()
+                .into(),
+        );
         let prs = PortCreateParams {
             nic: &nic,
-            source_nat: Some(source_nat),
-            ephemeral_ip: None,
-            floating_ips: &[],
+            external_ips: &external_ips,
             firewall_rules: &[],
             dhcp_config: DhcpCfg {
                 hostname: None,
@@ -1594,13 +1557,17 @@ mod tests {
             primary: true,
             slot: 0,
         };
-        let source_nat =
-            SourceNatConfig::new(IpAddr::V6(ext_ip), 0, 16383).unwrap();
+        let source_nat = SourceNatConfigV6::new(ext_ip, 0, 16383).unwrap();
+        let external_ips = Some(
+            ExternalIpConfigBuilder::new()
+                .with_source_nat(source_nat)
+                .build()
+                .unwrap()
+                .into(),
+        );
         let prs = PortCreateParams {
             nic: &nic,
-            source_nat: Some(source_nat),
-            ephemeral_ip: None,
-            floating_ips: &[],
+            external_ips: &external_ips,
             firewall_rules: &[],
             dhcp_config: DhcpCfg {
                 hostname: None,
@@ -1668,13 +1635,22 @@ mod tests {
         };
 
         // Ipv4 source NAT, Ipv6 ephemeral
-        let source_nat =
-            SourceNatConfig::new(IpAddr::V4(ext_ipv4), 0, 16383).unwrap();
+        let source_nat = SourceNatConfigV4::new(ext_ipv4, 0, 16383).unwrap();
+        let external_ipv4 = ExternalIpConfigBuilder::new()
+            .with_source_nat(source_nat)
+            .build()
+            .unwrap();
+        let external_ipv6 = ExternalIpConfigBuilder::new()
+            .with_ephemeral_ip(ext_ipv6)
+            .build()
+            .unwrap();
+        let external_ips = Some(ExternalIpConfig::DualStack {
+            v4: external_ipv4,
+            v6: external_ipv6,
+        });
         let prs = PortCreateParams {
             nic: &nic,
-            source_nat: Some(source_nat),
-            ephemeral_ip: Some(ext_ipv6.into()),
-            floating_ips: &[],
+            external_ips: &external_ips,
             firewall_rules: &[],
             dhcp_config: DhcpCfg {
                 hostname: None,
@@ -1753,13 +1729,17 @@ mod tests {
             primary: true,
             slot: 0,
         };
-        let source_nat =
-            SourceNatConfig::new(IpAddr::V6(ext_ip), 0, 16383).unwrap();
+        let source_nat = SourceNatConfigV6::new(ext_ip, 0, 16383).unwrap();
+        let external_ips = Some(
+            ExternalIpConfigBuilder::new()
+                .with_source_nat(source_nat)
+                .build()
+                .unwrap()
+                .into(),
+        );
         let prs = PortCreateParams {
             nic: &nic,
-            source_nat: Some(source_nat),
-            ephemeral_ip: None,
-            floating_ips: &[],
+            external_ips: &external_ips,
             firewall_rules: &[],
             dhcp_config: DhcpCfg {
                 hostname: None,
@@ -1794,13 +1774,17 @@ mod tests {
             primary: true,
             slot: 0,
         };
-        let source_nat =
-            SourceNatConfig::new(IpAddr::V4(ext_ip), 0, 16383).unwrap();
+        let source_nat = SourceNatConfigV4::new(ext_ip, 0, 16383).unwrap();
+        let external_ips = Some(
+            ExternalIpConfigBuilder::new()
+                .with_source_nat(source_nat)
+                .build()
+                .unwrap()
+                .into(),
+        );
         let prs = PortCreateParams {
             nic: &nic,
-            source_nat: Some(source_nat),
-            ephemeral_ip: None,
-            floating_ips: &[],
+            external_ips: &external_ips,
             firewall_rules: &[],
             dhcp_config: DhcpCfg {
                 hostname: None,

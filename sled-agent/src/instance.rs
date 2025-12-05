@@ -24,8 +24,8 @@ use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
-    DelegatedZvol, NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers,
-    SourceNatConfig,
+    DelegatedZvol, ExternalIpConfig, NetworkInterface, ResolvedVpcFirewallRule,
+    SledIdentifiers,
 };
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
@@ -534,9 +534,8 @@ struct InstanceRunner {
 
     // Guest NIC and OPTE port information
     requested_nics: Vec<NetworkInterface>,
-    source_nat: SourceNatConfig,
-    ephemeral_ip: Option<IpAddr>,
-    floating_ips: Vec<IpAddr>,
+    external_ips: Option<ExternalIpConfig>,
+
     // Multicast groups to which this instance belongs.
     multicast_groups: Vec<InstanceMulticastMembership>,
     firewall_rules: Vec<ResolvedVpcFirewallRule>,
@@ -720,11 +719,11 @@ impl InstanceRunner {
                                 .map_err(|_| Error::FailedSendClientClosed)
                             },
                             AddExternalIp { ip, tx } => {
-                                tx.send(self.add_external_ip(&ip).await.map_err(|e| e.into()))
+                                tx.send(self.add_external_ip(&ip).map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
                             },
                             DeleteExternalIp { ip, tx } => {
-                                tx.send(self.delete_external_ip(&ip).await.map_err(|e| e.into()))
+                                tx.send(self.delete_external_ip(&ip).map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
                             },
                             RefreshExternalIps { tx } => {
@@ -1346,60 +1345,112 @@ impl InstanceRunner {
         running_state.running_zone.release_opte_ports();
     }
 
-    async fn add_external_ip_inner(
+    fn add_external_ip_inner(
         &mut self,
-        ip: &InstanceExternalIpBody,
+        request: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        // v4 + v6 handling is delegated to `external_ips_ensure`.
-        // If OPTE is unhappy, we undo at `Instance` level.
-
-        match ip {
-            // For idempotency of add/delete, we want to return
-            // success on 'already done'.
-            InstanceExternalIpBody::Ephemeral(ip)
-                if Some(ip) == self.ephemeral_ip.as_ref() =>
-            {
-                return Ok(());
-            }
-            InstanceExternalIpBody::Floating(ip)
-                if self.floating_ips.contains(ip) =>
-            {
-                return Ok(());
-            }
-            // New Ephemeral IP while current exists -- error without
-            // explicit delete.
-            InstanceExternalIpBody::Ephemeral(ip)
-                if self.ephemeral_ip.is_some() =>
-            {
-                return Err(Error::Opte(
-                    illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
-                        *ip,
-                        self.ephemeral_ip.unwrap(),
-                    ),
-                ));
-            }
-            // Not found, proceed with OPTE update.
-            InstanceExternalIpBody::Ephemeral(ip) => {
-                self.ephemeral_ip = Some(*ip);
-            }
-            InstanceExternalIpBody::Floating(ip) => {
-                self.floating_ips.push(*ip);
-            }
-        }
-
         let Some(primary_nic) = self.primary_nic() else {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
+        let nic_id = primary_nic.id;
+        let nic_kind = primary_nic.kind;
 
-        self.port_manager.external_ips_ensure(
-            primary_nic.id,
-            primary_nic.kind,
-            Some(self.source_nat),
-            self.ephemeral_ip,
-            &self.floating_ips,
-        )?;
+        // TODO-completeness:
+        //
+        // If we have no external IP configuration for the requested address
+        // version, then we fail the overall request. We _could_ support this,
+        // dynamically creating the external IP configuration for the specified
+        // address on-demand. But it's not clear that's what we want right now,
+        // and so we'll defer it. Instead, this means instances need to be
+        // created with the IP stacks they need.
+        //
+        // We should revisit this when actually implementing the public API for
+        // external dual-stack addressing, see
+        // https://github.com/oxidecomputer/omicron/issues/9248.
+        let Some(external_ips) = &mut self.external_ips else {
+            return Err(Error::Opte(
+                illumos_utils::opte::Error::InvalidPortIpConfig,
+            ));
+        };
 
-        Ok(())
+        // v4 + v6 handling is delegated to `external_ips_ensure`.
+        // If OPTE is unhappy, we undo at `Instance` level.
+
+        // In each match arm below, we check a few things
+        //
+        // - We have an IP configuration of the same IP version as the requested
+        //   address.
+        // - And either:
+        //      - The new address and the existing one are equal, for
+        //        idempotency. This returns early.
+        //      - Or we have no existing address of this type, in which case we
+        //        assign it.
+        match request {
+            InstanceExternalIpBody::Ephemeral(IpAddr::V4(ipv4)) => {
+                let Some(cfg) = external_ips.ipv4_config_mut() else {
+                    return Err(Error::Opte(
+                        illumos_utils::opte::Error::InvalidPortIpConfig,
+                    ));
+                };
+                match cfg.ephemeral_ip_mut() {
+                    Some(eip) if eip == ipv4 => return Ok(()),
+                    Some(eip) => return Err(Error::Opte(
+                        illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
+                            (*ipv4).into(),
+                            (*eip).into(),
+                        ),
+                    )),
+                    empty @ None => {
+                        let _ = empty.insert(*ipv4);
+                    }
+                }
+            }
+            InstanceExternalIpBody::Ephemeral(IpAddr::V6(ipv6)) => {
+                let Some(cfg) = external_ips.ipv6_config_mut() else {
+                    return Err(Error::Opte(
+                        illumos_utils::opte::Error::InvalidPortIpConfig,
+                    ));
+                };
+                match cfg.ephemeral_ip_mut() {
+                    Some(eip) if eip == ipv6 => return Ok(()),
+                    Some(eip) => return Err(Error::Opte(
+                        illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
+                            (*ipv6).into(),
+                            (*eip).into(),
+                        ),
+                    )),
+                    empty @ None => {
+                        let _ = empty.insert(*ipv6);
+                    }
+                }
+            }
+            InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
+                let Some(cfg) = external_ips.ipv4_config_mut() else {
+                    return Err(Error::Opte(
+                        illumos_utils::opte::Error::InvalidPortIpConfig,
+                    ));
+                };
+                if cfg.floating_ips().contains(ipv4) {
+                    return Ok(());
+                }
+                cfg.floating_ips_mut().push(*ipv4);
+            }
+            InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
+                let Some(cfg) = external_ips.ipv6_config_mut() else {
+                    return Err(Error::Opte(
+                        illumos_utils::opte::Error::InvalidPortIpConfig,
+                    ));
+                };
+                if cfg.floating_ips().contains(ipv6) {
+                    return Ok(());
+                }
+                cfg.floating_ips_mut().push(*ipv6);
+            }
+        }
+
+        self.port_manager
+            .external_ips_ensure(nic_id, nic_kind, external_ips)
+            .map_err(Error::Opte)
     }
 
     fn refresh_external_ips_inner(&mut self) -> Result<(), Error> {
@@ -1407,60 +1458,104 @@ impl InstanceRunner {
             return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
         };
 
-        self.port_manager.external_ips_ensure(
-            primary_nic.id,
-            primary_nic.kind,
-            Some(self.source_nat),
-            self.ephemeral_ip,
-            &self.floating_ips,
-        )?;
+        let Some(external_ips) = &self.external_ips else {
+            return Ok(());
+        };
 
-        Ok(())
+        self.port_manager
+            .external_ips_ensure(
+                primary_nic.id,
+                primary_nic.kind,
+                &external_ips,
+            )
+            .map_err(Error::Opte)
     }
 
-    async fn delete_external_ip_inner(
+    fn delete_external_ip_inner(
         &mut self,
-        ip: &InstanceExternalIpBody,
+        request: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
+        let Some(primary_nic) = self.primary_nic() else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+        let nic_id = primary_nic.id;
+        let nic_kind = primary_nic.kind;
+
+        // See note at the top of `add_external_ip_inner()`.
+        let Some(external_ips) = &mut self.external_ips else {
+            return Err(Error::Opte(
+                illumos_utils::opte::Error::InvalidPortIpConfig,
+            ));
+        };
+
         // v4 + v6 handling is delegated to `external_ips_ensure`.
         // If OPTE is unhappy, we undo at `Instance` level.
 
-        match ip {
-            // For idempotency of add/delete, we want to return
-            // success on 'already done'.
-            // IP Mismatch and 'deleted in past' can't really be
-            // disambiguated here.
-            InstanceExternalIpBody::Ephemeral(ip)
-                if self.ephemeral_ip != Some(*ip) =>
-            {
-                return Ok(());
+        // We want to idempotently delete addresses, but it's not really
+        // possible to tell the difference between:
+        //
+        // - Having no IP at all
+        // - Having deleted the requested IP but afterwards reassigned a new
+        //   one.
+        //
+        // Also note that we don't fail if we're asked to delete an external
+        // address that we don't have an IP stack for (i.e., delete an IPv4 when
+        // we're IPv6-only). This is to preserve the original behavior, which
+        // would not fail in this case either.
+        match request {
+            InstanceExternalIpBody::Ephemeral(IpAddr::V4(ipv4)) => {
+                let Some(cfg) = external_ips.ipv4_config_mut() else {
+                    return Ok(());
+                };
+                // Take out of the option only if it contains the requested
+                // address. If it doesn't, either it's None or has another
+                // address, both of which mean we've "succeeded".
+                if cfg.ephemeral_ip_mut().take_if(|eip| eip == ipv4).is_none() {
+                    return Ok(());
+                }
             }
-            InstanceExternalIpBody::Ephemeral(_) => {
-                self.ephemeral_ip = None;
+            InstanceExternalIpBody::Ephemeral(IpAddr::V6(ipv6)) => {
+                let Some(cfg) = external_ips.ipv6_config_mut() else {
+                    return Ok(());
+                };
+                if cfg.ephemeral_ip_mut().take_if(|eip| eip == ipv6).is_none() {
+                    return Ok(());
+                }
             }
-            InstanceExternalIpBody::Floating(ip) => {
-                let floating_index =
-                    self.floating_ips.iter().position(|v| v == ip);
+            InstanceExternalIpBody::Floating(IpAddr::V4(ipv4)) => {
+                let Some(cfg) = external_ips.ipv4_config_mut() else {
+                    return Ok(());
+                };
+                let fips = cfg.floating_ips_mut();
+                let floating_index = fips.iter().position(|v| v == ipv4);
                 if let Some(pos) = floating_index {
                     // Swap remove is valid here, OPTE is not sensitive
                     // to Floating Ip ordering.
-                    self.floating_ips.swap_remove(pos);
+                    fips.swap_remove(pos);
+                } else {
+                    return Ok(());
+                }
+            }
+            InstanceExternalIpBody::Floating(IpAddr::V6(ipv6)) => {
+                let Some(cfg) = external_ips.ipv6_config_mut() else {
+                    return Ok(());
+                };
+                let fips = cfg.floating_ips_mut();
+                let floating_index = fips.iter().position(|v| v == ipv6);
+                if let Some(pos) = floating_index {
+                    // Swap remove is valid here, OPTE is not sensitive
+                    // to Floating Ip ordering.
+                    fips.swap_remove(pos);
                 } else {
                     return Ok(());
                 }
             }
         }
 
-        let Some(primary_nic) = self.primary_nic() else {
-            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
-        };
-
         self.port_manager.external_ips_ensure(
-            primary_nic.id,
-            primary_nic.kind,
-            Some(self.source_nat),
-            self.ephemeral_ip,
-            &self.floating_ips,
+            nic_id,
+            nic_kind,
+            &external_ips,
         )?;
 
         Ok(())
@@ -1680,9 +1775,7 @@ impl Instance {
             vnic_allocator,
             port_manager,
             requested_nics: local_config.nics,
-            source_nat: local_config.source_nat,
-            ephemeral_ip: local_config.ephemeral_ip,
-            floating_ips: local_config.floating_ips,
+            external_ips: local_config.external_ips,
             multicast_groups: local_config.multicast_groups,
             firewall_rules: local_config.firewall_rules,
             dhcp_config,
@@ -2047,20 +2140,9 @@ impl InstanceRunner {
         let mut opte_ports = Vec::with_capacity(self.requested_nics.len());
         let mut opte_port_names = Vec::with_capacity(self.requested_nics.len());
         for nic in self.requested_nics.iter() {
-            let (snat, ephemeral_ip, floating_ips) = if nic.primary {
-                (
-                    Some(self.source_nat),
-                    self.ephemeral_ip,
-                    &self.floating_ips[..],
-                )
-            } else {
-                (None, None, &[][..])
-            };
             let port = self.port_manager.create_port(PortCreateParams {
                 nic,
-                source_nat: snat,
-                ephemeral_ip,
-                floating_ips,
+                external_ips: &self.external_ips,
                 firewall_rules: &self.firewall_rules,
                 dhcp_config: self.dhcp_config.clone(),
             })?;
@@ -2306,7 +2388,7 @@ impl InstanceRunner {
         }
     }
 
-    async fn add_external_ip(
+    fn add_external_ip(
         &mut self,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
@@ -2315,35 +2397,25 @@ impl InstanceRunner {
         // Be cautious and reset state if either fails.
         // Note we don't need to re-ensure port manager/OPTE state
         // since that's the last call we make internally.
-        let old_eph = self.ephemeral_ip;
-        let out = self.add_external_ip_inner(ip).await;
-
+        let old_config = self.external_ips.clone();
+        let out = self.add_external_ip_inner(ip);
         if out.is_err() {
-            self.ephemeral_ip = old_eph;
-            if let InstanceExternalIpBody::Floating(ip) = ip {
-                self.floating_ips.retain(|v| v != ip);
-            }
+            self.external_ips = old_config;
         }
         out
     }
 
-    async fn delete_external_ip(
+    fn delete_external_ip(
         &mut self,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
         // Similar logic to `add_external_ip`, except here we
         // need to readd the floating IP if it was removed.
         // OPTE doesn't care about the order of floating IPs.
-        let old_eph = self.ephemeral_ip;
-        let out = self.delete_external_ip_inner(ip).await;
-
+        let old_config = self.external_ips.clone();
+        let out = self.delete_external_ip_inner(ip);
         if out.is_err() {
-            self.ephemeral_ip = old_eph;
-            if let InstanceExternalIpBody::Floating(ip) = ip {
-                if !self.floating_ips.contains(ip) {
-                    self.floating_ips.push(*ip);
-                }
-            }
+            self.external_ips = old_config;
         }
         out
     }
@@ -2502,7 +2574,9 @@ mod tests {
     use omicron_common::FileKv;
     use omicron_common::api::external::{Generation, Hostname};
     use omicron_common::api::internal::nexus::VmmState;
-    use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
+    use omicron_common::api::internal::shared::{
+        DhcpConfig, ExternalIpConfigBuilder, SledIdentifiers, SourceNatConfigV6,
+    };
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::InternalZpoolUuid;
     use propolis_client::types::{
@@ -2707,17 +2781,20 @@ mod tests {
             components: Default::default(),
         });
 
+        let external_ips = Some(
+            ExternalIpConfigBuilder::new()
+                .with_source_nat(
+                    SourceNatConfigV6::new(Ipv6Addr::UNSPECIFIED, 0, 16383)
+                        .unwrap(),
+                )
+                .build()
+                .expect("Should be a valid External IP config")
+                .into(),
+        );
         let local_config = InstanceSledLocalConfig {
             hostname: Hostname::from_str("bert").unwrap(),
             nics: vec![],
-            source_nat: SourceNatConfig::new(
-                IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-                0,
-                16383,
-            )
-            .unwrap(),
-            ephemeral_ip: None,
-            floating_ips: vec![],
+            external_ips,
             multicast_groups: vec![],
             firewall_rules: vec![],
             dhcp_config: DhcpConfig {
@@ -3324,9 +3401,7 @@ mod tests {
                 vnic_allocator,
                 port_manager,
                 requested_nics: local_config.nics,
-                source_nat: local_config.source_nat,
-                ephemeral_ip: local_config.ephemeral_ip,
-                floating_ips: local_config.floating_ips,
+                external_ips: local_config.external_ips,
                 multicast_groups: local_config.multicast_groups,
                 firewall_rules: local_config.firewall_rules,
                 dhcp_config,

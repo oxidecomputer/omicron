@@ -16,7 +16,7 @@ use nexus_sled_agent_shared::inventory::{
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::external_ip::v1::SourceNatConfig;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::OmicronPhysicalDiskConfig;

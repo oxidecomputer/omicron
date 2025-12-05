@@ -11,7 +11,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::ExternalIpPolicy;
 use nexus_types::deployment::OmicronZoneExternalIp;
-use nexus_types::inventory::SourceNatConfig;
+use nexus_types::inventory::SourceNatConfigGeneric;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::DNS_OPTE_IPV6_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -414,7 +414,7 @@ pub struct ExternalNetworkingChoice {
 
 #[derive(Debug, Clone)]
 pub struct ExternalSnatNetworkingChoice {
-    pub snat_cfg: SourceNatConfig,
+    pub snat_cfg: SourceNatConfigGeneric,
     pub nic_ip_config: PrivateIpConfig,
     pub nic_mac: MacAddr,
 }
@@ -575,7 +575,7 @@ impl ExternalIpAllocator {
 
     fn claim_next_snat_ip(
         &mut self,
-    ) -> Result<SourceNatConfig, ExternalNetworkingError> {
+    ) -> Result<SourceNatConfigGeneric, ExternalNetworkingError> {
         // Prefer reusing an existing SNAT IP, if we still have port ranges
         // available on that ip.
         for (ip, used_port_ranges) in self.used_snat_ips.iter_mut() {
@@ -618,7 +618,7 @@ enum SnatPortRange {
 }
 
 impl SnatPortRange {
-    fn into_source_nat_config(self, ip: IpAddr) -> SourceNatConfig {
+    fn into_source_nat_config(self, ip: IpAddr) -> SourceNatConfigGeneric {
         let first = match self {
             SnatPortRange::One => 0,
             SnatPortRange::Two => NUM_SOURCE_NAT_PORTS,
@@ -630,9 +630,10 @@ impl SnatPortRange {
         let last = first + (NUM_SOURCE_NAT_PORTS - 1);
 
         // By construction our (first, last) pair is aligned, so we can unwrap
-        // here. We'll use an explicit match to guard against `SourceNatConfig`
-        // gaining other kinds of validation we're currently not aware of.
-        match SourceNatConfig::new(ip, first, last) {
+        // here. We'll use an explicit match to guard against
+        // `SourceNatConfigGeneric` gaining other kinds of validation we're
+        // currently not aware of.
+        match SourceNatConfigGeneric::new(ip, first, last) {
             Ok(cfg) => cfg,
             Err(SourceNatConfigError::UnalignedPortPair { .. }) => {
                 unreachable!("port pair guaranteed aligned: {first}, {last}");

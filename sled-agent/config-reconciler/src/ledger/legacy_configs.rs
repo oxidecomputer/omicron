@@ -16,6 +16,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_types::inventory::v9::OmicronSledConfig as OmicronSledConfigV9;
 use sled_agent_types::inventory::v9::OmicronZoneConfig as OmicronZoneConfigV9;
+use sled_agent_types::inventory::v10::OmicronSledConfig as OmicronSledConfigV10;
 use slog::Logger;
 use slog::error;
 use slog::warn;
@@ -45,9 +46,14 @@ pub(super) async fn try_convert_v9_sled_config(
 ) -> Option<OmicronSledConfig> {
     let old =
         Ledger::<OmicronSledConfigLocal>::new(log, datasets.clone()).await?;
-    let new_config = old.into_inner().0.try_into().unwrap_or_else(|e| {
+    let new_config = OmicronSledConfigV10::try_from(old.into_inner().0).unwrap_or_else(|e| {
         panic!(
-            "Failed to convert OmicronSledConfigV9 to the current version: {e}"
+            "Failed to convert OmicronSledConfigV9 to the OmicronSledConfigV10: {e}"
+        )
+    });
+    let new_config = new_config.try_into().unwrap_or_else(|e| {
+        panic!(
+            "Failed to convert OmicronSledConfigV10 to the curent version: {e}"
         )
     });
     write_converted_ledger(
@@ -138,9 +144,13 @@ pub(super) async fn convert_legacy_ledgers(
     // instead. This conversion _is_ fallible. Unfortunately, if it fails,
     // there's nothing we can do. That conversion is determinstic, so doing it
     // again won't change the result.
+    let sled_config = OmicronSledConfigV10::try_from(sled_config)
+        .unwrap_or_else(|e| panic!(
+            "Failed to convert OmicronSledConfigV9 to OmicronSledConfigV10: {e}"
+        ));
     let sled_config = OmicronSledConfig::try_from(sled_config)
         .unwrap_or_else(|e| panic!(
-            "Failed to convert OmicronSledConfigV9 to the current version: {e}"
+            "Failed to convert OmicronSledConfigV10 to the current version: {e}"
         ));
 
     // Write the newly-merged config to disk.
@@ -395,8 +405,10 @@ pub(super) mod tests {
             tokio::fs::read_to_string(dst_file).await.unwrap().as_str(),
         )
         .expect("successfully converted config");
-        let new = OmicronSledConfig::try_from(new_as_v9)
+        let new_as_v10 = OmicronSledConfigV10::try_from(new_as_v9)
             .expect("successfully converted v9 config");
+        let new = OmicronSledConfig::try_from(new_as_v10)
+            .expect("successfully converted v10 config");
         assert_eq!(new, converted);
         logctx.cleanup_successful();
     }

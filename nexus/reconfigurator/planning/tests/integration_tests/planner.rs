@@ -63,7 +63,7 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::PrivateIpConfig;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::SourceNatConfigGeneric;
 use omicron_common::disk::DatasetKind;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
@@ -4501,7 +4501,7 @@ fn test_update_boundary_ntp() {
                 },
                 external_ip: OmicronZoneExternalSnatIp {
                     id: ExternalIpUuid::new_v4(),
-                    snat_cfg: SourceNatConfig::new(
+                    snat_cfg: SourceNatConfigGeneric::new(
                         IpAddr::V6(Ipv6Addr::LOCALHOST),
                         0,
                         0x4000 - 1,
