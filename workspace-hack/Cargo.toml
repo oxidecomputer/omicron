@@ -94,7 +94,8 @@ openapiv3 = { version = "2.2.0", default-features = false, features = ["skip_ser
 peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.2" }
-petgraph = { version = "0.6.5", features = ["serde-1"] }
+petgraph-3b31131e45eafb45 = { package = "petgraph", version = "0.6.5", features = ["serde-1"] }
+petgraph-c38e5c1d305a1b54 = { package = "petgraph", version = "0.8.2", features = ["serde-1"] }
 phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 portable-atomic = { version = "1.11.0" }
@@ -234,7 +235,8 @@ openapiv3 = { version = "2.2.0", default-features = false, features = ["skip_ser
 peg-runtime = { version = "0.8.5", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 percent-encoding = { version = "2.3.2" }
-petgraph = { version = "0.6.5", features = ["serde-1"] }
+petgraph-3b31131e45eafb45 = { package = "petgraph", version = "0.6.5", features = ["serde-1"] }
+petgraph-c38e5c1d305a1b54 = { package = "petgraph", version = "0.8.2", features = ["serde-1"] }
 phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 portable-atomic = { version = "1.11.0" }
