@@ -1601,38 +1601,6 @@ pub struct PlanningInputBuilder {
 }
 
 impl PlanningInputBuilder {
-    /*
-    pub fn empty_input() -> PlanningInput {
-        // This empty input is known to be valid.
-        PlanningInput {
-            policy: Policy {
-                external_ips: ExternalIpPolicy::empty(),
-                target_boundary_ntp_zone_count: 0,
-                target_nexus_zone_count: 0,
-                target_internal_dns_zone_count: 0,
-                target_oximeter_zone_count: 0,
-                target_cockroachdb_zone_count: 0,
-                target_cockroachdb_cluster_version:
-                    CockroachDbClusterVersion::POLICY,
-                target_crucible_pantry_zone_count: 0,
-                clickhouse_policy: None,
-                oximeter_read_policy: OximeterReadPolicy::new(1),
-                tuf_repo: TufRepoPolicy::initial(),
-                old_repo: TufRepoPolicy::initial(),
-                planner_config: PlannerConfig::default(),
-            },
-            internal_dns_version: Generation::new(),
-            external_dns_version: Generation::new(),
-            cockroachdb_settings: CockroachDbSettings::empty(),
-            sleds: BTreeMap::new(),
-            network_resources: OmicronZoneNetworkResources::new(),
-            ignore_impossible_mgs_updates_since: Utc::now(),
-            active_nexus_zones: BTreeSet::new(),
-            not_yet_nexus_zones: BTreeSet::new(),
-        }
-    }
-    */
-
     // TODO-john docs
     pub fn new(
         parent_blueprint: Arc<Blueprint>,
