@@ -287,29 +287,26 @@ async fn test_cache_ttl_driven_refresh() {
     const GROUP_NAME: &str = "ttl-test-group";
     const INSTANCE_NAME: &str = "ttl-test-instance";
 
-    // Load default test config and customize TTLs
-    let mut config = nexus_test_utils::load_test_config();
-
-    // Set short cache TTLs for testing (2 seconds for sled cache)
-    config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
-        chrono::TimeDelta::seconds(2).to_std().unwrap();
-    config.pkg.background_tasks.multicast_reconciler.backplane_cache_ttl_secs =
-        chrono::TimeDelta::seconds(1).to_std().unwrap();
-
-    // Ensure multicast is enabled
-    config.pkg.multicast.enabled = true;
-
     // Start test server with custom config
-    let cptestctx =
-        nexus_test_utils::test_setup_with_config::<omicron_nexus::Server>(
-            "test_cache_ttl_driven_refresh",
-            &mut config,
-            omicron_sled_agent::sim::SimMode::Explicit,
-            None,
-            0,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
-        )
-        .await;
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+        "test_cache_ttl_driven_refresh",
+    )
+    .customize_nexus_config(&|config| {
+        // Set short cache TTLs for testing (2 seconds for sled cache)
+        config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
+            chrono::TimeDelta::seconds(2).to_std().unwrap();
+        config
+            .pkg
+            .background_tasks
+            .multicast_reconciler
+            .backplane_cache_ttl_secs =
+            chrono::TimeDelta::seconds(1).to_std().unwrap();
+
+        // Ensure multicast is enabled
+        config.pkg.multicast.enabled = true;
+    })
+    .start::<omicron_nexus::Server>()
+    .await;
 
     ensure_multicast_test_ready(&cptestctx).await;
 
@@ -504,30 +501,29 @@ async fn test_backplane_cache_ttl_expiry() {
     const GROUP_NAME: &str = "backplane-ttl-group";
     const INSTANCE_NAME: &str = "backplane-ttl-instance";
 
-    // Load default test config and customize TTLs
-    let mut config = nexus_test_utils::load_test_config();
+    let cptestctx = nexus_test_utils::ControlPlaneBuilder::new(
+        "test_backplane_cache_ttl_expiry",
+    )
+    .customize_nexus_config(&|config| {
+        // Set backplane cache TTL to 1 second (shorter than sled cache to test
+        // independently)
+        config
+            .pkg
+            .background_tasks
+            .multicast_reconciler
+            .backplane_cache_ttl_secs =
+            chrono::TimeDelta::seconds(1).to_std().unwrap();
 
-    // Set backplane cache TTL to 1 second (shorter than sled cache to test independently)
-    config.pkg.background_tasks.multicast_reconciler.backplane_cache_ttl_secs =
-        chrono::TimeDelta::seconds(1).to_std().unwrap();
-    // Keep sled cache TTL longer to ensure we're testing backplane cache expiry
-    config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
-        chrono::TimeDelta::seconds(10).to_std().unwrap();
+        // Keep sled cache TTL longer to ensure we're testing backplane cache
+        // expiry
+        config.pkg.background_tasks.multicast_reconciler.sled_cache_ttl_secs =
+            chrono::TimeDelta::seconds(10).to_std().unwrap();
 
-    // Ensure multicast is enabled
-    config.pkg.multicast.enabled = true;
-
-    // Start test server with custom config
-    let cptestctx =
-        nexus_test_utils::test_setup_with_config::<omicron_nexus::Server>(
-            "test_backplane_cache_ttl_expiry",
-            &mut config,
-            omicron_sled_agent::sim::SimMode::Explicit,
-            None,
-            0,
-            gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG.into(),
-        )
-        .await;
+        // Ensure multicast is enabled
+        config.pkg.multicast.enabled = true;
+    })
+    .start::<omicron_nexus::Server>()
+    .await;
 
     ensure_multicast_test_ready(&cptestctx).await;
 

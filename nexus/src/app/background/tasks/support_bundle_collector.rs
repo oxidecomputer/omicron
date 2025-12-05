@@ -61,6 +61,7 @@ use sha2::{Digest, Sha256};
 use sled_agent_types::support_bundle::NESTED_DATASET_NOT_FOUND;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
 use std::io::Write;
@@ -89,11 +90,8 @@ fn authz_support_bundle_from_id(id: SupportBundleUuid) -> authz::SupportBundle {
     authz::SupportBundle::new(authz::FLEET, id, LookupType::by_id(id))
 }
 
-// Describes how support bundle data is selected.
-//
-// Multiple values of this enum are joined together into a HashSet.
-// Categories should be additive.
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+// Describes the category of support bundle data.
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 enum BundleDataCategory {
     // Collects reconfigurator state (some of the latest blueprints,
     // information about the target blueprint).
@@ -105,6 +103,96 @@ enum BundleDataCategory {
     SledCubbyInfo,
     // Saves task dumps from SPs.
     SpDumps,
+    // Collects ereports
+    Ereports,
+}
+
+// Specifies what data to collect for a bundle data category.
+//
+// Each variant corresponds to a BundleDataCategory.
+// For categories without additional parameters, the variant is a unit variant.
+// For categories that can be filtered or configured, the variant contains
+// that configuration data.
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum BundleData {
+    Reconfigurator,
+    HostInfo(HashSet<SledSelection>),
+    SledCubbyInfo,
+    SpDumps,
+    Ereports(EreportFilters),
+}
+
+impl BundleData {
+    fn category(&self) -> BundleDataCategory {
+        match self {
+            Self::Reconfigurator => BundleDataCategory::Reconfigurator,
+            Self::HostInfo(_) => BundleDataCategory::HostInfo,
+            Self::SledCubbyInfo => BundleDataCategory::SledCubbyInfo,
+            Self::SpDumps => BundleDataCategory::SpDumps,
+            Self::Ereports(_) => BundleDataCategory::Ereports,
+        }
+    }
+}
+
+// A collection of bundle data specifications.
+//
+// This wrapper ensures that categories and data always match - you can't
+// insert (BundleDataCategory::Reconfigurator, BundleData::SpDumps)
+// because each BundleData determines its own category.
+#[derive(Debug, Clone)]
+struct BundleDataSelection {
+    data: HashMap<BundleDataCategory, BundleData>,
+}
+
+impl BundleDataSelection {
+    fn new() -> Self {
+        Self { data: HashMap::new() }
+    }
+
+    // Inserts BundleData to be queried for a particular category within the
+    // bundle.
+    //
+    // Each category of data can only be specified once (e.g., inserting
+    // BundleData::HostInfo multiple times will only use the most-recently
+    // inserted specification)
+    fn insert(&mut self, bundle_data: BundleData) {
+        self.data.insert(bundle_data.category(), bundle_data);
+    }
+
+    fn contains(&self, category: BundleDataCategory) -> bool {
+        self.data.contains_key(&category)
+    }
+
+    fn get(&self, category: BundleDataCategory) -> Option<&BundleData> {
+        self.data.get(&category)
+    }
+}
+
+impl FromIterator<BundleData> for BundleDataSelection {
+    fn from_iter<T: IntoIterator<Item = BundleData>>(iter: T) -> Self {
+        let mut selection = Self::new();
+        for bundle_data in iter {
+            selection.insert(bundle_data);
+        }
+        selection
+    }
+}
+
+impl Default for BundleDataSelection {
+    fn default() -> Self {
+        [
+            BundleData::Reconfigurator,
+            BundleData::HostInfo(HashSet::from([SledSelection::All])),
+            BundleData::SledCubbyInfo,
+            BundleData::SpDumps,
+            BundleData::Ereports(EreportFilters {
+                start_time: Some(chrono::Utc::now() - chrono::Days::new(7)),
+                ..EreportFilters::default()
+            }),
+        ]
+        .into_iter()
+        .collect()
+    }
 }
 
 // The set of sleds to include
@@ -127,40 +215,45 @@ struct BundleRequest {
     transfer_chunk_size: NonZeroU64,
 
     // The set of data to be included within this bundle.
-    data_selection: HashSet<BundleDataCategory>,
-
-    // The set of sleds to be included within this bundle.
     //
-    // NOTE: This selection is only considered if "data_selection" requests
-    // data from sleds.
-    sled_selection: HashSet<SledSelection>,
-
-    // The set of ereports to be included within this bundle.
-    //
-    // "None" causes ereports to be skipped.
-    ereport_query: Option<EreportFilters>,
+    // Maps each category to its filter. If a category is not in the map,
+    // it is excluded from the bundle.
+    data_selection: BundleDataSelection,
 }
 
 impl BundleRequest {
     fn include_reconfigurator_data(&self) -> bool {
-        self.data_selection.contains(&BundleDataCategory::Reconfigurator)
+        self.data_selection.contains(BundleDataCategory::Reconfigurator)
     }
 
     fn include_host_info(&self) -> bool {
-        self.data_selection.contains(&BundleDataCategory::HostInfo)
+        self.data_selection.contains(BundleDataCategory::HostInfo)
     }
 
-    fn include_sled(&self, id: SledUuid) -> bool {
-        self.sled_selection.contains(&SledSelection::Specific(id))
-            || self.sled_selection.contains(&SledSelection::All)
+    fn include_sled_host_info(&self, id: SledUuid) -> bool {
+        let selection =
+            match self.data_selection.get(BundleDataCategory::HostInfo) {
+                Some(BundleData::HostInfo(selection)) => selection,
+                _ => return false,
+            };
+
+        selection.contains(&SledSelection::Specific(id))
+            || selection.contains(&SledSelection::All)
+    }
+
+    fn get_ereport_filters(&self) -> Option<&EreportFilters> {
+        match self.data_selection.get(BundleDataCategory::Ereports) {
+            Some(BundleData::Ereports(filters)) => Some(filters),
+            _ => None,
+        }
     }
 
     fn include_sled_cubby_info(&self) -> bool {
-        self.data_selection.contains(&BundleDataCategory::SledCubbyInfo)
+        self.data_selection.contains(BundleDataCategory::SledCubbyInfo)
     }
 
     fn include_sp_dumps(&self) -> bool {
-        self.data_selection.contains(&BundleDataCategory::SpDumps)
+        self.data_selection.contains(BundleDataCategory::SpDumps)
     }
 }
 
@@ -168,17 +261,7 @@ impl Default for BundleRequest {
     fn default() -> Self {
         Self {
             transfer_chunk_size: CHUNK_SIZE,
-            data_selection: HashSet::from([
-                BundleDataCategory::Reconfigurator,
-                BundleDataCategory::HostInfo,
-                BundleDataCategory::SledCubbyInfo,
-                BundleDataCategory::SpDumps,
-            ]),
-            sled_selection: HashSet::from([SledSelection::All]),
-            ereport_query: Some(EreportFilters {
-                start_time: Some(chrono::Utc::now() - chrono::Days::new(7)),
-                ..EreportFilters::default()
-            }),
+            data_selection: BundleDataSelection::default(),
         }
     }
 }
@@ -591,7 +674,7 @@ impl CollectionStep {
                 warn!(
                     collection.log,
                     "Step failed";
-                    "name" => &self.name,
+                    "step" => &self.name,
                     InlineErrorChain::new(err.as_ref()),
                 );
             })
@@ -929,7 +1012,7 @@ impl BundleCollection {
                     let collection = self.clone();
                     let dir = output.path().to_path_buf();
                     async move {
-                        debug!(collection.log, "Running step"; "name" => &step.name);
+                        debug!(collection.log, "Running step"; "step" => &step.name);
                         step.run(&collection, dir.as_path()).await
                     }
                 }).await;
@@ -1252,7 +1335,7 @@ impl BundleCollection {
 
         let mut extra_steps: Vec<CollectionStep> = vec![];
         for sled in all_sleds {
-            if !self.request.include_sled(sled.id()) {
+            if !self.request.include_sled_host_info(sled.id()) {
                 continue;
             }
 
@@ -1284,9 +1367,7 @@ impl BundleCollection {
         sled: &nexus_db_model::Sled,
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
-        if !self.request.include_host_info()
-            || !self.request.include_sled(sled.id())
-        {
+        if !self.request.include_sled_host_info(sled.id()) {
             return Ok(CollectionStepOutput::Skipped);
         }
 
@@ -1301,20 +1382,25 @@ impl BundleCollection {
         tokio::fs::write(sled_path.join("sled.txt"), format!("{sled:?}"))
             .await?;
 
-        let Ok(sled_client) = nexus_networking::sled_client(
+        let sled_client = match nexus_networking::sled_client(
             &self.datastore,
             &self.opctx,
             sled.id(),
             log,
         )
         .await
-        else {
-            tokio::fs::write(
-                sled_path.join("error.txt"),
-                "Could not contact sled",
-            )
-            .await?;
-            bail!("Could not contact sled");
+        {
+            Ok(client) => client,
+            Err(err) => {
+                tokio::fs::write(
+                    sled_path.join("error.txt"),
+                    "Could not contact sled",
+                )
+                .await.with_context(|| {
+                    format!("Failed to save 'error.txt' to bundle when recording error: {err}")
+                })?;
+                bail!("Could not contact sled: {err}");
+            }
         };
 
         // NB: As new sled-diagnostic commands are added they should
@@ -1426,7 +1512,7 @@ impl BundleCollection {
         self: &Arc<Self>,
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
-        let Some(ref ereport_filters) = self.request.ereport_query else {
+        let Some(ereport_filters) = self.request.get_ereport_filters() else {
             debug!(self.log, "Support bundle: ereports not requested");
             return Ok(CollectionStepOutput::Skipped);
         };
@@ -2397,12 +2483,10 @@ mod test {
         );
 
         // The bundle collection should complete successfully.
-        let request = BundleRequest {
-            // NOTE: The support bundle querying interface isn't supported on
-            // the simulated sled agent (yet?) so we're skipping this step.
-            sled_selection: HashSet::new(),
-            ..Default::default()
-        };
+        // NOTE: The support bundle querying interface isn't supported on
+        // the simulated sled agent (yet?) so we're using an empty sled selection.
+        let mut request = BundleRequest::default();
+        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -2483,9 +2567,14 @@ mod test {
         // to get split up.
         let request = BundleRequest {
             transfer_chunk_size: NonZeroU64::new(16).unwrap(),
-            sled_selection: HashSet::new(),
-            ereport_query: None,
-            ..Default::default()
+            data_selection: [
+                BundleData::Reconfigurator,
+                BundleData::HostInfo(HashSet::new()),
+                BundleData::SledCubbyInfo,
+                BundleData::SpDumps,
+            ]
+            .into_iter()
+            .collect(),
         };
 
         let report = collector
@@ -2581,10 +2670,8 @@ mod test {
         );
 
         // Each time we call "collect_bundle", we collect a SINGLE bundle.
-        let request = BundleRequest {
-            sled_selection: HashSet::new(),
-            ..Default::default()
-        };
+        let mut request = BundleRequest::default();
+        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -2748,10 +2835,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let request = BundleRequest {
-            sled_selection: HashSet::new(),
-            ..Default::default()
-        };
+        let mut request = BundleRequest::default();
+        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -2905,10 +2990,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let request = BundleRequest {
-            sled_selection: HashSet::new(),
-            ..Default::default()
-        };
+        let mut request = BundleRequest::default();
+        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -2992,10 +3075,8 @@ mod test {
             false,
             nexus.id(),
         );
-        let request = BundleRequest {
-            sled_selection: HashSet::new(),
-            ..Default::default()
-        };
+        let mut request = BundleRequest::default();
+        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await
@@ -3080,10 +3161,8 @@ mod test {
         );
 
         // Collect the bundle
-        let request = BundleRequest {
-            sled_selection: HashSet::new(),
-            ..Default::default()
-        };
+        let mut request = BundleRequest::default();
+        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
         let report = collector
             .collect_bundle(&opctx, &request)
             .await

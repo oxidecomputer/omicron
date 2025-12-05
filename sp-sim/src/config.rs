@@ -5,6 +5,7 @@
 //! Interfaces for parsing configuration files and working with a simulated SP
 //! configuration
 
+use crate::FAKE_GIMLET_MODEL;
 use crate::sensors;
 use dropshot::ConfigLogging;
 use gateway_messages::DeviceCapabilities;
@@ -83,6 +84,10 @@ pub struct SpCabooses {
     pub stage0_next: Caboose,
 }
 
+fn default_part_number() -> String {
+    FAKE_GIMLET_MODEL.to_string()
+}
+
 /// Common configuration for all flavors of SP
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SpCommonConfig {
@@ -92,6 +97,9 @@ pub struct SpCommonConfig {
     /// Network config for the (fake) ereport UDP ports.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ereport_network_config: Option<[NetworkConfig; 2]>,
+    /// Fake part number
+    #[serde(default = "default_part_number")]
+    pub part_number: String,
     /// Fake serial number
     pub serial_number: String,
     /// 32-byte seed to create a manufacturing root certificate.

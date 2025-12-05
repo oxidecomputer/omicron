@@ -155,7 +155,7 @@ members = [
     "wicketd",
     "wicketd-api",
     "workspace-hack",
-    "zone-setup",
+    "zone-setup"
 ]
 
 default-members = [
@@ -441,9 +441,9 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { git = "https://github.com/oxidecomputer/dendrite", rev = "cc8e02a0800034c431c8cf96b889ea638da3d194" }
-dropshot = { version = "0.16.3", features = [ "usdt-probes" ] }
-dropshot-api-manager = "0.2.3"
-dropshot-api-manager-types = "0.2.3"
+dropshot = { version = "0.16.5", features = [ "usdt-probes" ] }
+dropshot-api-manager = "0.2.4"
+dropshot-api-manager-types = "0.2.4"
 dyn-clone = "1.0.20"
 either = "1.15.0"
 ereport-types = { path = "ereport/types" }
@@ -573,7 +573,7 @@ nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
-nix = { version = "0.30", features = ["net"] }
+nix = { version = "0.30", features = ["fs", "net"] }
 nom = "7.1.3"
 num-integer = "0.1.46"
 num = { version = "0.4.3", default-features = false, features = [ "libm" ] }
@@ -755,7 +755,7 @@ termtree = "0.5.1"
 textwrap = { version = "0.16.2", features = [ "terminal_size" ] }
 test-strategy = "0.4.3"
 thiserror = "2.0"
-tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
+tofino = { git = "https://github.com/oxidecomputer/tofino" }
 tokio = "1.47.0"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.17"
