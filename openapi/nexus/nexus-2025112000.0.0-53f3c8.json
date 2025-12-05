@@ -3620,7 +3620,7 @@
           "instances"
         ],
         "summary": "Create instance",
-        "operationId": "v1_instance_create",
+        "operationId": "instance_create",
         "parameters": [
           {
             "in": "query",
@@ -3712,7 +3712,7 @@
           "instances"
         ],
         "summary": "Update instance",
-        "operationId": "v1_instance_update",
+        "operationId": "instance_update",
         "parameters": [
           {
             "in": "query",
@@ -4283,7 +4283,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "List multicast groups for an instance.",
+        "summary": "List multicast groups for instance",
         "operationId": "instance_multicast_group_list",
         "parameters": [
           {
@@ -4329,8 +4329,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Join a multicast group.",
-        "description": "The group can be specified by name or UUID. This endpoint does not accept a request body.",
+        "summary": "Join multicast group.",
+        "description": "This is functionally equivalent to adding the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.",
         "operationId": "instance_multicast_group_join",
         "parameters": [
           {
@@ -4383,8 +4383,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Leave a multicast group.",
-        "description": "The group can be specified by name or UUID.",
+        "summary": "Leave multicast group.",
+        "description": "This is functionally equivalent to removing the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.",
         "operationId": "instance_multicast_group_leave",
         "parameters": [
           {
@@ -6033,7 +6033,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "List multicast groups.",
+        "summary": "List all multicast groups.",
         "operationId": "multicast_group_list",
         "parameters": [
           {
@@ -6091,8 +6091,8 @@
           "experimental"
         ],
         "summary": "Create a multicast group.",
-        "description": "Deprecated: Groups are created implicitly when adding members in newer API versions.",
-        "operationId": "v1_multicast_group_create",
+        "description": "Multicast groups are fleet-scoped resources that can be joined by instances across projects and silos. A single multicast IP serves all group members regardless of project or silo boundaries.",
+        "operationId": "multicast_group_create",
         "requestBody": {
           "content": {
             "application/json": {
@@ -6129,7 +6129,6 @@
           "experimental"
         ],
         "summary": "Fetch a multicast group.",
-        "description": "The group can be specified by name or UUID.",
         "operationId": "multicast_group_view",
         "parameters": [
           {
@@ -6166,8 +6165,7 @@
           "experimental"
         ],
         "summary": "Update a multicast group.",
-        "description": "Deprecated: groups are managed implicitly through member operations.",
-        "operationId": "v1_multicast_group_update",
+        "operationId": "multicast_group_update",
         "parameters": [
           {
             "in": "path",
@@ -6213,8 +6211,7 @@
           "experimental"
         ],
         "summary": "Delete a multicast group.",
-        "description": "Deprecated: groups are deleted automatically when the last member leaves.",
-        "operationId": "v1_multicast_group_delete",
+        "operationId": "multicast_group_delete",
         "parameters": [
           {
             "in": "path",
@@ -6245,7 +6242,6 @@
           "experimental"
         ],
         "summary": "List members of a multicast group.",
-        "description": "The group can be specified by name or UUID.",
         "operationId": "multicast_group_member_list",
         "parameters": [
           {
@@ -6312,7 +6308,7 @@
           "experimental"
         ],
         "summary": "Add instance to a multicast group.",
-        "description": "The group can be specified by name or UUID.",
+        "description": "Functionally equivalent to updating the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger the same reconciliation logic.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
         "operationId": "multicast_group_member_add",
         "parameters": [
           {
@@ -6369,7 +6365,7 @@
           "experimental"
         ],
         "summary": "Remove instance from a multicast group.",
-        "description": "The group can be specified by name or UUID.",
+        "description": "Functionally equivalent to removing the group from the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger reconciliation.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
         "operationId": "multicast_group_member_remove",
         "parameters": [
           {
@@ -9632,8 +9628,7 @@
           "experimental"
         ],
         "summary": "Look up multicast group by IP address.",
-        "description": "Deprecated: use the main view endpoint which accepts IP addresses directly.",
-        "operationId": "v1_lookup_multicast_group_by_ip",
+        "operationId": "lookup_multicast_group_by_ip",
         "parameters": [
           {
             "in": "path",
@@ -21049,7 +21044,7 @@
         ]
       },
       "InstanceCreate": {
-        "description": "Create-time parameters for an `Instance`.",
+        "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
           "anti_affinity_groups": {
@@ -21062,7 +21057,7 @@
           },
           "auto_restart_policy": {
             "nullable": true,
-            "description": "The auto-restart policy for this instance.",
+            "description": "The auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy will be explicitly configured for this instance, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
             "default": null,
             "allOf": [
               {
@@ -21072,7 +21067,7 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "The disk the instance is configured to boot from.",
+            "description": "The disk the instance is configured to boot from.\n\nThis disk can either be attached if it already exists or created along with the instance.\n\nSpecifying a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped. The boot disk counts against the disk attachment limit.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
             "default": null,
             "allOf": [
               {
@@ -21082,7 +21077,7 @@
           },
           "cpu_platform": {
             "nullable": true,
-            "description": "The CPU platform to be used for this instance.",
+            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform; when it is started the instance will have the most general CPU platform supported by the sled it is initially placed on.",
             "default": null,
             "allOf": [
               {
@@ -21094,7 +21089,7 @@
             "type": "string"
           },
           "disks": {
-            "description": "A list of disks to be attached to the instance.",
+            "description": "A list of disks to be attached to the instance.\n\nDisk attachments of type \"create\" will be created, while those of type \"attach\" must already exist.\n\nThe order of this list does not guarantee a boot order for the instance. Use the boot_disk attribute to specify a boot disk. When boot_disk is specified it will count against the disk attachment limit.",
             "default": [],
             "type": "array",
             "items": {
@@ -21102,7 +21097,7 @@
             }
           },
           "external_ips": {
-            "description": "The external IP addresses provided to this instance.",
+            "description": "The external IP addresses provided to this instance.\n\nBy default, all instances have outbound connectivity, but no inbound connectivity. These external addresses can be used to provide a fixed, known IP address for making inbound connections to the instance.",
             "default": [],
             "type": "array",
             "items": {
@@ -21126,7 +21121,7 @@
             ]
           },
           "multicast_groups": {
-            "description": "Multicast groups this instance should be joined to upon creation.\n\nProvide a list of multicast group names or UUIDs. Newer API versions also accept multicast IP addresses.",
+            "description": "The multicast groups this instance should join.\n\nThe instance will be automatically added as a member of the specified multicast groups during creation, enabling it to send and receive multicast traffic for those groups.",
             "default": [],
             "type": "array",
             "items": {
@@ -21157,7 +21152,7 @@
           },
           "ssh_public_keys": {
             "nullable": true,
-            "description": "An allowlist of SSH public keys to be transferred to the instance via cloud-init during instance creation.",
+            "description": "An allowlist of SSH public keys to be transferred to the instance via cloud-init during instance creation.\n\nIf not provided, all SSH public keys from the user's profile will be sent. If an empty list is provided, no public keys will be transmitted to the instance.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NameOrId"
@@ -21623,7 +21618,7 @@
         "properties": {
           "auto_restart_policy": {
             "nullable": true,
-            "description": "The auto-restart policy for this instance.",
+            "description": "The auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, any explicitly configured auto-restart policy will be unset, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
@@ -21632,7 +21627,7 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "The disk the instance is configured to boot from.",
+            "description": "The disk the instance is configured to boot from.\n\nSetting a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped. The boot disk counts against the disk attachment limit.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
@@ -21641,7 +21636,7 @@
           },
           "cpu_platform": {
             "nullable": true,
-            "description": "The CPU platform to be used for this instance.",
+            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform; when it is started the instance will have the most general CPU platform supported by the sled it is initially placed on.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceCpuPlatform"
@@ -21658,7 +21653,8 @@
           },
           "multicast_groups": {
             "nullable": true,
-            "description": "Multicast groups this instance should join.\n\nWhen specified, this replaces the instance's current multicast group membership with the new set of groups. The instance will leave any groups not listed here and join any new groups that are specified.\n\nIf not provided (None), the instance's multicast group membership will not be changed.\n\nAccepts group names or UUIDs. Newer API versions also accept multicast IP addresses.",
+            "description": "Multicast groups this instance should join.\n\nWhen specified, this replaces the instance's current multicast group membership with the new set of groups. The instance will leave any groups not listed here and join any new groups that are specified.\n\nIf not provided (None), the instance's multicast group membership will not be changed.",
+            "default": null,
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NameOrId"
@@ -22987,6 +22983,13 @@
             "type": "string",
             "format": "ip"
           },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. None means no VLAN tagging on egress.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -23082,7 +23085,7 @@
         ]
       },
       "MulticastGroupMember": {
-        "description": "View of a Multicast Group Member.\n\nThis version doesn't have the `multicast_ip` field which was added later.",
+        "description": "View of a Multicast Group Member (instance belonging to a multicast group)",
         "type": "object",
         "properties": {
           "description": {
@@ -23203,8 +23206,6 @@
         "properties": {
           "description": {
             "nullable": true,
-            "description": "New description for the multicast group",
-            "default": null,
             "type": "string"
           },
           "mvlan": {
@@ -23216,8 +23217,6 @@
           },
           "name": {
             "nullable": true,
-            "description": "New name for the multicast group",
-            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -23226,7 +23225,6 @@
           },
           "source_ips": {
             "nullable": true,
-            "description": "Update source IPs for SSM",
             "type": "array",
             "items": {
               "type": "string",

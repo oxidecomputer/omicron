@@ -14,6 +14,7 @@
 //! - Has explicit [`MulticastGroupCreate`] and [`MulticastGroupUpdate`] types
 //!   (newer versions create/delete groups implicitly via member operations).
 //! - [`MulticastGroupMemberAdd`] doesn't have `source_ips` field.
+//! - [`MulticastGroup`] view includes `mvlan` field (always `None`, field was removed).
 //!
 //! [`MulticastGroupIdentifier`]: params::MulticastGroupIdentifier
 //! [`NameOrId`]: omicron_common::api::external::NameOrId
@@ -29,9 +30,9 @@ use nexus_types::external_api::params::UserData;
 use nexus_types::external_api::{params, views};
 use nexus_types::multicast::MulticastGroupCreate as InternalMulticastGroupCreate;
 use omicron_common::api::external::{
-    ByteCount, Hostname, IdentityMetadataCreateParams,
+    ByteCount, Hostname, IdentityMetadata, IdentityMetadataCreateParams,
     InstanceAutoRestartPolicy, InstanceCpuCount, InstanceCpuPlatform, Name,
-    NameOrId, Nullable,
+    NameOrId, Nullable, ObjectIdentity,
 };
 use omicron_common::vlan::VlanID;
 use params::{
@@ -99,18 +100,18 @@ impl From<InstanceMulticastGroupPath> for params::InstanceMulticastGroupPath {
 pub struct MulticastGroupCreate {
     pub name: Name,
     pub description: String,
-    /// The multicast IP address to allocate. If None, one will be allocated
+    /// The multicast IP address to allocate. If `None`, one will be allocated
     /// from the default pool.
     #[serde(default)]
     pub multicast_ip: Option<IpAddr>,
     /// Source IP addresses for Source-Specific Multicast (SSM).
     ///
-    /// None uses default behavior (Any-Source Multicast).
+    /// `None` uses default behavior (Any-Source Multicast).
     /// Empty list explicitly allows any source (Any-Source Multicast).
     /// Non-empty list restricts to specific sources (SSM).
     #[serde(default)]
     pub source_ips: Option<Vec<IpAddr>>,
-    /// Name or ID of the IP pool to allocate from. If None, uses the default
+    /// Name or ID of the IP pool to allocate from. If `None`, uses the default
     /// multicast pool.
     #[serde(default)]
     pub pool: Option<NameOrId>,
@@ -209,6 +210,44 @@ impl From<views::MulticastGroupMember> for MulticastGroupMember {
             instance_id: v.instance_id,
             state: v.state,
         }
+    }
+}
+
+/// View of a Multicast Group
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct MulticastGroup {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The multicast IP address held by this resource.
+    pub multicast_ip: IpAddr,
+    /// Source IP addresses for Source-Specific Multicast (SSM).
+    /// Empty array means any source is allowed.
+    pub source_ips: Vec<IpAddr>,
+    /// Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks.
+    /// `None` means no VLAN tagging on egress.
+    pub mvlan: Option<VlanID>,
+    /// The ID of the IP pool this resource belongs to.
+    pub ip_pool_id: Uuid,
+    /// Current state of the multicast group.
+    pub state: String,
+}
+
+impl From<views::MulticastGroup> for MulticastGroup {
+    fn from(v: views::MulticastGroup) -> Self {
+        Self {
+            identity: v.identity,
+            multicast_ip: v.multicast_ip,
+            source_ips: v.source_ips,
+            mvlan: None, // Field removed, always `None` for backwards compat
+            ip_pool_id: v.ip_pool_id,
+            state: v.state,
+        }
+    }
+}
+
+impl ObjectIdentity for MulticastGroup {
+    fn identity(&self) -> &IdentityMetadata {
+        &self.identity
     }
 }
 
@@ -329,7 +368,7 @@ pub struct InstanceUpdate {
     /// membership with the new set of groups. The instance will leave any
     /// groups not listed here and join any new groups that are specified.
     ///
-    /// If not provided (None), the instance's multicast group membership
+    /// If not provided (`None`), the instance's multicast group membership
     /// will not be changed.
     ///
     /// Accepts group names or UUIDs. Newer API versions also accept multicast
