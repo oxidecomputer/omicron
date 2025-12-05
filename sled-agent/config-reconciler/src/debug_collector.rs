@@ -118,28 +118,75 @@ use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot;
 use zone::{Zone, ZoneError};
 
+// Names of ZFS dataset properties.  These are stable and documented in zfs(1M).
+
 const ZFS_PROP_USED: &str = "used";
 const ZFS_PROP_AVAILABLE: &str = "available";
 
+// Parameters related to management of storage on debug datasets
+
+/// Threshold of percent utilization for debug datasets above which we prefer to
+/// avoid using this dataset if others are available
+///
+/// This is also the target utilization when cleaning up old data.  We'll delete
+/// old data until a dataset reaches this level.
 const DATASET_USAGE_PERCENT_CHOICE: u64 = 70;
+
+/// Threshold of percent utilization for debug datasets above which we will try
+/// to switch to a different debug dataset or else trigger cleanup of old data
 const DATASET_USAGE_PERCENT_CLEANUP: u64 = 80;
 
+/// How frequently we move debug data (cores, log files, etc.) from their
+/// origins into debug datasets for long-term storage
 const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 
-// we sure are passing a lot of Utf8PathBufs around, let's be careful about it
+// Newtypes for distinguishing different types of filesystem paths
+
+/// Filesystem path to a block device that can be used as a dump device
+///
+/// This is generally a slice on an internal (M.2) device.
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
 struct DumpSlicePath(Utf8PathBuf);
+
+/// Filesystem path to the mountpoint of a ZFS dataset that's intended for
+/// storing debug data for the long term
+///
+/// This is generally on a removable (U.2) device.
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
 struct DebugDataset(Utf8PathBuf);
+
+/// Filesystem path to the mountpoint of a ZFS dataset that's available as the
+/// first place that user process core dumps get written
+///
+/// This is generally on an internal (M.2) device.
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
 struct CoreDataset(Utf8PathBuf);
 
+// Types that describe ZFS datasets that are used to store different kinds of
+// debug data
+
+/// Identifies a ZFS dataset to which user process core dumps may be written
+///
+/// Equivalently, identifies a pool on which there exists such a dataset.  These
+/// are equivalent because there is exactly one such dataset on any pool and it
+/// has a well-known name within the pool.  See the impl of `GetMountpoint` for
+/// what it is.
+///
+/// This pool is generally on an M.2 device.
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct CoreZpool {
     mount_config: Arc<MountConfig>,
     name: ZpoolName,
 }
 
+/// Identifies a ZFS dataset that's intended for long-term storage of debug data
+///
+/// Equivalently, identifies a pool on which there exists such a dataset.  These
+/// are equivalent because there is exactly one such dataset on any pool and it
+/// has a well-known name within the pool.  See the impl of `GetMountpoint` for
+/// what it is.
+///
+/// This pool is generally on an M.2 device.
 #[derive(AsRef, Clone, Debug, From)]
 pub(super) struct DebugZpool {
     mount_config: Arc<MountConfig>,
@@ -161,7 +208,8 @@ impl GetMountpoint for CoreZpool {
     }
 }
 
-// only want to access these directories after they're mounted!
+/// GetMountpoint provides a common interface for getting the mountpoint of a
+/// `DebugZpool` or `CoreZpool` dataset based on just the pool that it's on.
 trait GetMountpoint: AsRef<ZpoolName> {
     type NewType: From<Utf8PathBuf>;
     const MOUNTPOINT: &'static str;
@@ -172,6 +220,8 @@ trait GetMountpoint: AsRef<ZpoolName> {
         &self,
         invoker: &dyn ZfsInvoker,
     ) -> Result<Option<Self::NewType>, ZfsGetError> {
+        // It's important that we only access this directory if it's mounted.
+        // If not, return `None`.
         if invoker.zfs_get_prop(&self.as_ref().to_string(), "mounted")? == "yes"
         {
             Ok(Some(Self::NewType::from(invoker.mountpoint(
@@ -185,13 +235,25 @@ trait GetMountpoint: AsRef<ZpoolName> {
     }
 }
 
+/// Actor-style commands sent to the DebugCollectorWorker
+///
+/// These are sent from different places.
 #[derive(Debug)]
 enum DebugCollectorCmd {
+    /// Archive logs and other debug data from directory `zone_root`, which
+    /// corresponds to the root of a previously-running zone called `zone_name`.
+    /// Reply on `completion_tx` when finished.
+    ///
+    /// This message is sent from the DebugCollectorTask (outside this module).
     ArchiveFormerZoneRoot {
         zone_root: Utf8PathBuf,
         zone_name: String,
         completion_tx: oneshot::Sender<()>,
     },
+
+    /// Update the DebugCollector with details about the currently available
+    /// dump slices, debug datasets, and core datasets.  (See the corresponding
+    /// types above.)  Reply on `update_complete_tx` when finished.
     UpdateDumpdevSetup {
         dump_slices: Vec<DumpSlicePath>,
         debug_datasets: Vec<DebugZpool>,
@@ -200,27 +262,57 @@ enum DebugCollectorCmd {
     },
 }
 
+/// Operates the debug collector:
+///
+/// - receives and processes `DebugCollectorCmd` commands (see above)
+/// - configures dumpadm(8), savecore(8), and coreadm(8)
+/// - periodically archives log files and other debug data from running zones
+///
+/// This runs in its own tokio task.  More precisely, poll_file_archival() runs
+/// in its own tokio task and does all these things.
 struct DebugCollectorWorker {
+    /// list of ZFS datasets that can be used for saving process core dumps
     core_dataset_names: Vec<CoreZpool>,
+    /// list of ZFS datasets that can be used for long-term storage of
+    /// debug data
     debug_dataset_names: Vec<DebugZpool>,
 
+    /// currently-chosen dump device
     chosen_dump_slice: Option<DumpSlicePath>,
+    /// currently-chosen directory for long-term storage of new debug data
     chosen_debug_dir: Option<DebugDataset>,
+    /// currently-chosen directory for process core dumps
+    /// (before being moved to longer-term storage)
     chosen_core_dir: Option<CoreDataset>,
 
+    /// list of dump devices available
     known_dump_slices: Vec<DumpSlicePath>,
+    /// list of directories available for long-term storage of debug data
     known_debug_dirs: Vec<DebugDataset>,
+    /// list of directories available for process core dumps
     known_core_dirs: Vec<CoreDataset>,
 
+    /// list of dump devices that once contained a crash dump that has since
+    /// been saved to a debug directory
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
+
+    /// channel for receiving commands to update configuration, etc.
     rx: Receiver<DebugCollectorCmd>,
+
+    // helpers for invoking system functionality
+    // (abstracted behind traits for testing)
     coredumpadm_invoker: Box<dyn CoreDumpAdmInvoker + Send + Sync>,
     zfs_invoker: Box<dyn ZfsInvoker + Send + Sync>,
     zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
 }
 
+/// "External" handle to the debug collector
+///
+/// The DebugCollectorTask (a tiny task that passes information from the rest of
+/// sled agent to this subystem) has this handle and uses it to send commands to
+/// the DebugCollectorWorker.
 pub struct DebugCollector {
     tx: tokio::sync::mpsc::Sender<DebugCollectorCmd>,
     mount_config: Arc<MountConfig>,
@@ -411,6 +503,7 @@ enum ZfsGetError {
     Parse(#[from] std::num::ParseIntError),
 }
 
+/// Helper for invoking coreadm(8) and dumpadm(8), abstracted out for tests
 #[async_trait]
 trait CoreDumpAdmInvoker {
     fn coreadm(&self, core_dir: &Utf8PathBuf) -> Result<(), ExecutionError>;
@@ -421,6 +514,7 @@ trait CoreDumpAdmInvoker {
     ) -> Result<Option<OsString>, ExecutionError>;
 }
 
+/// Helper for interacting with ZFS filesystems, abstracted out for tests
 trait ZfsInvoker {
     fn zfs_get_prop(
         &self,
@@ -459,6 +553,7 @@ trait ZfsInvoker {
     ) -> Utf8PathBuf;
 }
 
+/// Helper for listing currently-running zones on the system
 #[async_trait]
 trait ZoneInvoker {
     async fn get_zones(&self) -> Result<Vec<Zone>, ArchiveLogsError>;
@@ -584,6 +679,8 @@ impl ZoneInvoker for RealZone {
     }
 }
 
+/// Returns whether a given file on a debug dataset can safely be deleted as
+/// part of cleaning up that dataset
 fn safe_to_delete(path: &Utf8Path, meta: &std::fs::Metadata) -> bool {
     if !meta.is_file() {
         // Ignore non-files (e.g. directories, symlinks)
@@ -629,6 +726,7 @@ impl DebugCollectorWorker {
         }
     }
 
+    /// Runs the body of the DebugCollector
     async fn poll_file_archival(mut self) {
         info!(self.log, "DebugCollector poll loop started.");
 
@@ -640,6 +738,9 @@ impl DebugCollectorWorker {
         let mut evaluation_and_archiving_complete_tx = None;
 
         loop {
+            // Wait for either:
+            // - an external command to arrive on `self.rx`
+            // - a timer to fire for periodic archival of logs, etc.
             match tokio::time::timeout(ARCHIVAL_INTERVAL, self.rx.recv()).await
             {
                 Ok(Some(DebugCollectorCmd::UpdateDumpdevSetup {
