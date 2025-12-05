@@ -61,11 +61,13 @@ use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
 /// needs to generate a blueprint
 pub struct PlanningInputFromDb<'a> {
+    pub parent_blueprint: Arc<Blueprint>,
     pub sled_rows: &'a [nexus_db_model::Sled],
     pub zpool_rows:
         &'a [(nexus_db_model::Zpool, nexus_db_model::PhysicalDisk)],
@@ -94,10 +96,12 @@ pub struct PlanningInputFromDb<'a> {
 }
 
 impl PlanningInputFromDb<'_> {
+    // TODO-john docs
     pub async fn assemble(
         opctx: &OpContext,
         datastore: &DataStore,
         planner_config: PlannerConfig,
+        parent_blueprint: Arc<Blueprint>,
     ) -> Result<PlanningInput, Error> {
         opctx.check_complex_operations_allowed()?;
         // Note we list *all* rows here including the ones for decommissioned
@@ -236,6 +240,7 @@ impl PlanningInputFromDb<'_> {
             not_yet_nexus_zones.into_iter().map(|n| n.nexus_id()).collect();
 
         let planning_input = PlanningInputFromDb {
+            parent_blueprint,
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
             ip_pool_range_rows: &ip_pool_range_rows,
@@ -314,6 +319,7 @@ impl PlanningInputFromDb<'_> {
             planner_config: self.planner_config,
         };
         let mut builder = PlanningInputBuilder::new(
+            Arc::clone(&self.parent_blueprint),
             policy,
             self.internal_dns_version.into(),
             self.external_dns_version.into(),
@@ -452,12 +458,19 @@ pub async fn reconfigurator_state_load(
     nmax_blueprints: usize,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
+    let (_, current_target_blueprint) =
+        datastore.blueprint_target_get_current_full(opctx).await?;
     let planner_config = datastore
         .reconfigurator_config_get_latest(opctx)
         .await?
         .map_or_else(PlannerConfig::default, |c| c.config.planner_config);
-    let planning_input =
-        PlanningInputFromDb::assemble(opctx, datastore, planner_config).await?;
+    let planning_input = PlanningInputFromDb::assemble(
+        opctx,
+        datastore,
+        planner_config,
+        Arc::new(current_target_blueprint),
+    )
+    .await?;
 
     // We'll grab the most recent several inventory collections.
     const NCOLLECTIONS: u8 = 5;
