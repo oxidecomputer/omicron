@@ -674,7 +674,7 @@ impl CollectionStep {
                 warn!(
                     collection.log,
                     "Step failed";
-                    "name" => &self.name,
+                    "step" => &self.name,
                     InlineErrorChain::new(err.as_ref()),
                 );
             })
@@ -1028,7 +1028,7 @@ impl BundleCollection {
                     let collection = self.clone();
                     let dir = output.path().to_path_buf();
                     async move {
-                        debug!(collection.log, "Running step"; "name" => &step.name);
+                        debug!(collection.log, "Running step"; "step" => &step.name);
                         step.run(&collection, dir.as_path()).await
                     }
                 }).await;
@@ -1398,20 +1398,25 @@ impl BundleCollection {
         tokio::fs::write(sled_path.join("sled.txt"), format!("{sled:?}"))
             .await?;
 
-        let Ok(sled_client) = nexus_networking::sled_client(
+        let sled_client = match nexus_networking::sled_client(
             &self.datastore,
             &self.opctx,
             sled.id(),
             log,
         )
         .await
-        else {
-            tokio::fs::write(
-                sled_path.join("error.txt"),
-                "Could not contact sled",
-            )
-            .await?;
-            bail!("Could not contact sled");
+        {
+            Ok(client) => client,
+            Err(err) => {
+                tokio::fs::write(
+                    sled_path.join("error.txt"),
+                    "Could not contact sled",
+                )
+                .await.with_context(|| {
+                    format!("Failed to save 'error.txt' to bundle when recording error: {err}")
+                })?;
+                bail!("Could not contact sled: {err}");
+            }
         };
 
         // NB: As new sled-diagnostic commands are added they should

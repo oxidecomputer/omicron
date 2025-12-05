@@ -72,6 +72,7 @@ use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
@@ -2630,9 +2631,9 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
                 struct StepRow {
                     step_name: String,
-                    start_time: String,
+                    start_time: DateTime<Utc>,
                     duration: String,
-                    status: String,
+                    status: SupportBundleCollectionStepStatus,
                 }
 
                 steps.sort_unstable_by_key(|s| s.start);
@@ -2644,9 +2645,9 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                             .unwrap_or(Duration::from_millis(0));
                         StepRow {
                             step_name: step.name,
-                            start_time: step.start.to_rfc3339(),
+                            start_time: step.start,
                             duration: format!("{:.3}s", duration.as_secs_f64()),
-                            status: step.status.to_string(),
+                            status: step.status,
                         }
                     })
                     .collect();
