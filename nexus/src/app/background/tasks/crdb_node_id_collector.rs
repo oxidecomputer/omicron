@@ -46,14 +46,14 @@ use tokio::sync::watch;
 
 pub struct CockroachNodeIdCollector {
     datastore: Arc<DataStore>,
-    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_blueprint: watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
 }
 
 impl CockroachNodeIdCollector {
     pub fn new(
         datastore: Arc<DataStore>,
         rx_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
+            Option<(BlueprintTarget, Arc<Blueprint>)>,
         >,
     ) -> Self {
         Self { datastore, rx_blueprint }
@@ -74,7 +74,7 @@ impl CockroachNodeIdCollector {
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
 
-        let Some((_bp_target, blueprint)) = update.as_deref() else {
+        let Some((_bp_target, blueprint)) = update else {
             warn!(
                 &opctx.log, "Blueprint execution: skipped";
                 "reason" => "no blueprint",
@@ -84,19 +84,18 @@ impl CockroachNodeIdCollector {
 
         // With a bit of concurrency, confirm we know the node IDs for all the
         // CRDB zones in the blueprint.
-        let mut results =
-            stream::iter(addrs_from_blueprint.cockroach_admin_addrs(blueprint))
-                .map(|(zone_id, admin_addr)| {
-                    let datastore = &self.datastore;
-                    async move {
-                        ensure_node_id_known(
-                            opctx, datastore, zone_id, admin_addr,
-                        )
-                        .await
-                        .map_err(|err| (zone_id, err))
-                    }
-                })
-                .buffer_unordered(8);
+        let mut results = stream::iter(
+            addrs_from_blueprint.cockroach_admin_addrs(&blueprint),
+        )
+        .map(|(zone_id, admin_addr)| {
+            let datastore = &self.datastore;
+            async move {
+                ensure_node_id_known(opctx, datastore, zone_id, admin_addr)
+                    .await
+                    .map_err(|err| (zone_id, err))
+            }
+        })
+        .buffer_unordered(8);
 
         let mut nsuccess = 0;
         let mut errors = vec![];
@@ -379,7 +378,7 @@ mod tests {
         };
 
         let (_tx_blueprint, rx_blueprint) =
-            watch::channel(Some(Arc::new((blueprint_target, blueprint))));
+            watch::channel(Some((blueprint_target, Arc::new(blueprint))));
         let mut collector =
             CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
 
@@ -439,7 +438,7 @@ mod tests {
         };
 
         let (_tx_blueprint, rx_blueprint) =
-            watch::channel(Some(Arc::new((blueprint_target, blueprint))));
+            watch::channel(Some((blueprint_target, Arc::new(blueprint))));
         let mut collector =
             CockroachNodeIdCollector::new(datastore.clone(), rx_blueprint);
 

@@ -58,7 +58,7 @@ pub struct BlueprintPlanner {
     datastore: Arc<DataStore>,
     rx_config: Receiver<ReconfiguratorConfigLoaderState>,
     rx_inventory: Receiver<Option<Arc<Collection>>>,
-    rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_blueprint: Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
     tx_blueprint: Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     blueprint_limit: u64,
 }
@@ -84,7 +84,7 @@ impl BlueprintPlanner {
         datastore: Arc<DataStore>,
         rx_config: Receiver<ReconfiguratorConfigLoaderState>,
         rx_inventory: Receiver<Option<Arc<Collection>>>,
-        rx_blueprint: Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+        rx_blueprint: Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
     ) -> Self {
         let (tx_blueprint, _) = watch::channel(None);
         Self {
@@ -160,10 +160,11 @@ impl BlueprintPlanner {
 
         // Get the current target blueprint to use as a parent.
         // Cloned so that we don't block the channel.
-        let Some(loaded) = self.rx_blueprint.borrow_and_update().clone() else {
+        let Some((target, parent)) =
+            self.rx_blueprint.borrow_and_update().clone()
+        else {
             return Err(PlanError::NoTargetBlueprint);
         };
-        let (target, parent) = &*loaded;
         let parent_blueprint_id = parent.id;
 
         // Get the inventory most recently seen by the inventory loader
@@ -180,6 +181,7 @@ impl BlueprintPlanner {
             opctx,
             &self.datastore,
             config.config.planner_config,
+            Arc::clone(&parent),
         )
         .await
         .map_err(PlanError::AssemblePlanningInput)?;

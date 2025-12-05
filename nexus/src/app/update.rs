@@ -41,13 +41,13 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct UpdateStatusHandle {
     latest_blueprint:
-        watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+        watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
 }
 
 impl UpdateStatusHandle {
     pub fn new(
         latest_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
+            Option<(BlueprintTarget, Arc<Blueprint>)>,
         >,
     ) -> Self {
         Self { latest_blueprint }
@@ -220,7 +220,7 @@ impl super::Nexus {
             )
             .await?;
 
-        let bp_arc = self
+        let (blueprint_target, blueprint) = self
             .update_status
             .latest_blueprint
             .borrow()
@@ -231,8 +231,6 @@ impl super::Nexus {
                      target blueprint is loaded",
                 )
             })?;
-
-        let (blueprint_target, blueprint) = &*bp_arc;
 
         let time_last_step_planned = blueprint_target.time_made_target;
 

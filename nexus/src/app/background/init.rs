@@ -1180,7 +1180,7 @@ pub struct BackgroundTasksData {
     pub tuf_artifact_replication_rx: mpsc::Receiver<ArtifactsWithPlan>,
     /// Channel for exposing the latest loaded blueprint
     pub blueprint_load_tx:
-        watch::Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+        watch::Sender<Option<(BlueprintTarget, Arc<Blueprint>)>>,
     /// `reqwest::Client` for webhook delivery requests.
     ///
     /// This is shared with the external API as it's also used when sending

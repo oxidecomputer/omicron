@@ -31,7 +31,7 @@ use update_engine::NestedError;
 pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     resolver: Resolver,
-    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_blueprint: watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
     nexus_id: OmicronZoneUuid,
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
@@ -44,7 +44,7 @@ impl BlueprintExecutor {
         datastore: Arc<DataStore>,
         resolver: Resolver,
         rx_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
+            Option<(BlueprintTarget, Arc<Blueprint>)>,
         >,
         nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
@@ -79,15 +79,13 @@ impl BlueprintExecutor {
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
 
-        let Some(update) = update else {
+        let Some((bp_target, blueprint)) = update else {
             warn!(
                 &opctx.log, "Blueprint execution: skipped";
                 "reason" => "no blueprint",
             );
             return json!({"error": "no blueprint" });
         };
-
-        let (bp_target, blueprint) = &*update;
 
         // Regardless of anything else: propagate whatever this blueprint
         // says about our quiescing state.
@@ -158,7 +156,7 @@ impl BlueprintExecutor {
                 datastore: &self.datastore,
                 resolver: &self.resolver,
                 creator: self.nexus_id,
-                blueprint,
+                blueprint: &blueprint,
                 sender,
                 mgs_updates: self.mgs_update_tx.clone(),
                 saga_quiesce: self.nexus_quiesce.sagas(),
