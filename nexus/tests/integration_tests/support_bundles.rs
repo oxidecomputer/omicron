@@ -19,6 +19,7 @@ use nexus_types::external_api::shared::SupportBundleInfo;
 use nexus_types::external_api::shared::SupportBundleState;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleCollectionStep;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_uuid_kinds::SupportBundleUuid;
 use serde::Deserialize;
@@ -489,8 +490,6 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
 
     let report = output.collection_report.as_ref().expect("Missing report");
     assert_eq!(report.bundle, bundle.id);
-    assert!(report.listed_in_service_sleds);
-    assert!(report.listed_sps);
     assert!(report.activated_in_db_ok);
     assert_eq!(
         report.ereports,
@@ -510,6 +509,18 @@ async fn test_support_bundle_lifecycle(cptestctx: &ControlPlaneTestContext) {
             step.name
         );
     }
+
+    // Verify that we successfully spawned steps to query sleds and SPs
+    let step_names: Vec<_> =
+        report.steps.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
+        "Should have attempted to list in-service sleds"
+    );
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS),
+        "Should have attempted to list service processors"
+    );
 
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
@@ -601,8 +612,6 @@ async fn test_support_bundle_range_requests(
     assert_eq!(output.collection_err, None);
     let report = output.collection_report.as_ref().expect("Missing report");
     assert_eq!(report.bundle, bundle.id);
-    assert!(report.listed_in_service_sleds);
-    assert!(report.listed_sps);
     assert!(report.activated_in_db_ok);
     assert_eq!(
         report.ereports,
@@ -622,6 +631,18 @@ async fn test_support_bundle_range_requests(
             step.name
         );
     }
+
+    // Verify that we successfully spawned steps to query sleds and SPs
+    let step_names: Vec<_> =
+        report.steps.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SLEDS),
+        "Should have attempted to list in-service sleds"
+    );
+    assert!(
+        step_names.contains(&SupportBundleCollectionStep::STEP_SPAWN_SP_DUMPS),
+        "Should have attempted to list service processors"
+    );
 
     let bundle = bundle_get(&client, bundle.id).await.unwrap();
     assert_eq!(bundle.state, SupportBundleState::Active);
