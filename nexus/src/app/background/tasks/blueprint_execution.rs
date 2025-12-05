@@ -450,10 +450,16 @@ mod test {
         // With a target blueprint having no zones, the task should trivially
         // complete and report a successful (empty) summary.
         let generation = Generation::new();
-        let blueprint = Arc::new(
-            create_blueprint(&datastore, &opctx, BTreeMap::new(), generation)
-                .await,
-        );
+        let blueprint = {
+            let (target, blueprint) = create_blueprint(
+                &datastore,
+                &opctx,
+                BTreeMap::new(),
+                generation,
+            )
+            .await;
+            (target, Arc::new(blueprint))
+        };
         let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
         let mut value = task.activate(&opctx).await;
@@ -541,7 +547,9 @@ mod test {
                 .expect("failed to upsert zpool");
         }
 
-        blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
+        blueprint_tx
+            .send(Some((blueprint.0, Arc::new(blueprint.1.clone()))))
+            .unwrap();
 
         // Make sure that requests get made to the sled agent.
         for s in [&mut s1, &mut s2] {
@@ -584,7 +592,9 @@ mod test {
         blueprint.1.internal_dns_version =
             blueprint.1.internal_dns_version.next();
         blueprint.0.enabled = false;
-        blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
+        blueprint_tx
+            .send(Some((blueprint.0, Arc::new(blueprint.1.clone()))))
+            .unwrap();
         let value = task.activate(&opctx).await;
         println!("when disabled: {:?}", value);
         assert_eq!(
@@ -607,7 +617,9 @@ mod test {
         // Do it all again, but configure one of the servers to fail so we can
         // verify the task's returned summary of what happened.
         blueprint.0.enabled = true;
-        blueprint_tx.send(Some(Arc::new(blueprint))).unwrap();
+        blueprint_tx
+            .send(Some((blueprint.0, Arc::new(blueprint.1.clone()))))
+            .unwrap();
         s1.expect(
             Expectation::matching(match_put_omicron_config())
                 .respond_with(status_code(204)),
