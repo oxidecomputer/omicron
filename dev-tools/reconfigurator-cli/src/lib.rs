@@ -85,6 +85,7 @@ use tufaceous_artifact::ArtifactVersionError;
 use tufaceous_lib::assemble::ArtifactManifest;
 
 mod log_capture;
+pub mod test_utils;
 
 /// REPL state
 #[derive(Debug)]
@@ -260,6 +261,89 @@ impl ReconfiguratorSim {
         builder.set_not_yet_nexus_zones(not_yet_nexus_zones);
 
         Ok(builder.build())
+    }
+
+    fn load_example<F>(
+        &mut self,
+        seed: Option<String>,
+        f: F,
+    ) -> anyhow::Result<Option<String>>
+    where
+        F: FnOnce(ExampleSystemBuilder) -> anyhow::Result<ExampleSystemBuilder>,
+    {
+        let mut s = String::new();
+        let mut state = self.current_state().to_mut();
+        if !state.system_mut().is_empty() {
+            bail!(
+                "changes made to simulated system: run `wipe system` before \
+                 loading"
+            );
+        }
+
+        // Generate the example system.
+        match seed {
+            Some(seed) => {
+                // In this case, reset the RNG state to the provided seed.
+                swriteln!(s, "setting new RNG seed: {}", seed);
+                state.rng_mut().set_seed(seed);
+            }
+            None => {
+                // In this case, use the existing RNG state.
+                swriteln!(
+                    s,
+                    "using existing RNG state (seed: {})",
+                    state.rng_mut().seed()
+                );
+            }
+        };
+        let rng = state.rng_mut().next_example_rng();
+
+        let builder = f(ExampleSystemBuilder::new_with_rng(&self.log, rng)
+            .nexus_count(
+                state
+                    .config_mut()
+                    .num_nexus()
+                    .map_or(NEXUS_REDUNDANCY, |n| n.into()),
+            ))?;
+
+        let (example, blueprint) = builder.build();
+
+        // Generate the internal and external DNS configs based on the blueprint.
+        let sleds_by_id = make_sleds_by_id(&example.system)?;
+        let blueprint_nexus_generation =
+            blueprint_active_nexus_generation(&blueprint);
+        let internal_dns = blueprint_internal_dns_config(
+            &blueprint,
+            &sleds_by_id,
+            blueprint_nexus_generation,
+            &Default::default(),
+        )?;
+        let external_dns_zone_name =
+            state.config_mut().external_dns_zone_name().to_owned();
+        let external_dns = blueprint_external_dns_config(
+            &blueprint,
+            state.config_mut().silo_names(),
+            external_dns_zone_name,
+            blueprint_nexus_generation,
+        );
+
+        let blueprint_id = blueprint.id;
+        let collection_id = example.collection.id;
+
+        state
+            .system_mut()
+            .load_example(example, blueprint, internal_dns, external_dns)
+            .expect("already checked non-empty state above");
+        self.commit_and_bump(
+            "reconfigurator-cli load-example".to_owned(),
+            state,
+        );
+
+        Ok(Some(format!(
+            "loaded example system with:\n\
+             - collection: {collection_id}\n\
+             - blueprint: {blueprint_id}",
+        )))
     }
 }
 
@@ -1756,7 +1840,7 @@ fn cmd_sled_set(
         }
         SledSetCommand::OmicronConfig(command) => {
             let resolved_id =
-                system.resolve_blueprint_id(command.blueprint.into())?;
+                system.resolve_blueprint_id(command.blueprint.into());
             let blueprint = system.get_blueprint(&resolved_id)?;
             let sled_cfg =
                 blueprint.sleds.get(&sled_id).with_context(|| {
@@ -2236,7 +2320,7 @@ fn cmd_blueprint_blippy(
 ) -> anyhow::Result<Option<String>> {
     let state = sim.current_state();
     let resolved_id =
-        state.system().resolve_blueprint_id(args.blueprint_id.into())?;
+        state.system().resolve_blueprint_id(args.blueprint_id.into());
     let blueprint = state.system().get_blueprint(&resolved_id)?;
     let planning_input = sim
         .planning_input(blueprint)
@@ -2255,7 +2339,7 @@ fn cmd_blueprint_plan(
     let system = state.system_mut();
 
     let parent_blueprint_id =
-        system.resolve_blueprint_id(args.parent_blueprint_id.into())?;
+        system.resolve_blueprint_id(args.parent_blueprint_id.into());
     let parent_blueprint = system.get_blueprint(&parent_blueprint_id)?;
     let collection = match args.collection_id {
         Some(collection_id) => {
@@ -2311,7 +2395,7 @@ fn cmd_blueprint_edit(
     let rng = state.rng_mut().next_planner_rng();
     let system = state.system_mut();
 
-    let resolved_id = system.resolve_blueprint_id(args.blueprint_id.into())?;
+    let resolved_id = system.resolve_blueprint_id(args.blueprint_id.into());
     let blueprint = system.get_blueprint(&resolved_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
     let planning_input = sim
@@ -2779,7 +2863,7 @@ fn cmd_blueprint_history(
 
     let state = sim.current_state();
     let system = state.system();
-    let resolved_id = system.resolve_blueprint_id(blueprint_id.into())?;
+    let resolved_id = system.resolve_blueprint_id(blueprint_id.into());
     let mut blueprint = system.get_blueprint(&resolved_id)?;
 
     // We want to print the output in logical order, but in order to construct
@@ -2852,8 +2936,7 @@ fn cmd_blueprint_save(
     let blueprint_id = args.blueprint_id;
 
     let state = sim.current_state();
-    let resolved_id =
-        state.system().resolve_blueprint_id(blueprint_id.into())?;
+    let resolved_id = state.system().resolve_blueprint_id(blueprint_id.into());
     let blueprint = state.system().get_blueprint(&resolved_id)?;
 
     let output_path = &args.filename;
@@ -3362,86 +3445,20 @@ fn cmd_load_example(
     sim: &mut ReconfiguratorSim,
     args: LoadExampleArgs,
 ) -> anyhow::Result<Option<String>> {
-    let mut s = String::new();
-    let mut state = sim.current_state().to_mut();
-    if !state.system_mut().is_empty() {
-        bail!(
-            "changes made to simulated system: run `wipe system` before \
-             loading"
-        );
-    }
-
-    // Generate the example system.
-    match args.seed {
-        Some(seed) => {
-            // In this case, reset the RNG state to the provided seed.
-            swriteln!(s, "setting new RNG seed: {}", seed);
-            state.rng_mut().set_seed(seed);
+    sim.load_example(args.seed, |builder| {
+        let mut builder = builder
+            .nsleds(args.nsleds)
+            .ndisks_per_sled(args.ndisks_per_sled)
+            .external_dns_count(3)
+            .context("invalid external DNS zone count")?
+            .create_disks_in_blueprint(!args.no_disks_in_blueprint);
+        for sled_policy in args.sled_policy {
+            builder = builder
+                .with_sled_policy(sled_policy.index, sled_policy.policy)
+                .context("setting sled policy")?;
         }
-        None => {
-            // In this case, use the existing RNG state.
-            swriteln!(
-                s,
-                "using existing RNG state (seed: {})",
-                state.rng_mut().seed()
-            );
-        }
-    };
-    let rng = state.rng_mut().next_example_rng();
-
-    let mut builder = ExampleSystemBuilder::new_with_rng(&sim.log, rng)
-        .nsleds(args.nsleds)
-        .ndisks_per_sled(args.ndisks_per_sled)
-        .nexus_count(
-            state
-                .config_mut()
-                .num_nexus()
-                .map_or(NEXUS_REDUNDANCY, |n| n.into()),
-        )
-        .external_dns_count(3)
-        .context("invalid external DNS zone count")?
-        .create_disks_in_blueprint(!args.no_disks_in_blueprint);
-    for sled_policy in args.sled_policy {
-        builder = builder
-            .with_sled_policy(sled_policy.index, sled_policy.policy)
-            .context("setting sled policy")?;
-    }
-
-    let (example, blueprint) = builder.build();
-
-    // Generate the internal and external DNS configs based on the blueprint.
-    let sleds_by_id = make_sleds_by_id(&example.system)?;
-    let blueprint_nexus_generation =
-        blueprint_active_nexus_generation(&blueprint);
-    let internal_dns = blueprint_internal_dns_config(
-        &blueprint,
-        &sleds_by_id,
-        blueprint_nexus_generation,
-        &Default::default(),
-    )?;
-    let external_dns_zone_name =
-        state.config_mut().external_dns_zone_name().to_owned();
-    let external_dns = blueprint_external_dns_config(
-        &blueprint,
-        state.config_mut().silo_names(),
-        external_dns_zone_name,
-        blueprint_nexus_generation,
-    );
-
-    let blueprint_id = blueprint.id;
-    let collection_id = example.collection.id;
-
-    state
-        .system_mut()
-        .load_example(example, blueprint, internal_dns, external_dns)
-        .expect("already checked non-empty state above");
-    sim.commit_and_bump("reconfigurator-cli load-example".to_owned(), state);
-
-    Ok(Some(format!(
-        "loaded example system with:\n\
-         - collection: {collection_id}\n\
-         - blueprint: {blueprint_id}",
-    )))
+        Ok(builder)
+    })
 }
 
 fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {

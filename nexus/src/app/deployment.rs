@@ -308,7 +308,7 @@ fn is_target_release_change_allowed(
     let mut all_components_on_current_target_release = true;
 
     // Check sled configs first.
-    for sled_config in current_blueprint.active_sled_configs() {
+    for (_, sled_config) in current_blueprint.active_sled_configs() {
         if sled_config.remove_mupdate_override.is_some() {
             // A mupdate has occurred; we must allow a new target release.
             return true;
