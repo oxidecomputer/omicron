@@ -6865,6 +6865,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "ereport-types",
  "iddqd",
  "nexus-reconfigurator-planning",
  "nexus-types",
