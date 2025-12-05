@@ -57,7 +57,7 @@ pub struct NexusQuiesceHandle {
     sagas: SagaQuiesceHandle,
     quiesce_opctx: Arc<OpContext>,
     latest_blueprint:
-        watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+        watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
     state: watch::Sender<QuiesceState>,
 }
 
@@ -66,7 +66,7 @@ impl NexusQuiesceHandle {
         datastore: Arc<DataStore>,
         my_nexus_id: OmicronZoneUuid,
         latest_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
+            Option<(BlueprintTarget, Arc<Blueprint>)>,
         >,
         quiesce_opctx: OpContext,
     ) -> NexusQuiesceHandle {
@@ -336,7 +336,7 @@ async fn check_all_sagas_drained(
         .await
         // This should be impossible
         .context("latest_blueprint rx channel closed")?
-        .as_deref()
+        .as_ref()
         // unwrap(): wait_for() returns a value for which the closure
         // returns true, and we checked that this is `Some`
         .unwrap()
@@ -882,7 +882,7 @@ mod test {
         };
         let blueprint_id = blueprint.id;
         let (_, blueprint_rx) =
-            watch::channel(Some(Arc::new((bp_target, blueprint))));
+            watch::channel(Some((bp_target, Arc::new(blueprint))));
 
         // Insert active records for the Nexus instances.
         let conn =

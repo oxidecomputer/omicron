@@ -2641,7 +2641,7 @@ pub mod test {
             }
         }
 
-        let blueprint2 = builder.build(BlueprintSource::Test);
+        let blueprint2 = Arc::new(builder.build(BlueprintSource::Test));
         verify_blueprint(&blueprint2, &example.input);
         let summary = blueprint2.diff_since_blueprint(&blueprint1);
         println!(
@@ -2658,7 +2658,11 @@ pub mod test {
 
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
-        let input = example.system.to_planning_input_builder().unwrap().build();
+        let input = example
+            .system
+            .to_planning_input_builder(Arc::clone(&blueprint2))
+            .unwrap()
+            .build();
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,

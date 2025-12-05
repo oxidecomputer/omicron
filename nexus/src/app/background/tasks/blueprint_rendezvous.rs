@@ -25,7 +25,7 @@ use tokio::sync::watch;
 /// control for other parts of Nexus to consume.
 pub struct BlueprintRendezvous {
     datastore: Arc<DataStore>,
-    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx_blueprint: watch::Receiver<Option<(BlueprintTarget, Arc<Blueprint>)>>,
     rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
 }
 
@@ -33,7 +33,7 @@ impl BlueprintRendezvous {
     pub fn new(
         datastore: Arc<DataStore>,
         rx_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
+            Option<(BlueprintTarget, Arc<Blueprint>)>,
         >,
         rx_inventory: watch::Receiver<Option<Arc<Collection>>>,
     ) -> Self {
@@ -50,7 +50,7 @@ impl BlueprintRendezvous {
         // Get the latest blueprint, cloning to prevent holding a read lock
         // on the watch.
         let update = self.rx_blueprint.borrow_and_update().clone();
-        let Some((_, blueprint)) = update.as_deref() else {
+        let Some((_, blueprint)) = update else {
             warn!(
                 &opctx.log, "Blueprint rendezvous: skipped";
                 "reason" => "no blueprint",
@@ -75,7 +75,7 @@ impl BlueprintRendezvous {
         let result = reconcile_blueprint_rendezvous_tables(
             opctx,
             &self.datastore,
-            blueprint,
+            &blueprint,
             &collection,
         )
         .await;
