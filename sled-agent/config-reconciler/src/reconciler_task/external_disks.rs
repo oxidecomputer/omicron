@@ -45,9 +45,9 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use tokio::sync::watch;
 
+use crate::debug_collector_task::FormerZoneRootArchiver;
 use crate::disks_common::MaybeUpdatedDisk;
 use crate::disks_common::update_properties_from_raw_disk;
-use crate::dump_setup_task::FormerZoneRootArchiver;
 use camino::Utf8PathBuf;
 use illumos_utils::zfs::Mountpoint;
 
@@ -238,7 +238,7 @@ pub(super) struct ExternalDisks {
     currently_managed_zpools_tx: watch::Sender<Arc<CurrentlyManagedZpools>>,
 
     // Output channel for the raw disks we're managing. This is only consumed
-    // within this crate by `DumpSetupTask` (for managing dump devices).
+    // within this crate by `DebugCollectorTask` (for managing dump devices).
     external_disks_tx: watch::Sender<HashSet<Disk>>,
 
     // For requesting archival of former zone root directories.
@@ -501,8 +501,8 @@ impl ExternalDisks {
 
         // Update the output channels now.  This is important to do before
         // cleaning up former zone root datasets because that step will require
-        // that the archival task (DumpSetup) has seen the new disks and added
-        // any debug datasets found on them.
+        // that the archival task (DebugCollector) has seen the new disks and
+        // added any debug datasets found on them.
         self.update_output_watch_channels();
 
         // For any newly-adopted disks, clean up any former zone root datasets

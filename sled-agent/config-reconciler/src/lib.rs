@@ -46,9 +46,9 @@
 //!   [`ConfigReconcilerHandle::inventory()`].
 
 mod dataset_serialization_task;
+mod debug_collector;
+mod debug_collector_task;
 mod disks_common;
-mod dump_setup;
-mod dump_setup_task;
 mod handle;
 mod host_phase_2;
 mod internal_disks;

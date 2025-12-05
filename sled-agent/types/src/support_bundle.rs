@@ -13,9 +13,9 @@
 //                              |               | This is a per-bundle nested dataset
 //                              | This is a Debug dataset
 //
-// NOTE: The "DumpSetupWorker" has been explicitly configured to ignore these files, so they are
-// not removed. If the files used here change in the future, DumpSetupWorker should also be
-// updated.
+// NOTE: The DebugCollector has been explicitly configured to ignore these
+// files, so they are not removed. If the files used here change in the future,
+// DebugCollector should also be updated.
 pub const BUNDLE_FILE_NAME: &str = "bundle.zip";
 pub const BUNDLE_TMP_FILE_NAME: &str = "bundle.zip.tmp";
 
