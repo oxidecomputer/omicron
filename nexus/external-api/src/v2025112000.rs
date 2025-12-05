@@ -20,7 +20,7 @@ pub enum DiskType {
 impl From<DiskType> for external::DiskType {
     fn from(old: DiskType) -> external::DiskType {
         match old {
-            DiskType::Crucible => external::DiskType::Crucible,
+            DiskType::Crucible => external::DiskType::Distributed,
         }
     }
 }
@@ -72,7 +72,7 @@ impl TryFrom<external::Disk> for Disk {
             state: new.state,
             device_path: new.device_path,
             disk_type: match new.disk_type {
-                external::DiskType::Crucible => DiskType::Crucible,
+                external::DiskType::Distributed => DiskType::Crucible,
 
                 _ => {
                     // Cannot display any other variant for this old client

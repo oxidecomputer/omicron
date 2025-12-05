@@ -271,7 +271,7 @@ impl Into<api::external::Disk> for Disk {
                     block_size: disk.block_size.into(),
                     state: disk.state().into(),
                     device_path,
-                    disk_type: api::external::DiskType::Crucible,
+                    disk_type: api::external::DiskType::Distributed,
                 }
             }
 
