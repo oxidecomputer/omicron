@@ -152,9 +152,10 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: None,
             },
+            cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep1)
+            .fm_sitrep_insert(&opctx, sitrep1.clone())
             .await
             .expect("inserting initial sitrep should succeed");
 
@@ -174,9 +175,10 @@ mod tests {
                 time_created: Utc::now(),
                 parent_sitrep_id: Some(sitrep1.metadata.id),
             },
+            cases: Default::default(),
         };
         datastore
-            .fm_sitrep_insert(&opctx, &sitrep2)
+            .fm_sitrep_insert(&opctx, sitrep2.clone())
             .await
             .expect("inserting child sitrep should succeed");
 
@@ -264,9 +266,12 @@ mod tests {
                 comment: format!("test sitrep v{i}; orphan {i}"),
                 time_created: Utc::now(),
                 parent_sitrep_id,
+                // TODO(eliza): we should populate cases and assert they get
+                // cleaned up...
             },
+            cases: Default::default(),
         };
-        match datastore.fm_sitrep_insert(&opctx, &sitrep).await {
+        match datastore.fm_sitrep_insert(&opctx, sitrep).await {
             Ok(_) => {
                 panic!("inserting sitrep v{v} orphan {i} should not succeed")
             }
