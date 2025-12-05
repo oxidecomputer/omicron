@@ -6,6 +6,9 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
+use nexus_sled_agent_shared::inventory::ManifestBootInventory;
+use nexus_sled_agent_shared::inventory::ManifestInventory;
+use nexus_sled_agent_shared::inventory::ManifestNonBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
@@ -15,11 +18,8 @@ use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
 use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
 use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use omicron_common::update::{
-    MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
+    MupdateOverrideInfo, OmicronFileManifest, OmicronFileManifestSource,
 };
 use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::InternalZpoolUuid;
@@ -33,11 +33,19 @@ use tufaceous_artifact::ArtifactHash;
 /// The location to look for images shipped with the RAM disk.
 pub const RAMDISK_IMAGE_PATH: &str = "/opt/oxide";
 
+/// Measurements for testing
+///
+pub const TESTING_MEASUREMENTS_PATH: &str = "/opt/oxide/sled-agent/pkg/";
+pub const TESTING_MEASUREMENTS_FILE: &str = "testing-measurements";
+
 /// Current status of the zone image resolver.
 #[derive(Clone, Debug)]
 pub struct ResolverStatus {
     /// The zone manifest status.
     pub zone_manifest: ZoneManifestStatus,
+
+    /// The measurement manifest status.
+    pub measurement_manifest: MeasurementManifestStatus,
 
     /// The mupdate override status.
     pub mupdate_override: MupdateOverrideStatus,
@@ -46,6 +54,8 @@ pub struct ResolverStatus {
     ///
     /// This is injected by tests.
     pub image_directory_override: Option<Utf8PathBuf>,
+
+    pub measurement_directory_override: Option<Utf8PathBuf>,
 }
 
 impl ResolverStatus {
@@ -54,7 +64,85 @@ impl ResolverStatus {
         ZoneImageResolverInventory {
             zone_manifest: self.zone_manifest.to_inventory(),
             mupdate_override: self.mupdate_override.to_inventory(),
+            // Adding the measurement to inventory will come later
         }
+    }
+}
+
+/// Describes the current state of measurement manifests.
+#[derive(Clone, Debug)]
+pub struct MeasurementManifestStatus {
+    /// The path to the measurement manifest JSON on the boot disk.
+    pub boot_disk_path: Utf8PathBuf,
+
+    /// Status of the boot disk.
+    pub boot_disk_result:
+        Result<ZoneManifestArtifactsResult, ZoneManifestReadError>,
+
+    /// Status of the non-boot disks. This results in warnings in case of a
+    /// mismatch.
+    pub non_boot_disk_metadata: IdOrdMap<ZoneManifestNonBootInfo>,
+}
+
+type MeasurementEntry = Result<(String, ArtifactHash), ManifestHashError>;
+
+impl MeasurementManifestStatus {
+    /// Convert this status to the inventory format.
+    pub fn to_inventory(&self) -> ManifestInventory {
+        let boot_inventory = match &self.boot_disk_result {
+            Ok(artifacts_result) => Ok(artifacts_result.to_boot_inventory()),
+            Err(error) => Err(InlineErrorChain::new(error).to_string()),
+        };
+
+        let non_boot_status = self
+            .non_boot_disk_metadata
+            .iter()
+            .map(|info| ManifestNonBootInventory {
+                zpool_id: info.zpool_id,
+                path: info.path.clone(),
+                is_valid: info.result.is_valid(),
+                message: info.result.display().to_string(),
+            })
+            .collect();
+
+        ManifestInventory {
+            boot_disk_path: self.boot_disk_path.clone(),
+            boot_inventory,
+            non_boot_status,
+        }
+    }
+
+    pub fn all_measurements(
+        &self,
+    ) -> Result<Vec<MeasurementEntry>, ManifestHashError> {
+        let artifacts_result = self
+            .boot_disk_result
+            .as_ref()
+            .map_err(|err| ManifestHashError::ReadBootDisk(err.clone()))?;
+
+        let mut results = Vec::new();
+        for artifact in artifacts_result.data.clone() {
+            match artifact.status {
+                ArtifactReadResult::Valid => {
+                    results
+                        .push(Ok((artifact.file_name, artifact.expected_hash)));
+                }
+                ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
+                    results.push(Err(ManifestHashError::SizeHashMismatch {
+                        expected_size: artifact.expected_size,
+                        expected_hash: artifact.expected_hash,
+                        actual_size,
+                        actual_hash,
+                    }));
+                }
+                ArtifactReadResult::Error(err) => {
+                    results.push(Err(ManifestHashError::ReadArtifact(
+                        err.clone(),
+                    )));
+                }
+            }
+        }
+        Ok(results)
     }
 }
 
@@ -75,7 +163,7 @@ pub struct ZoneManifestStatus {
 
 impl ZoneManifestStatus {
     /// Convert this status to the inventory format.
-    pub fn to_inventory(&self) -> ZoneManifestInventory {
+    pub fn to_inventory(&self) -> ManifestInventory {
         let boot_inventory = match &self.boot_disk_result {
             Ok(artifacts_result) => Ok(artifacts_result.to_boot_inventory()),
             Err(error) => Err(InlineErrorChain::new(error).to_string()),
@@ -84,7 +172,7 @@ impl ZoneManifestStatus {
         let non_boot_status = self
             .non_boot_disk_metadata
             .iter()
-            .map(|info| ZoneManifestNonBootInventory {
+            .map(|info| ManifestNonBootInventory {
                 zpool_id: info.zpool_id,
                 path: info.path.clone(),
                 is_valid: info.result.is_valid(),
@@ -92,7 +180,7 @@ impl ZoneManifestStatus {
             })
             .collect();
 
-        ZoneManifestInventory {
+        ManifestInventory {
             boot_disk_path: self.boot_disk_path.clone(),
             boot_inventory,
             non_boot_status,
@@ -105,22 +193,22 @@ impl ZoneManifestStatus {
     pub fn zone_hash(
         &self,
         kind: ZoneKind,
-    ) -> Result<ArtifactHash, ZoneManifestZoneHashError> {
-        let artifacts_result =
-            self.boot_disk_result.as_ref().map_err(|err| {
-                ZoneManifestZoneHashError::ReadBootDisk(err.clone())
-            })?;
+    ) -> Result<ArtifactHash, ManifestHashError> {
+        let artifacts_result = self
+            .boot_disk_result
+            .as_ref()
+            .map_err(|err| ManifestHashError::ReadBootDisk(err.clone()))?;
 
         let file_name = kind.artifact_in_install_dataset();
         let artifact = &artifacts_result
             .data
             .get(file_name)
-            .ok_or(ZoneManifestZoneHashError::NoArtifactForZoneKind(kind))?;
+            .ok_or(ManifestHashError::NoArtifactForZoneKind(kind))?;
 
         match &artifact.status {
             ArtifactReadResult::Valid => Ok(artifact.expected_hash),
             ArtifactReadResult::Mismatch { actual_size, actual_hash } => {
-                Err(ZoneManifestZoneHashError::SizeHashMismatch {
+                Err(ManifestHashError::SizeHashMismatch {
                     expected_size: artifact.expected_size,
                     expected_hash: artifact.expected_hash,
                     actual_size: *actual_size,
@@ -128,14 +216,14 @@ impl ZoneManifestStatus {
                 })
             }
             ArtifactReadResult::Error(err) => {
-                Err(ZoneManifestZoneHashError::ReadArtifact(err.clone()))
+                Err(ManifestHashError::ReadArtifact(err.clone()))
             }
         }
     }
 }
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq)]
-pub enum ZoneManifestZoneHashError {
+pub enum ManifestHashError {
     #[error("error reading boot disk")]
     ReadBootDisk(#[source] ZoneManifestReadError),
     #[error("no artifact found for zone kind {0:?}")]
@@ -163,7 +251,7 @@ pub enum ZoneManifestZoneHashError {
 /// [`Self::is_valid`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZoneManifestArtifactsResult {
-    pub manifest: OmicronZoneManifest,
+    pub manifest: OmicronFileManifest,
     pub data: IdOrdMap<ZoneManifestArtifactResult>,
 }
 
@@ -182,16 +270,16 @@ impl ZoneManifestArtifactsResult {
     }
 
     /// Converts this result to the inventory format, used for the boot disk.
-    pub fn to_boot_inventory(&self) -> ZoneManifestBootInventory {
+    pub fn to_boot_inventory(&self) -> ManifestBootInventory {
         let artifacts =
             self.data.iter().map(|artifact| artifact.to_inventory()).collect();
 
-        ZoneManifestBootInventory { source: self.manifest.source, artifacts }
+        ManifestBootInventory { source: self.manifest.source, artifacts }
     }
 }
 
 pub struct ZoneManifestArtifactsDisplay<'a> {
-    source: &'a OmicronZoneManifestSource,
+    source: &'a OmicronFileManifestSource,
     artifacts: &'a IdOrdMap<ZoneManifestArtifactResult>,
 }
 
@@ -1236,7 +1324,7 @@ pub enum RunningZoneImageLocation {
 pub enum ZoneImageLocationError {
     /// An error occurred while looking up the zone hash.
     #[error("error looking up zone hash from zone manifest")]
-    ZoneHash(#[source] ZoneManifestZoneHashError),
+    ZoneHash(#[source] ManifestHashError),
 
     /// The boot disk is unavailable.
     #[error("boot disk missing")]

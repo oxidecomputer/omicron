@@ -205,12 +205,12 @@ mod api_impl {
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredContents;
     use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
     use nexus_sled_agent_shared::inventory::Inventory;
+    use nexus_sled_agent_shared::inventory::ManifestInventory;
     use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
     use nexus_sled_agent_shared::inventory::OmicronSledConfig;
     use nexus_sled_agent_shared::inventory::SledCpuFamily;
     use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
-    use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
     use omicron_common::api::external::Generation;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
     use omicron_common::api::internal::nexus::SledVmmState;
@@ -339,7 +339,7 @@ mod api_impl {
                     boot_partitions,
                 }),
                 zone_image_resolver: ZoneImageResolverInventory {
-                    zone_manifest: ZoneManifestInventory {
+                    zone_manifest: ManifestInventory {
                         boot_disk_path: Utf8PathBuf::new(),
                         boot_inventory: Err(
                             "not implemented by HostPhase2SledAgentImpl"

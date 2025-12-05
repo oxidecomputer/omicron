@@ -527,7 +527,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "hubpack",
- "rats-corim",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "salty",
  "serde",
  "serde_with",
@@ -546,7 +546,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "hubpack",
- "rats-corim",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "salty",
  "serde",
  "serde_with",
@@ -567,7 +567,7 @@ dependencies = [
  "hubpack",
  "knuffel",
  "miette",
- "rats-corim",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "serde_json",
 ]
 
@@ -2704,7 +2704,7 @@ dependencies = [
  "libipcc",
  "log",
  "p384",
- "rats-corim",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim)",
  "sha3",
  "tempfile",
  "thiserror 2.0.17",
@@ -8659,6 +8659,7 @@ dependencies = [
  "omicron-pins",
  "omicron-workspace-hack",
  "omicron-zone-package",
+ "rats-corim 0.1.0 (git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b)",
  "reqwest",
  "semver 1.0.27",
  "serde",
@@ -11269,6 +11270,21 @@ dependencies = [
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "rats-corim"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/rats-corim.git?rev=f0d5d5168d3d31487a56df32c676b0c6240bcc6b#f0d5d5168d3d31487a56df32c676b0c6240bcc6b"
+dependencies = [
+ "ciborium",
+ "ciborium-io",
+ "clap",
+ "hex",
+ "serde",
+ "serde_with",
+ "strum 0.26.3",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -15005,7 +15021,7 @@ dependencies = [
 [[package]]
 name = "tufaceous"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=measurement_corpus_take_2#d5ef2b3c21ad5d2d1936a01f910010dcc08f4bd9"
 dependencies = [
  "anyhow",
  "camino",
@@ -15026,7 +15042,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-artifact"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=measurement_corpus_take_2#d5ef2b3c21ad5d2d1936a01f910010dcc08f4bd9"
 dependencies = [
  "daft",
  "hex",
@@ -15043,7 +15059,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-brand-metadata"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=measurement_corpus_take_2#d5ef2b3c21ad5d2d1936a01f910010dcc08f4bd9"
 dependencies = [
  "semver 1.0.27",
  "serde",
@@ -15055,7 +15071,7 @@ dependencies = [
 [[package]]
 name = "tufaceous-lib"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/tufaceous?branch=main#db072743d0cfde918dcf981a064f225b0003b98d"
+source = "git+https://github.com/oxidecomputer/tufaceous?branch=measurement_corpus_take_2#d5ef2b3c21ad5d2d1936a01f910010dcc08f4bd9"
 dependencies = [
  "anyhow",
  "async-trait",

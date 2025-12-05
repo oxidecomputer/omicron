@@ -90,11 +90,11 @@ use nexus_sled_agent_shared::inventory::BootPartitionDetails;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventory;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryResult;
 use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
+use nexus_sled_agent_shared::inventory::ManifestNonBootInventory;
 use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
 use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use nexus_sled_agent_shared::inventory::OrphanedDataset;
 use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::CockroachStatus;
 use nexus_types::inventory::Collection;
@@ -3646,7 +3646,7 @@ impl DataStore {
 
             let mut by_sled_id: BTreeMap<
                 SledUuid,
-                IdOrdMap<ZoneManifestNonBootInventory>,
+                IdOrdMap<ManifestNonBootInventory>,
             > = BTreeMap::new();
 
             let mut paginator = Paginator::new(

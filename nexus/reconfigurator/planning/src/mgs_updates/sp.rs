@@ -120,7 +120,8 @@ pub(super) fn try_make_update(
                     | KnownArtifactKind::SwitchRot
                     | KnownArtifactKind::GimletRotBootloader
                     | KnownArtifactKind::PscRotBootloader
-                    | KnownArtifactKind::SwitchRotBootloader,
+                    | KnownArtifactKind::SwitchRotBootloader
+                    | KnownArtifactKind::MeasurementCorpus,
                 ) => false,
             }
         })
