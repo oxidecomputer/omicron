@@ -1601,7 +1601,6 @@ pub struct PlanningInputBuilder {
 }
 
 impl PlanningInputBuilder {
-    // TODO-john docs
     pub fn new(
         parent_blueprint: Arc<Blueprint>,
         policy: Policy,
