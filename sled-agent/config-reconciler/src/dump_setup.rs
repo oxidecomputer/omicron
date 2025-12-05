@@ -1154,11 +1154,14 @@ impl DumpSetupWorker {
         rv
     }
 
-    // Archives log files found in `logdir` for zone `zone_name` to the destination debug dataset.
+    // Archives log files found in `logdir` for zone `zone_name` to the
+    // destination debug dataset.
     //
-    // `log_name_pattern` should be a glob pattern that matches against file names, e.g., `*.log`, `mylog`.
-    // If `include_live` is `true`, this will archive all logs, matching on `{log_name_pattern}*`.
-    // If it is `false`, only rotated logs will be archived, matching on `{log_name_pattern}.[0-9]`.
+    // `log_name_pattern` should be a glob pattern that matches against file
+    // names, e.g., `*.log`, `mylog`. If `include_live` is `true`, this will
+    // archive all logs, matching on `{log_name_pattern}*`. If it is `false`,
+    // only rotated logs will be archived, matching on
+    // `{log_name_pattern}.[0-9]`.
     async fn archive_logs_from_zone_path(
         &self,
         debug_dir: &DebugDataset,
