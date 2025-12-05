@@ -123,6 +123,22 @@ pub fn mk_ereport(
     time_collected: chrono::DateTime<Utc>,
     json: serde_json::Value,
 ) -> Ereport {
+    let (serial_number, part_number) = match reporter {
+        Reporter::Sp { .. } => {
+            let part_number =
+                json["baseboard_part_number"].as_str().map(ToOwned::to_owned);
+            let serial_number =
+                json["baseboard_serial_number"].as_str().map(ToOwned::to_owned);
+            (serial_number, part_number)
+        }
+        Reporter::HostOs { .. } => {
+            todo!(
+                "eliza: when we get around to actually ingesting host ereport \
+                 JSON, figure out what the field names for serial and part \
+                 numbers would be!",
+            );
+        }
+    };
     Ereport {
         reporter,
         data: EreportData {
@@ -133,10 +149,8 @@ pub fn mk_ereport(
                 .as_str()
                 .or_else(|| json["k"].as_str())
                 .map(ToOwned::to_owned),
-            serial_number: json["serial_number"]
-                .as_str()
-                .map(ToOwned::to_owned),
-            part_number: json["part_number"].as_str().map(ToOwned::to_owned),
+            serial_number,
+            part_number,
             report: json,
         },
     }

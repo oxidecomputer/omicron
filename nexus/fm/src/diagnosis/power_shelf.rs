@@ -668,8 +668,7 @@ mod test {
 
         let sitrep = sitrep.build(OmicronZoneUuid::nil());
 
-        // TODO(eliza) ACTUALLY MAKE SOME ASSERTIONS ABOUT THE SITREP
-        eprintln!("{sitrep:#?}");
+        eprintln!("--- SITREP ---\n\n{sitrep:#?}");
 
         let case0 = {
             let mut cases = sitrep.cases.iter();
@@ -681,6 +680,8 @@ mod test {
             );
             case0
         };
+
+        eprintln!("\n--- CASE ---\n\n{case0}");
 
         let mut insert_alert = None;
         let mut remove_alert = None;
