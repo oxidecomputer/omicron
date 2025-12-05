@@ -1423,7 +1423,7 @@ fn bool_true() -> bool {
 // `UserData::deserialize()` below.
 pub const MAX_USER_DATA_BYTES: usize = 32 * 1024; // 32 KiB
 
-struct UserData;
+pub struct UserData;
 impl UserData {
     pub fn serialize<S>(
         data: &Vec<u8>,
@@ -2879,6 +2879,15 @@ impl From<Uuid> for MulticastGroupIdentifier {
 impl From<IpAddr> for MulticastGroupIdentifier {
     fn from(ip: IpAddr) -> Self {
         MulticastGroupIdentifier::Ip(ip)
+    }
+}
+
+impl From<NameOrId> for MulticastGroupIdentifier {
+    fn from(value: NameOrId) -> Self {
+        match value {
+            NameOrId::Name(name) => MulticastGroupIdentifier::Name(name),
+            NameOrId::Id(id) => MulticastGroupIdentifier::Id(id),
+        }
     }
 }
 

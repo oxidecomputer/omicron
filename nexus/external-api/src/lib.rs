@@ -14,7 +14,7 @@ use dropshot::{
     Query, RequestContext, ResultsPage, StreamingBody, TypedBody,
     WebsocketChannelResult, WebsocketConnection,
 };
-use dropshot_api_manager_types::ValidationContext;
+use dropshot_api_manager_types::{ValidationContext, api_versions};
 use http::Response;
 use ipnetwork::IpNetwork;
 use nexus_types::{
@@ -33,7 +33,51 @@ use omicron_common::api::external::{
 };
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20251208.0.0";
+pub mod v20251120;
+
+api_versions!([
+    // API versions are in the format YYYYMMDDNN.0.0, defined below as
+    // YYYYMMDDNN. Here, NN is a two-digit number starting at 00 for a
+    // particular date.
+    //
+    // WHEN CHANGING THE API (part 1 of 2):
+    //
+    // +- First, determine the next API version number to use.
+    // |
+    // |  * On the main branch: Take today's date in YYYYMMDD format, e.g. 20251112.
+    // |    Find the smallest NN that isn't already defined in the list below. In
+    // |    most cases, that is 00, but if 00 is already taken, use 01, 02, etc.
+    // |
+    // |  * On a release branch, don't alter the date. Instead, always bump the NN.
+    // |
+    // |  Duplicate this line, uncomment the *second* copy, update that copy for
+    // |  your new API version, and leave the first copy commented out as an
+    // |  example for the next person.
+    // |
+    // |  If there's a merge conflict, update the version number to the current
+    // |  date. Otherwise, it is okay to leave the version number unchanged even
+    // |  if you land your change on a different day from the one you make it on.
+    // |
+    // |  Ensure that version numbers are sorted in descending order. (This macro
+    // |  will panic at runtime if they're not in descending order.) The newest
+    // |  date-based version should be at the top of the list.
+    // v
+    // (next_yyyymmddnn, IDENT),
+    (2025120500, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
+    (2025112000, INITIAL),
+]);
+
+// WHEN CHANGING THE API (part 2 of 2):
+//
+// The call to `api_versions!` above defines constants of type
+// `semver::Version` that you can use in your Dropshot API definition to specify
+// the version when a particular endpoint was added or removed.  For example, if
+// you used:
+//
+//     (2025120100, ADD_FOOBAR)
+//
+// Then you could use `VERSION_ADD_FOOBAR` as the version in which endpoints
+// were added or removed.
 
 const MIB: usize = 1024 * 1024;
 const GIB: usize = 1024 * MIB;
@@ -1241,30 +1285,123 @@ pub trait NexusExternalApi {
 
     // Multicast Groups
 
-    /// List all multicast groups.
+    /// List multicast groups.
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups",
         tags = ["experimental"],
+        operation_id = "multicast_group_list",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId>,
+    ) -> Result<HttpResponseOk<ResultsPage<v20251120::MulticastGroup>>, HttpError>;
+
+    /// List multicast groups.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn multicast_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>;
 
+    /// Create a multicast group.
+    ///
+    /// Deprecated: Groups are created implicitly when adding members in newer
+    /// API versions.
+    #[endpoint {
+        method = POST,
+        path = "/v1/multicast-groups",
+        tags = ["experimental"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_multicast_group_create(
+        rqctx: RequestContext<Self::Context>,
+        new_group: TypedBody<v20251120::MulticastGroupCreate>,
+    ) -> Result<HttpResponseCreated<v20251120::MulticastGroup>, HttpError>;
+
     /// Fetch a multicast group.
     ///
-    /// The group can be specified by name, UUID, or multicast IP address
+    /// The group can be specified by name or UUID.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "multicast_group_view",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_multicast_group_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v20251120::MulticastGroupPath>,
+    ) -> Result<HttpResponseOk<v20251120::MulticastGroup>, HttpError>;
+
+    /// Fetch a multicast group.
+    ///
+    /// The group can be specified by name, UUID, or multicast IP address.
     /// (e.g., "224.1.2.3" or "ff38::1").
     #[endpoint {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}",
         tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn multicast_group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+
+    /// Update a multicast group.
+    ///
+    /// Deprecated: groups are managed implicitly through member operations.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_multicast_group_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v20251120::MulticastGroupPath>,
+        update_params: TypedBody<v20251120::MulticastGroupUpdate>,
+    ) -> Result<HttpResponseOk<v20251120::MulticastGroup>, HttpError>;
+
+    /// Delete a multicast group.
+    ///
+    /// Deprecated: groups are deleted automatically when the last member leaves.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_multicast_group_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v20251120::MulticastGroupPath>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List members of a multicast group.
+    ///
+    /// The group can be specified by name or UUID.
+    #[endpoint {
+        method = GET,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+        operation_id = "multicast_group_member_list",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_multicast_group_member_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v20251120::MulticastGroupPath>,
+        query_params: Query<PaginatedById>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v20251120::MulticastGroupMember>>,
+        HttpError,
+    >;
 
     /// List members of a multicast group.
     ///
@@ -1273,12 +1410,30 @@ pub trait NexusExternalApi {
         method = GET,
         path = "/v1/multicast-groups/{multicast_group}/members",
         tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn multicast_group_member_list(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::MulticastGroupPath>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<ResultsPage<MulticastGroupMember>>, HttpError>;
+
+    /// Add instance to a multicast group.
+    ///
+    /// The group can be specified by name or UUID.
+    #[endpoint {
+        method = POST,
+        path = "/v1/multicast-groups/{multicast_group}/members",
+        tags = ["experimental"],
+        operation_id = "multicast_group_member_add",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_multicast_group_member_add(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v20251120::MulticastGroupPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        member_params: TypedBody<v20251120::MulticastGroupMemberAdd>,
+    ) -> Result<HttpResponseCreated<v20251120::MulticastGroupMember>, HttpError>;
 
     /// Add instance to a multicast group.
     ///
@@ -1314,6 +1469,7 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/multicast-groups/{multicast_group}/members",
         tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn multicast_group_member_add(
         rqctx: RequestContext<Self::Context>,
@@ -1321,6 +1477,22 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
         member_params: TypedBody<params::MulticastGroupMemberAdd>,
     ) -> Result<HttpResponseCreated<MulticastGroupMember>, HttpError>;
+
+    /// Remove instance from a multicast group.
+    ///
+    /// The group can be specified by name or UUID.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/multicast-groups/{multicast_group}/members/{instance}",
+        tags = ["experimental"],
+        operation_id = "multicast_group_member_remove",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_multicast_group_member_remove(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v20251120::MulticastGroupMemberPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Remove instance from a multicast group.
     ///
@@ -1339,12 +1511,27 @@ pub trait NexusExternalApi {
         method = DELETE,
         path = "/v1/multicast-groups/{multicast_group}/members/{instance}",
         tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn multicast_group_member_remove(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<params::MulticastGroupMemberPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Look up multicast group by IP address.
+    ///
+    /// Deprecated: use the main view endpoint which accepts IP addresses directly.
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/multicast-groups/by-ip/{address}",
+        tags = ["experimental"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_lookup_multicast_group_by_ip(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v20251120::MulticastGroupByIpPath>,
+    ) -> Result<HttpResponseOk<v20251120::MulticastGroup>, HttpError>;
 
     // Disks
 
@@ -1469,6 +1656,20 @@ pub trait NexusExternalApi {
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v20251120::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+
+    /// Create instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn instance_create(
         rqctx: RequestContext<Self::Context>,
@@ -1505,6 +1706,21 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/instances/{instance}",
         tags = ["instances"],
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_instance_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+        instance_config: TypedBody<v20251120::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError>;
+
+    /// Update instance
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn instance_update(
         rqctx: RequestContext<Self::Context>,
@@ -2559,11 +2775,29 @@ pub trait NexusExternalApi {
 
     // Instance Multicast Groups
 
-    /// List multicast groups for instance
+    /// List multicast groups for an instance.
     #[endpoint {
         method = GET,
         path = "/v1/instances/{instance}/multicast-groups",
         tags = ["experimental"],
+        operation_id = "instance_multicast_group_list",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_instance_multicast_group_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v20251120::MulticastGroupMember>>,
+        HttpError,
+    >;
+
+    /// List multicast groups for an instance.
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/multicast-groups",
+        tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn instance_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
@@ -2574,7 +2808,24 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Join multicast group.
+    /// Join a multicast group.
+    ///
+    /// The group can be specified by name or UUID. This endpoint does not
+    /// accept a request body.
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_join",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_instance_multicast_group_join(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v20251120::InstanceMulticastGroupPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseCreated<v20251120::MulticastGroupMember>, HttpError>;
+
+    /// Join a multicast group.
     ///
     /// This is functionally equivalent to adding the instance via the group's
     /// member management endpoint or updating the instance's `multicast_groups`
@@ -2606,6 +2857,7 @@ pub trait NexusExternalApi {
         method = PUT,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
         tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn instance_multicast_group_join(
         rqctx: RequestContext<Self::Context>,
@@ -2614,7 +2866,23 @@ pub trait NexusExternalApi {
         body_params: TypedBody<params::InstanceMulticastGroupJoin>,
     ) -> Result<HttpResponseCreated<views::MulticastGroupMember>, HttpError>;
 
-    /// Leave multicast group.
+    /// Leave a multicast group.
+    ///
+    /// The group can be specified by name or UUID.
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
+        tags = ["experimental"],
+        operation_id = "instance_multicast_group_leave",
+        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v1_instance_multicast_group_leave(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<v20251120::InstanceMulticastGroupPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Leave a multicast group.
     ///
     /// The group can be specified by name, UUID, or multicast IP address.
     /// All three are fleet-wide unique identifiers.
@@ -2629,6 +2897,7 @@ pub trait NexusExternalApi {
         method = DELETE,
         path = "/v1/instances/{instance}/multicast-groups/{multicast_group}",
         tags = ["experimental"],
+        versions = VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES..,
     }]
     async fn instance_multicast_group_leave(
         rqctx: RequestContext<Self::Context>,
@@ -4383,8 +4652,37 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseDeleted, HttpError>;
 }
 
-/// Perform extra validations on the OpenAPI spec.
+/// Perform extra validations on the OpenAPI document, and generate the
+/// nexus_tags.txt file.
 pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
+    let blessed = cx
+        .is_blessed()
+        .expect("this is a versioned API so is_blessed should always be Some");
+
+    // There are two parts to this function:
+    //
+    // 1. Perform validation on the OpenAPI document.
+    // 2. Generate the nexus_tags.txt file.
+    //
+    // Step 1 should only be performed on non-blessed versions. That's because
+    // blessed versions are immutable, and if new checks are added in the
+    // future, we don't want old API versions to be affected.
+    //
+    // nexus_tags.txt is unversioned, so step 2 should only be performed on the
+    // latest version, whether or not it's blessed.
+
+    if !blessed {
+        validate_api_doc(spec, &mut cx);
+    }
+
+    // nexus_tags.txt is unversioned, so only write it out for the latest
+    // version (whether it's blessed or not).
+    if cx.is_latest() {
+        generate_tags_file(spec, &mut cx);
+    }
+}
+
+fn validate_api_doc(spec: &OpenAPI, cx: &mut ValidationContext<'_>) {
     if spec.openapi != "3.0.3" {
         cx.report_error(anyhow!(
             "Expected OpenAPI version to be 3.0.3, found {}",
@@ -4397,13 +4695,6 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
             spec.info.title,
         ));
     }
-    if spec.info.version != API_VERSION {
-        cx.report_error(anyhow!(
-            "Expected OpenAPI version to be '{}', found '{}'",
-            API_VERSION,
-            spec.info.version,
-        ));
-    }
 
     // Spot check a couple of items.
     if spec.paths.paths.is_empty() {
@@ -4413,13 +4704,7 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
         cx.report_error(anyhow!("Expected a path for /v1/projects"));
     }
 
-    // Construct a string that helps us identify the organization of tags and
-    // operations.
-    let mut ops_by_tag =
-        BTreeMap::<String, Vec<(String, String, String)>>::new();
-
-    let mut ops_by_tag_valid = true;
-    for (path, method, op) in spec.operations() {
+    for (_path, _method, op) in spec.operations() {
         // Make sure each operation has exactly one tag. Note, we intentionally
         // do this before validating the OpenAPI output as fixing an error here
         // would necessitate refreshing the spec file again.
@@ -4429,8 +4714,6 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
                 op.operation_id.as_ref().unwrap(),
                 op.tags.len()
             ));
-            ops_by_tag_valid = false;
-            continue;
         }
 
         // Every non-hidden endpoint must have a summary
@@ -4440,8 +4723,21 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
                 "operation '{}' is missing a summary doc comment",
                 op.operation_id.as_ref().unwrap()
             ));
-            // This error does not prevent `ops_by_tag` from being populated
-            // correctly, so we can continue.
+        }
+    }
+}
+
+fn generate_tags_file(spec: &OpenAPI, cx: &mut ValidationContext<'_>) {
+    // Construct a string that helps us identify the organization of tags and
+    // operations.
+    let mut ops_by_tag =
+        BTreeMap::<String, Vec<(String, String, String)>>::new();
+
+    for (path, method, op) in spec.operations() {
+        // If an operation doesn't have exactly one tag, skip generating the
+        // tags file entirely. (Validation above catches this case).
+        if op.tags.len() != 1 {
+            return;
         }
 
         ops_by_tag
@@ -4454,34 +4750,29 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
             ));
     }
 
-    if ops_by_tag_valid {
-        let mut tags = String::new();
-        for (tag, mut ops) in ops_by_tag {
-            ops.sort();
+    let mut tags = String::new();
+    for (tag, mut ops) in ops_by_tag {
+        ops.sort();
+        tags.push_str(&format!(r#"API operations found with tag "{}""#, tag));
+        tags.push_str(&format!(
+            "\n{:40} {:8} {}\n",
+            "OPERATION ID", "METHOD", "URL PATH"
+        ));
+        for (operation_id, method, path) in ops {
             tags.push_str(&format!(
-                r#"API operations found with tag "{}""#,
-                tag
+                "{:40} {:8} {}\n",
+                operation_id, method, path
             ));
-            tags.push_str(&format!(
-                "\n{:40} {:8} {}\n",
-                "OPERATION ID", "METHOD", "URL PATH"
-            ));
-            for (operation_id, method, path) in ops {
-                tags.push_str(&format!(
-                    "{:40} {:8} {}\n",
-                    operation_id, method, path
-                ));
-            }
-            tags.push('\n');
         }
-
-        // When this fails, verify that operations on which you're adding,
-        // renaming, or changing the tags are what you intend.
-        cx.record_file_contents(
-            "nexus/external-api/output/nexus_tags.txt",
-            tags.into_bytes(),
-        );
+        tags.push('\n');
     }
+
+    // When this fails, verify that operations on which you're adding,
+    // renaming, or changing the tags are what you intend.
+    cx.record_file_contents(
+        "nexus/external-api/output/nexus_tags.txt",
+        tags.into_bytes(),
+    );
 }
 
 pub type IpPoolRangePaginationParams =
