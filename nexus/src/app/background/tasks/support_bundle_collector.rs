@@ -1037,9 +1037,92 @@ impl BundleCollection {
             //
             // Only finish if we've exhausted all possible steps and joined all spawned work.
             if steps.is_empty() {
+                // Write trace file before returning
+                if let Err(err) = self.write_trace_file(output, &report).await {
+                    warn!(
+                        self.log,
+                        "Failed to write trace file";
+                        "error" => ?err
+                    );
+                }
                 return report;
             }
         }
+    }
+
+    // Write a Perfetto Event format JSON file for visualization
+    async fn write_trace_file(
+        &self,
+        output: &Utf8TempDir,
+        report: &SupportBundleCollectionReport,
+    ) -> anyhow::Result<()> {
+        let meta_dir = output.path().join("meta");
+        tokio::fs::create_dir_all(&meta_dir).await.with_context(|| {
+            format!("Failed to create meta directory {meta_dir}")
+        })?;
+
+        let trace_path = meta_dir.join("trace.json");
+
+        // Convert steps to Perfetto Trace Event format.
+        // Sort steps by start time and assign each a unique sequential ID.
+        //
+        // This is necessary because the trace event format does not like
+        // multiple slices to overlap - so we make each slice distinct.
+        //
+        // Ideally we'd be able to correlate these with actual tokio tasks,
+        // but it's hard to convert tokio::task::Id to a u64 because
+        // of https://github.com/tokio-rs/tokio/issues/7430
+        let mut sorted_steps: Vec<_> = report.steps.iter().collect();
+        sorted_steps.sort_by_key(|s| s.start);
+
+        // Generate trace events - each step gets a unique ID (1, 2, 3, ...)
+        // based on its start time order
+        let trace_events: Vec<_> = sorted_steps
+            .iter()
+            .enumerate()
+            .map(|(i, step)| {
+                let start_us = step.start.timestamp_micros();
+                let duration_us = (step.end - step.start)
+                    .num_microseconds()
+                    .unwrap_or(0)
+                    .max(0);
+                let step_id = i + 1;
+
+                json!({
+                    "name": step.name,
+                    "cat": "bundle_collection",
+                    "ph": "X",  // Complete event (has duration)
+                    "ts": start_us,
+                    "dur": duration_us,
+                    "pid": 1,
+                    "tid": step_id,
+                    "args": {
+                        "status": step.status.to_string(),
+                    }
+                })
+            })
+            .collect();
+
+        let trace_json = json!({
+            "traceEvents": trace_events,
+            "displayTimeUnit": "ms",
+        });
+
+        let trace_content = serde_json::to_string_pretty(&trace_json)
+            .context("Failed to serialize trace JSON")?;
+
+        tokio::fs::write(&trace_path, trace_content).await.with_context(
+            || format!("Failed to write trace file to {trace_path}"),
+        )?;
+
+        info!(
+            self.log,
+            "Wrote trace file";
+            "path" => %trace_path,
+            "num_events" => trace_events.len()
+        );
+
+        Ok(())
     }
 
     async fn collect_bundle_id(
@@ -2526,6 +2609,130 @@ mod test {
             .await
             .expect("Collection should be a no-op the second time");
         assert!(report.is_none());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_trace_file_generated(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let resolver = nexus.resolver();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        // Before we can create any bundles, we need to create the
+        // space for them to be provisioned.
+        let _datasets =
+            TestDataset::setup(cptestctx, &datastore, &opctx, 1).await;
+
+        // Create a bundle to collect
+        let bundle = datastore
+            .support_bundle_create(
+                &opctx,
+                "For trace file testing",
+                nexus.id(),
+                None,
+            )
+            .await
+            .expect("Couldn't allocate a support bundle");
+
+        let collector = SupportBundleCollector::new(
+            datastore.clone(),
+            resolver.clone(),
+            false,
+            nexus.id(),
+        );
+
+        // Collect the bundle
+        let mut request = BundleRequest::default();
+        request.data_selection.insert(BundleData::HostInfo(HashSet::new()));
+        let report = collector
+            .collect_bundle(&opctx, &request)
+            .await
+            .expect("Collection should have succeeded")
+            .expect("Should have generated a report");
+
+        // Download the trace file from the bundle
+        let head = false;
+        let range = None;
+        let response = nexus
+            .support_bundle_download(
+                &opctx,
+                bundle.id.into(),
+                SupportBundleQueryType::Path {
+                    file_path: "meta/trace.json".to_string(),
+                },
+                head,
+                range,
+            )
+            .await
+            .expect("Should be able to download trace file");
+
+        // Parse the trace file as JSON
+        let body_bytes =
+            response.into_body().collect().await.unwrap().to_bytes();
+        let trace_json: serde_json::Value = serde_json::from_slice(&body_bytes)
+            .expect("Trace file should be valid JSON");
+
+        // Verify the structure matches Perfetto Trace Event format
+        let trace_events = trace_json
+            .get("traceEvents")
+            .expect("Should have traceEvents field")
+            .as_array()
+            .expect("traceEvents should be an array");
+
+        // We should have at least the main collection steps
+        assert!(
+            !trace_events.is_empty(),
+            "Should have at least one trace event"
+        );
+
+        // Verify each event has the expected fields
+        for event in trace_events {
+            assert!(event.get("name").is_some(), "Event should have name");
+            assert_eq!(
+                event.get("cat").and_then(|v| v.as_str()),
+                Some("bundle_collection"),
+                "Event should have category 'bundle_collection'"
+            );
+            assert_eq!(
+                event.get("ph").and_then(|v| v.as_str()),
+                Some("X"),
+                "Event should be Complete event type"
+            );
+            assert!(
+                event.get("ts").and_then(|v| v.as_i64()).is_some(),
+                "Event should have timestamp"
+            );
+            assert!(
+                event.get("dur").and_then(|v| v.as_i64()).is_some(),
+                "Event should have duration"
+            );
+            assert!(
+                event.get("args").is_some(),
+                "Event should have args field"
+            );
+        }
+
+        // Verify we have the same number of events as steps in the report
+        assert_eq!(
+            trace_events.len(),
+            report.steps.len(),
+            "Number of events should match number of steps"
+        );
+
+        // Verify step names match between report and trace
+        let trace_names: std::collections::HashSet<_> = trace_events
+            .iter()
+            .filter_map(|e| e.get("name").and_then(|v| v.as_str()))
+            .collect();
+        let report_names: std::collections::HashSet<_> =
+            report.steps.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            trace_names, report_names,
+            "Trace event names should match report step names"
+        );
     }
 
     #[nexus_test(server = crate::Server)]
