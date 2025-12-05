@@ -26,10 +26,55 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SiloUserUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
+use schemars::JsonSchema;
+use serde::Serialize;
 use slog::Logger;
 use std::env;
+use std::future::Future;
 use std::sync::Arc;
 use uuid::Uuid;
+
+use dropshot::{
+    HttpError, HttpResponse, HttpResponseAccepted, HttpResponseCreated,
+    HttpResponseDeleted, HttpResponseOk, HttpResponseUpdatedNoContent,
+};
+use omicron_common::api::external::SimpleIdentity;
+
+/// Trait for extracting resource ID from HTTP response types to record in
+/// the audit log. Implemented for response types that may contain a created
+/// resource.
+pub trait MaybeHasResourceId {
+    fn resource_id(&self) -> Option<Uuid> {
+        None
+    }
+}
+
+impl<T> MaybeHasResourceId for HttpResponseCreated<T>
+where
+    T: SimpleIdentity + Serialize + JsonSchema + Send + Sync + 'static,
+{
+    fn resource_id(&self) -> Option<Uuid> {
+        Some(self.0.id())
+    }
+}
+
+// We only pull the ID out of HttpResponseCreated responses. For the rest of
+// these, keep the default impl with no resource ID because the identifier is
+// there in the URL. Something to think about: the identifier in the URL can
+// be a name, which can then be reused after the thing is deleted or renamed,
+// so names don't actually identify things uniquely the way IDs do. So we may
+// end up needing to record the ID for delete or update operations as well.
+
+impl<T> MaybeHasResourceId for HttpResponseOk<T> where
+    T: Serialize + JsonSchema + Send + Sync + 'static
+{
+}
+impl MaybeHasResourceId for HttpResponseDeleted {}
+impl MaybeHasResourceId for HttpResponseUpdatedNoContent {}
+impl<T> MaybeHasResourceId for HttpResponseAccepted<T> where
+    T: Serialize + JsonSchema + Send + Sync + 'static
+{
+}
 
 /// Indicates the kind of HTTP server.
 #[derive(Clone, Copy)]
@@ -332,6 +377,45 @@ impl ServerContext {
             omdb_config: config.pkg.omdb.clone(),
         }))
     }
+}
+
+/// Execute an external API handler with audit logging and latency tracking.
+///
+/// This helper:
+/// 1. Creates an OpContext via authentication
+/// 2. Initializes an audit log entry
+/// 3. Runs the handler
+/// 4. Completes the audit log entry with result info
+/// 5. Wraps everything in latency instrumentation
+pub async fn audit_and_time<F, Fut, R>(
+    rqctx: &dropshot::RequestContext<ApiContext>,
+    handler: F,
+) -> Result<R, HttpError>
+where
+    F: FnOnce(Arc<OpContext>, Arc<Nexus>) -> Fut,
+    Fut: Future<Output = Result<R, HttpError>>,
+    R: HttpResponse + MaybeHasResourceId,
+{
+    let apictx = rqctx.context();
+    let nexus = Arc::clone(&apictx.context.nexus);
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(rqctx, async {
+            let opctx = Arc::new(op_context_for_external_api(rqctx).await?);
+            let audit = nexus.audit_log_entry_init(&opctx, rqctx).await?;
+
+            let result = handler(Arc::clone(&opctx), Arc::clone(&nexus)).await;
+
+            // TODO: pass resource_id to audit_log_entry_complete once
+            // the schema supports it
+            let _resource_id =
+                result.as_ref().ok().and_then(|r| r.resource_id());
+            let _ =
+                nexus.audit_log_entry_complete(&opctx, &audit, &result).await;
+            result
+        })
+        .await
 }
 
 /// Authenticates an incoming request to the external API and produces a new
