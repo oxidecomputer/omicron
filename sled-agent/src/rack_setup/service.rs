@@ -1775,6 +1775,7 @@ mod test {
                 reconciler_status: ConfigReconcilerInventoryStatus::NotYetRun,
                 last_reconciliation: None,
                 zone_image_resolver: ZoneImageResolverInventory::new_fake(),
+                smf_services_enabled_not_running: vec![],
             },
             true,
         )

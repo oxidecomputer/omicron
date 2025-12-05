@@ -32,6 +32,7 @@ use futures::stream::FuturesUnordered;
 use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
+use illumos_utils::svcs::Svcs;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
 use illumos_utils::zfs::Mountpoint;
@@ -306,13 +307,16 @@ pub enum InventoryError {
     BadByteCount(#[from] ByteCountRangeError),
     #[error(transparent)]
     InventoryError(#[from] sled_agent_config_reconciler::InventoryError),
+    #[error(transparent)]
+    ExecutionError(#[from] illumos_utils::ExecutionError),
 }
 
 impl From<InventoryError> for omicron_common::api::external::Error {
     fn from(inventory_error: InventoryError) -> Self {
         match inventory_error {
             e @ (InventoryError::BadByteCount(..)
-            | InventoryError::InventoryError(_)) => {
+            | InventoryError::InventoryError(_)
+            | InventoryError::ExecutionError(_)) => {
                 omicron_common::api::external::Error::internal_error(
                     &InlineErrorChain::new(&e).to_string(),
                 )
@@ -1129,6 +1133,9 @@ impl SledAgent {
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
 
+        let smf_services_enabled_not_running =
+            Svcs::enabled_not_running(&self.log).await?;
+
         let ReconcilerInventory {
             disks,
             zpools,
@@ -1154,6 +1161,7 @@ impl SledAgent {
             reconciler_status,
             last_reconciliation,
             zone_image_resolver,
+            smf_services_enabled_not_running,
         })
     }
 

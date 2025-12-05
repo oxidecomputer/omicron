@@ -3999,6 +3999,8 @@ impl DataStore {
                 reconciler_status,
                 last_reconciliation,
                 zone_image_resolver,
+                // TODO-K: Actually query the DB when there is something there
+                smf_services_enabled_not_running: vec![],
             };
             sled_agents
                 .insert_unique(sled_agent)

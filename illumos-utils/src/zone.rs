@@ -25,6 +25,7 @@ const DLADM: &str = "/usr/sbin/dladm";
 pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
 pub const SVCCFG: &str = "/usr/sbin/svccfg";
+pub const SVCS: &str = "/usr/bin/svcs";
 pub const ZLOGIN: &str = "/usr/sbin/zlogin";
 pub const ROUTE: &str = "/usr/sbin/route";
 
