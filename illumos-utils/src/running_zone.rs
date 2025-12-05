@@ -8,6 +8,8 @@ use crate::addrobj::{
     AddrObject, DHCP_ADDROBJ_NAME, IPV4_STATIC_ADDROBJ_NAME,
     IPV6_STATIC_ADDROBJ_NAME,
 };
+#[cfg(target_os = "illumos")]
+use crate::contract;
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
@@ -112,7 +114,7 @@ pub fn ensure_contract_reaper(log: &Logger) {
     info!(log, "Ensuring contract reaper thread");
     REAPER_THREAD.get_or_init(|| {
         let log = log.new(o!("component" => "ContractReaper"));
-        std::thread::spawn(move || zenter::contract_reaper(log))
+        std::thread::spawn(move || contract::process_contract_reaper(log))
     });
 }
 
@@ -125,214 +127,12 @@ pub fn ensure_contract_reaper(log: &Logger) {
 // inside a non-global zone.
 #[cfg(target_os = "illumos")]
 mod zenter {
-    use libc::ctid_t;
     use libc::zoneid_t;
-    use slog::{Logger, debug, error};
     use std::ffi::c_int;
-    use std::ffi::c_uint;
-    use std::ffi::c_void;
-    use std::ffi::{CStr, CString};
-    use std::process;
-    use std::thread;
-    use std::time::Duration;
-
-    #[allow(non_camel_case_types)]
-    type ct_evthdl_t = *mut c_void;
-
-    #[link(name = "contract")]
-    unsafe extern "C" {
-        fn ct_tmpl_set_critical(fd: c_int, events: c_uint) -> c_int;
-        fn ct_tmpl_set_informative(fd: c_int, events: c_uint) -> c_int;
-        fn ct_pr_tmpl_set_fatal(fd: c_int, events: c_uint) -> c_int;
-        fn ct_pr_tmpl_set_param(fd: c_int, params: c_uint) -> c_int;
-        fn ct_tmpl_activate(fd: c_int) -> c_int;
-        fn ct_tmpl_clear(fd: c_int) -> c_int;
-        fn ct_ctl_abandon(fd: c_int) -> c_int;
-        fn ct_event_read_critical(fd: c_int, ev: *mut ct_evthdl_t) -> c_int;
-        fn ct_event_get_type(ev: ct_evthdl_t) -> u64;
-        fn ct_event_get_ctid(ev: ct_evthdl_t) -> ctid_t;
-        fn ct_event_free(ev: ct_evthdl_t);
-    }
 
     #[link(name = "c")]
     unsafe extern "C" {
         pub fn zone_enter(zid: zoneid_t) -> c_int;
-    }
-
-    // This thread watches for critical events coming from all process
-    // contracts held by sled-agent, and reaps (abandons) contracts which
-    // become empty. Process contracts are used in conjunction with
-    // zone_enter() in order to run commands within non-global zones, and
-    // the contracts used for this come from templates that define becoming
-    // empty as a critical event.
-    pub fn contract_reaper(log: Logger) {
-        const EVENT_PATH: &'static [u8] = b"/system/contract/process/pbundle";
-        const CT_PR_EV_EMPTY: u64 = 1;
-
-        let cpath = CString::new(EVENT_PATH).unwrap();
-        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY) };
-
-        if fd < 0 {
-            panic!(
-                "Could not open {:?}: {}",
-                cpath,
-                std::io::Error::last_os_error()
-            );
-        }
-
-        loop {
-            let mut ev: ct_evthdl_t = std::ptr::null_mut();
-            let evp: *mut ct_evthdl_t = &mut ev;
-            // The event endpoint was not opened as non-blocking, so
-            // ct_event_read_critical(3CONTRACT) will block until a new
-            // critical event is available on the channel.
-            match unsafe { ct_event_read_critical(fd, evp) } {
-                0 => {
-                    let typ = unsafe { ct_event_get_type(ev) };
-                    if typ == CT_PR_EV_EMPTY {
-                        let ctid = unsafe { ct_event_get_ctid(ev) };
-                        match abandon_contract(ctid) {
-                            Err(e) => error!(
-                                &log,
-                                "Failed to abandon contract {}: {}", ctid, e
-                            ),
-                            Ok(_) => {
-                                debug!(&log, "Abandoned contract {}", ctid)
-                            }
-                        }
-                    }
-                    unsafe { ct_event_free(ev) };
-                }
-                err => {
-                    // ct_event_read_critical(3CONTRACT) does not state any
-                    // error values for this function if the file descriptor
-                    // was not opened non-blocking, but inspection of the
-                    // library code shows that various errnos could be returned
-                    // in situations such as failure to allocate memory. In
-                    // those cases, log a message and pause to avoid entering a
-                    // tight loop if the problem persists.
-                    error!(
-                        &log,
-                        "Unexpected response from contract event channel: {}",
-                        std::io::Error::from_raw_os_error(err)
-                    );
-                    thread::sleep(Duration::from_secs(1));
-                }
-            }
-        }
-    }
-
-    #[derive(thiserror::Error, Debug)]
-    pub enum AbandonContractError {
-        #[error("Error opening file {file}: {error}")]
-        Open { file: String, error: std::io::Error },
-
-        #[error("Error abandoning contract {ctid}: {error}")]
-        Abandon { ctid: ctid_t, error: std::io::Error },
-
-        #[error("Error closing file {file}: {error}")]
-        Close { file: String, error: std::io::Error },
-    }
-
-    pub fn abandon_contract(ctid: ctid_t) -> Result<(), AbandonContractError> {
-        let path = format!("/proc/{}/contracts/{}/ctl", process::id(), ctid);
-
-        let cpath = CString::new(path.clone()).unwrap();
-        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_WRONLY) };
-        if fd < 0 {
-            return Err(AbandonContractError::Open {
-                file: path,
-                error: std::io::Error::last_os_error(),
-            });
-        }
-        let ret = unsafe { ct_ctl_abandon(fd) };
-        if ret != 0 {
-            unsafe { libc::close(fd) };
-            return Err(AbandonContractError::Abandon {
-                ctid,
-                error: std::io::Error::from_raw_os_error(ret),
-            });
-        }
-        if unsafe { libc::close(fd) } != 0 {
-            return Err(AbandonContractError::Close {
-                file: path,
-                error: std::io::Error::last_os_error(),
-            });
-        }
-
-        Ok(())
-    }
-
-    // A Rust wrapper around the process contract template.
-    #[derive(Debug)]
-    pub struct Template {
-        fd: c_int,
-    }
-
-    impl Drop for Template {
-        fn drop(&mut self) {
-            self.clear();
-            // Ignore any error, since printing may interfere with `slog`'s
-            // structured output.
-            unsafe { libc::close(self.fd) };
-        }
-    }
-
-    impl Template {
-        const TEMPLATE_PATH: &'static [u8] =
-            b"/system/contract/process/template\0";
-
-        // Constants related to how the contract below is managed. See
-        // `usr/src/uts/common/sys/contract/process.h` in the illumos sources
-        // for details.
-
-        // Contract has become empty.
-        const CT_PR_EV_EMPTY: c_uint = 0x1;
-        // Process experienced an uncorrectable error.
-        const CT_PR_EV_HWERR: c_uint = 0x20;
-        // Only kill process group on fatal errors.
-        const CT_PR_PGRPONLY: c_uint = 0x04;
-        // Automatically detach inherited contracts.
-        const CT_PR_REGENT: c_uint = 0x08;
-
-        pub fn new() -> Result<Self, crate::ExecutionError> {
-            let path = CStr::from_bytes_with_nul(Self::TEMPLATE_PATH).unwrap();
-            let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR) };
-            if fd < 0 {
-                let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ContractFailure { err });
-            }
-
-            // Initialize the contract template.
-            //
-            // Nothing is inherited, we do not allow the contract to be
-            // orphaned, and the only event which is delivered is EV_EMPTY,
-            // indicating that the contract has become empty. These events are
-            // consumed by contract_reaper() above.
-            //
-            // See illumos sources in `usr/src/cmd/zlogin/zlogin.c` in the
-            // implementation of `init_template()` for details.
-            if unsafe { ct_tmpl_set_critical(fd, Self::CT_PR_EV_EMPTY) } != 0
-                || unsafe { ct_tmpl_set_informative(fd, 0) } != 0
-                || unsafe { ct_pr_tmpl_set_fatal(fd, Self::CT_PR_EV_HWERR) }
-                    != 0
-                || unsafe {
-                    ct_pr_tmpl_set_param(
-                        fd,
-                        Self::CT_PR_PGRPONLY | Self::CT_PR_REGENT,
-                    )
-                } != 0
-                || unsafe { ct_tmpl_activate(fd) } != 0
-            {
-                let err = std::io::Error::last_os_error();
-                return Err(crate::ExecutionError::ContractFailure { err });
-            }
-            Ok(Self { fd })
-        }
-
-        pub fn clear(&self) {
-            unsafe { ct_tmpl_clear(self.fd) };
-        }
     }
 }
 
@@ -421,10 +221,11 @@ impl RunningZone {
                 err: crate::ExecutionError::NotRunning,
             });
         };
-        let template =
-            std::sync::Arc::new(zenter::Template::new().map_err(|err| {
-                RunCommandError { zone: self.name().to_string(), err }
-            })?);
+        let template = std::sync::Arc::new(
+            contract::Template::new(contract::ContractType::Process).map_err(
+                |err| RunCommandError { zone: self.name().to_string(), err },
+            )?,
+        );
         let tmpl = std::sync::Arc::clone(&template);
         let mut command = std::process::Command::new(crate::PFEXEC);
         let logger = self.inner.log.clone();

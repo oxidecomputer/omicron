@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20251208.0.0"
+    "version": "2025112000.0.0"
   },
   "paths": {
     "/device/auth": {
@@ -3620,7 +3620,7 @@
           "instances"
         ],
         "summary": "Create instance",
-        "operationId": "instance_create",
+        "operationId": "v1_instance_create",
         "parameters": [
           {
             "in": "query",
@@ -3712,7 +3712,7 @@
           "instances"
         ],
         "summary": "Update instance",
-        "operationId": "instance_update",
+        "operationId": "v1_instance_update",
         "parameters": [
           {
             "in": "query",
@@ -4283,7 +4283,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "List multicast groups for instance",
+        "summary": "List multicast groups for an instance.",
         "operationId": "instance_multicast_group_list",
         "parameters": [
           {
@@ -4329,8 +4329,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Join multicast group.",
-        "description": "This is functionally equivalent to adding the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.\n\nAuthorization: requires Modify on the instance identified in the URL path (checked first) and Read on the multicast group. Checking instance permission first prevents creating orphaned groups when the instance check fails.\n\nGroup Identification: Groups can be referenced by name, IP address, or UUID. All three are fleet-wide unique identifiers: - By name: If group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. Pool selection prefers the default pool; if none, selects alphabetically. - By IP: If group doesn't exist, it's implicitly created using that IP. The pool is determined by which pool contains the IP. - By UUID: Group must already exist.\n\nSource IP filtering (SSM): - Duplicate IPs in the request are automatically deduplicated. - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3). - Creating a new SSM group: `source_ips` is required. SSM addresses (232.x.x.x for IPv4, FF3x:: for IPv6) require source filtering. - Joining an existing group: If `source_ips` is omitted, the instance inherits the group's existing sources. If specified, they must exactly match the group's sources or the request fails. - Providing `source_ips` to an ASM group (or vice versa) will fail.",
+        "summary": "Join a multicast group.",
+        "description": "The group can be specified by name or UUID. This endpoint does not accept a request body.",
         "operationId": "instance_multicast_group_join",
         "parameters": [
           {
@@ -4345,10 +4345,10 @@
           {
             "in": "path",
             "name": "multicast_group",
-            "description": "Name, ID, or IP address of the multicast group",
+            "description": "Name or ID of the multicast group",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -4360,16 +4360,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMulticastGroupJoin"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "201": {
             "description": "successful creation",
@@ -4393,8 +4383,8 @@
         "tags": [
           "experimental"
         ],
-        "summary": "Leave multicast group.",
-        "description": "The group can be specified by name, UUID, or multicast IP address. All three are fleet-wide unique identifiers.\n\nThis is functionally equivalent to removing the instance via the group's member management endpoint or updating the instance's `multicast_groups` field. All approaches modify the same membership and trigger reconciliation.\n\nAuthorization: requires Modify on the instance (checked first) and Read on the multicast group.",
+        "summary": "Leave a multicast group.",
+        "description": "The group can be specified by name or UUID.",
         "operationId": "instance_multicast_group_leave",
         "parameters": [
           {
@@ -4409,10 +4399,10 @@
           {
             "in": "path",
             "name": "multicast_group",
-            "description": "Name, ID, or IP address of the multicast group",
+            "description": "Name or ID of the multicast group",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -6043,7 +6033,7 @@
         "tags": [
           "experimental"
         ],
-        "summary": "List all multicast groups.",
+        "summary": "List multicast groups.",
         "operationId": "multicast_group_list",
         "parameters": [
           {
@@ -6095,6 +6085,42 @@
         "x-dropshot-pagination": {
           "required": []
         }
+      },
+      "post": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Create a multicast group.",
+        "description": "Deprecated: Groups are created implicitly when adding members in newer API versions.",
+        "operationId": "v1_multicast_group_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MulticastGroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/multicast-groups/{multicast_group}": {
@@ -6103,16 +6129,16 @@
           "experimental"
         ],
         "summary": "Fetch a multicast group.",
-        "description": "The group can be specified by name, UUID, or multicast IP address (e.g., \"224.1.2.3\" or \"ff38::1\").",
+        "description": "The group can be specified by name or UUID.",
         "operationId": "multicast_group_view",
         "parameters": [
           {
             "in": "path",
             "name": "multicast_group",
-            "description": "Name, ID, or IP address of the multicast group",
+            "description": "Name or ID of the multicast group",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/NameOrId"
             }
           }
         ],
@@ -6134,6 +6160,83 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "put": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Update a multicast group.",
+        "description": "Deprecated: groups are managed implicitly through member operations.",
+        "operationId": "v1_multicast_group_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MulticastGroupUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Delete a multicast group.",
+        "description": "Deprecated: groups are deleted automatically when the last member leaves.",
+        "operationId": "v1_multicast_group_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "multicast_group",
+            "description": "Name or ID of the multicast group",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/multicast-groups/{multicast_group}/members": {
@@ -6142,16 +6245,16 @@
           "experimental"
         ],
         "summary": "List members of a multicast group.",
-        "description": "The group can be specified by name, UUID, or multicast IP address.",
+        "description": "The group can be specified by name or UUID.",
         "operationId": "multicast_group_member_list",
         "parameters": [
           {
             "in": "path",
             "name": "multicast_group",
-            "description": "Name, ID, or IP address of the multicast group",
+            "description": "Name or ID of the multicast group",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -6209,16 +6312,16 @@
           "experimental"
         ],
         "summary": "Add instance to a multicast group.",
-        "description": "Functionally equivalent to updating the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger the same reconciliation logic.\n\nAuthorization: requires Modify on the instance specified in the request body (checked first) and Read on the multicast group (users can only attach instances they are authorized to modify).\n\nGroup Identification: Groups can be referenced by name, IP address, or UUID. All three are fleet-wide unique identifiers: - By name: If group doesn't exist, it's implicitly created with an auto-allocated IP from a multicast pool linked to the caller's silo. Pool selection prefers the default pool; if none, selects alphabetically. - By IP: If group doesn't exist, it's implicitly created using that IP. The pool is determined by which pool contains the IP. - By UUID: Group must already exist.\n\nSource IP filtering (SSM): - Duplicate IPs in the request are automatically deduplicated. - Maximum of 64 source IPs allowed (per RFC 3376, IGMPv3). - Creating a new SSM group: `source_ips` is required. SSM addresses (232.x.x.x for IPv4, FF3x:: for IPv6) require source filtering. - Joining an existing group: If `source_ips` is omitted, the instance inherits the group's existing sources. If specified, they must exactly match the group's sources or the request fails. - Providing `source_ips` to an ASM group (or vice versa) will fail.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
+        "description": "The group can be specified by name or UUID.",
         "operationId": "multicast_group_member_add",
         "parameters": [
           {
             "in": "path",
             "name": "multicast_group",
-            "description": "Name, ID, or IP address of the multicast group",
+            "description": "Name or ID of the multicast group",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -6266,7 +6369,7 @@
           "experimental"
         ],
         "summary": "Remove instance from a multicast group.",
-        "description": "The group can be specified by name, UUID, or multicast IP address. All three are fleet-wide unique identifiers.\n\nFunctionally equivalent to removing the group from the instance's `multicast_groups` field. Both approaches modify the same underlying membership and trigger reconciliation.\n\nAuthorization: requires Modify on the instance (checked first) and Read on the multicast group.\n\nSpecify instance by name (requires `?project=<name>`) or UUID.",
+        "description": "The group can be specified by name or UUID.",
         "operationId": "multicast_group_member_remove",
         "parameters": [
           {
@@ -6281,10 +6384,10 @@
           {
             "in": "path",
             "name": "multicast_group",
-            "description": "Name, ID, or IP address of the multicast group",
+            "description": "Name or ID of the multicast group",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -9520,6 +9623,46 @@
             "end_time",
             "start_time"
           ]
+        }
+      }
+    },
+    "/v1/system/multicast-groups/by-ip/{address}": {
+      "get": {
+        "tags": [
+          "experimental"
+        ],
+        "summary": "Look up multicast group by IP address.",
+        "description": "Deprecated: use the main view endpoint which accepts IP addresses directly.",
+        "operationId": "v1_lookup_multicast_group_by_ip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "description": "IP address of the multicast group",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MulticastGroup"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -20906,7 +21049,7 @@
         ]
       },
       "InstanceCreate": {
-        "description": "Create-time parameters for an `Instance`",
+        "description": "Create-time parameters for an `Instance`.",
         "type": "object",
         "properties": {
           "anti_affinity_groups": {
@@ -20919,7 +21062,7 @@
           },
           "auto_restart_policy": {
             "nullable": true,
-            "description": "The auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy will be explicitly configured for this instance, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
+            "description": "The auto-restart policy for this instance.",
             "default": null,
             "allOf": [
               {
@@ -20929,7 +21072,7 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "The disk the instance is configured to boot from.\n\nThis disk can either be attached if it already exists or created along with the instance.\n\nSpecifying a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped. The boot disk counts against the disk attachment limit.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
+            "description": "The disk the instance is configured to boot from.",
             "default": null,
             "allOf": [
               {
@@ -20939,7 +21082,7 @@
           },
           "cpu_platform": {
             "nullable": true,
-            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform; when it is started the instance will have the most general CPU platform supported by the sled it is initially placed on.",
+            "description": "The CPU platform to be used for this instance.",
             "default": null,
             "allOf": [
               {
@@ -20951,7 +21094,7 @@
             "type": "string"
           },
           "disks": {
-            "description": "A list of disks to be attached to the instance.\n\nDisk attachments of type \"create\" will be created, while those of type \"attach\" must already exist.\n\nThe order of this list does not guarantee a boot order for the instance. Use the boot_disk attribute to specify a boot disk. When boot_disk is specified it will count against the disk attachment limit.",
+            "description": "A list of disks to be attached to the instance.",
             "default": [],
             "type": "array",
             "items": {
@@ -20959,7 +21102,7 @@
             }
           },
           "external_ips": {
-            "description": "The external IP addresses provided to this instance.\n\nBy default, all instances have outbound connectivity, but no inbound connectivity. These external addresses can be used to provide a fixed, known IP address for making inbound connections to the instance.",
+            "description": "The external IP addresses provided to this instance.",
             "default": [],
             "type": "array",
             "items": {
@@ -20983,11 +21126,11 @@
             ]
           },
           "multicast_groups": {
-            "description": "The multicast groups this instance should join.\n\nThe instance will be automatically added as a member of the specified multicast groups during creation, enabling it to send and receive multicast traffic for those groups. Groups can be specified by name, ID, or multicast IP address.",
+            "description": "Multicast groups this instance should be joined to upon creation.\n\nProvide a list of multicast group names or UUIDs. Newer API versions also accept multicast IP addresses.",
             "default": [],
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           "name": {
@@ -21014,7 +21157,7 @@
           },
           "ssh_public_keys": {
             "nullable": true,
-            "description": "An allowlist of SSH public keys to be transferred to the instance via cloud-init during instance creation.\n\nIf not provided, all SSH public keys from the user's profile will be sent. If an empty list is provided, no public keys will be transmitted to the instance.",
+            "description": "An allowlist of SSH public keys to be transferred to the instance via cloud-init during instance creation.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/NameOrId"
@@ -21109,22 +21252,6 @@
             ]
           }
         ]
-      },
-      "InstanceMulticastGroupJoin": {
-        "description": "Parameters for joining an instance to a multicast group.\n\nWhen joining by IP address, the pool containing the multicast IP is auto-discovered from all linked multicast pools.",
-        "type": "object",
-        "properties": {
-          "source_ips": {
-            "nullable": true,
-            "description": "Optional Source IP addresses for Source-Specific Multicast (SSM).\n\nIf the group already exists: - Validates sources match the group's existing configuration\n\nIf the group doesn't exist (implicit creation): - Non-empty list creates an SSM group with these sources - Empty or omitted creates an ASM group",
-            "default": null,
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
-          }
-        }
       },
       "InstanceNetworkInterface": {
         "description": "An `InstanceNetworkInterface` represents a virtual network interface device attached to an instance.",
@@ -21496,7 +21623,7 @@
         "properties": {
           "auto_restart_policy": {
             "nullable": true,
-            "description": "The auto-restart policy for this instance.\n\nThis policy determines whether the instance should be automatically restarted by the control plane on failure. If this is `null`, any explicitly configured auto-restart policy will be unset, and the control plane will select the default policy when determining whether the instance can be automatically restarted.\n\nCurrently, the global default auto-restart policy is \"best-effort\", so instances with `null` auto-restart policies will be automatically restarted. However, in the future, the default policy may be configurable through other mechanisms, such as on a per-project basis. In that case, any configured default policy will be used if this is `null`.",
+            "description": "The auto-restart policy for this instance.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
@@ -21505,7 +21632,7 @@
           },
           "boot_disk": {
             "nullable": true,
-            "description": "The disk the instance is configured to boot from.\n\nSetting a boot disk is optional but recommended to ensure predictable boot behavior. The boot disk can be set during instance creation or later if the instance is stopped. The boot disk counts against the disk attachment limit.\n\nAn instance that does not have a boot disk set will use the boot options specified in its UEFI settings, which are controlled by both the instance's UEFI firmware and the guest operating system. Boot options can change as disks are attached and detached, which may result in an instance that only boots to the EFI shell until a boot disk is set.",
+            "description": "The disk the instance is configured to boot from.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
@@ -21514,7 +21641,7 @@
           },
           "cpu_platform": {
             "nullable": true,
-            "description": "The CPU platform to be used for this instance. If this is `null`, the instance requires no particular CPU platform; when it is started the instance will have the most general CPU platform supported by the sled it is initially placed on.",
+            "description": "The CPU platform to be used for this instance.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceCpuPlatform"
@@ -21531,11 +21658,10 @@
           },
           "multicast_groups": {
             "nullable": true,
-            "description": "Multicast groups this instance should join.\n\nWhen specified, this replaces the instance's current multicast group membership with the new set of groups. The instance will leave any groups not listed here and join any new groups that are specified. Groups can be specified by name, ID, or multicast IP address.\n\nIf not provided (None), the instance's multicast group membership will not be changed.",
-            "default": null,
+            "description": "Multicast groups this instance should join.\n\nWhen specified, this replaces the instance's current multicast group membership with the new set of groups. The instance will leave any groups not listed here and join any new groups that are specified.\n\nIf not provided (None), the instance's multicast group membership will not be changed.\n\nAccepts group names or UUIDs. Newer API versions also accept multicast IP addresses.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/MulticastGroupIdentifier"
+              "$ref": "#/components/schemas/NameOrId"
             }
           },
           "ncpus": {
@@ -22904,13 +23030,59 @@
           "time_modified"
         ]
       },
-      "MulticastGroupIdentifier": {
-        "title": "A multicast group identifier",
-        "description": "Can be a UUID, a name, or an IP address",
-        "type": "string"
+      "MulticastGroupCreate": {
+        "description": "Create-time parameters for a multicast group.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "multicast_ip": {
+            "nullable": true,
+            "description": "The multicast IP address to allocate. If None, one will be allocated from the default pool.",
+            "default": null,
+            "type": "string",
+            "format": "ip"
+          },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. Tags packets leaving the rack to traverse VLAN-segmented upstream networks.\n\nValid range: 2-4094 (VLAN IDs 0-1 are reserved by IEEE 802.1Q standard).",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "pool": {
+            "nullable": true,
+            "description": "Name or ID of the IP pool to allocate from. If None, uses the default multicast pool.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "source_ips": {
+            "nullable": true,
+            "description": "Source IP addresses for Source-Specific Multicast (SSM).\n\nNone uses default behavior (Any-Source Multicast). Empty list explicitly allows any source (Any-Source Multicast). Non-empty list restricts to specific sources (SSM).",
+            "default": null,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
       },
       "MulticastGroupMember": {
-        "description": "View of a Multicast Group Member (instance belonging to a multicast group)",
+        "description": "View of a Multicast Group Member.\n\nThis version doesn't have the `multicast_ip` field which was added later.",
         "type": "object",
         "properties": {
           "description": {
@@ -22931,11 +23103,6 @@
             "description": "The ID of the multicast group this member belongs to.",
             "type": "string",
             "format": "uuid"
-          },
-          "multicast_ip": {
-            "description": "The multicast IP address of the group this member belongs to.",
-            "type": "string",
-            "format": "ip"
           },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
@@ -22965,7 +23132,6 @@
           "id",
           "instance_id",
           "multicast_group_id",
-          "multicast_ip",
           "name",
           "state",
           "time_created",
@@ -22983,16 +23149,6 @@
                 "$ref": "#/components/schemas/NameOrId"
               }
             ]
-          },
-          "source_ips": {
-            "nullable": true,
-            "description": "Optional Source IP addresses for Source-Specific Multicast (SSM).\n\nIf the group already exists: - If `source_ips` is specified, validates they match the group's sources (no implicit update is performed).\n\nIf the group doesn't exist (implicit creation): - If `source_ips` is specified and non-empty, attempts to create an SSM group using these sources. - If omitted or empty, creates an ASM group.",
-            "default": null,
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
           }
         },
         "required": [
@@ -23040,6 +23196,44 @@
         "required": [
           "items"
         ]
+      },
+      "MulticastGroupUpdate": {
+        "description": "Update-time parameters for a multicast group.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "description": "New description for the multicast group",
+            "default": null,
+            "type": "string"
+          },
+          "mvlan": {
+            "nullable": true,
+            "description": "Multicast VLAN (MVLAN) for egress multicast traffic to upstream networks. Set to null to clear the MVLAN. Valid range: 2-4094 when provided. Omit the field to leave mvlan unchanged.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "name": {
+            "nullable": true,
+            "description": "New name for the multicast group",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "source_ips": {
+            "nullable": true,
+            "description": "Update source IPs for SSM",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        }
       },
       "Name": {
         "title": "A name unique within the parent collection",
