@@ -73,10 +73,10 @@ async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
 
 #[tokio::test]
 async fn test_oximeter_reregistration() {
-    let mut context = nexus_test_utils::test_setup::<omicron_nexus::Server>(
+    let mut context = nexus_test_utils::ControlPlaneBuilder::new(
         "test_oximeter_reregistration",
-        0,
     )
+    .start::<omicron_nexus::Server>()
     .await;
     let db = &context.database;
     let producer_id: Uuid = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
