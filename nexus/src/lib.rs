@@ -250,6 +250,13 @@ impl Server {
                 log.new(o!("component" => "dropshot_external_techport")),
             )
             .config(techport_server_config)
+            .version_policy(dropshot::VersionPolicy::Dynamic(Box::new(
+                dropshot::ClientSpecifiesVersionInHeader::new(
+                    omicron_common::api::VERSION_HEADER,
+                    nexus_external_api::latest_version(),
+                )
+                .on_missing(nexus_external_api::latest_version()),
+            )))
             .tls(tls_config.map(dropshot::ConfigTls::Dynamic))
             .start()
             .map_err(|error| {
