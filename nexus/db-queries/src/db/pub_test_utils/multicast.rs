@@ -9,7 +9,7 @@ use std::net::Ipv4Addr;
 use uuid::Uuid;
 
 use nexus_db_model::{
-    IncompleteVpc, IpPool, IpPoolReservationType, IpPoolResource,
+    IncompleteIpPoolResource, IncompleteVpc, IpPool, IpPoolReservationType,
     IpPoolResourceType, IpVersion,
 };
 use nexus_types::external_api::params;
@@ -133,7 +133,7 @@ pub async fn create_test_setup_with_range(
         .expect("Should add multicast range to pool");
 
     // Link pool to silo
-    let link = IpPoolResource {
+    let link = IncompleteIpPoolResource {
         resource_id: opctx.authn.silo_required().unwrap().id(),
         resource_type: IpPoolResourceType::Silo,
         ip_pool_id: ip_pool.id(),

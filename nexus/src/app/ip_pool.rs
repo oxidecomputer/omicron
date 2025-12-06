@@ -363,7 +363,7 @@ impl super::Nexus {
         self.db_datastore
             .ip_pool_link_silo(
                 opctx,
-                db::model::IpPoolResource {
+                db::model::IncompleteIpPoolResource {
                     ip_pool_id: authz_pool.id(),
                     resource_type: db::model::IpPoolResourceType::Silo,
                     resource_id: authz_silo.id(),

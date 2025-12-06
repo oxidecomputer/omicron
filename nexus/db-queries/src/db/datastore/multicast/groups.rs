@@ -743,8 +743,8 @@ mod tests {
     use crate::db::datastore::LookupType;
     use crate::db::model::IpPool;
     use crate::db::model::{
-        Generation, InstanceRuntimeState, IpPoolReservationType,
-        IpPoolResource, IpPoolResourceType, IpVersion,
+        Generation, IncompleteIpPoolResource, InstanceRuntimeState,
+        IpPoolReservationType, IpPoolResourceType, IpVersion,
         MulticastGroupMemberState,
     };
     use crate::db::pub_test_utils::helpers::{
@@ -803,7 +803,7 @@ mod tests {
             .await
             .expect("Should add multicast range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -903,7 +903,7 @@ mod tests {
             .await
             .expect("Should add multicast range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -1053,7 +1053,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1145,7 +1145,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1559,7 +1559,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1743,7 +1743,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -1954,7 +1954,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2065,7 +2065,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2195,7 +2195,7 @@ mod tests {
             .expect("Should add multicast range to pool");
 
         let silo_id = opctx.authn.silo_required().unwrap().id();
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             ip_pool_id: ip_pool.id(),
             resource_type: IpPoolResourceType::Silo,
             resource_id: silo_id,
@@ -2318,7 +2318,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2427,7 +2427,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
@@ -2553,7 +2553,7 @@ mod tests {
             .await
             .expect("Should add range to pool");
 
-        let link = IpPoolResource {
+        let link = IncompleteIpPoolResource {
             resource_id: opctx.authn.silo_required().unwrap().id(),
             resource_type: IpPoolResourceType::Silo,
             ip_pool_id: ip_pool.id(),
