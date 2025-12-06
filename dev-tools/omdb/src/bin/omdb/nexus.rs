@@ -73,6 +73,7 @@ use nexus_types::internal_api::background::SitrepGcStatus;
 use nexus_types::internal_api::background::SitrepLoadStatus;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use nexus_types::internal_api::background::TufArtifactReplicationCounters;
 use nexus_types::internal_api::background::TufArtifactReplicationRequest;
@@ -99,6 +100,7 @@ use std::fs::OpenOptions;
 use std::os::unix::fs::PermissionsExt;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use support_bundle_viewer::LocalFileAccess;
 use support_bundle_viewer::SupportBundleAccessor;
 use tabled::Tabled;
@@ -2686,6 +2688,7 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 listed_in_service_sleds,
                 listed_sps,
                 activated_in_db_ok,
+                mut steps,
                 ereports,
             }) = collection_report
             {
@@ -2697,6 +2700,35 @@ fn print_task_support_bundle_collector(details: &serde_json::Value) {
                 println!(
                     "      Bundle was able to list service processors: {listed_sps}"
                 );
+
+                #[derive(Tabled)]
+                #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+                struct StepRow {
+                    step_name: String,
+                    start_time: DateTime<Utc>,
+                    duration: String,
+                    status: SupportBundleCollectionStepStatus,
+                }
+
+                steps.sort_unstable_by_key(|s| s.start);
+                let rows: Vec<StepRow> = steps
+                    .into_iter()
+                    .map(|step| {
+                        let duration = (step.end - step.start)
+                            .to_std()
+                            .unwrap_or(Duration::from_millis(0));
+                        StepRow {
+                            step_name: step.name,
+                            start_time: step.start,
+                            duration: format!("{:.3}s", duration.as_secs_f64()),
+                            status: step.status,
+                        }
+                    })
+                    .collect();
+
+                if !rows.is_empty() {
+                    println!("\n{}", tabled::Table::new(rows));
+                }
                 println!(
                     "      Bundle was activated in the database: {activated_in_db_ok}"
                 );
