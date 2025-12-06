@@ -393,8 +393,10 @@ pub static DEMO_DISK_CREATE: LazyLock<params::DiskCreate> =
                 name: DEMO_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(4096).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(
                 // divide by at least two to leave space for snapshot blocks
@@ -413,8 +415,10 @@ pub static DEMO_IMPORT_DISK_CREATE: LazyLock<params::DiskCreate> =
                 name: DEMO_IMPORT_DISK_NAME.clone(),
                 description: "".parse().unwrap(),
             },
-            disk_source: params::DiskSource::ImportingBlocks {
-                block_size: params::BlockSize::try_from(4096).unwrap(),
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::ImportingBlocks {
+                    block_size: params::BlockSize::try_from(4096).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(
                 // divide by at least two to leave space for snapshot blocks

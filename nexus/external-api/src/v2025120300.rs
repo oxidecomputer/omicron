@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external API types (version 2025112000)
+//! Nexus external API types (version 2025120300)
 //!
-//! Version 2025112000 types (before [`MulticastGroupIdentifier`] was introduced
+//! Version 2025120300 types (before [`MulticastGroupIdentifier`] was introduced
 //! and before implicit group lifecycle).
 //!
 //! Key differences from newer API versions:
@@ -14,6 +14,7 @@
 //! - Has explicit [`MulticastGroupCreate`] and [`MulticastGroupUpdate`] types
 //!   (newer versions create/delete groups implicitly via member operations).
 //! - [`MulticastGroupMemberAdd`] doesn't have `source_ips` field.
+//! - [`MulticastGroup`] view includes `mvlan` field (always `None`, field was removed).
 //!
 //! [`MulticastGroupIdentifier`]: params::MulticastGroupIdentifier
 //! [`NameOrId`]: omicron_common::api::external::NameOrId

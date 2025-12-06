@@ -538,6 +538,7 @@ pub async fn create_project(
     .await
 }
 
+/// Create a regular Crucible disk
 pub async fn create_disk(
     client: &ClientTestContext,
     project_name: &str,
@@ -552,8 +553,10 @@ pub async fn create_disk(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Blank {
-                block_size: params::BlockSize::try_from(512).unwrap(),
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
             },
             size: ByteCount::from_gibibytes_u32(1),
         },
@@ -576,7 +579,9 @@ pub async fn create_disk_from_snapshot(
                 name: disk_name.parse().unwrap(),
                 description: String::from("sells rainsticks"),
             },
-            disk_source: params::DiskSource::Snapshot { snapshot_id },
+            disk_backend: params::DiskBackend::Distributed {
+                disk_source: params::DiskSource::Snapshot { snapshot_id },
+            },
             size: ByteCount::from_gibibytes_u32(1),
         },
     )
@@ -1568,9 +1573,27 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     ///
     /// Does not inform sled agents to use these pools.
     ///
-    /// See: [Self::propagate_datasets_to_sleds] if you want to send
-    /// this configuration to a simulated sled agent.
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// configuration to a simulated sled agent.
     pub async fn add_zpool_with_datasets(&mut self, sled_id: SledUuid) {
+        self.add_sized_zpool_with_datasets(
+            sled_id,
+            Self::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await
+    }
+
+    /// Adds the zpool (of arbitrary size) and datasets into the database.
+    ///
+    /// Does not inform sled agents to use these pools.
+    ///
+    /// See: [Self::propagate_datasets_to_sleds] if you want to send this
+    /// configuration to a simulated sled agent.
+    pub async fn add_sized_zpool_with_datasets(
+        &mut self,
+        sled_id: SledUuid,
+        gibibytes: u32,
+    ) {
         self.add_zpool_with_datasets_ext(
             sled_id,
             PhysicalDiskUuid::new_v4(),
@@ -1585,7 +1608,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
                     kind: DatasetKind::Debug,
                 },
             ],
-            Self::DEFAULT_ZPOOL_SIZE_GIB,
+            gibibytes,
         )
         .await
     }
