@@ -128,15 +128,6 @@ fn dpd_state_matches_sources(
     dpd_ips == db_sources_sorted
 }
 
-/// Check if DPD vlan_id matches database mvlan.
-fn dpd_state_matches_mvlan(
-    dpd_group: &dpd_client::types::MulticastGroupExternalResponse,
-    db_group: &MulticastGroup,
-) -> bool {
-    let db_mvlan = db_group.mvlan.map(|v| v as u16);
-    dpd_group.external_forwarding.vlan_id == db_mvlan
-}
-
 /// Trait for processing different types of multicast groups
 trait GroupStateProcessor {
     /// Process a group in "Creating" state.
@@ -513,10 +504,8 @@ impl MulticastGroupReconciler {
                 let tag_matches = dpd_state_matches_tag(&dpd_group, group);
                 let sources_match =
                     dpd_state_matches_sources(&dpd_group, group);
-                let mvlan_matches = dpd_state_matches_mvlan(&dpd_group, group);
 
-                let needs_update =
-                    !tag_matches || !sources_match || !mvlan_matches;
+                let needs_update = !tag_matches || !sources_match;
 
                 if needs_update {
                     debug!(
@@ -524,8 +513,7 @@ impl MulticastGroupReconciler {
                         "detected DPD state mismatch for active group";
                         "group_id" => %group.id(),
                         "tag_matches" => tag_matches,
-                        "sources_match" => sources_match,
-                        "mvlan_matches" => mvlan_matches
+                        "sources_match" => sources_match
                     );
                 }
 

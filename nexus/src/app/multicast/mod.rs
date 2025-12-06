@@ -37,6 +37,16 @@
 //!
 //! All multicast groups use `DEFAULT_MULTICAST_VNI` (77), which is reserved for
 //! multicast and below the guest VNI range.
+//!
+//! # TODO: Scope
+//!
+//! The current implementation supports **ingress-into-the-rack multicast**:
+//! external multicast sources sending traffic to instances within the rack.
+//! Egress multicast (instances sending to external receivers out-of-the-rack)
+//! is not yet supported.
+//!
+//! When egress support is added, (M)VLAN tagging will be introduced to enable
+//! multicast traffic to traverse VLAN-segmented upstream networks.
 
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -343,7 +353,6 @@ impl super::Nexus {
             },
             multicast_ip: Some(ip),
             source_ips: source_ips.clone(),
-            mvlan: None,
         };
 
         // Create the group; on conflict -> re-lookup
@@ -412,7 +421,6 @@ impl super::Nexus {
             },
             multicast_ip: None,
             source_ips: source_ips.clone(),
-            mvlan: None,
         };
 
         // Create the group; on conflict -> re-lookup

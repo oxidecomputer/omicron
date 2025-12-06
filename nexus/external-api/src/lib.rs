@@ -1306,10 +1306,20 @@ pub trait NexusExternalApi {
     async fn v2025120300_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>
-    {
-        // Types are identical, delegate directly
-        Self::multicast_group_list(rqctx, query_params).await
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025120300::MulticastGroup>>,
+        HttpError,
+    > {
+        match Self::multicast_group_list(rqctx, query_params).await {
+            Ok(page) => {
+                let new_page = ResultsPage {
+                    next_page: page.0.next_page,
+                    items: page.0.items.into_iter().map(Into::into).collect(),
+                };
+                Ok(HttpResponseOk(new_page))
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// List multicast groups.
@@ -1337,7 +1347,7 @@ pub trait NexusExternalApi {
     async fn v2025120300_multicast_group_create(
         rqctx: RequestContext<Self::Context>,
         new_group: TypedBody<v2025120300::MulticastGroupCreate>,
-    ) -> Result<HttpResponseCreated<views::MulticastGroup>, HttpError>;
+    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroup>, HttpError>;
 
     /// Fetch a multicast group.
     ///
@@ -1352,7 +1362,7 @@ pub trait NexusExternalApi {
     async fn v2025120300_multicast_group_view(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025120300::MulticastGroupPath>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError>;
 
     /// Fetch a multicast group.
     ///
@@ -1382,7 +1392,7 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025120300::MulticastGroupPath>,
         update_params: TypedBody<v2025120300::MulticastGroupUpdate>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError>;
 
     /// Delete a multicast group.
     ///
@@ -1545,7 +1555,7 @@ pub trait NexusExternalApi {
     async fn v2025120300_lookup_multicast_group_by_ip(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<v2025120300::MulticastGroupByIpPath>,
-    ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
+    ) -> Result<HttpResponseOk<v2025120300::MulticastGroup>, HttpError>;
 
     // Disks
 
