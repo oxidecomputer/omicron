@@ -1,2 +1,13 @@
-CREATE INDEX IF NOT EXISTS lookup_trust_quroum_members_by_rack_id_and_epoch
-ON omicron.public.trust_quorum_member (rack_id, epoch);
+CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_acked_commit (
+    -- Foreign key into the rack table
+    -- Foreign key into the `trust_quorum_configuration` table along with `epoch`
+    rack_id UUID NOT NULL,
+
+    -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
+    epoch INT8 NOT NULL,
+
+    -- Foreign key into the `hw_baseboard_id` table
+    hw_baseboard_id UUID NOT NULL,
+
+    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
+);
