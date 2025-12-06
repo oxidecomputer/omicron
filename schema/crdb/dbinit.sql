@@ -7352,6 +7352,138 @@ CREATE INDEX IF NOT EXISTS multicast_member_parent_state ON omicron.public.multi
     state
 ) WHERE time_deleted IS NULL;
 
+-- An LRTQ configuration explicitly placed in the database via a DB migration
+-- 
+-- LRTQ configurations are always epoch 1, and any subsequent trust quorum
+-- configuration must have epoch > 1.
+CREATE TABLE IF NOT EXISTS omicron.public.lrtq_members (
+    -- Foreign key into the rack table
+    rack_id UUID NOT NULL,
+
+    -- Foreign key into the `hw_baseboard_id` table
+    hw_baseboard_id UUID NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS lookup_lrtq_members_by_rack_id
+ON omicron.public.lrtq_members (rack_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_lrtq_members_by_hw_baseboard_id
+ON omicron.public.lrtq_members (hw_baseboard_id);
+
+-- The state of a given trust quorum configuration
+CREATE TYPE IF NOT EXISTS omicron.public.trust_quorum_configuration_state AS ENUM (
+    -- Nexus is waiting for prepare acknowledgments by polling the coordinator
+    -- These may come as part of a reconfiguration or LRTQ upgrade
+    'preparing',
+    -- The configuration has committed to the dataabase, and nexus may still be
+    -- trying to inform nodes about the commit.
+    'committed',
+    -- The configuration has aborted and will not commit. The epoch can be
+    -- skipped.
+    'aborted'
+);
+
+-- Information for tracking trust quorum memberships over time
+CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
+    -- Foreign key into the rack table
+    rack_id UUID NOT NULL,
+
+    -- Monotonically increasing version per rack_id
+    epoch INT8 NOT NULL,
+
+    -- The number of shares needed to compute the rack secret
+    --
+    -- In some documentation we call this the `K` parameter.
+    threshold INT2 NOT NULL,
+
+    -- The number of additional nodes beyond threshold to commit 
+    --
+    -- This represents the number of prepared nodes that can be offline after
+    -- a commit at Nexus and still allow the secret to be reconstructed during
+    -- rack unlock. If this number is equivalent to the total membership (`N`)
+    -- minus `threshold` nodes, then all nodes in the membership set for this
+    -- epoch must ack a prepare for a commit to occur. By varying this value we
+    -- allow commit to occur even if some nodes haven't prepared, thus providing
+    -- fault tolerance during the prepare phase and also during unlock.
+    --
+    -- In some documentation we call this the `Z` parameter.
+    commit_crash_tolerance INT2 NOT NULL,
+
+    -- Which member is coordinating the prepare phase of the protocol this epoch
+    -- Foreign key into the `hw_baseboard_id` table
+    coordinator UUID NOT NULL,
+
+    -- Encrypted rack secrets for prior committed epochs
+    --
+    -- These are only filled in during a reconfiguration and retrieved
+    -- during the prepare phase of the protocol by Nexus from the coordinator.
+    encrypted_rack_secrets TEXT,
+
+    -- Each rack has its own trust quorum
+    PRIMARY KEY (rack_id, epoch)
+);
+
+-- Total group membership in trust quorum for a given epoch
+CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
+    -- Foreign key into the rack table
+    -- Foreign key into the `trust_quorum_configuration` table along with `epoch`
+    rack_id UUID NOT NULL,
+
+    -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
+    epoch INT8 NOT NULL,
+
+
+    -- Foreign key into the `hw_baseboard_id` table
+    hw_baseboard_id UUID NOT NULL,
+
+    -- The sha3-256 hash of the key share for this node. This is only filled in
+    -- after Nexus has retrieved the configuration from the coordinator during
+    -- the prepare phase of the protocol.
+    share_digest STRING(32)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_trust_quroum_members_by_rack_id_and_epoch
+ON omicron.public.trust_quorum_member (rack_id, epoch);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_trust_quorum_members_unique
+ON omicron.public.trust_quorum_member (rack_id, epoch, hw_baseboard_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_acked_prepare (
+    -- Foreign key into the rack table
+    -- Foreign key into the `trust_quorum_configuration` table along with `epoch`
+    rack_id UUID NOT NULL,
+
+    -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
+    epoch INT8 PRIMARY KEY,
+
+    -- Foreign key into the `hw_baseboard_id` table
+    hw_baseboard_id UUID NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS lookup_trust_quroum_acked_prepares_by_rack_id_and_epoch
+ON omicron.public.trust_quorum_acked_prepare (rack_id, epoch);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_trust_quorum_acked_prepares_unique
+ON omicron.public.trust_quorum_acked_prepare (rack_id, epoch, hw_baseboard_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_acked_commit (
+    -- Foreign key into the rack table
+    -- Foreign key into the `trust_quorum_configuration` table along with `epoch`
+    rack_id UUID NOT NULL,
+
+    -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
+    epoch INT8 PRIMARY KEY,
+
+    -- Foreign key into the `hw_baseboard_id` table
+    hw_baseboard_id UUID NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS lookup_trust_quroum_acked_commits_by_rack_id_and_epoch
+ON omicron.public.trust_quorum_acked_commit (rack_id, epoch);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_trust_quorum_acked_commits_unique
+ON omicron.public.trust_quorum_acked_commit (rack_id, epoch, hw_baseboard_id);
+
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
 INSERT INTO omicron.public.db_metadata (
@@ -7361,7 +7493,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '211.0.0', NULL)
+    (TRUE, NOW(), NOW(), '212.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
