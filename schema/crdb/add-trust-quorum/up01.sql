@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.lrtq_members (
     rack_id UUID NOT NULL,
 
     -- Foreign key into the `hw_baseboard_id` table
-    hw_baseboard_id UUID NOT NULL
-);
+    hw_baseboard_id UUID NOT NULL,
 
+    PRIMARY KEY (rack_id, hw_baseboard_id)
+);

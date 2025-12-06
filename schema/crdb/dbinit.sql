@@ -7478,12 +7478,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.lrtq_members (
     rack_id UUID NOT NULL,
 
     -- Foreign key into the `hw_baseboard_id` table
-    hw_baseboard_id UUID NOT NULL
+    hw_baseboard_id UUID NOT NULL,
+
+    PRIMARY KEY (rack_id, hw_baseboard_id)
 );
 
-CREATE INDEX IF NOT EXISTS lookup_lrtq_members_by_rack_id
-ON omicron.public.lrtq_members (rack_id);
-
+-- A sled can't be in more than one rack
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_lrtq_members_by_hw_baseboard_id
 ON omicron.public.lrtq_members (hw_baseboard_id);
 
@@ -7507,6 +7507,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
 
     -- Monotonically increasing version per rack_id
     epoch INT8 NOT NULL,
+
+    -- The current state of this configuration
+    state omicron.public.trust_quorum_configuration_state NOT NULL,
 
     -- The number of shares needed to compute the rack secret
     --
@@ -7549,21 +7552,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
     epoch INT8 NOT NULL,
 
-
     -- Foreign key into the `hw_baseboard_id` table
     hw_baseboard_id UUID NOT NULL,
 
     -- The sha3-256 hash of the key share for this node. This is only filled in
     -- after Nexus has retrieved the configuration from the coordinator during
     -- the prepare phase of the protocol.
-    share_digest STRING(32)
+    --
+    -- Hex formatted string
+    share_digest STRING(64),
+
+    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
 );
-
-CREATE INDEX IF NOT EXISTS lookup_trust_quroum_members_by_rack_id_and_epoch
-ON omicron.public.trust_quorum_member (rack_id, epoch);
-
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_trust_quorum_members_unique
-ON omicron.public.trust_quorum_member (rack_id, epoch, hw_baseboard_id);
 
 CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_acked_prepare (
     -- Foreign key into the rack table
@@ -7571,17 +7571,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_acked_prepare (
     rack_id UUID NOT NULL,
 
     -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
-    epoch INT8 PRIMARY KEY,
+    epoch INT8 NOT NULL,
 
     -- Foreign key into the `hw_baseboard_id` table
-    hw_baseboard_id UUID NOT NULL
+    hw_baseboard_id UUID NOT NULL,
+
+    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
 );
-
-CREATE INDEX IF NOT EXISTS lookup_trust_quroum_acked_prepares_by_rack_id_and_epoch
-ON omicron.public.trust_quorum_acked_prepare (rack_id, epoch);
-
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_trust_quorum_acked_prepares_unique
-ON omicron.public.trust_quorum_acked_prepare (rack_id, epoch, hw_baseboard_id);
 
 CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_acked_commit (
     -- Foreign key into the rack table
@@ -7589,17 +7585,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_acked_commit (
     rack_id UUID NOT NULL,
 
     -- Foreign key into the `trust_quorum_configuration` table along with `rack_id`
-    epoch INT8 PRIMARY KEY,
+    epoch INT8 NOT NULL,
 
     -- Foreign key into the `hw_baseboard_id` table
-    hw_baseboard_id UUID NOT NULL
+    hw_baseboard_id UUID NOT NULL,
+
+    PRIMARY KEY (rack_id, epoch, hw_baseboard_id)
 );
-
-CREATE INDEX IF NOT EXISTS lookup_trust_quroum_acked_commits_by_rack_id_and_epoch
-ON omicron.public.trust_quorum_acked_commit (rack_id, epoch);
-
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_trust_quorum_acked_commits_unique
-ON omicron.public.trust_quorum_acked_commit (rack_id, epoch, hw_baseboard_id);
 
 -- Keep this at the end of file so that the database does not contain a version
 -- until it is fully populated.
