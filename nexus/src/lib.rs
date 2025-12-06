@@ -255,6 +255,11 @@ impl Server {
                     omicron_common::api::VERSION_HEADER,
                     nexus_external_api::latest_version(),
                 )
+                // Since we don't have control over all clients to the external
+                // API, we allow the api-version header to not be specified
+                // (picking the latest version in that case). However, all
+                // clients that *are* under our control should specify the
+                // api-version header.
                 .on_missing(nexus_external_api::latest_version()),
             )))
             .tls(tls_config.map(dropshot::ConfigTls::Dynamic))
