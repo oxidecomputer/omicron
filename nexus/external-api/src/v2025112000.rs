@@ -309,7 +309,11 @@ impl From<InstanceCreate> for params::InstanceCreate {
             user_data: old.user_data,
             network_interfaces: old.network_interfaces,
             external_ips: old.external_ips,
-            multicast_groups: old.multicast_groups.into_iter().map(Into::into).collect(),
+            multicast_groups: old
+                .multicast_groups
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             disks: old.disks.into_iter().map(Into::into).collect(),
             boot_disk: old.boot_disk.map(Into::into),
             ssh_public_keys: old.ssh_public_keys,
