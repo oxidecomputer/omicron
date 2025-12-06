@@ -2357,15 +2357,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     // Multicast Groups
 
-    async fn v1_multicast_group_list(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>
-    {
-        // v1 (v20251120) types are identical, delegate to current version
-        Self::multicast_group_list(rqctx, query_params).await
-    }
-
     async fn multicast_group_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -2399,9 +2390,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v1_multicast_group_create(
+    async fn v2025120300_multicast_group_create(
         rqctx: RequestContext<ApiContext>,
-        new_group: TypedBody<v20251120::MulticastGroupCreate>,
+        new_group: TypedBody<v2025120300::MulticastGroupCreate>,
     ) -> Result<HttpResponseCreated<views::MulticastGroup>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -2410,7 +2401,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let nexus = &apictx.context.nexus;
             let v1_params = new_group.into_inner();
 
-            // v1 (v20251120) allowed explicit pool selection, but the new
+            // v1 (v2025120300) allowed explicit pool selection, but the new
             // implicit lifecycle auto-selects SSM/ASM pool based on `multicast_ip`.
             // If pool is provided without `multicast_ip`, return an error.
             if v1_params.pool.is_some() && v1_params.multicast_ip.is_none() {
@@ -2436,9 +2427,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v1_multicast_group_view(
+    async fn v2025120300_multicast_group_view(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v20251120::MulticastGroupPath>,
+        path_params: Path<v2025120300::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -2489,10 +2480,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v1_multicast_group_update(
+    async fn v2025120300_multicast_group_update(
         _rqctx: RequestContext<ApiContext>,
-        _path_params: Path<v20251120::MulticastGroupPath>,
-        _update_params: TypedBody<v20251120::MulticastGroupUpdate>,
+        _path_params: Path<v2025120300::MulticastGroupPath>,
+        _update_params: TypedBody<v2025120300::MulticastGroupUpdate>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError> {
         // Multicast group update is deprecated in the implicit lifecycle model.
         // Groups are now created implicitly when members join and deleted when
@@ -2506,9 +2497,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
         ))
     }
 
-    async fn v1_multicast_group_delete(
+    async fn v2025120300_multicast_group_delete(
         _rqctx: RequestContext<ApiContext>,
-        _path_params: Path<v20251120::MulticastGroupPath>,
+        _path_params: Path<v2025120300::MulticastGroupPath>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         // Multicast group deletion is deprecated in the implicit lifecycle
         // model. Groups are automatically deleted when all members leave.
@@ -2523,12 +2514,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     // Multicast Group Member Management
 
-    async fn v1_multicast_group_member_list(
+    async fn v2025120300_multicast_group_member_list(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v20251120::MulticastGroupPath>,
+        path_params: Path<v2025120300::MulticastGroupPath>,
         query_params: Query<PaginatedById>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v20251120::MulticastGroupMember>>,
+        HttpResponseOk<ResultsPage<v2025120300::MulticastGroupMember>>,
         HttpError,
     > {
         let apictx = rqctx.context();
@@ -2556,7 +2547,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                     &pag_params,
                 )
                 .await?;
-            let results: Vec<v20251120::MulticastGroupMember> = members
+            let results: Vec<v2025120300::MulticastGroupMember> = members
                 .into_iter()
                 .map(|m| {
                     views::MulticastGroupMember::try_from(m).map(Into::into)
@@ -2565,7 +2556,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             Ok(HttpResponseOk(ScanById::results_page(
                 &query,
                 results,
-                &|_, m: &v20251120::MulticastGroupMember| m.id,
+                &|_, m: &v2025120300::MulticastGroupMember| m.id,
             )?))
         };
         apictx
@@ -2624,12 +2615,12 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v1_multicast_group_member_add(
+    async fn v2025120300_multicast_group_member_add(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v20251120::MulticastGroupPath>,
+        path_params: Path<v2025120300::MulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
-        member_params: TypedBody<v20251120::MulticastGroupMemberAdd>,
-    ) -> Result<HttpResponseCreated<v20251120::MulticastGroupMember>, HttpError>
+        member_params: TypedBody<v2025120300::MulticastGroupMemberAdd>,
+    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroupMember>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -2661,7 +2652,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             let view = views::MulticastGroupMember::try_from(result)?;
-            Ok(HttpResponseCreated(v20251120::MulticastGroupMember::from(view)))
+            Ok(HttpResponseCreated(v2025120300::MulticastGroupMember::from(
+                view,
+            )))
         };
         apictx
             .context
@@ -2715,9 +2708,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v1_multicast_group_member_remove(
+    async fn v2025120300_multicast_group_member_remove(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v20251120::MulticastGroupMemberPath>,
+        path_params: Path<v2025120300::MulticastGroupMemberPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
@@ -2810,9 +2803,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v1_lookup_multicast_group_by_ip(
+    async fn v2025120300_lookup_multicast_group_by_ip(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v20251120::MulticastGroupByIpPath>,
+        path_params: Path<v2025120300::MulticastGroupByIpPath>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -3129,15 +3122,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v1_instance_create(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v20251120::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
-            .await
-    }
-
     async fn instance_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -3247,21 +3231,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .external_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
-    }
-
-    async fn v1_instance_update(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::OptionalProjectSelector>,
-        path_params: Path<params::InstancePath>,
-        instance_config: TypedBody<v20251120::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
-        Self::instance_update(
-            rqctx,
-            query_params,
-            path_params,
-            instance_config.map(Into::into),
-        )
-        .await
     }
 
     async fn instance_update(
@@ -5924,29 +5893,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     // Instance Multicast Groups
 
-    async fn v1_instance_multicast_group_list(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::OptionalProjectSelector>,
-        path_params: Path<params::InstancePath>,
-    ) -> Result<
-        HttpResponseOk<ResultsPage<v20251120::MulticastGroupMember>>,
-        HttpError,
-    > {
-        // Call current version and convert to v1 view type
-        let result = Self::instance_multicast_group_list(
-            rqctx,
-            query_params,
-            path_params,
-        )
-        .await?;
-        // Convert to v1 view type (without multicast_ip field)
-        let v1_page = ResultsPage {
-            items: result.0.items.into_iter().map(Into::into).collect(),
-            next_page: result.0.next_page,
-        };
-        Ok(HttpResponseOk(v1_page))
-    }
-
     async fn instance_multicast_group_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
@@ -5989,11 +5935,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v1_instance_multicast_group_join(
+    async fn v2025120300_instance_multicast_group_join(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v20251120::InstanceMulticastGroupPath>,
+        path_params: Path<v2025120300::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseCreated<v20251120::MulticastGroupMember>, HttpError>
+    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroupMember>, HttpError>
     {
         let apictx = rqctx.context();
         let handler = async {
@@ -6013,7 +5959,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 .context
                 .nexus
                 .instance_lookup(&opctx, instance_selector)?;
-            // v1 (v20251120) didn't have a body parameter, default to no `source_ips`
+            // v1 (v2025120300) didn't have a body parameter, default to no `source_ips`
             let result = apictx
                 .context
                 .nexus
@@ -6025,7 +5971,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             let view = views::MulticastGroupMember::try_from(result)?;
-            Ok(HttpResponseCreated(v20251120::MulticastGroupMember::from(view)))
+            Ok(HttpResponseCreated(v2025120300::MulticastGroupMember::from(
+                view,
+            )))
         };
         apictx
             .context
@@ -6080,9 +6028,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v1_instance_multicast_group_leave(
+    async fn v2025120300_instance_multicast_group_leave(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<v20251120::InstanceMulticastGroupPath>,
+        path_params: Path<v2025120300::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();

@@ -18270,6 +18270,48 @@
           "time_modified"
         ]
       },
+      "DiskBackend": {
+        "description": "The source of a `Disk`'s blocks",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "local"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "disk_source": {
+                "description": "The initial source for this disk",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/DiskSource"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "distributed"
+                ]
+              }
+            },
+            "required": [
+              "disk_source",
+              "type"
+            ]
+          }
+        ]
+      },
       "DiskCreate": {
         "description": "Create-time parameters for a `Disk`",
         "type": "object",
@@ -18277,11 +18319,11 @@
           "description": {
             "type": "string"
           },
-          "disk_source": {
-            "description": "The initial source for this disk",
+          "disk_backend": {
+            "description": "The source for this `Disk`'s blocks",
             "allOf": [
               {
-                "$ref": "#/components/schemas/DiskSource"
+                "$ref": "#/components/schemas/DiskBackend"
               }
             ]
           },
@@ -18299,7 +18341,7 @@
         },
         "required": [
           "description",
-          "disk_source",
+          "disk_backend",
           "name",
           "size"
         ]
@@ -18342,7 +18384,7 @@
         ]
       },
       "DiskSource": {
-        "description": "Different sources for a disk",
+        "description": "Different sources for a Distributed Disk",
         "oneOf": [
           {
             "description": "Create a blank disk",
@@ -18632,7 +18674,8 @@
       "DiskType": {
         "type": "string",
         "enum": [
-          "crucible"
+          "distributed",
+          "local"
         ]
       },
       "Distributiondouble": {
@@ -21050,11 +21093,11 @@
               "description": {
                 "type": "string"
               },
-              "disk_source": {
-                "description": "The initial source for this disk",
+              "disk_backend": {
+                "description": "The source for this `Disk`'s blocks",
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/DiskSource"
+                    "$ref": "#/components/schemas/DiskBackend"
                   }
                 ]
               },
@@ -21078,7 +21121,7 @@
             },
             "required": [
               "description",
-              "disk_source",
+              "disk_backend",
               "name",
               "size",
               "type"

@@ -12,7 +12,6 @@
 use crate::app::background::BackgroundTask;
 use chrono::Utc;
 use ereport_types::Ena;
-use ereport_types::Ereport;
 use ereport_types::EreportId;
 use futures::future::BoxFuture;
 use internal_dns_types::names::ServiceName;
@@ -245,76 +244,19 @@ impl Ingester {
             } else {
                 status.get_or_insert_default().requests += 1;
             }
-
+            let time_collected = Utc::now();
             let received = reports.items.len();
             let status = status.get_or_insert_default();
             status.ereports_received += received;
 
             let db_ereports = reports.items.into_iter().map(|ereport| {
-                const MISSING_VPD: &str =
-                    " (perhaps the SP doesn't know its own VPD?)";
-                let part_number = get_sp_metadata_string(
-                    "baseboard_part_number",
-                    &ereport,
-                    &restart_id,
+                EreportData::from_sp_ereport(
                     &opctx.log,
-                    MISSING_VPD,
-                );
-                let serial_number = get_sp_metadata_string(
-                    "baseboard_serial_number",
-                    &ereport,
-                    &restart_id,
-                    &opctx.log,
-                    MISSING_VPD,
-                );
-                let ena = ereport.ena;
-                let class = ereport
-                    .data
-                    // "k" (for "kind") is used as an abbreviation of
-                    // "class" to save 4 bytes of ereport.
-                    .get("k")
-                    .or_else(|| ereport.data.get("class"));
-                let class = match (class, ereport.data.get("lost")) {
-                    (Some(serde_json::Value::String(class)), _) => {
-                        Some(class.to_string())
-                    }
-                    (Some(v), _) => {
-                        slog::warn!(
-                            &opctx.log,
-                            "malformed ereport: value for 'k'/'class' \
-                             should be a string, but found: {v:?}";
-                            "ena" => ?ena,
-                            "restart_id" => ?restart_id,
-                        );
-                        None
-                    }
-                    // This is a loss record! I know this!
-                    (None, Some(serde_json::Value::Null)) => {
-                        Some("ereport.data_loss.possible".to_string())
-                    }
-                    (None, Some(serde_json::Value::Number(_))) => {
-                        Some("ereport.data_loss.certain".to_string())
-                    }
-                    (None, _) => {
-                        slog::warn!(
-                            &opctx.log,
-                            "ereport missing 'k'/'class' key";
-                            "ena" => ?ena,
-                            "restart_id" => ?restart_id,
-                        );
-                        None
-                    }
-                };
-
-                EreportData {
-                    id: EreportId { restart_id, ena },
-                    time_collected: Utc::now(),
-                    collector_id: self.nexus_id,
-                    part_number,
-                    serial_number,
-                    class,
-                    report: serde_json::Value::Object(ereport.data),
-                }
+                    restart_id,
+                    ereport,
+                    time_collected,
+                    self.nexus_id,
+                )
             });
             let created = match self
                 .datastore
@@ -424,41 +366,6 @@ impl Ingester {
         }
 
         None
-    }
-}
-
-/// Attempt to extract a VPD metadata from an SP ereport, logging a warning if
-/// it's missing. We still want to keep such ereports, as the error condition
-/// could be that the SP couldn't determine the metadata field, but it's
-/// uncomfortable, so we ought to complain about it.
-fn get_sp_metadata_string(
-    key: &str,
-    ereport: &Ereport,
-    restart_id: &EreporterRestartUuid,
-    log: &slog::Logger,
-    extra_context: &'static str,
-) -> Option<String> {
-    match ereport.data.get(key) {
-        Some(serde_json::Value::String(s)) => Some(s.clone()),
-        Some(v) => {
-            slog::warn!(
-                &log,
-                "malformed ereport: value for '{key}' should be a string, \
-                 but found: {v:?}";
-                "ena" => ?ereport.ena,
-                "restart_id" => ?restart_id,
-            );
-            None
-        }
-        None => {
-            slog::warn!(
-                &log,
-                "ereport missing '{key}'{extra_context}";
-                "ena" => ?ereport.ena,
-                "restart_id" => ?restart_id,
-            );
-            None
-        }
     }
 }
 

@@ -33,7 +33,9 @@ use omicron_common::api::external::{
 };
 use openapiv3::OpenAPI;
 
-pub mod v20251120;
+/// Copies of data types that changed between versions
+mod v2025112000;
+pub mod v2025120300;
 
 api_versions!([
     // API versions are in the format YYYYMMDDNN.0.0, defined below as
@@ -64,6 +66,7 @@ api_versions!([
     // v
     // (next_yyyymmddnn, IDENT),
     (2025120500, MULTICAST_IMPLICIT_LIFECYCLE_UPDATES),
+    (2025120300, LOCAL_STORAGE),
     (2025112000, INITIAL),
 ]);
 
@@ -1280,6 +1283,17 @@ pub trait NexusExternalApi {
     ) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError>;
 
     // Multicast Groups
+    //
+    // API versioning note: Versioned endpoints can use default trait
+    // implementations when path types are identical between versions.
+    // `TypedBody<T>` has `.map()` for input conversion, but `Path<T>` does not.
+    // Endpoints with different path types (e.g., `v2025120300::MulticastGroupPath`
+    // vs `params::MulticastGroupPath`) must have implementations in
+    // `http_entrypoints.rs`.
+    //
+    // TODO: Consider adding `.map()` to dropshot's `Path<T>` (similar to
+    // `TypedBody<T>`) to enable default implementations for versioned endpoints
+    // with different path types.
 
     /// List multicast groups.
     #[endpoint {
@@ -1289,10 +1303,14 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_multicast_group_list(
+    async fn v2025120300_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<views::MulticastGroup>>, HttpError>
+    {
+        // Types are identical, delegate directly
+        Self::multicast_group_list(rqctx, query_params).await
+    }
 
     /// List multicast groups.
     #[endpoint {
@@ -1316,9 +1334,9 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_multicast_group_create(
+    async fn v2025120300_multicast_group_create(
         rqctx: RequestContext<Self::Context>,
-        new_group: TypedBody<v20251120::MulticastGroupCreate>,
+        new_group: TypedBody<v2025120300::MulticastGroupCreate>,
     ) -> Result<HttpResponseCreated<views::MulticastGroup>, HttpError>;
 
     /// Fetch a multicast group.
@@ -1331,9 +1349,9 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_view",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_multicast_group_view(
+    async fn v2025120300_multicast_group_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v20251120::MulticastGroupPath>,
+        path_params: Path<v2025120300::MulticastGroupPath>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
 
     /// Fetch a multicast group.
@@ -1360,10 +1378,10 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_multicast_group_update(
+    async fn v2025120300_multicast_group_update(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v20251120::MulticastGroupPath>,
-        update_params: TypedBody<v20251120::MulticastGroupUpdate>,
+        path_params: Path<v2025120300::MulticastGroupPath>,
+        update_params: TypedBody<v2025120300::MulticastGroupUpdate>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
 
     /// Delete a multicast group.
@@ -1375,9 +1393,9 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_multicast_group_delete(
+    async fn v2025120300_multicast_group_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v20251120::MulticastGroupPath>,
+        path_params: Path<v2025120300::MulticastGroupPath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// List members of a multicast group.
@@ -1390,12 +1408,12 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_member_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_multicast_group_member_list(
+    async fn v2025120300_multicast_group_member_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v20251120::MulticastGroupPath>,
+        path_params: Path<v2025120300::MulticastGroupPath>,
         query_params: Query<PaginatedById>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v20251120::MulticastGroupMember>>,
+        HttpResponseOk<ResultsPage<v2025120300::MulticastGroupMember>>,
         HttpError,
     >;
 
@@ -1424,12 +1442,12 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_member_add",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_multicast_group_member_add(
+    async fn v2025120300_multicast_group_member_add(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v20251120::MulticastGroupPath>,
+        path_params: Path<v2025120300::MulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
-        member_params: TypedBody<v20251120::MulticastGroupMemberAdd>,
-    ) -> Result<HttpResponseCreated<v20251120::MulticastGroupMember>, HttpError>;
+        member_params: TypedBody<v2025120300::MulticastGroupMemberAdd>,
+    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroupMember>, HttpError>;
 
     /// Add instance to a multicast group.
     ///
@@ -1484,9 +1502,9 @@ pub trait NexusExternalApi {
         operation_id = "multicast_group_member_remove",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_multicast_group_member_remove(
+    async fn v2025120300_multicast_group_member_remove(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v20251120::MulticastGroupMemberPath>,
+        path_params: Path<v2025120300::MulticastGroupMemberPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
@@ -1524,18 +1542,50 @@ pub trait NexusExternalApi {
         tags = ["experimental"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_lookup_multicast_group_by_ip(
+    async fn v2025120300_lookup_multicast_group_by_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v20251120::MulticastGroupByIpPath>,
+        path_params: Path<v2025120300::MulticastGroupByIpPath>,
     ) -> Result<HttpResponseOk<views::MulticastGroup>, HttpError>;
 
     // Disks
 
     /// List disks
     #[endpoint {
+        operation_id = "disk_list",
         method = GET,
         path = "/v1/disks",
         tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025112000::Disk>>, HttpError> {
+        match Self::disk_list(rqctx, query_params).await {
+            Ok(page) => {
+                let new_page = ResultsPage {
+                    next_page: page.0.next_page,
+                    items: {
+                        let mut items = Vec::with_capacity(page.0.items.len());
+                        for item in page.0.items {
+                            items.push(item.try_into()?);
+                        }
+                        items
+                    },
+                };
+
+                Ok(HttpResponseOk(new_page))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// List disks
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -1545,9 +1595,34 @@ pub trait NexusExternalApi {
     // TODO-correctness See note about instance create.  This should be async.
     /// Create a disk
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/disks",
-        tags = ["disks"]
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_disk_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_disk: TypedBody<v2025112000::DiskCreate>,
+    ) -> Result<HttpResponseCreated<v2025112000::Disk>, HttpError> {
+        match Self::disk_create(rqctx, query_params, new_disk.map(Into::into))
+            .await
+        {
+            Ok(HttpResponseCreated(disk)) => {
+                Ok(HttpResponseCreated(disk.try_into()?))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    // TODO-correctness See note about instance create.  This should be async.
+    /// Create a disk
+    #[endpoint {
+        method = POST,
+        path = "/v1/disks",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn disk_create(
         rqctx: RequestContext<Self::Context>,
@@ -1557,9 +1632,29 @@ pub trait NexusExternalApi {
 
     /// Fetch disk
     #[endpoint {
+        operation_id = "disk_view",
         method = GET,
         path = "/v1/disks/{disk}",
-        tags = ["disks"]
+        tags = ["disks"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_disk_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::DiskPath>,
+        query_params: Query<params::OptionalProjectSelector>,
+    ) -> Result<HttpResponseOk<v2025112000::Disk>, HttpError> {
+        match Self::disk_view(rqctx, path_params, query_params).await {
+            Ok(HttpResponseOk(disk)) => Ok(HttpResponseOk(disk.try_into()?)),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Fetch disk
+    #[endpoint {
+        method = GET,
+        path = "/v1/disks/{disk}",
+        tags = ["disks"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn disk_view(
         rqctx: RequestContext<Self::Context>,
@@ -1649,16 +1744,36 @@ pub trait NexusExternalApi {
 
     /// Create instance
     #[endpoint {
+        operation_id = "disk_create",
         method = POST,
         path = "/v1/instances",
         tags = ["instances"],
-        versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+        versions = ..VERSION_LOCAL_STORAGE,
     }]
-    async fn v1_instance_create(
+    async fn v2025112000_instance_create(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v20251120::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+        new_instance: TypedBody<v2025112000::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
+
+    /// Create instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
+    }]
+    async fn v2025120300_instance_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::ProjectSelector>,
+        new_instance: TypedBody<v2025120300::InstanceCreate>,
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
 
     /// Create instance
     #[endpoint {
@@ -1704,12 +1819,20 @@ pub trait NexusExternalApi {
         tags = ["instances"],
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_instance_update(
+    async fn v2025120300_instance_update(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
-        instance_config: TypedBody<v20251120::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError>;
+        instance_config: TypedBody<v2025120300::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+        Self::instance_update(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await
+    }
 
     /// Update instance
     #[endpoint {
@@ -1806,9 +1929,45 @@ pub trait NexusExternalApi {
 
     /// List disks for instance
     #[endpoint {
+        operation_id = "instance_disk_list",
         method = GET,
         path = "/v1/instances/{instance}/disks",
         tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_instance_disk_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalProjectSelector>,
+        >,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseOk<ResultsPage<v2025112000::Disk>>, HttpError> {
+        match Self::instance_disk_list(rqctx, query_params, path_params).await {
+            Ok(page) => {
+                let page = ResultsPage {
+                    next_page: page.0.next_page,
+                    items: {
+                        let mut items = Vec::with_capacity(page.0.items.len());
+                        for item in page.0.items {
+                            items.push(item.try_into()?);
+                        }
+                        items
+                    },
+                };
+
+                Ok(HttpResponseOk(page))
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// List disks for instance
+    #[endpoint {
+        method = GET,
+        path = "/v1/instances/{instance}/disks",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn instance_disk_list(
         rqctx: RequestContext<Self::Context>,
@@ -1820,9 +1979,40 @@ pub trait NexusExternalApi {
 
     /// Attach disk to instance
     #[endpoint {
+        operation_id = "instance_disk_attach",
         method = POST,
         path = "/v1/instances/{instance}/disks/attach",
         tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_instance_disk_attach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_attach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025112000::Disk>, HttpError> {
+        match Self::instance_disk_attach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_attach,
+        )
+        .await
+        {
+            Ok(HttpResponseAccepted(disk)) => {
+                Ok(HttpResponseAccepted(disk.try_into()?))
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Attach disk to instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/attach",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn instance_disk_attach(
         rqctx: RequestContext<Self::Context>,
@@ -1833,9 +2023,40 @@ pub trait NexusExternalApi {
 
     /// Detach disk from instance
     #[endpoint {
+        operation_id = "instance_disk_detach",
         method = POST,
         path = "/v1/instances/{instance}/disks/detach",
         tags = ["instances"],
+        versions = ..VERSION_LOCAL_STORAGE,
+    }]
+    async fn v2025112000_instance_disk_detach(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InstancePath>,
+        query_params: Query<params::OptionalProjectSelector>,
+        disk_to_detach: TypedBody<params::DiskPath>,
+    ) -> Result<HttpResponseAccepted<v2025112000::Disk>, HttpError> {
+        match Self::instance_disk_detach(
+            rqctx,
+            path_params,
+            query_params,
+            disk_to_detach,
+        )
+        .await
+        {
+            Ok(HttpResponseAccepted(disk)) => {
+                Ok(HttpResponseAccepted(disk.try_into()?))
+            }
+
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Detach disk from instance
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/disks/detach",
+        tags = ["instances"],
+        versions = VERSION_LOCAL_STORAGE..,
     }]
     async fn instance_disk_detach(
         rqctx: RequestContext<Self::Context>,
@@ -2779,14 +3000,31 @@ pub trait NexusExternalApi {
         operation_id = "instance_multicast_group_list",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_instance_multicast_group_list(
+    async fn v2025120300_instance_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
     ) -> Result<
-        HttpResponseOk<ResultsPage<v20251120::MulticastGroupMember>>,
+        HttpResponseOk<ResultsPage<v2025120300::MulticastGroupMember>>,
         HttpError,
-    >;
+    > {
+        match Self::instance_multicast_group_list(
+            rqctx,
+            query_params,
+            path_params,
+        )
+        .await
+        {
+            Ok(page) => {
+                let new_page = ResultsPage {
+                    next_page: page.0.next_page,
+                    items: page.0.items.into_iter().map(Into::into).collect(),
+                };
+                Ok(HttpResponseOk(new_page))
+            }
+            Err(e) => Err(e),
+        }
+    }
 
     /// List multicast groups for an instance.
     #[endpoint {
@@ -2815,11 +3053,11 @@ pub trait NexusExternalApi {
         operation_id = "instance_multicast_group_join",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_instance_multicast_group_join(
+    async fn v2025120300_instance_multicast_group_join(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v20251120::InstanceMulticastGroupPath>,
+        path_params: Path<v2025120300::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
-    ) -> Result<HttpResponseCreated<v20251120::MulticastGroupMember>, HttpError>;
+    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroupMember>, HttpError>;
 
     /// Join a multicast group.
     ///
@@ -2872,9 +3110,9 @@ pub trait NexusExternalApi {
         operation_id = "instance_multicast_group_leave",
         versions = ..VERSION_MULTICAST_IMPLICIT_LIFECYCLE_UPDATES,
     }]
-    async fn v1_instance_multicast_group_leave(
+    async fn v2025120300_instance_multicast_group_leave(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<v20251120::InstanceMulticastGroupPath>,
+        path_params: Path<v2025120300::InstanceMulticastGroupPath>,
         query_params: Query<params::OptionalProjectSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 

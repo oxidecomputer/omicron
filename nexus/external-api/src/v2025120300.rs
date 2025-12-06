@@ -2,9 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Nexus external API types (version 2025112000)
+//! Nexus external API types (version 2025120300)
 //!
-//! Version 2025112000 types (before [`MulticastGroupIdentifier`] was introduced
+//! Version 2025120300 types (before [`MulticastGroupIdentifier`] was introduced
 //! and before implicit group lifecycle).
 //!
 //! Key differences from newer API versions:
@@ -17,6 +17,9 @@
 //!
 //! [`MulticastGroupIdentifier`]: params::MulticastGroupIdentifier
 //! [`NameOrId`]: omicron_common::api::external::NameOrId
+//! [`MulticastGroupCreate`]: self::MulticastGroupCreate
+//! [`MulticastGroupUpdate`]: self::MulticastGroupUpdate
+//! [`MulticastGroupMemberAdd`]: self::MulticastGroupMemberAdd
 
 use std::net::IpAddr;
 

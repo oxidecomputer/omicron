@@ -105,7 +105,11 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -216,7 +220,11 @@ async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -313,7 +321,11 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -403,8 +415,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -464,8 +478,10 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
             name: snap_disk_name.clone(),
             description: String::from("snapshot of 'sells rainsticks'"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -607,8 +623,10 @@ async fn test_reject_creating_disk_from_snapshot(
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(
@@ -639,8 +657,10 @@ async fn test_reject_creating_disk_from_snapshot(
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
@@ -672,8 +692,10 @@ async fn test_reject_creating_disk_from_snapshot(
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(
@@ -769,8 +791,10 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
                     description: String::from("bad disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(
@@ -858,8 +882,10 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
                     description: String::from("stolen disk"),
                 },
 
-                disk_source: params::DiskSource::Snapshot {
-                    snapshot_id: snapshot.id(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Snapshot {
+                        snapshot_id: snapshot.id(),
+                    },
                 },
 
                 size: ByteCount::try_from(MIN_DISK_SIZE_BYTES).unwrap(),
@@ -893,8 +919,10 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -964,7 +992,11 @@ async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: disk_size,
     };
 
@@ -1257,8 +1289,10 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
             name: base_disk_name.clone(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Blank {
-            block_size: params::BlockSize::try_from(512).unwrap(),
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Blank {
+                block_size: params::BlockSize::try_from(512).unwrap(),
+            },
         },
         size: disk_size,
     };
@@ -1488,7 +1522,10 @@ async fn test_region_allocation_for_snapshot(
     let Disk::Crucible(db_disk) = datastore
         .disk_get(&opctx, disk_id)
         .await
-        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id))
+    else {
+        unreachable!()
+    };
 
     let allocated_regions =
         datastore.get_allocated_regions(db_disk.volume_id()).await.unwrap();
