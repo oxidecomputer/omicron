@@ -5,8 +5,8 @@ use anyhow::{Context as _, Result, ensure};
 use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, ExternalIp, ExternalIpCreate,
-    InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
+    ByteCount, DiskBackend, DiskCreate, DiskSource, ExternalIp,
+    ExternalIpCreate, InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
     InstanceNetworkInterfaceAttachment, InstanceState, SshKeyCreate,
 };
 use oxide_client::{ClientCurrentUserExt, ClientDisksExt, ClientInstancesExt};
@@ -45,9 +45,9 @@ async fn instance_launch() -> Result<()> {
         .body(DiskCreate {
             name: disk_name.clone(),
             description: String::new(),
-            disk_source: DiskSource::Image {
+            disk_backend: DiskBackend::Distributed(DiskSource::Image {
                 image_id: ctx.get_silo_image_id("debian11").await?,
-            },
+            }),
             size: ByteCount(2048 * 1024 * 1024),
         })
         .send()
