@@ -2652,7 +2652,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             let view = views::MulticastGroupMember::try_from(result)?;
-            Ok(HttpResponseCreated(v2025120300::MulticastGroupMember::from(view)))
+            Ok(HttpResponseCreated(v2025120300::MulticastGroupMember::from(
+                view,
+            )))
         };
         apictx
             .context
@@ -5993,7 +5995,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 )
                 .await?;
             let view = views::MulticastGroupMember::try_from(result)?;
-            Ok(HttpResponseCreated(v2025120300::MulticastGroupMember::from(view)))
+            Ok(HttpResponseCreated(v2025120300::MulticastGroupMember::from(
+                view,
+            )))
         };
         apictx
             .context

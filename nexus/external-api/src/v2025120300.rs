@@ -14,10 +14,12 @@
 //! - Has explicit [`MulticastGroupCreate`] and [`MulticastGroupUpdate`] types
 //!   (newer versions create/delete groups implicitly via member operations).
 //! - [`MulticastGroupMemberAdd`] doesn't have `source_ips` field.
-//! - [`MulticastGroup`] view includes `mvlan` field (always `None`, field was removed).
 //!
 //! [`MulticastGroupIdentifier`]: params::MulticastGroupIdentifier
 //! [`NameOrId`]: omicron_common::api::external::NameOrId
+//! [`MulticastGroupCreate`]: self::MulticastGroupCreate
+//! [`MulticastGroupUpdate`]: self::MulticastGroupUpdate
+//! [`MulticastGroupMemberAdd`]: self::MulticastGroupMemberAdd
 
 use std::net::IpAddr;
 
