@@ -2859,6 +2859,7 @@ dependencies = [
  "hickory-server",
  "http",
  "internal-dns-types",
+ "internal-dns-types-migrations",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -2892,7 +2893,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "dropshot-api-manager-types",
- "internal-dns-types",
+ "internal-dns-types-migrations",
  "omicron-workspace-hack",
  "schemars 0.8.22",
  "semver 1.0.27",
@@ -5463,6 +5464,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "expectorate",
+ "internal-dns-types-migrations",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5470,6 +5472,18 @@ dependencies = [
  "serde",
  "serde_json",
  "strum 0.27.2",
+]
+
+[[package]]
+name = "internal-dns-types-migrations"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars 0.8.22",
+ "serde",
 ]
 
 [[package]]

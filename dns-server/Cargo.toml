@@ -21,6 +21,7 @@ hickory-resolver.workspace = true
 hickory-server.workspace = true
 http.workspace = true
 internal-dns-types.workspace = true
+internal-dns-types-migrations.workspace = true
 omicron-common.workspace = true
 oxide-tokio-rt.workspace = true
 pretty-hex.workspace = true

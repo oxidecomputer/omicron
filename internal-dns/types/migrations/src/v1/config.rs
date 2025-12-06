@@ -2,7 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::v2;
+//! DNS configuration types for API version 1.0.0 (INITIAL).
+//!
+//! These types were introduced in the initial version of the DNS server API.
+//! For conversion code to/from v2, see [`crate::v2::config`].
+
 use anyhow::ensure;
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
@@ -35,34 +39,6 @@ impl DnsConfigParams {
     }
 }
 
-pub enum TranslationError {
-    GenerationTooLarge,
-}
-
-impl TryInto<v2::config::DnsConfigParams> for DnsConfigParams {
-    type Error = TranslationError;
-
-    fn try_into(self) -> Result<v2::config::DnsConfigParams, Self::Error> {
-        let serial: u32 = self
-            .generation
-            .as_u64()
-            .try_into()
-            .map_err(|_| TranslationError::GenerationTooLarge)?;
-
-        let mut converted_zones: Vec<v2::config::DnsConfigZone> = Vec::new();
-        for zone in self.zones.into_iter() {
-            converted_zones.push(zone.into());
-        }
-
-        Ok(v2::config::DnsConfigParams {
-            generation: self.generation,
-            serial,
-            time_created: self.time_created,
-            zones: converted_zones,
-        })
-    }
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfig {
     pub generation: Generation,
@@ -71,38 +47,14 @@ pub struct DnsConfig {
     pub zones: Vec<DnsConfigZone>,
 }
 
-// See docs on [`v2::config::DnsConfigZone`] for more about this struct. They are functionally
-// equivalent. We would include that doc comment here, but altering docs to existing types
-// makes them appear different in OpenAPI terms and would be "breaking" for the time being.
+// See docs on [`crate::v2::config::DnsConfigZone`] for more about this struct.
+// They are functionally equivalent. We would include that doc comment here,
+// but altering docs to existing types makes them appear different in OpenAPI
+// terms and would be "breaking" for the time being.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct DnsConfigZone {
     pub zone_name: String,
     pub records: HashMap<String, Vec<DnsRecord>>,
-}
-
-impl Into<v2::config::DnsConfigZone> for DnsConfigZone {
-    fn into(self) -> v2::config::DnsConfigZone {
-        let converted_records: HashMap<String, Vec<v2::config::DnsRecord>> =
-            self.records
-                .into_iter()
-                .filter_map(|(name, name_records)| {
-                    let converted_name_records: Vec<v2::config::DnsRecord> =
-                        name_records
-                            .into_iter()
-                            .map(|rec| rec.into())
-                            .collect();
-                    if converted_name_records.is_empty() {
-                        None
-                    } else {
-                        Some((name, converted_name_records))
-                    }
-                })
-                .collect();
-        v2::config::DnsConfigZone {
-            zone_name: self.zone_name,
-            records: converted_records,
-        }
-    }
 }
 
 #[derive(
@@ -126,16 +78,6 @@ pub enum DnsRecord {
     Aaaa(Ipv6Addr),
     #[serde(rename = "SRV")]
     Srv(Srv),
-}
-
-impl Into<v2::config::DnsRecord> for DnsRecord {
-    fn into(self) -> v2::config::DnsRecord {
-        match self {
-            DnsRecord::A(ip) => v2::config::DnsRecord::A(ip),
-            DnsRecord::Aaaa(ip) => v2::config::DnsRecord::Aaaa(ip),
-            DnsRecord::Srv(srv) => v2::config::DnsRecord::Srv(srv.into()),
-        }
-    }
 }
 
 // The `From<Ipv4Addr>` and `From<Ipv6Addr>` implementations are very slightly
@@ -179,15 +121,4 @@ pub struct Srv {
     pub weight: u16,
     pub port: u16,
     pub target: String,
-}
-
-impl From<v2::config::Srv> for Srv {
-    fn from(other: v2::config::Srv) -> Self {
-        Srv {
-            prio: other.prio,
-            weight: other.weight,
-            port: other.port,
-            target: other.target,
-        }
-    }
 }

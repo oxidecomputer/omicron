@@ -7,29 +7,12 @@
 //!
 //! ## Organization
 //!
-//! Some types in this crate are exposed by its dependents as part of versioned
-//! HTTP interfaces, such as `dns-server`'s management interfaces. In those
-//! cases we may want to support multiple HTTP interface versions concurrently,
-//! and so this crate preserves old versions of select public items used in this
-//! way.
+//! Published types for the DNS server API live in the `internal-dns-types-migrations`
+//! crate, organized by version. This crate re-exports the latest versions as
+//! floating identifiers for use by non-migration-related code.
 //!
-//! The alternative here would be to require dependents of `internal-dns` to
-//! declare duplicate dependencies on `internal-dns` at different revisions.
-//! That would force dependents to take all of `internal-dns`' dependencies at
-//! versions of interest as transitive dependencies, and precludes maintenance
-//! that would otherwise be able to preserve API compatibility of the public
-//! types.
-//!
-//! `cargo xtask openapi` helps us check that we don't unintentionally break an
-//! existing committed version, which also helps us be confident that future
-//! maintenance on old versions' types does not introduce breaking changes.
-//!
-//! The top-level items here can be thought of as the "current" version, where
-//! versioned items (and their previous versions) are in the `vN` modules with
-//! their latest form re-exported as the "current" version.
-
-pub mod v1;
-pub mod v2;
+//! For fixed identifiers (used in API definitions), depend on
+//! `internal-dns-types-migrations` directly.
 
 pub mod config;
 pub mod diff;
