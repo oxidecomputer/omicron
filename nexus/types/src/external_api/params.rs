@@ -1415,7 +1415,7 @@ pub struct InstanceUpdate {
 }
 
 #[inline]
-fn bool_true() -> bool {
+pub fn bool_true() -> bool {
     true
 }
 
@@ -1744,7 +1744,7 @@ impl From<DiskVariant> for PhysicalDiskKind {
     }
 }
 
-/// Different sources for a disk
+/// Different sources for a Distributed Disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DiskSource {
@@ -1753,13 +1753,28 @@ pub enum DiskSource {
         /// size of blocks for this Disk. valid values are: 512, 2048, or 4096
         block_size: BlockSize,
     },
+
     /// Create a disk from a disk snapshot
     Snapshot { snapshot_id: Uuid },
+
     /// Create a disk from an image
     Image { image_id: Uuid },
+
     /// Create a blank disk that will accept bulk writes or pull blocks from an
     /// external source.
     ImportingBlocks { block_size: BlockSize },
+}
+
+/// The source of a `Disk`'s blocks
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DiskBackend {
+    Local {},
+
+    Distributed {
+        /// The initial source for this disk
+        disk_source: DiskSource,
+    },
 }
 
 /// Create-time parameters for a `Disk`
@@ -1768,8 +1783,10 @@ pub struct DiskCreate {
     /// The common identifying metadata for the disk
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// The initial source for this disk
-    pub disk_source: DiskSource,
+
+    /// The source for this `Disk`'s blocks
+    pub disk_backend: DiskBackend,
+
     /// The total size of the Disk (in bytes)
     pub size: ByteCount,
 }

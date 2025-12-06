@@ -2612,8 +2612,10 @@ async fn test_instance_using_image_from_other_project_fails(
                             name: "stolen".parse().unwrap(),
                             description: "i stole an image".into(),
                         },
-                        disk_source: params::DiskSource::Image {
-                            image_id: image.identity.id,
+                        disk_backend: params::DiskBackend::Distributed {
+                            disk_source: params::DiskSource::Image {
+                                image_id: image.identity.id,
+                            },
                         },
                         size: ByteCount::from_gibibytes_u32(4),
                     },
@@ -4098,8 +4100,10 @@ async fn test_instance_create_attach_disks(
                     ),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
                 },
             },
         )),
@@ -4113,8 +4117,10 @@ async fn test_instance_create_attach_disks(
                     ),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
                 },
             }),
             params::InstanceDiskAttachment::Attach(
@@ -4211,8 +4217,10 @@ async fn test_instance_create_attach_disks_undo(
                     description: String::from("probably data"),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
-                disk_source: params::DiskSource::Blank {
-                    block_size: params::BlockSize::try_from(512).unwrap(),
+                disk_backend: params::DiskBackend::Distributed {
+                    disk_source: params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
                 },
             }),
             params::InstanceDiskAttachment::Attach(
@@ -7996,7 +8004,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
-async fn instance_get(
+pub async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
 ) -> Instance {
