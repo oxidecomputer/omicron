@@ -6,6 +6,7 @@
 
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
+use anyhow::bail;
 use base64::Engine;
 use camino::Utf8DirEntry;
 use camino::Utf8Path;
@@ -13,6 +14,8 @@ use camino::Utf8PathBuf;
 use camino_tempfile::Utf8TempDir;
 use camino_tempfile::tempdir_in;
 use camino_tempfile::tempfile_in;
+use chrono::DateTime;
+use chrono::Utc;
 use futures::FutureExt;
 use futures::StreamExt;
 use futures::future::BoxFuture;
@@ -38,6 +41,8 @@ use nexus_types::fm::Ereport;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::SupportBundleCleanupReport;
 use nexus_types::internal_api::background::SupportBundleCollectionReport;
+use nexus_types::internal_api::background::SupportBundleCollectionStep;
+use nexus_types::internal_api::background::SupportBundleCollectionStepStatus;
 use nexus_types::internal_api::background::SupportBundleEreportStatus;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -646,7 +651,101 @@ type CollectionStepFn = Box<
         + Send,
 >;
 
+struct CollectionStep {
+    name: String,
+    step_fn: CollectionStepFn,
+}
+
+impl CollectionStep {
+    fn new(name: impl Into<String>, step_fn: CollectionStepFn) -> Self {
+        Self { name: name.into(), step_fn }
+    }
+
+    async fn run(
+        self,
+        collection: &Arc<BundleCollection>,
+        output: &Utf8Path,
+    ) -> CompletedCollectionStep {
+        let start = Utc::now();
+
+        let output = (self.step_fn)(collection, output)
+            .await
+            .inspect_err(|err| {
+                warn!(
+                    collection.log,
+                    "Step failed";
+                    "step" => &self.name,
+                    InlineErrorChain::new(err.as_ref()),
+                );
+            })
+            .unwrap_or_else(|err| CollectionStepOutput::Failed(err));
+
+        let end = Utc::now();
+
+        CompletedCollectionStep { name: self.name, start, end, output }
+    }
+}
+
+struct CompletedCollectionStep {
+    name: String,
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+    output: CollectionStepOutput,
+}
+
+impl CompletedCollectionStep {
+    // Updates the collection report based on the output of a collection step,
+    // and possibly extends the set of all steps to be executed.
+    fn process(
+        self,
+        report: &mut SupportBundleCollectionReport,
+        steps: &mut Vec<CollectionStep>,
+    ) {
+        use SupportBundleCollectionStepStatus as Status;
+
+        let status = match self.output {
+            CollectionStepOutput::Skipped => Status::Skipped,
+            CollectionStepOutput::Failed(err) => {
+                Status::Failed(err.to_string())
+            }
+            CollectionStepOutput::Ereports(status) => {
+                report.ereports = Some(status);
+                Status::Ok
+            }
+            CollectionStepOutput::SavingSpDumps { listed_sps } => {
+                report.listed_sps = listed_sps;
+                Status::Ok
+            }
+            CollectionStepOutput::SpawnSleds { extra_steps } => {
+                report.listed_in_service_sleds = true;
+                steps.extend(extra_steps);
+                Status::Ok
+            }
+            CollectionStepOutput::Spawn { extra_steps } => {
+                steps.extend(extra_steps);
+                Status::Ok
+            }
+            CollectionStepOutput::None => Status::Ok,
+        };
+
+        // Add information about this completed step the bundle report.
+        let step = SupportBundleCollectionStep {
+            name: self.name,
+            start: self.start,
+            end: self.end,
+            status,
+        };
+        report.steps.push(step);
+    }
+}
+
 enum CollectionStepOutput {
+    // The step was not executed intentionally
+    Skipped,
+    // The step encountered a fatal error and could not complete.
+    //
+    // It may have still saved a partial set of data to the bundle.
+    Failed(anyhow::Error),
     Ereports(SupportBundleEreportStatus),
     SavingSpDumps { listed_sps: bool },
     // NOTE: The distinction between this and "Spawn" is pretty artificial -
@@ -655,36 +754,10 @@ enum CollectionStepOutput {
     //
     // If we changed the collection report, this could easily be combined
     // with the "Spawn" variant.
-    SpawnSleds { extra_steps: Vec<(&'static str, CollectionStepFn)> },
-    Spawn { extra_steps: Vec<(&'static str, CollectionStepFn)> },
+    SpawnSleds { extra_steps: Vec<CollectionStep> },
+    Spawn { extra_steps: Vec<CollectionStep> },
+    // The step completed with nothing to report, and no follow-up steps
     None,
-}
-
-impl CollectionStepOutput {
-    // Updates the collection report based on the output of a collection step,
-    // and possibly extends the set of all steps to be executed.
-    fn process(
-        self,
-        report: &mut SupportBundleCollectionReport,
-        steps: &mut Vec<(&'static str, CollectionStepFn)>,
-    ) {
-        match self {
-            CollectionStepOutput::Ereports(status) => {
-                report.ereports = Some(status);
-            }
-            CollectionStepOutput::SavingSpDumps { listed_sps } => {
-                report.listed_sps = listed_sps;
-            }
-            CollectionStepOutput::SpawnSleds { extra_steps } => {
-                report.listed_in_service_sleds = true;
-                steps.extend(extra_steps);
-            }
-            CollectionStepOutput::Spawn { extra_steps } => {
-                steps.extend(extra_steps);
-            }
-            CollectionStepOutput::None => (),
-        }
-    }
 }
 
 impl BundleCollection {
@@ -939,7 +1012,7 @@ impl BundleCollection {
     async fn run_collect_bundle_steps(
         self: &Arc<Self>,
         output: &Utf8TempDir,
-        mut steps: Vec<(&'static str, CollectionStepFn)>,
+        mut steps: Vec<CollectionStep>,
     ) -> SupportBundleCollectionReport {
         let mut report =
             SupportBundleCollectionReport::new(self.bundle.id.into());
@@ -950,34 +1023,25 @@ impl BundleCollection {
 
         loop {
             // Process all the currently-planned steps
-            while let Some((step_name, step)) = steps.pop() {
+            while let Some(step) = steps.pop() {
                 let previous_result = tasks.spawn({
                     let collection = self.clone();
                     let dir = output.path().to_path_buf();
                     async move {
-                        debug!(collection.log, "Running step"; "name" => &step_name);
-                        step(&collection, dir.as_path()).await.inspect_err(|err| {
-                            warn!(
-                                collection.log,
-                                "Step failed";
-                                "name" => &step_name,
-                                InlineErrorChain::new(err.as_ref()),
-                            );
-                        })
+                        debug!(collection.log, "Running step"; "step" => &step.name);
+                        step.run(&collection, dir.as_path()).await
                     }
                 }).await;
 
-                if let Some(Ok(output)) = previous_result {
+                if let Some(output) = previous_result {
                     output.process(&mut report, &mut steps);
                 };
             }
 
             // If we've run out of tasks to spawn, join any of the previously
             // spawned tasks, if any exist.
-            if let Some(previous_result) = tasks.join_next().await {
-                if let Ok(output) = previous_result {
-                    output.process(&mut report, &mut steps);
-                };
+            if let Some(output) = tasks.join_next().await {
+                output.process(&mut report, &mut steps);
 
                 // As soon as any task completes, see if we can spawn more work
                 // immediately. This ensures that the ParallelTaskSet is
@@ -1009,7 +1073,7 @@ impl BundleCollection {
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
         if !self.request.include_reconfigurator_data() {
-            return Ok(CollectionStepOutput::None);
+            return Ok(CollectionStepOutput::Skipped);
         }
 
         // Collect reconfigurator state
@@ -1094,17 +1158,13 @@ impl BundleCollection {
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
         if !self.request.include_sled_cubby_info() {
-            return Ok(CollectionStepOutput::None);
+            return Ok(CollectionStepOutput::Skipped);
         }
 
         let Some(mgs_client) =
             &**self.get_or_initialize_mgs_client(mgs_client).await
         else {
-            warn!(
-                self.log,
-                "No MGS client, skipping sled cubby info collection"
-            );
-            return Ok(CollectionStepOutput::None);
+            bail!("Could not initialize MGS client");
         };
         let nexus_sleds = self
             .get_or_initialize_all_sleds(all_sleds)
@@ -1123,14 +1183,13 @@ impl BundleCollection {
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
         if !self.request.include_sp_dumps() {
-            return Ok(CollectionStepOutput::None);
+            return Ok(CollectionStepOutput::Skipped);
         }
 
         let Some(mgs_client) =
             &**self.get_or_initialize_mgs_client(mgs_client).await
         else {
-            warn!(self.log, "No MGS client, skipping SP task dump collection");
-            return Ok(CollectionStepOutput::None);
+            bail!("Could not initialize MGS client");
         };
 
         let sp_dumps_dir = dir.join("sp_task_dumps");
@@ -1138,10 +1197,10 @@ impl BundleCollection {
             format!("Failed to create SP task dump directory {sp_dumps_dir}")
         })?;
 
-        let mut extra_steps: Vec<(&'static str, CollectionStepFn)> = vec![];
+        let mut extra_steps: Vec<CollectionStep> = vec![];
         for sp in get_available_sps(&mgs_client).await? {
-            extra_steps.push((
-                "SP dump",
+            extra_steps.push(CollectionStep::new(
+                format!("SP dump for {:?}", sp),
                 Box::new({
                     let mgs_client = mgs_client.clone();
                     move |collection, dir| {
@@ -1166,7 +1225,7 @@ impl BundleCollection {
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
         if !self.request.include_sp_dumps() {
-            return Ok(CollectionStepOutput::None);
+            return Ok(CollectionStepOutput::Skipped);
         }
 
         save_sp_dumps(mgs_client, sp, dir).await.with_context(|| {
@@ -1207,26 +1266,26 @@ impl BundleCollection {
         // Shared, lazy, fallible initialization for MGS client
         let mgs_client: OnceCell<Arc<Option<MgsClient>>> = OnceCell::new();
 
-        let steps: Vec<(&str, CollectionStepFn)> = vec![
-            (
+        let steps: Vec<CollectionStep> = vec![
+            CollectionStep::new(
                 "bundle id",
                 Box::new(|collection, dir| {
                     collection.collect_bundle_id(dir).boxed()
                 }),
             ),
-            (
+            CollectionStep::new(
                 "reconfigurator state",
                 Box::new(|collection, dir| {
                     collection.collect_reconfigurator_state(dir).boxed()
                 }),
             ),
-            (
+            CollectionStep::new(
                 "ereports",
                 Box::new(|collection, dir| {
                     collection.collect_ereports(dir).boxed()
                 }),
             ),
-            (
+            CollectionStep::new(
                 "sled cubby info",
                 Box::new({
                     let all_sleds = all_sleds.clone();
@@ -1245,7 +1304,7 @@ impl BundleCollection {
                     }
                 }),
             ),
-            (
+            CollectionStep::new(
                 "spawn steps to query all SP dumps",
                 Box::new({
                     let mgs_client = mgs_client.clone();
@@ -1259,7 +1318,7 @@ impl BundleCollection {
                     }
                 }),
             ),
-            (
+            CollectionStep::new(
                 "spawn steps to query all sleds",
                 Box::new({
                     let all_sleds = all_sleds.clone();
@@ -1281,24 +1340,23 @@ impl BundleCollection {
         all_sleds: &OnceCell<Arc<Option<Vec<Sled>>>>,
     ) -> anyhow::Result<CollectionStepOutput> {
         if !self.request.include_host_info() {
-            return Ok(CollectionStepOutput::None);
+            return Ok(CollectionStepOutput::Skipped);
         }
 
         let Some(all_sleds) =
             self.get_or_initialize_all_sleds(all_sleds).await.as_deref()
         else {
-            warn!(self.log, "Could not read list of sleds");
-            return Ok(CollectionStepOutput::None);
+            bail!("Could not read list of sleds");
         };
 
-        let mut extra_steps: Vec<(&'static str, CollectionStepFn)> = vec![];
+        let mut extra_steps: Vec<CollectionStep> = vec![];
         for sled in all_sleds {
             if !self.request.include_sled_host_info(sled.id()) {
                 continue;
             }
 
-            extra_steps.push((
-                "sled data",
+            extra_steps.push(CollectionStep::new(
+                format!("sled data for sled {}", sled.id()),
                 Box::new({
                     let sled = sled.clone();
                     move |collection, dir| {
@@ -1326,7 +1384,7 @@ impl BundleCollection {
         dir: &Utf8Path,
     ) -> anyhow::Result<CollectionStepOutput> {
         if !self.request.include_sled_host_info(sled.id()) {
-            return Ok(CollectionStepOutput::None);
+            return Ok(CollectionStepOutput::Skipped);
         }
 
         let log = &self.log;
@@ -1340,20 +1398,25 @@ impl BundleCollection {
         tokio::fs::write(sled_path.join("sled.txt"), format!("{sled:?}"))
             .await?;
 
-        let Ok(sled_client) = nexus_networking::sled_client(
+        let sled_client = match nexus_networking::sled_client(
             &self.datastore,
             &self.opctx,
             sled.id(),
             log,
         )
         .await
-        else {
-            tokio::fs::write(
-                sled_path.join("error.txt"),
-                "Could not contact sled",
-            )
-            .await?;
-            return Ok(CollectionStepOutput::None);
+        {
+            Ok(client) => client,
+            Err(err) => {
+                tokio::fs::write(
+                    sled_path.join("error.txt"),
+                    "Could not contact sled",
+                )
+                .await.with_context(|| {
+                    format!("Failed to save 'error.txt' to bundle when recording error: {err}")
+                })?;
+                bail!("Could not contact sled: {err}");
+            }
         };
 
         // NB: As new sled-diagnostic commands are added they should
@@ -1467,7 +1530,7 @@ impl BundleCollection {
     ) -> anyhow::Result<CollectionStepOutput> {
         let Some(ereport_filters) = self.request.get_ereport_filters() else {
             debug!(self.log, "Support bundle: ereports not requested");
-            return Ok(CollectionStepOutput::None);
+            return Ok(CollectionStepOutput::Skipped);
         };
         let ereports_dir = dir.join("ereports");
         let mut status = SupportBundleEreportStatus::default();
