@@ -36,5 +36,6 @@ pub mod fm;
 pub mod identity;
 pub mod internal_api;
 pub mod inventory;
+pub mod multicast;
 pub mod quiesce;
 pub mod silo;

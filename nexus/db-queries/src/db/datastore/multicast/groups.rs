@@ -21,13 +21,13 @@ use diesel::result::{
 };
 use ipnetwork::IpNetwork;
 use ref_cast::RefCast;
-use slog::{error, info};
+use slog::{debug, error, info};
 use uuid::Uuid;
 
 use nexus_db_errors::{ErrorHandler, public_error_from_diesel};
 use nexus_db_lookup::DbConnection;
-use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
+use nexus_types::multicast::MulticastGroupCreate;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult,
@@ -41,10 +41,9 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::DataStore;
 use crate::db::model::{
-    ExternalMulticastGroup, ExternalMulticastGroupUpdate,
-    IncompleteExternalMulticastGroup, IncompleteExternalMulticastGroupParams,
-    IpPoolType, MulticastGroup, MulticastGroupState, Name,
-    UnderlayMulticastGroup, Vni,
+    ExternalMulticastGroup, IncompleteExternalMulticastGroup,
+    IncompleteExternalMulticastGroupParams, IpPoolType, MulticastGroup,
+    MulticastGroupState, Name, UnderlayMulticastGroup, Vni,
 };
 use crate::db::pagination::paginated;
 use crate::db::queries::external_multicast_group::NextExternalMulticastGroup;
@@ -63,7 +62,8 @@ pub(crate) struct MulticastGroupAllocationParams {
 impl DataStore {
     /// List multicast groups by state.
     ///
-    /// Used by RPW reconciler.
+    /// Used by RPW reconciler. For "Deleting" state, this includes groups with
+    /// `time_deleted` set so the RPW can clean them up.
     pub async fn multicast_groups_list_by_state(
         &self,
         opctx: &OpContext,
@@ -72,21 +72,58 @@ impl DataStore {
     ) -> ListResultVec<MulticastGroup> {
         use nexus_db_schema::schema::multicast_group::dsl;
 
-        paginated(dsl::multicast_group, dsl::id, pagparams)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::state.eq(state))
+        let mut query = paginated(dsl::multicast_group, dsl::id, pagparams)
+            .filter(dsl::state.eq(state));
+
+        if state != MulticastGroupState::Deleting {
+            query = query.filter(dsl::time_deleted.is_null());
+        }
+
+        query
             .select(MulticastGroup::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Set multicast group state.
-    pub async fn multicast_group_set_state(
+    /// List multicast groups matching any of the provided states.
+    ///
+    /// Used by RPW reconciler. For "Deleting" state, includes groups with
+    /// `time_deleted` set so the RPW can clean them up.
+    pub async fn multicast_groups_list_by_states(
+        &self,
+        opctx: &OpContext,
+        states: &[MulticastGroupState],
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<MulticastGroup> {
+        use nexus_db_schema::schema::multicast_group::dsl;
+
+        let mut query = paginated(dsl::multicast_group, dsl::id, pagparams)
+            .filter(dsl::state.eq_any(states.to_vec()));
+
+        if !states.contains(&MulticastGroupState::Deleting) {
+            query = query.filter(dsl::time_deleted.is_null());
+        }
+
+        query
+            .select(MulticastGroup::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Transition multicast group to "Active" state.
+    ///
+    /// This is used after successfully programming the dataplane (DPD) to mark
+    /// the group as fully operational.
+    ///
+    /// Note: this is the only valid state transition via this API. To delete a
+    /// group, use [`Self::mark_multicast_group_for_removal_if_no_members`] which
+    /// handles the "Deleting" state transition along with setting `time_deleted`.
+    pub async fn multicast_group_set_active(
         &self,
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
-        new_state: MulticastGroupState,
     ) -> UpdateResult<()> {
         use nexus_db_schema::schema::multicast_group::dsl;
 
@@ -94,7 +131,7 @@ impl DataStore {
             .filter(dsl::id.eq(group_id.into_untyped_uuid()))
             .filter(dsl::time_deleted.is_null())
             .set((
-                dsl::state.eq(new_state),
+                dsl::state.eq(MulticastGroupState::Active),
                 dsl::time_modified.eq(diesel::dsl::now),
             ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
@@ -118,7 +155,7 @@ impl DataStore {
     pub async fn multicast_group_create(
         &self,
         opctx: &OpContext,
-        params: &params::MulticastGroupCreate,
+        params: &MulticastGroupCreate,
         authz_pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalMulticastGroup> {
         self.allocate_external_multicast_group(
@@ -198,7 +235,7 @@ impl DataStore {
             })
     }
 
-    /// List multicast groups (fleet-wide).
+    /// List multicast groups (fleet-scoped for visibility).
     pub async fn multicast_groups_list(
         &self,
         opctx: &OpContext,
@@ -223,91 +260,61 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Update a multicast group.
-    pub async fn multicast_group_update(
+    /// Mark a multicast group for deletion, but only if it has no active members.
+    ///
+    /// This is a safe implicit deletion method. It atomically checks that no members
+    /// exist before marking the group as "Deleting". This prevents race conditions
+    /// where a concurrent join could create a member between a "list members"
+    /// check and the mark-for-removal call.
+    ///
+    /// Returns:
+    /// - `Ok(true)` if the group was marked for deletion (no members existed)
+    /// - `Ok(false)` if the group still has members (not marked)
+    /// - `Err` on database errors
+    pub async fn mark_multicast_group_for_removal_if_no_members(
         &self,
         opctx: &OpContext,
         group_id: MulticastGroupUuid,
-        params: &params::MulticastGroupUpdate,
-    ) -> UpdateResult<ExternalMulticastGroup> {
-        use nexus_db_schema::schema::multicast_group::dsl;
-
-        // Create update struct with mvlan=None (won't update field)
-        let mut update = ExternalMulticastGroupUpdate::from(params.clone());
-
-        // Handle mvlan manually like VpcSubnetUpdate handles custom_router_id
-        // - None: leave as None (don't update field)
-        // - Some(Nullable(Some(v))): set to update field to value
-        // - Some(Nullable(None)): set to update field to NULL
-        if let Some(mvlan) = &params.mvlan {
-            update.mvlan = Some(mvlan.0.map(|vlan| u16::from(vlan) as i16));
-        }
-
-        diesel::update(dsl::multicast_group)
-            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
-            .filter(dsl::time_deleted.is_null())
-            .set(update)
-            .returning(ExternalMulticastGroup::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::MulticastGroup,
-                        LookupType::ById(group_id.into_untyped_uuid()),
-                    ),
-                )
-            })
-    }
-
-    /// Mark a multicast group for deletion by transitioning to "DELETING" state.
-    ///
-    /// Unlike members (which use `time_deleted` to distinguish temporary vs
-    /// permanent removal), groups use a simpler model:
-    /// - "DELETING" state = permanent removal in progress
-    /// - RPW reconciler handles cleanup then removes the row entirely
-    /// - `time_deleted` is only set as final step before row deletion
-    ///
-    /// The group remains visible in queries until the reconciler completes
-    /// cleanup and hard-deletes the row.
-    pub async fn mark_multicast_group_for_removal(
-        &self,
-        opctx: &OpContext,
-        group_id: MulticastGroupUuid,
-    ) -> DeleteResult {
-        use nexus_db_schema::schema::multicast_group::dsl;
+    ) -> Result<bool, external::Error> {
+        use nexus_db_schema::schema::multicast_group;
+        use nexus_db_schema::schema::multicast_group_member;
         let now = Utc::now();
 
-        diesel::update(dsl::multicast_group)
-            .filter(dsl::id.eq(group_id.into_untyped_uuid()))
+        // Atomic: only mark `Deleting` if no active members exist.
+        let rows = diesel::update(multicast_group::table)
+            .filter(multicast_group::id.eq(group_id.into_untyped_uuid()))
             .filter(
-                dsl::state
+                multicast_group::state
                     .eq(MulticastGroupState::Active)
-                    .or(dsl::state.eq(MulticastGroupState::Creating)),
+                    .or(multicast_group::state
+                        .eq(MulticastGroupState::Creating)),
             )
-            .filter(dsl::time_deleted.is_null())
+            .filter(multicast_group::time_deleted.is_null())
+            .filter(diesel::dsl::not(diesel::dsl::exists(
+                multicast_group_member::table
+                    .filter(
+                        multicast_group_member::external_group_id
+                            .eq(group_id.into_untyped_uuid()),
+                    )
+                    .filter(multicast_group_member::time_deleted.is_null()),
+            )))
             .set((
-                dsl::state.eq(MulticastGroupState::Deleting),
-                dsl::time_modified.eq(now),
+                multicast_group::state.eq(MulticastGroupState::Deleting),
+                multicast_group::time_deleted.eq(now),
+                multicast_group::time_modified.eq(now),
             ))
-            .returning(ExternalMulticastGroup::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::MulticastGroup,
-                        LookupType::ById(group_id.into_untyped_uuid()),
-                    ),
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(())
+        Ok(rows > 0)
     }
 
     /// Delete a multicast group permanently.
+    ///
+    /// This should only be called by the RPW reconciler after DPD cleanup.
+    /// Requires both `state=Deleting` and `time_deleted IS NOT NULL` as a
+    /// safety check.
     pub async fn multicast_group_delete(
         &self,
         opctx: &OpContext,
@@ -315,45 +322,114 @@ impl DataStore {
     ) -> DeleteResult {
         use nexus_db_schema::schema::multicast_group::dsl;
 
-        diesel::delete(dsl::multicast_group)
+        let deleted_rows = diesel::delete(dsl::multicast_group)
             .filter(dsl::id.eq(group_id.into_untyped_uuid()))
+            .filter(dsl::state.eq(MulticastGroupState::Deleting))
+            .filter(dsl::time_deleted.is_not_null())
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if deleted_rows == 0 {
+            return Err(external::Error::not_found_by_id(
+                ResourceType::MulticastGroup,
+                &group_id.into_untyped_uuid(),
+            ));
+        }
+
+        Ok(())
     }
 
     /// Allocate an external multicast group from an IP Pool.
     ///
-    /// See [`Self::allocate_external_multicast_group_on_conn`] for the connection-reusing variant.
+    /// See [`Self::allocate_external_multicast_group_on_conn`] for the
+    /// connection-reusing variant.
     pub(crate) async fn allocate_external_multicast_group(
         &self,
         opctx: &OpContext,
         params: MulticastGroupAllocationParams,
     ) -> CreateResult<ExternalMulticastGroup> {
         let group_id = Uuid::new_v4();
-        let authz_pool = self
-            .resolve_pool_for_allocation(
+
+        // Determine if this is an SSM request (source_ips provided) or an
+        // implicit ASM request (no sources, no explicit pool/IP)
+        let sources_empty =
+            params.source_ips.as_ref().map(|v| v.is_empty()).unwrap_or(true);
+        let needs_ssm_pool =
+            !sources_empty && params.pool.is_none() && params.ip.is_none();
+        let needs_asm_pool =
+            sources_empty && params.pool.is_none() && params.ip.is_none();
+
+        // Select the appropriate pool:
+        // - If `source_ips` provided without explicit pool/IP, find an SSM pool.
+        // - If no `source_ips` and no explicit pool/IP, find an ASM pool.
+        // - Otherwise (explicit pool or explicit IP provided), fall back to
+        //   generic resolution via `resolve_pool_for_allocation` which validates
+        //   linkage and type. ASM/SSM semantics are still enforced below.
+        let authz_pool = if needs_ssm_pool {
+            let (authz_pool, _) = self
+                .ip_pools_fetch_ssm_multicast(opctx)
+                .await
+                .map_err(|_| {
+                    external::Error::invalid_request(concat!(
+                        "No SSM multicast pool linked to your silo. ",
+                        "Create a multicast pool with SSM ranges ",
+                        "(IPv4 232/8, IPv6 ff3x::/32) and link it to ",
+                        "your silo, or provide an explicit SSM address.",
+                    ))
+                })?;
+            opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+            authz_pool
+        } else if needs_asm_pool {
+            let (authz_pool, _) = self
+                .ip_pools_fetch_asm_multicast(opctx)
+                .await
+                .map_err(|_| {
+                    external::Error::invalid_request(concat!(
+                        "No ASM multicast pool linked to your silo. ",
+                        "Create a multicast pool with ASM ranges ",
+                        "(IPv4 224/4 excluding 232/8, or IPv6 ffxx::/16 ",
+                        "excluding ff3x::/32) and link it to your silo, ",
+                        "or provide an explicit ASM address.",
+                    ))
+                })?;
+            opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
+            authz_pool
+        } else {
+            self.resolve_pool_for_allocation(
                 opctx,
                 params.pool,
                 IpPoolType::Multicast,
             )
-            .await?;
+            .await?
+        };
+
+        debug!(
+            opctx.log,
+            "multicast group allocation";
+            "pool_selection" => if needs_ssm_pool { "ssm" } else if needs_asm_pool { "asm" } else { "explicit" },
+            "pool_id" => %authz_pool.id(),
+        );
 
         // Enforce ASM/SSM semantics when allocating from a pool:
         // - If sources are provided without an explicit IP (implicit allocation),
         //   the pool must be SSM so we allocate an SSM address.
         // - If the pool is SSM and sources are empty/missing, reject.
-        let sources_empty =
-            params.source_ips.as_ref().map(|v| v.is_empty()).unwrap_or(true);
-
         let pool_is_ssm =
             self.multicast_pool_is_ssm(opctx, authz_pool.id()).await?;
 
+        // Note: When needs_ssm_pool was true, we already fetched an SSM pool,
+        // so this check only triggers for explicitly-provided pools.
         if !sources_empty && params.ip.is_none() && !pool_is_ssm {
             let pool_id = authz_pool.id();
             return Err(external::Error::invalid_request(&format!(
-                "Cannot allocate SSM multicast group from ASM pool {pool_id}. Choose a multicast pool with SSM ranges (IPv4 232/8, IPv6 FF3x::/32) or provide an explicit SSM address."
+                concat!(
+                    "Cannot allocate SSM multicast group from ASM pool {}. ",
+                    "Choose a multicast pool with SSM ranges ",
+                    "(IPv4 232/8, IPv6 ff3x::/32) or provide an explicit ",
+                    "SSM address."
+                ),
+                pool_id
             )));
         }
 
@@ -376,7 +452,7 @@ impl DataStore {
         // Fleet-scoped multicast groups always use DEFAULT_MULTICAST_VNI (77).
         // This reserved VNI is below MIN_GUEST_VNI (1024) and provides consistent
         // behavior across all multicast groups. VNI is not derived from VPC since
-        // groups are fleet-wide and can span multiple projects/VPCs.
+        // groups are fleet-scoped and can span multiple projects/VPCs.
         let vni = Vni(external::Vni::DEFAULT_MULTICAST_VNI);
 
         // Create the incomplete group
@@ -390,9 +466,9 @@ impl DataStore {
                 source_ips: source_ip_networks,
                 mvlan: params.mvlan.map(|vlan_id| u16::from(vlan_id) as i16),
                 vni,
-                // Set DPD tag to the group name to couple overlay/underlay entries
-                // for this multicast group (kept in sync on rename)
-                tag: Some(params.identity.name.to_string()),
+                // Set DPD tag to the group UUID to ensure uniqueness across lifecycle.
+                // This prevents tag collision when group names are reused.
+                tag: Some(group_id.to_string()),
             },
         );
 
@@ -442,7 +518,7 @@ impl DataStore {
     /// Deallocate an external multicast group address for IP pool cleanup.
     ///
     /// This marks the group's IP address as deallocated by setting `time_deleted`,
-    /// releasing it back to the pool. This is NOT the user-initiated deletion path.
+    /// releasing it back to the pool. This is not the user-initiated deletion path.
     ///
     /// User-initiated deletion uses `mark_multicast_group_for_removal` which
     /// transitions to "Deleting" state for RPW cleanup before row removal.
@@ -627,9 +703,9 @@ impl DataStore {
 
     /// Delete an underlay multicast group permanently.
     ///
-    /// This immediately removes the underlay group record from the database. It
-    /// sho¨ld only be called when the group is already removed from the switch
-    /// or when cleaning up failed operations.
+    /// This should only be called by the RPW reconciler after DPD cleanup.
+    /// Underlay groups don't have independent lifecycle, i.e. they're always
+    /// deleted as part of cleaning up their parent external group.
     pub async fn underlay_multicast_group_delete(
         &self,
         opctx: &OpContext,
@@ -637,12 +713,20 @@ impl DataStore {
     ) -> DeleteResult {
         use nexus_db_schema::schema::underlay_multicast_group::dsl;
 
-        diesel::delete(dsl::underlay_multicast_group)
+        let deleted_rows = diesel::delete(dsl::underlay_multicast_group)
             .filter(dsl::id.eq(group_id))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        if deleted_rows == 0 {
+            return Err(external::Error::not_found_by_id(
+                ResourceType::MulticastGroup,
+                &group_id,
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -654,9 +738,6 @@ mod tests {
 
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range};
-    use omicron_common::api::external::{
-        IdentityMetadataUpdateParams, NameOrId,
-    };
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::{
         GenericUuid, InstanceUuid, PropolisUuid, SledUuid,
@@ -738,14 +819,13 @@ mod tests {
             .expect("Should link multicast pool to silo");
 
         // Allocate first address
-        let params1 = params::MulticastGroupCreate {
+        let params1 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "first-group".parse().unwrap(),
                 description: "First group".to_string(),
             },
             multicast_ip: None,
             source_ips: None,
-            pool: Some(NameOrId::Name("exhaust-pool".parse().unwrap())),
             mvlan: None,
         };
         datastore
@@ -754,14 +834,13 @@ mod tests {
             .expect("Should create first group");
 
         // Allocate second address
-        let params2 = params::MulticastGroupCreate {
+        let params2 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "second-group".parse().unwrap(),
                 description: "Second group".to_string(),
             },
             multicast_ip: None,
             source_ips: None,
-            pool: Some(NameOrId::Name("exhaust-pool".parse().unwrap())),
             mvlan: None,
         };
         datastore
@@ -770,14 +849,13 @@ mod tests {
             .expect("Should create second group");
 
         // Third allocation should fail due to exhaustion
-        let params3 = params::MulticastGroupCreate {
+        let params3 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "third-group".parse().unwrap(),
                 description: "Should fail".to_string(),
             },
             multicast_ip: None,
             source_ips: None,
-            pool: Some(NameOrId::Name("exhaust-pool".parse().unwrap())),
             mvlan: None,
         };
         let result3 = datastore
@@ -844,14 +922,13 @@ mod tests {
             .expect("Should link multicast pool to silo");
 
         // Create group without specifying pool (should use default)
-        let params_default = params::MulticastGroupCreate {
+        let params_default = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "auto-alloc-group".parse().unwrap(),
                 description: "Group using default pool".to_string(),
             },
             multicast_ip: None,
             source_ips: None,
-            pool: None, // No pool specified - should use default
             mvlan: None,
         };
 
@@ -870,16 +947,13 @@ mod tests {
         );
 
         // Create group with explicit pool name
-        let params_explicit = params::MulticastGroupCreate {
+        let params_explicit = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "explicit-alloc-group".parse().unwrap(),
                 description: "Group with explicit pool".to_string(),
             },
             multicast_ip: None,
             source_ips: None,
-            pool: Some(NameOrId::Name(
-                "default-multicast-pool".parse().unwrap(),
-            )),
             mvlan: None,
         };
         let group_explicit = datastore
@@ -898,10 +972,9 @@ mod tests {
 
         // Test state transitions on the default pool group
         datastore
-            .multicast_group_set_state(
+            .multicast_group_set_active(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group_default.id()),
-                MulticastGroupState::Active,
             )
             .await
             .expect("Should transition default group to 'Active'");
@@ -1001,14 +1074,13 @@ mod tests {
             .expect("Should link multicast pool to silo");
 
         // Create external multicast group with explicit address
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "test-group".parse().unwrap(),
                 description: "Comprehensive test group".to_string(),
             },
             multicast_ip: Some("224.1.3.3".parse().unwrap()),
             source_ips: None,
-            pool: Some(NameOrId::Name("test-multicast-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -1099,14 +1171,13 @@ mod tests {
             create_project(&opctx, &datastore, "test-project").await;
 
         // Create a multicast group using the real project
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "parent-id-test-group".parse().unwrap(),
                 description: "Group for parent_id testing".to_string(),
             },
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
-            pool: Some(NameOrId::Name("parent-id-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -1266,10 +1337,9 @@ mod tests {
 
         // Transition group to "Active" state before adding members
         datastore
-            .multicast_group_set_state(
+            .multicast_group_set_active(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MulticastGroupState::Active,
             )
             .await
             .expect("Should transition group to 'Active' state");
@@ -1566,14 +1636,13 @@ mod tests {
             .await
             .expect("Should set instance runtime state");
 
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "duplicate-test-group".parse().unwrap(),
                 description: "Group for duplicate testing".to_string(),
             },
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
-            pool: Some(NameOrId::Name("duplicate-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -1584,10 +1653,9 @@ mod tests {
 
         // Transition group to "Active" state before adding members
         datastore
-            .multicast_group_set_state(
+            .multicast_group_set_active(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MulticastGroupState::Active,
             )
             .await
             .expect("Should transition group to 'Active' state");
@@ -1699,7 +1767,7 @@ mod tests {
             .expect("Should link pool to silo");
 
         // Create multicast group (datastore-only; not exercising reconciler)
-        let group_params = params::MulticastGroupCreate {
+        let group_params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "state-test-group".parse().unwrap(),
                 description: "Group for testing member state transitions"
@@ -1707,7 +1775,6 @@ mod tests {
             },
             multicast_ip: None, // Let it allocate from pool
             source_ips: None,
-            pool: Some(NameOrId::Name("state-test-pool".parse().unwrap())),
             mvlan: None,
         };
         let group = datastore
@@ -1735,10 +1802,9 @@ mod tests {
 
         // Transition group to "Active" state before adding members
         datastore
-            .multicast_group_set_state(
+            .multicast_group_set_active(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MulticastGroupState::Active,
             )
             .await
             .expect("Should transition group to 'Active' state");
@@ -1756,7 +1822,7 @@ mod tests {
         assert_eq!(member.state, MulticastGroupMemberState::Joining);
         assert_eq!(member.parent_id, test_instance_id);
 
-        // Test: Transition from "Joining" → "Joined" (simulating what the reconciler would do)
+        // Case: Transition from "Joining" → "Joined" (simulating what the reconciler would do)
         datastore
             .multicast_group_member_set_state(
                 &opctx,
@@ -1786,7 +1852,7 @@ mod tests {
         assert_eq!(members.len(), 1);
         assert_eq!(members[0].state, MulticastGroupMemberState::Joined);
 
-        // Test: Transition member to "Left" state (without permanent deletion)
+        // Case: Transition member to "Left" state (without permanent deletion)
         datastore
             .multicast_group_member_set_state(
                 &opctx,
@@ -1914,14 +1980,13 @@ mod tests {
 
         // Create group with specific IP
         let target_ip = "224.10.1.101".parse().unwrap();
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "reuse-test".parse().unwrap(),
                 description: "Group for IP reuse test".to_string(),
             },
             multicast_ip: Some(target_ip),
             source_ips: None,
-            pool: Some(NameOrId::Name("reuse-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -1942,14 +2007,13 @@ mod tests {
         assert_eq!(deleted, true, "Should successfully deallocate the group");
 
         // Create another group with the same IP - should succeed due to time_deleted filtering
-        let params2 = params::MulticastGroupCreate {
+        let params2 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "reuse-test-2".parse().unwrap(),
                 description: "Second group reusing same IP".to_string(),
             },
             multicast_ip: Some(target_ip),
             source_ips: None,
-            pool: Some(NameOrId::Name("reuse-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -2028,14 +2092,13 @@ mod tests {
             .expect("Should link pool to silo");
 
         // Exhaust the pool
-        let params1 = params::MulticastGroupCreate {
+        let params1 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "cycle-test-1".parse().unwrap(),
                 description: "First group to exhaust pool".to_string(),
             },
             multicast_ip: None,
             source_ips: None,
-            pool: Some(NameOrId::Name("cycle-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -2046,14 +2109,13 @@ mod tests {
         let allocated_ip = group1.multicast_ip.ip();
 
         // Try to create another group - should fail due to exhaustion
-        let params2 = params::MulticastGroupCreate {
+        let params2 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "cycle-test-2".parse().unwrap(),
                 description: "Second group should fail".to_string(),
             },
             multicast_ip: None,
             source_ips: None,
-            pool: Some(NameOrId::Name("cycle-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -2076,7 +2138,7 @@ mod tests {
         assert_eq!(deleted, true, "Should successfully deallocate the group");
 
         // Now creating a new group should succeed
-        let params3 = params::MulticastGroupCreate {
+        let params3 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "cycle-test-3".parse().unwrap(),
                 description: "Third group should succeed after deletion"
@@ -2084,7 +2146,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            pool: Some(NameOrId::Name("cycle-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -2164,14 +2225,13 @@ mod tests {
             .expect("Should link pool to silo");
 
         // Create a group
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "dealloc-test".parse().unwrap(),
                 description: "Group for deallocation testing".to_string(),
             },
             multicast_ip: None,
             source_ips: None,
-            pool: Some(NameOrId::Name("dealloc-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -2289,7 +2349,7 @@ mod tests {
             .expect("Should link multicast pool to silo");
 
         // Test creating a multicast group
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "fetch-test-group".parse().unwrap(),
                 description: "Test group for fetch operations".to_string(),
@@ -2299,7 +2359,6 @@ mod tests {
                 "10.0.0.1".parse().unwrap(),
                 "10.0.0.2".parse().unwrap(),
             ]),
-            pool: Some(NameOrId::Name("fetch-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -2399,41 +2458,38 @@ mod tests {
             .await
             .expect("Should link multicast pool to silo");
 
-        // Create fleet-wide multicast groups
-        let params_1 = params::MulticastGroupCreate {
+        // Create fleet-scoped multicast groups
+        let params_1 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "fleet-group-1".parse().unwrap(),
                 description: "Fleet-wide group 1".to_string(),
             },
             multicast_ip: Some("224.100.20.10".parse().unwrap()),
             source_ips: None,
-            pool: Some(NameOrId::Name("list-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
-        let params_2 = params::MulticastGroupCreate {
+        let params_2 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "fleet-group-2".parse().unwrap(),
                 description: "Fleet-wide group 2".to_string(),
             },
             multicast_ip: Some("224.100.20.11".parse().unwrap()),
             source_ips: None,
-            pool: Some(NameOrId::Name("list-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
-        let params_3 = params::MulticastGroupCreate {
+        let params_3 = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "fleet-group-3".parse().unwrap(),
                 description: "Fleet-wide group 3".to_string(),
             },
             multicast_ip: Some("224.100.20.12".parse().unwrap()),
             source_ips: None,
-            pool: Some(NameOrId::Name("list-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
-        // Create groups (all are fleet-wide)
+        // Create groups (all are fleet-scoped)
         datastore
             .multicast_group_create(&opctx, &params_1, Some(authz_pool.clone()))
             .await
@@ -2449,7 +2505,7 @@ mod tests {
             .await
             .expect("Should create fleet-group-3");
 
-        // List all groups fleet-wide - should get 3 groups
+        // List all groups (fleet-scoped) - should get 3 groups
         let pagparams = DataPageParams {
             marker: None,
             direction: external::PaginationOrder::Ascending,
@@ -2461,9 +2517,9 @@ mod tests {
         let groups = datastore
             .multicast_groups_list(&opctx, &paginated_by)
             .await
-            .expect("Should list all fleet-wide groups");
+            .expect("Should list all fleet-scoped groups");
 
-        assert_eq!(groups.len(), 3, "Should have 3 fleet-wide groups");
+        assert_eq!(groups.len(), 3, "Should have 3 fleet-scoped groups");
 
         // Verify the groups have the correct names
         let group_names: Vec<_> =
@@ -2531,14 +2587,13 @@ mod tests {
             .await
             .expect("Should link multicast pool to silo");
 
-        let params = params::MulticastGroupCreate {
+        let params = MulticastGroupCreate {
             identity: IdentityMetadataCreateParams {
                 name: "state-test-group".parse().unwrap(),
                 description: "Test group for state transitions".to_string(),
             },
             multicast_ip: Some("224.100.30.5".parse().unwrap()),
             source_ips: None,
-            pool: Some(NameOrId::Name("state-test-pool".parse().unwrap())),
             mvlan: None,
         };
 
@@ -2552,10 +2607,9 @@ mod tests {
 
         // Test transition to "Active"
         datastore
-            .multicast_group_set_state(
+            .multicast_group_set_active(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MulticastGroupState::Active,
             )
             .await
             .expect("Should transition to 'Active'");
@@ -2571,32 +2625,39 @@ mod tests {
         assert_eq!(updated_group.state, MulticastGroupState::Active);
 
         // Test transition to "Deleting"
-        datastore
-            .multicast_group_set_state(
+        // Since this group has no members, it should be marked for deletion
+        let marked = datastore
+            .mark_multicast_group_for_removal_if_no_members(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(group.id()),
-                MulticastGroupState::Deleting,
             )
             .await
             .expect("Should transition to 'Deleting'");
+        assert!(marked, "Group with no members should be marked for deletion");
 
-        let deleting_group = datastore
-            .multicast_group_fetch(
+        // Note: After marking for removal, group has `time_deleted` set,
+        // so it won't show up in regular fetch (which filters `time_deleted IS NULL`).
+        // We can verify by listing groups in Deleting state which includes deleted groups.
+        let deleting_groups = datastore
+            .multicast_groups_list_by_state(
                 &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
+                MulticastGroupState::Deleting,
+                &DataPageParams::max_page(),
             )
             .await
-            .expect("Should fetch deleting group");
+            .expect("Should list deleting groups");
 
-        assert_eq!(deleting_group.state, MulticastGroupState::Deleting);
+        assert_eq!(deleting_groups.len(), 1);
+        assert_eq!(deleting_groups[0].id(), group.id());
+        assert_eq!(deleting_groups[0].state, MulticastGroupState::Deleting);
+        assert!(deleting_groups[0].time_deleted().is_some());
 
         // Test trying to update non-existent group
         let fake_id = Uuid::new_v4();
         let result = datastore
-            .multicast_group_set_state(
+            .multicast_group_set_active(
                 &opctx,
                 MulticastGroupUuid::from_untyped_uuid(fake_id),
-                MulticastGroupState::Active,
             )
             .await;
         assert!(result.is_err());
@@ -2725,165 +2786,6 @@ mod tests {
             .expect("Should still find non-deleted group");
 
         assert_eq!(still_found_group2.id(), group2.id());
-
-        db.terminate().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_multicast_group_update() {
-        let logctx = dev::test_setup_log("test_multicast_group_update");
-        let db = TestDatabase::new_with_datastore(&logctx.log).await;
-        let (opctx, datastore) = (db.opctx(), db.datastore());
-
-        // Create test setup
-        let setup = multicast::create_test_setup(
-            &opctx,
-            &datastore,
-            "test-pool",
-            "test-project",
-        )
-        .await;
-
-        // Create initial multicast group
-        let group = multicast::create_test_group(
-            &opctx,
-            &datastore,
-            &setup,
-            "original-group",
-            "224.10.1.100",
-        )
-        .await;
-
-        // Verify original values
-        assert_eq!(group.name().as_str(), "original-group");
-        assert_eq!(group.description(), "Test group: original-group");
-        assert_eq!(group.source_ips.len(), 0); // Empty array initially
-
-        // Test updating name and description
-        let update_params = params::MulticastGroupUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: Some("updated-group".parse().unwrap()),
-                description: Some("Updated group description".to_string()),
-            },
-            source_ips: None,
-            mvlan: None,
-        };
-
-        let updated_group = datastore
-            .multicast_group_update(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group.id()),
-                &update_params,
-            )
-            .await
-            .expect("Should update multicast group");
-
-        // Verify updated identity fields
-        assert_eq!(updated_group.name().as_str(), "updated-group");
-        assert_eq!(updated_group.description(), "Updated group description");
-        assert_eq!(updated_group.id(), group.id()); // ID should not change
-        assert_eq!(updated_group.multicast_ip, group.multicast_ip); // IP should not change
-        assert!(updated_group.time_modified() > group.time_modified()); // Modified time should advance
-
-        // Test updating source IPs (Source-Specific Multicast)
-        let source_ip_update = params::MulticastGroupUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: None,
-            },
-            source_ips: Some(vec![
-                "10.1.1.10".parse().unwrap(),
-                "10.1.1.20".parse().unwrap(),
-            ]),
-            mvlan: None,
-        };
-
-        let group_with_sources = datastore
-            .multicast_group_update(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(updated_group.id()),
-                &source_ip_update,
-            )
-            .await
-            .expect("Should update source IPs");
-
-        // Verify source IPs were updated
-        assert_eq!(group_with_sources.source_ips.len(), 2);
-        let source_addrs: Vec<_> =
-            group_with_sources.source_ips.iter().map(|ip| ip.ip()).collect();
-        assert!(source_addrs.contains(&"10.1.1.10".parse().unwrap()));
-        assert!(source_addrs.contains(&"10.1.1.20".parse().unwrap()));
-
-        // Test updating all fields at once
-        let complete_update = params::MulticastGroupUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: Some("final-group".parse().unwrap()),
-                description: Some("Final group description".to_string()),
-            },
-            source_ips: Some(vec!["192.168.1.1".parse().unwrap()]),
-            mvlan: None,
-        };
-
-        let final_group = datastore
-            .multicast_group_update(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(group_with_sources.id()),
-                &complete_update,
-            )
-            .await
-            .expect("Should update all fields");
-
-        assert_eq!(final_group.name().as_str(), "final-group");
-        assert_eq!(final_group.description(), "Final group description");
-        assert_eq!(final_group.source_ips.len(), 1);
-        assert_eq!(
-            final_group.source_ips[0].ip(),
-            "192.168.1.1".parse::<IpAddr>().unwrap()
-        );
-
-        // Test updating nonexistent group - should fail
-        let nonexistent_id = MulticastGroupUuid::new_v4();
-        let failed_update = datastore
-            .multicast_group_update(&opctx, nonexistent_id, &update_params)
-            .await;
-
-        assert!(failed_update.is_err());
-        match failed_update.err().unwrap() {
-            Error::ObjectNotFound { .. } => {
-                // Expected error for nonexistent group
-            }
-            other => panic!("Expected ObjectNotFound error, got: {:?}", other),
-        }
-
-        // Test updating deleted group - should fail
-        // First soft-delete the group (sets time_deleted)
-        datastore
-            .deallocate_external_multicast_group(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(final_group.id()),
-            )
-            .await
-            .expect("Should soft-delete group");
-
-        let deleted_update = datastore
-            .multicast_group_update(
-                &opctx,
-                MulticastGroupUuid::from_untyped_uuid(final_group.id()),
-                &update_params,
-            )
-            .await;
-
-        assert!(deleted_update.is_err());
-        match deleted_update.err().unwrap() {
-            Error::ObjectNotFound { .. } => {
-                // Expected - soft-deleted groups should not be updatable
-            }
-            other => panic!(
-                "Expected ObjectNotFound error for deleted group, got: {:?}",
-                other
-            ),
-        }
 
         db.terminate().await;
         logctx.cleanup_successful();

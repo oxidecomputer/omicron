@@ -836,7 +836,7 @@ impl PortManager {
     ///
     /// TODO: Once OPTE kernel module supports multicast group APIs, this
     /// method should be updated to configure OPTE port-level multicast
-    /// group membership. Note: multicast groups are fleet-wide and can span
+    /// group membership. Note: multicast groups are fleet-scoped and can span
     /// across VPCs.
     pub fn multicast_groups_ensure(
         &self,

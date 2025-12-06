@@ -4,8 +4,6 @@
 
 //! Integration tests for operating on IP Pools
 
-use std::net::Ipv4Addr;
-
 use crate::integration_tests::instances::create_project_and_pool;
 use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::HttpErrorResponseBody;
@@ -1231,6 +1229,239 @@ async fn test_ip_pool_multicast_range_rejects_v6(
     assert_eq!(error.message, "IPv6 ranges are not allowed yet");
 }
 
+/// Test that multicast pools reject reserved IPv4 multicast address ranges.
+///
+/// This test ensures operators receive immediate feedback when configuring
+/// IP pools, preventing users from encountering Dendrite errors later when
+/// allocating addresses for multicast groups.
+///
+/// TODO: Add IPv6 reserved range tests (ff00::/16 reserved-scope, ff01::/16
+/// interface-local, ff02::/16 link-local) once IPv6 multicast support is
+/// enabled. The validation code exists and matches Dendrite's validation
+/// (see dendrite/dpd/src/mcast/validate.rs).
+#[nexus_test]
+async fn test_ip_pool_multicast_rejects_reserved_ranges(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a multicast pool
+    let pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "mcast-reserved-test".parse().unwrap(),
+            description: "Test rejection of reserved multicast ranges"
+                .to_string(),
+        },
+        IpVersion::V4,
+    );
+    object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
+        .await;
+
+    let add_url = "/v1/system/ip-pools/mcast-reserved-test/ranges/add";
+
+    // IPv4 link-local multicast (224.0.0.0/24) should be rejected
+    let link_local_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 0, 0, 10),
+            std::net::Ipv4Addr::new(224, 0, 0, 20),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &link_local_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(error.message.contains("link-local multicast"));
+
+    // IPv4 GLOP multicast (233.0.0.0/8) should be rejected
+    let glop_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(233, 1, 0, 1),
+            std::net::Ipv4Addr::new(233, 1, 0, 10),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &glop_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(error.message.contains("GLOP multicast"));
+
+    // IPv4 admin-scoped multicast (239.0.0.0/8) should be rejected
+    let admin_scoped_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(239, 10, 0, 1),
+            std::net::Ipv4Addr::new(239, 10, 0, 10),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &admin_scoped_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(error.message.contains("administratively scoped multicast"));
+
+    // Valid ASM range (225.0.0.0 - 231.255.255.255) should succeed
+    let valid_asm_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(225, 1, 0, 1),
+            std::net::Ipv4Addr::new(225, 1, 0, 10),
+        )
+        .unwrap(),
+    );
+    object_create::<_, IpPoolRange>(client, add_url, &valid_asm_range).await;
+
+    // Ranges that touch reserved boundaries should be rejected
+    // Range starting in valid space but ending in link-local
+    let boundary_range_low = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 0, 0, 0),
+            std::net::Ipv4Addr::new(224, 0, 1, 0),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &boundary_range_low,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(error.message.contains("link-local multicast"));
+
+    // Range touching GLOP boundary
+    let boundary_range_glop = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(233, 0, 0, 1),
+            std::net::Ipv4Addr::new(233, 255, 255, 255),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &boundary_range_glop,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(error.message.contains("GLOP multicast"));
+}
+
+/// Test that multicast pools reject specific reserved IPv4 multicast addresses.
+///
+/// These addresses (NTP, Cisco Auto-RP, PTP) are individually reserved and
+/// cannot be used even though they fall within otherwise valid ranges.
+/// This validation aligns with Dendrite's (i.e. DPD's) specific address
+/// rejection.
+#[nexus_test]
+async fn test_ip_pool_multicast_rejects_specific_reserved_addresses(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a multicast pool
+    let pool_params = IpPoolCreate::new_multicast(
+        IdentityMetadataCreateParams {
+            name: "mcast-specific-reserved-test".parse().unwrap(),
+            description:
+                "Test rejection of specific reserved multicast addresses"
+                    .to_string(),
+        },
+        IpVersion::V4,
+    );
+    object_create::<_, IpPool>(client, "/v1/system/ip-pools", &pool_params)
+        .await;
+
+    let add_url = "/v1/system/ip-pools/mcast-specific-reserved-test/ranges/add";
+
+    // NTP (224.0.1.1) should be rejected
+    let ntp_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 0, 1, 0),
+            std::net::Ipv4Addr::new(224, 0, 1, 10),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &ntp_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("224.0.1.1"),
+        "Expected error about NTP address 224.0.1.1, got: {}",
+        error.message
+    );
+
+    // Cisco Auto-RP-Announce (224.0.1.39) should be rejected
+    let cisco_announce_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 0, 1, 35),
+            std::net::Ipv4Addr::new(224, 0, 1, 45),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &cisco_announce_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("224.0.1.39")
+            || error.message.contains("224.0.1.40"),
+        "Expected error about Cisco Auto-RP address, got: {}",
+        error.message
+    );
+
+    // PTP-primary (224.0.1.129) should be rejected
+    let ptp_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 0, 1, 125),
+            std::net::Ipv4Addr::new(224, 0, 1, 135),
+        )
+        .unwrap(),
+    );
+    let error = object_create_error(
+        client,
+        add_url,
+        &ptp_range,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(
+        error.message.contains("224.0.1.129")
+            || error.message.contains("224.0.1.130")
+            || error.message.contains("224.0.1.131")
+            || error.message.contains("224.0.1.132"),
+        "Expected error about PTP address, got: {}",
+        error.message
+    );
+
+    // Range that avoids all specific reserved addresses should succeed
+    // 224.0.1.50 - 224.0.1.100 is safe (between Cisco Auto-RP and PTP)
+    let valid_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(224, 0, 1, 50),
+            std::net::Ipv4Addr::new(224, 0, 1, 100),
+        )
+        .unwrap(),
+    );
+    object_create::<_, IpPoolRange>(client, add_url, &valid_range).await;
+}
+
 #[nexus_test]
 async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -1338,8 +1569,11 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // create other pool and link to silo
     let other_pool_range = IpRange::V4(
-        Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
-            .unwrap(),
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 1, 0, 1),
+            std::net::Ipv4Addr::new(10, 1, 0, 5),
+        )
+        .unwrap(),
     );
     let other_name = "other-pool";
     create_ip_pool(&client, other_name, Some(other_pool_range)).await;
@@ -1347,8 +1581,11 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // create third pool and don't link to silo
     let unlinked_pool_range = IpRange::V4(
-        Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
-            .unwrap(),
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 2, 0, 1),
+            std::net::Ipv4Addr::new(10, 2, 0, 5),
+        )
+        .unwrap(),
     );
     let unlinked_name = "unlinked-pool";
     create_ip_pool(&client, unlinked_name, Some(unlinked_pool_range)).await;

@@ -99,7 +99,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::Instant;
 
 use anyhow::{Context, Result};
 use futures::stream::{self, StreamExt};
@@ -264,6 +264,13 @@ impl MemberStateProcessor for InstanceMemberProcessor {
 }
 
 impl MulticastGroupReconciler {
+    /// Group states that require member reconciliation processing.
+    const RECONCILABLE_STATES: &'static [MulticastGroupState] = &[
+        MulticastGroupState::Creating,
+        MulticastGroupState::Active,
+        MulticastGroupState::Deleting,
+    ];
+
     /// Process member state changes ("Joining"→"Joined"→"Left").
     pub async fn reconcile_member_states(
         &self,
@@ -401,6 +408,31 @@ impl MulticastGroupReconciler {
         instance_states: &InstanceStateMap,
         dataplane_client: &MulticastDataplaneClient,
     ) -> Result<StateTransition, anyhow::Error> {
+        // Check if the parent group has been deleted or is being deleted.
+        // If so, delete the member so cleanup can proceed.
+        //
+        // This should be impossible under normal operation because:
+        // 1. Members can only be added to "Active" groups (member_attach CTE)
+        // 2. Groups only transition to "Deleting" when there are no active
+        //    members (`mark_multicast_group_for_removal_if_no_members`)
+        //
+        // However, we provide a fallthrough case for robustness.
+        if group.time_deleted().is_some()
+            || group.state == MulticastGroupState::Deleting
+        {
+            warn!(
+                opctx.log,
+                "member found for deleted/deleting group (unexpected state)";
+                "member_id" => %member.id,
+                "group_id" => %group.id(),
+                "group_state" => ?group.state,
+                "group_time_deleted" => ?group.time_deleted()
+            );
+            return self
+                .delete_member_for_deleted_group(opctx, group, member)
+                .await;
+        }
+
         // For now, all members are instance-based, but this is where we'd
         // dispatch to different processors for different member types
         let processor = InstanceMemberProcessor;
@@ -443,6 +475,47 @@ impl MulticastGroupReconciler {
                     .await
             }
         }
+    }
+
+    /// Delete a member when its parent group has been deleted or is being deleted.
+    /// Sets `time_deleted` and transitions to "Left" state for RPW cleanup.
+    async fn delete_member_for_deleted_group(
+        &self,
+        opctx: &OpContext,
+        group: &MulticastGroup,
+        member: &MulticastGroupMember,
+    ) -> Result<StateTransition, anyhow::Error> {
+        // Skip if member is already deleted
+        if member.time_deleted.is_some() {
+            debug!(
+                opctx.log,
+                "member already deleted, no action needed";
+                "member_id" => %member.id,
+                "group_id" => %group.id()
+            );
+            return Ok(StateTransition::NoChange);
+        }
+
+        // Delete the member (sets `time_deleted`, `state`="Left", and clears `sled_id`)
+        self.datastore
+            .multicast_group_member_delete_by_id(
+                opctx,
+                member.id.into_untyped_uuid(),
+            )
+            .await
+            .context("failed to delete member for deleted group")?;
+
+        info!(
+            opctx.log,
+            "member deleted due to parent group deletion";
+            "member_id" => %member.id,
+            "instance_id" => %member.parent_id,
+            "group_id" => %group.id(),
+            "group_state" => ?group.state,
+            "group_time_deleted" => ?group.time_deleted()
+        );
+
+        Ok(StateTransition::StateChanged)
     }
 
     /// Instance-specific handler for members in "Joining" state.
@@ -2067,6 +2140,76 @@ impl MulticastGroupReconciler {
         Ok(deleted_count)
     }
 
+    /// Check for and implicitly delete empty groups.
+    ///
+    /// With implicit deletion, all multicast groups are deleted when all members
+    /// are removed. This function checks "Active" groups for any that have no
+    /// active members and marks them for deletion.
+    ///
+    /// This handles the case where instance deletion causes members to be
+    /// soft-deleted (via `multicast_group_members_mark_for_removal`), and after
+    /// the member cleanup removes those records, the group becomes empty.
+    ///
+    /// The underlying datastore method uses an atomic NOT EXISTS guard to
+    /// prevent race conditions where a concurrent join could create a member
+    /// between the emptiness check and the mark-for-removal.
+    pub async fn cleanup_empty_groups(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<usize, anyhow::Error> {
+        trace!(
+            opctx.log,
+            "checking for empty multicast groups to implicitly delete"
+        );
+
+        // List all Active groups
+        let active_groups = self
+            .datastore
+            .multicast_groups_list_by_state(
+                opctx,
+                MulticastGroupState::Active,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .context("failed to list active groups")?;
+
+        let mut groups_marked = 0;
+
+        for group in active_groups {
+            // Atomically mark for deletion only if no members exist.
+            // This is race-safe: the NOT EXISTS guard in the datastore method
+            // ensures we don't delete a group that just gained a member.
+            let marked = self
+                .datastore
+                .mark_multicast_group_for_removal_if_no_members(
+                    opctx,
+                    MulticastGroupUuid::from_untyped_uuid(group.id()),
+                )
+                .await
+                .context("failed to check/mark empty group for removal")?;
+
+            if marked {
+                info!(
+                    opctx.log,
+                    "auto-deleting empty multicast group";
+                    "group_id" => %group.id(),
+                    "group_name" => %group.name()
+                );
+                groups_marked += 1;
+            }
+        }
+
+        if groups_marked > 0 {
+            info!(
+                opctx.log,
+                "marked empty multicast groups for deletion";
+                "groups_marked" => groups_marked
+            );
+        }
+
+        Ok(groups_marked)
+    }
+
     /// Get all members for a group.
     async fn get_group_members(
         &self,
@@ -2090,12 +2233,7 @@ impl MulticastGroupReconciler {
     ) -> Option<Vec<SwitchBackplanePort>> {
         let cache = self.sled_mapping_cache.read().await;
         let (cached_at, mappings) = &*cache;
-
-        // If we can't determine elapsed time, consider cache expired
-        let elapsed = match cached_at.elapsed() {
-            Ok(duration) => duration,
-            Err(_) => return None,
-        };
+        let elapsed = cached_at.elapsed();
 
         if elapsed < self.sled_cache_ttl {
             mappings.get(&cache_key).cloned()
@@ -2149,15 +2287,7 @@ impl MulticastGroupReconciler {
         let previous_map = {
             let cache = self.backplane_map_cache.read().await;
             if let Some((cached_at, ref map)) = *cache {
-                // If we can't determine elapsed time, consider cache expired
-                let elapsed = match cached_at.elapsed() {
-                    Ok(duration) => duration,
-                    Err(_) => {
-                        // If errored, we consider cache expired and return
-                        // previous map for comparison
-                        return Ok(map.clone());
-                    }
-                };
+                let elapsed = cached_at.elapsed();
 
                 if elapsed < self.backplane_cache_ttl {
                     trace!(
@@ -2201,7 +2331,7 @@ impl MulticastGroupReconciler {
 
         // Update cache
         let mut cache = self.backplane_map_cache.write().await;
-        *cache = Some((SystemTime::now(), backplane_map.clone()));
+        *cache = Some((Instant::now(), backplane_map.clone()));
 
         Ok(backplane_map)
     }
@@ -2451,7 +2581,7 @@ impl MulticastGroupReconciler {
         // Update cache
         let sled_count = mappings.len();
         let mut cache = self.sled_mapping_cache.write().await;
-        *cache = (SystemTime::now(), mappings);
+        *cache = (Instant::now(), mappings);
 
         // Log results
         if validation_failures > 0 {
@@ -2493,41 +2623,20 @@ impl MulticastGroupReconciler {
     }
 
     /// Get all multicast groups that need member reconciliation.
-    /// Returns both "Creating" and "Active" groups.
+    /// Returns "Creating", "Active", and "Deleting" groups.
     async fn get_reconcilable_groups(
         &self,
         opctx: &OpContext,
     ) -> Result<Vec<MulticastGroup>, anyhow::Error> {
-        // For now, we still make two queries but this is where we'd add
-        // a single combined query method if/when the datastore supports it
-        let mut groups = self
-            .datastore
-            .multicast_groups_list_by_state(
+        self.datastore
+            .multicast_groups_list_by_states(
                 opctx,
-                MulticastGroupState::Creating,
+                Self::RECONCILABLE_STATES,
                 &DataPageParams::max_page(),
             )
             .await
-            .context("failed to list 'Creating' multicast groups")?;
-
-        let active_groups = self
-            .datastore
-            .multicast_groups_list_by_state(
-                opctx,
-                MulticastGroupState::Active,
-                &DataPageParams::max_page(),
+            .context(
+                "failed to list multicast groups for member reconciliation",
             )
-            .await
-            .context("failed to list 'Active' multicast groups")?;
-
-        groups.extend(active_groups);
-
-        debug!(
-            opctx.log,
-            "found groups for member reconciliation";
-            "total_groups" => groups.len()
-        );
-
-        Ok(groups)
     }
 }

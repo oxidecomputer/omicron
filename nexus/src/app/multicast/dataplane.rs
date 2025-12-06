@@ -361,7 +361,7 @@ impl MulticastDataplaneClient {
         );
 
         let dpd_clients = &self.dpd_clients;
-        let tag = external_group.name().to_string();
+        let tag = external_group.dpd_tag();
 
         // Convert MVLAN to u16 for DPD, validating through VlanID
         let vlan_id = external_group
