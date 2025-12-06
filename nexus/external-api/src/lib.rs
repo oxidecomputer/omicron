@@ -1306,8 +1306,10 @@ pub trait NexusExternalApi {
     async fn v2025120300_multicast_group_list(
         rqctx: RequestContext<Self::Context>,
         query_params: Query<PaginatedByNameOrId>,
-    ) -> Result<HttpResponseOk<ResultsPage<v2025120300::MulticastGroup>>, HttpError>
-    {
+    ) -> Result<
+        HttpResponseOk<ResultsPage<v2025120300::MulticastGroup>>,
+        HttpError,
+    > {
         match Self::multicast_group_list(rqctx, query_params).await {
             Ok(page) => {
                 let new_page = ResultsPage {

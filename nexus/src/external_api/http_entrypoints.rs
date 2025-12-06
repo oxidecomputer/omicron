@@ -2390,7 +2390,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn v2025120300_multicast_group_create(
         rqctx: RequestContext<ApiContext>,
         new_group: TypedBody<v2025120300::MulticastGroupCreate>,
-    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroup>, HttpError> {
+    ) -> Result<HttpResponseCreated<v2025120300::MulticastGroup>, HttpError>
+    {
         let apictx = rqctx.context();
         let handler = async {
             let opctx =
