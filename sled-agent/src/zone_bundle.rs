@@ -670,7 +670,8 @@ async fn create_snapshot(
 // A key feature of the zone-bundle process is that we pull all the log files
 // for a zone. This is tricky. The logs are both being written to by the
 // programs we're interested in, and also potentially being rotated by `logadm`,
-// and / or archived out to the U.2s through the code in `crate::dump_setup`.
+// and / or archived out to the U.2s through the code in
+// `crate::debug_collector`.
 //
 // We need to capture all these logs, while avoiding inconsistent state (e.g., a
 // missing log message that existed when the bundle was created) and also
@@ -1033,8 +1034,8 @@ async fn create(
     //
     // Both of these are dynamic. The current log file is likely being written
     // by the service itself, and `logadm` may also be rotating files. At the
-    // same time, the log-archival process in `dump_setup.rs` may be copying
-    // these out to the U.2s, after which it deletes those on the zone
+    // same time, the log-archival process in `debug_collector.rs` may be
+    // copying these out to the U.2s, after which it deletes those on the zone
     // filesystem itself.
     //
     // To avoid various kinds of corruption, such as a bad tarball or missing
@@ -1261,7 +1262,7 @@ async fn find_archived_log_files<'a, T: Iterator<Item = &'a Utf8PathBuf>>(
                 }
             }
         } else {
-            // The logic in `dump_setup` picks some U.2 in which to start
+            // The logic in `debug_collector` picks some U.2 in which to start
             // archiving logs, and thereafter tries to keep placing new ones
             // there, subject to space constraints. It's not really an error for
             // there to be no entries for the named zone in any particular U.2
