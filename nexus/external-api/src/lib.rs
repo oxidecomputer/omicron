@@ -1770,7 +1770,10 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
         query_params: Query<params::ProjectSelector>,
         new_instance: TypedBody<v2025120300::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError>;
+    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
+        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
+            .await
+    }
 
     /// Create instance
     #[endpoint {
@@ -1821,7 +1824,15 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
         instance_config: TypedBody<v2025120300::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError>;
+    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+        Self::instance_update(
+            rqctx,
+            query_params,
+            path_params,
+            instance_config.map(Into::into),
+        )
+        .await
+    }
 
     /// Update instance
     #[endpoint {

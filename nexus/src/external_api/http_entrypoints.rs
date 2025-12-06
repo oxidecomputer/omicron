@@ -3122,15 +3122,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    async fn v2025120300_instance_create(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::ProjectSelector>,
-        new_instance: TypedBody<v2025120300::InstanceCreate>,
-    ) -> Result<HttpResponseCreated<Instance>, HttpError> {
-        Self::instance_create(rqctx, query_params, new_instance.map(Into::into))
-            .await
-    }
-
     async fn instance_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -3240,21 +3231,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .external_latencies
             .instrument_dropshot_handler(&rqctx, handler)
             .await
-    }
-
-    async fn v2025120300_instance_update(
-        rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::OptionalProjectSelector>,
-        path_params: Path<params::InstancePath>,
-        instance_config: TypedBody<v2025120300::InstanceUpdate>,
-    ) -> Result<HttpResponseOk<Instance>, HttpError> {
-        Self::instance_update(
-            rqctx,
-            query_params,
-            path_params,
-            instance_config.map(Into::into),
-        )
-        .await
     }
 
     async fn instance_update(
