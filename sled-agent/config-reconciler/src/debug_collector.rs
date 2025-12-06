@@ -2,15 +2,86 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! This module is responsible for moving debug info (kernel crash dumps,
-//! userspace process core dumps, and rotated logs) onto external drives for
-//! perusal/archival, and to prevent internal drives from filling up.
-//! (For background on the paths and datasets being used, see RFD 118)
+//! The `DebugCollector` is responsible for collecting, archiving, and managing
+//! long-term storage of various debug data on the system:
 //!
-//! The behaviors documented below describe current behavior, but are not
-//! necessarily a long-term guarantee, and details may be subject to change.
+//! - kernel crash dumps
+//! - process core dumps
+//! - log files from zones
+//!
+//! Each of these types of debug data goes through a different flow, but
+//! ultimately all of it winds up on **debug datasets** (ZFS datasets on the
+//! system's external (U.2) disks).
+//!
+//! Support bundles also contain debug data and are stored in debug datasets.
+//! However, they're almost entirely layered _atop_ this subsystem.  The debug
+//! collector doesn't know anything about support bundles aside from the fact
+//! that it explicitly avoids deleting them when cleaning up debug datasets.
+//!
+//! ## Overview
+//!
+//! While the debug collector directly copies log files from zones into the
+//! debug dataset, it's only indirectly responsible for where kernel crash
+//! dumps and process core dumps go.  In summary, the DebugCollector:
+//!
+//! - nominates one of the currently available debug datasets as the
+//!   destination for debug data.
+//! - uses dumpadm(8) to specify a **dump device**, which is where the kernel
+//!   will save a crash dump if it panics.  Oxide sleds use slices on an
+//!   internal (M.2) disk as dump devices.
+//! - uses savecore(8) to copy any crash dumps found on eligible dump devices
+//!   to a debug dataset.
+//! - uses coreadm(8) to configure the system to save user process core dumps
+//!   to a specific **cores dataset*.
+//! - periodically archives to a debug dataset:
+//!   - core files found on any "cores" datasets, and
+//!   - log files from inside zones' filesystems.
+//!   When core files and log files are archived, they're copied to a debug
+//!   dataset and the original file is deleted.
+//! - when needed, deletes the oldest files in debug datasets to preserve space
+//!   for new debugging data
+//!
+//! That's the big picture, but there are many operational edge cases.
+//!
+//! Here's a summary of the data flow:
+//!
+//!     +------------------------+  +--------------+      +---------------+
+//!     | dump device containing |  | user process |      | log files     |
+//!     | kernel crash dump      |  +--------------+      | inside zones  |
+//!     +------------------------+        |               +---------------+
+//!            |                          |                       |
+//!            |                          | process crash:        |
+//!            |                          | system writes         |
+//!            | DebugCollector           | core dump to          |
+//!            | invokes                  | configured            |
+//!            | savecore(8)              | directory             |
+//!            |                          |                       |
+//!            |                          v                       |
+//!            |        +--------------------------------------+  |
+//!            |        |        chosen "core" dataset         |  |
+//!            |        | (ZFS dataset on internal (M.2) disk) |  |
+//!            |        +--------------------------------------+  |
+//!            |                          |                       |
+//!            |                          |                       |
+//!            |                          |                       |
+//!            |                          | DebugCollector        |
+//!            |                          | periodically archives |
+//!            |                          | the core dumps and    |
+//!            |                          | log files (copies to  |
+//!            |                          | debug dataset, then   |
+//!            |                          | deletes the original) |
+//!            |                          |                       |
+//!            v                          v                       v
+//!        +----------------------------------------------------------+
+//!        |    debug datasets (ZFS datasets on external (U.2) disks) |-+
+//!        +----------------------------------------------------------+ |-+
+//!          +----------------------------------------------------------+ |
+//!            +----------------------------------------------------------+
+//!
+//! For background on the paths and datasets being used, see RFD 118.
 //!
 //! ## Choice of destination external drive for archived logs and dumps
+//!
 //! As zpools on external (U.2) drives come online, their proportion of space
 //! used is checked, any that are over 70% are skipped, and of the remaining
 //! candidates the one with the *most* content is designated as the target onto
@@ -23,7 +94,19 @@
 //! If the chosen drive eventually exceeds 80% of its capacity used, then a
 //! different drive is chosen by the same algorithm.
 //!
+//! ## Debug dataset directory structure (not a committed interface!)
+//!
+//! Debug datasets are mounted at `/pool/ext/$pool_uuid/crypt/debug`.  In that
+//! directory we find:
+//!
+//! * `core.[zone-name].[exe-filename].[pid].[time]`: process core dumps
+//! * `unix.[0-9]+`, `bounds`: files associated with kernel crash dumps
+//! * `$UUID`: support bundles (wholly unrelated to the DebugCollector)
+//! * `oxz_[zone-type]_[zone-uuid]`: directory containing all the log files
+//!   for the corresponding zone.
+//!
 //! ## Kernel crash dumps
+//!
 //! As internal (M.2) drives are discovered, their designated dump slices are
 //! checked for the presence of a previous kernel crash dump that hasn't been
 //! archived. If a dump is present that has not yet been archived, and an
@@ -40,14 +123,15 @@
 //! do not configure a dump slice, preferring to preserve evidence of the
 //! original root cause of an issue rather than overwriting it with confounding
 //! variables (in the event adjacent systems begin behaving erratically due to
-//! the initial failure).
-//! In this event, as soon as an external drive becomes available to archive
-//! one or all of the occupied dump slices' contents, the golden-path procedure
-//! detailed above occurs and a dump slice is configured.
+//! the initial failure).  In this event, as soon as an external drive becomes
+//! available to archive one or all of the occupied dump slices' contents, the
+//! golden-path procedure detailed above occurs and a dump slice is configured.
 //!
 //! ## Process core dumps
+//!
 //! As zpools on internal (M.2) drives come online, the first one seen by the
 //! poll loop is chosen to be the destination of process cores in all zones:
+//!
 //! ```text
 //!     /pool/int/*/crash/core.[zone-name].[exe-filename].[pid].[time]
 //! ```
@@ -61,17 +145,21 @@
 //!       -G default+debug
 //! ```
 //!
-//! Every 5 minutes, all core files found on internal drives are moved to the
-//! DUMP_DATASET of the (similarly chosen) removable U.2 drive, like so:
+//! Every 5 minutes, all core files found on internal drives are moved to a
+//! debug dataset, like so:
+//!
 //! ```text
 //!     /pool/int/*/crash/core.global.sled-agent.101.34784217
 //!         -> /pool/ext/*/crypt/debug/core.global.sled-agent.101.34784217
 //! ```
 //!
-//! ## Log rotation and archival
-//! Every 5 minutes, each log that logadm(8) has rotated (in every zone) gets
-//! archived into the DUMP_DATASET of the chosen U.2, with the suffixed
-//! number replaced by the modified timestamp, like so:
+//! ## Periodic log rotation and archival
+//!
+//! logadm(8) is confiured in all zones to rotate log files.  Every 5 minutes,
+//! each log that logadm(8) has rotated in every zone gets archived into the
+//! current debug dataset, with the suffixed number replaced by the modified
+//! timestamp, like so:
+//!
 //! ```text
 //!     /var/svc/log/foo.log.0
 //!         -> /pool/ext/*/crypt/debug/global/foo.log.34784217
@@ -85,6 +173,15 @@
 //! In the event of filename collisions (i.e. several instances of a service's
 //! rotated log files having the same modified time to the second), the
 //! number is incremented by 1 until no conflict remains.
+//!
+//! ## On-demand log archival
+//!
+//! Logs are also archived upon request.  This happens when zones are being
+//! shut down (to catch any logs rotated since the last periodic archival).  It
+//! also happens when the system starts up in order to archive logs from zones
+//! that were running when the system last shut down.  In both of these cases,
+//! the _live_ log files are also archived, since they will not have a chance
+//! to get rotated and so would otherwise be lost.
 
 use async_trait::async_trait;
 use camino::Utf8Path;
