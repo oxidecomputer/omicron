@@ -305,6 +305,9 @@ impl Collection {
 /// number.  We do not include that here.  If we ever did find a baseboard with
 /// the same part number and serial number but a new revision number, we'd want
 /// to treat that as the same baseboard as one with a different revision number.
+///
+// TODO: This should be the same type as `sled_agent_types::BaseboardId`
+// I(ajs) don't recall why it isn't.
 #[derive(
     Clone,
     Debug,

@@ -98,6 +98,7 @@ define_enums! {
     SwitchLinkSpeedEnum => "switch_link_speed",
     SwitchPortGeometryEnum => "switch_port_geometry",
     TargetReleaseSourceEnum => "target_release_source",
+    TrustQuorumConfigurationStateEnum => "trust_quorum_configuration_state",
     UpstairsRepairNotificationTypeEnum => "upstairs_repair_notification_type",
     UpstairsRepairTypeEnum => "upstairs_repair_type",
     UserDataExportResourceTypeEnum => "user_data_export_resource_type",

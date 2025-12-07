@@ -46,6 +46,7 @@ pub mod service_firewall_rules;
 pub mod support_bundle_collector;
 pub mod sync_service_zone_nat;
 pub mod sync_switch_configuration;
+pub mod trust_quorum;
 pub mod tuf_artifact_replication;
 pub mod tuf_repo_pruner;
 pub mod v2p_mappings;

@@ -2914,3 +2914,47 @@ table! {
 }
 
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);
+
+table! {
+    lrtq_members (rack_id, hw_baseboard_id) {
+        rack_id -> Uuid,
+        hw_baseboard_id -> Uuid,
+    }
+}
+
+table! {
+    trust_quorum_configuration (rack_id, epoch) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        state -> crate::enums::TrustQuorumConfigurationStateEnum,
+        threshold -> Int2,
+        commit_crash_tolerance -> Int2,
+        coordinator -> Uuid,
+        encrypted_rack_secrets -> Text,
+    }
+}
+
+table! {
+    trust_quorum_member (rack_id, epoch, hw_baseboard_id) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        hw_baseboard_id -> Uuid,
+        share_digest -> Text
+    }
+}
+
+table! {
+    trust_quorum_acked_prepare (rack_id, epoch, hw_baseboard_id) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        hw_baseboard_id -> Uuid,
+    }
+}
+
+table! {
+    trust_quorum_acked_commit (rack_id, epoch, hw_baseboard_id) {
+        rack_id -> Uuid,
+        epoch -> Int8,
+        hw_baseboard_id -> Uuid,
+    }
+}
