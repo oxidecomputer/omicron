@@ -6,16 +6,7 @@
 //!
 //! This crate contains versioned types for the DNS server API. Types are
 //! organized by the API version they were introduced in, following the
-//! principles outlined in RFD 619.
-//!
-//! ## Organization
-//!
-//! - `v1`: Types introduced in API version 1.0.0 (INITIAL)
-//! - `v2`: Types introduced in API version 2.0.0 (SOA_AND_NS)
-//!
-//! Each version module contains types that were first introduced in that
-//! version. Conversion code between versions lives in the later version's
-//! module.
+//! principles outlined in [RFD 619](https://rfd.shared.oxide.computer/rfd/0619).
 
 pub mod v1;
 pub mod v2;

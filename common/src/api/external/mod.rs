@@ -593,7 +593,16 @@ impl Display for ByteCount {
 }
 
 // TODO-cleanup This could use the experimental std::num::IntErrorKind.
-#[derive(Debug, Eq, thiserror::Error, Ord, PartialEq, PartialOrd)]
+#[derive(
+    Debug,
+    Eq,
+    thiserror::Error,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    Deserialize,
+)]
 pub enum ByteCountRangeError {
     #[error("value is too small for a byte count")]
     TooSmall,
@@ -1424,7 +1433,8 @@ impl SimpleIdentityOrName for AntiAffinityGroupMember {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DiskType {
-    Crucible,
+    Distributed,
+    Local,
 }
 
 /// View of a Disk

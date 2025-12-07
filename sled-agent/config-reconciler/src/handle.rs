@@ -50,8 +50,8 @@ use crate::SledAgentFacilities;
 use crate::TimeSyncStatus;
 use crate::dataset_serialization_task::DatasetTaskHandle;
 use crate::dataset_serialization_task::NestedDatasetMountError;
-use crate::dump_setup_task;
-use crate::dump_setup_task::FormerZoneRootArchiver;
+use crate::debug_collector_task;
+use crate::debug_collector_task::FormerZoneRootArchiver;
 use crate::internal_disks::InternalDisksReceiver;
 use crate::ledger::CurrentSledConfig;
 use crate::ledger::LedgerTaskHandle;
@@ -136,7 +136,7 @@ impl ConfigReconcilerHandle {
         // Spawn the task that manages dump devices.
         let (external_disks_tx, external_disks_rx) =
             watch::channel(HashSet::new());
-        let former_zone_root_archiver = dump_setup_task::spawn(
+        let former_zone_root_archiver = debug_collector_task::spawn(
             internal_disks_rx.clone(),
             external_disks_rx,
             Arc::clone(&mount_config),

@@ -161,8 +161,10 @@ async fn test_make_disk_from_image(cptestctx: &ControlPlaneTestContext) {
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image {
-            image_id: alpine_image.identity.id,
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: alpine_image.identity.id,
+            },
         },
         size: ByteCount::from_gibibytes_u32(1),
     };
@@ -200,7 +202,11 @@ async fn test_make_disk_from_other_project_image_fails(
             name: "stolen-disk".parse().unwrap(),
             description: String::from("yoink"),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: ByteCount::from_gibibytes_u32(1),
     };
     let disks_url =
@@ -249,10 +255,11 @@ async fn test_make_disk_from_image_too_small(
             name: "disk".parse().unwrap(),
             description: String::from("sells rainsticks"),
         },
-        disk_source: params::DiskSource::Image {
-            image_id: alpine_image.identity.id,
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: alpine_image.identity.id,
+            },
         },
-
         // Nexus defines YouCanBootAnythingAsLongAsItsAlpine size as 100M
         size: ByteCount::from(90 * 1024 * 1024),
     };
@@ -418,7 +425,11 @@ async fn test_image_from_other_project_snapshot_fails(
             name: "disk".parse().unwrap(),
             description: "meow".into(),
         },
-        disk_source: params::DiskSource::Image { image_id: image.identity.id },
+        disk_backend: params::DiskBackend::Distributed {
+            disk_source: params::DiskSource::Image {
+                image_id: image.identity.id,
+            },
+        },
         size: ByteCount::from_gibibytes_u32(1),
     };
     let disk: Disk =

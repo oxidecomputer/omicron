@@ -3,9 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! DNS configuration types for API version 1.0.0 (INITIAL).
-//!
-//! These types were introduced in the initial version of the DNS server API.
-//! For conversion code to/from v2, see [`crate::v2::config`].
 
 use anyhow::ensure;
 use omicron_common::api::external::Generation;

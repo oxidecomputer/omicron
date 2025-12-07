@@ -7,8 +7,6 @@
 //! This version adds:
 //! - A `serial` field to [`DnsConfigParams`] and [`DnsConfig`] for SOA records
 //! - The [`DnsRecord::Ns`] variant for nameserver records
-//!
-//! This module also contains conversion code between v1 and v2 types.
 
 use crate::v1;
 use anyhow::ensure;
@@ -155,10 +153,6 @@ pub struct Srv {
     pub target: String,
 }
 
-// ============================================================================
-// Conversions from v1 to v2
-// ============================================================================
-
 impl TryFrom<v1::config::DnsConfigParams> for DnsConfigParams {
     type Error = V1ToV2TranslationError;
 
@@ -220,10 +214,6 @@ impl From<v1::config::Srv> for Srv {
         }
     }
 }
-
-// ============================================================================
-// Conversions from v2 to v1
-// ============================================================================
 
 impl TryFrom<DnsConfig> for v1::config::DnsConfig {
     type Error = V2ToV1TranslationError;

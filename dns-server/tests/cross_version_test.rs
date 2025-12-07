@@ -23,7 +23,7 @@ const TEST_ZONE: &'static str = "oxide.internal";
 // well.
 mod v1_client {
     use anyhow::Context;
-    use internal_dns_types::v1;
+    use internal_dns_types_migrations::v1;
 
     use std::collections::HashMap;
 
@@ -116,8 +116,8 @@ mod v1_client {
 pub async fn cross_version_works() -> Result<(), anyhow::Error> {
     let test_ctx = init_client_server("cross_version_works").await?;
 
-    use internal_dns_types::v1::config::DnsRecord as V1DnsRecord;
-    use internal_dns_types::v2::config::DnsRecord as V2DnsRecord;
+    use internal_dns_types_migrations::v1::config::DnsRecord as V1DnsRecord;
+    use internal_dns_types_migrations::v2::config::DnsRecord as V2DnsRecord;
 
     let ns1_addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let ns1_name = format!("ns1.{TEST_ZONE}.");

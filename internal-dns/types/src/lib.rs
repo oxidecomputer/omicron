@@ -7,12 +7,7 @@
 //!
 //! ## Organization
 //!
-//! Published types for the DNS server API live in the `internal-dns-types-migrations`
-//! crate, organized by version. This crate re-exports the latest versions as
-//! floating identifiers for use by non-migration-related code.
-//!
-//! For fixed identifiers (used in API definitions), depend on
-//! `internal-dns-types-migrations` directly.
+//! See [RFD 619](https://rfd.shared.oxide.computer/rfd/0619).
 
 pub mod config;
 pub mod diff;

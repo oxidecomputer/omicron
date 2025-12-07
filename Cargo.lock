@@ -6890,8 +6890,11 @@ dependencies = [
  "openapiv3",
  "oximeter-types 0.1.0",
  "oxql-types",
+ "schemars 0.8.22",
  "scim2-rs",
+ "serde",
  "tufaceous-artifact",
+ "uuid",
 ]
 
 [[package]]
