@@ -5,7 +5,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::component::SpIdentifier;
+use crate::v1::component::SpIdentifier;
 
 #[derive(
     Debug,
@@ -23,16 +23,10 @@ pub struct SpIgnitionInfo {
     pub details: SpIgnition,
 }
 
-impl From<SpIgnitionInfo> for crate::ignition::v1::SpIgnitionInfo {
-    fn from(s: SpIgnitionInfo) -> Self {
-        Self { id: s.id, details: s.details.into() }
-    }
-}
-
 /// State of an ignition target.
-//
-// TODO: Ignition returns much more information than we're reporting here: do
-// we want to expand this?
+///
+/// TODO: Ignition returns much more information than we're reporting here: do
+/// we want to expand this?
 #[derive(
     Debug,
     Clone,
@@ -54,13 +48,9 @@ pub enum SpIgnition {
         power: bool,
         ctrl_detect_0: bool,
         ctrl_detect_1: bool,
-        /// Fault from the A3 power domain
         flt_a3: bool,
-        /// Fault from the A2 power domain
         flt_a2: bool,
-        /// Fault from the RoT
         flt_rot: bool,
-        /// Fault from the SP
         flt_sp: bool,
     },
 }
@@ -89,33 +79,7 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
     }
 }
 
-impl From<SpIgnition> for crate::ignition::v1::SpIgnition {
-    fn from(state: SpIgnition) -> Self {
-        match state {
-            SpIgnition::Absent => Self::Absent,
-            SpIgnition::Present {
-                id,
-                power,
-                ctrl_detect_0,
-                ctrl_detect_1,
-                flt_a3,
-                flt_a2,
-                flt_rot,
-                flt_sp,
-            } => Self::Present {
-                id: id.into(),
-                power,
-                ctrl_detect_0,
-                ctrl_detect_1,
-                flt_a3,
-                flt_a2,
-                flt_rot,
-                flt_sp,
-            },
-        }
-    }
-}
-
+/// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
 #[derive(
     Debug,
     Clone,
@@ -134,7 +98,6 @@ pub enum SpIgnitionSystemType {
     Sidecar,
     Psc,
     Unknown { id: u16 },
-    Cosmo,
 }
 
 impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
@@ -145,20 +108,35 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Sidecar => Self::Sidecar,
             SystemType::Psc => Self::Psc,
             SystemType::Unknown(id) => Self::Unknown { id },
-            SystemType::Cosmo => Self::Cosmo,
+            // `0x4` is the ignition value per RFD 142
+            SystemType::Cosmo => Self::Unknown { id: 0x4 },
         }
     }
 }
 
-impl From<SpIgnitionSystemType> for crate::ignition::v1::SpIgnitionSystemType {
-    fn from(st: SpIgnitionSystemType) -> Self {
-        match st {
-            SpIgnitionSystemType::Gimlet => Self::Gimlet,
-            SpIgnitionSystemType::Sidecar => Self::Sidecar,
-            SpIgnitionSystemType::Psc => Self::Psc,
-            // Cosmo system id is 0x4
-            SpIgnitionSystemType::Cosmo => Self::Unknown { id: 0x4 },
-            SpIgnitionSystemType::Unknown { id } => Self::Unknown { id },
+/// Ignition command.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum IgnitionCommand {
+    PowerOn,
+    PowerOff,
+    PowerReset,
+}
+
+impl From<IgnitionCommand> for gateway_messages::IgnitionCommand {
+    fn from(cmd: IgnitionCommand) -> Self {
+        match cmd {
+            IgnitionCommand::PowerOn => {
+                gateway_messages::IgnitionCommand::PowerOn
+            }
+            IgnitionCommand::PowerOff => {
+                gateway_messages::IgnitionCommand::PowerOff
+            }
+            IgnitionCommand::PowerReset => {
+                gateway_messages::IgnitionCommand::PowerReset
+            }
         }
     }
 }

@@ -40,8 +40,6 @@ use gateway_types::component::SpState;
 use gateway_types::component_details::SpComponentDetails;
 use gateway_types::host::ComponentFirmwareHashStatus;
 use gateway_types::host::HostStartupOptions;
-use gateway_types::ignition;
-use gateway_types::ignition::SpIgnitionInfo;
 use gateway_types::rot::RotCfpa;
 use gateway_types::rot::RotCfpaSlot;
 use gateway_types::rot::RotCmpa;
@@ -53,6 +51,20 @@ use gateway_types::update::HostPhase2RecoveryImageId;
 use gateway_types::update::InstallinatorImageId;
 use gateway_types::update::SpComponentResetError;
 use gateway_types::update::SpUpdateStatus;
+use gateway_types_migrations::v1::ignition::SpIgnitionInfo as SpIgnitionInfoV1;
+use gateway_types_migrations::v1::params::ComponentCabooseSlot;
+use gateway_types_migrations::v1::params::ComponentUpdateIdSlot;
+use gateway_types_migrations::v1::params::GetCfpaParams;
+use gateway_types_migrations::v1::params::GetRotBootInfoParams;
+use gateway_types_migrations::v1::params::PathSp;
+use gateway_types_migrations::v1::params::PathSpComponent;
+use gateway_types_migrations::v1::params::PathSpComponentFirmwareSlot;
+use gateway_types_migrations::v1::params::PathSpIgnitionCommand;
+use gateway_types_migrations::v1::params::PathSpSensorId;
+use gateway_types_migrations::v1::params::PathSpTaskDumpIndex;
+use gateway_types_migrations::v1::params::SetComponentActiveSlotParams;
+use gateway_types_migrations::v1::params::UpdateAbortBody;
+use gateway_types_migrations::v2::ignition::SpIgnitionInfo as SpIgnitionInfoV2;
 use omicron_uuid_kinds::GenericUuid;
 use std::io::Cursor;
 use std::num::NonZeroU8;
@@ -832,27 +844,23 @@ impl GatewayApi for GatewayImpl {
 
     async fn ignition_list_v1(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<ignition::v1::SpIgnitionInfo>>, HttpError>
-    {
+    ) -> Result<HttpResponseOk<Vec<SpIgnitionInfoV1>>, HttpError> {
         let HttpResponseOk(v2_info) = Self::ignition_list(rqctx).await?;
         Ok(HttpResponseOk(
-            v2_info
-                .into_iter()
-                .map(|x| ignition::v1::SpIgnitionInfo::from(x))
-                .collect(),
+            v2_info.into_iter().map(|x| SpIgnitionInfoV1::from(x)).collect(),
         ))
     }
 
     async fn ignition_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Vec<SpIgnitionInfo>>, HttpError> {
+    ) -> Result<HttpResponseOk<Vec<SpIgnitionInfoV2>>, HttpError> {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
         let handler = async {
             let out = mgmt_switch
                 .bulk_ignition_state()
                 .await?
-                .map(|(id, state)| SpIgnitionInfo {
+                .map(|(id, state)| SpIgnitionInfoV2 {
                     id: id.into(),
                     details: state.into(),
                 })
@@ -866,15 +874,15 @@ impl GatewayApi for GatewayImpl {
     async fn ignition_get_v1(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<ignition::v1::SpIgnitionInfo>, HttpError> {
+    ) -> Result<HttpResponseOk<SpIgnitionInfoV1>, HttpError> {
         let HttpResponseOk(v2_info) = Self::ignition_get(rqctx, path).await?;
-        Ok(HttpResponseOk(ignition::v1::SpIgnitionInfo::from(v2_info)))
+        Ok(HttpResponseOk(SpIgnitionInfoV1::from(v2_info)))
     }
 
     async fn ignition_get(
         rqctx: RequestContext<Self::Context>,
         path: Path<PathSp>,
-    ) -> Result<HttpResponseOk<SpIgnitionInfo>, HttpError> {
+    ) -> Result<HttpResponseOk<SpIgnitionInfoV2>, HttpError> {
         let apictx = rqctx.context();
         let mgmt_switch = &apictx.mgmt_switch;
 
@@ -892,7 +900,7 @@ impl GatewayApi for GatewayImpl {
                 })?;
 
             let info =
-                SpIgnitionInfo { id: sp_id.into(), details: state.into() };
+                SpIgnitionInfoV2 { id: sp_id.into(), details: state.into() };
             Ok(HttpResponseOk(info))
         };
         apictx.latencies.instrument_dropshot_handler(&rqctx, handler).await

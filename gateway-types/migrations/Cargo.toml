@@ -1,5 +1,5 @@
 [package]
-name = "gateway-types"
+name = "gateway-types-migrations"
 version = "0.1.0"
 edition.workspace = true
 license = "MPL-2.0"
@@ -11,12 +11,7 @@ workspace = true
 daft.workspace = true
 dropshot.workspace = true
 gateway-messages.workspace = true
-gateway-types-migrations.workspace = true
-# Avoid depending on gateway-sp-comms! It is a pretty heavy dependency and
-# would only be used for From impls anyway. We put those impls in
-# omicron-gateway instead, and don't use `From`.
 hex.workspace = true
-omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
 proptest = { workspace = true, optional = true }
@@ -27,5 +22,9 @@ thiserror.workspace = true
 tufaceous-artifact.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true
+
 [features]
-testing = ["dep:proptest", "dep:test-strategy", "gateway-types-migrations/testing"]
+testing = ["dep:proptest", "dep:test-strategy"]

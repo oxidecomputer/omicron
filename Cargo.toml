@@ -60,6 +60,7 @@ members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
+    "gateway-types/migrations",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -222,6 +223,7 @@ default-members = [
     "gateway-cli",
     "gateway-test-utils",
     "gateway-types",
+    "gateway-types/migrations",
     "illumos-utils",
     "installinator-api",
     "installinator-common",
@@ -472,6 +474,7 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ea2f39ccdea124b5affcad0ca17bc5dacf65823a" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
+gateway-types-migrations = { path = "gateway-types/migrations" }
 gethostname = "0.5.0"
 gfss = { path = "trust-quorum/gfss" }
 trust-quorum = { path = "trust-quorum" }

@@ -20,6 +20,7 @@ gateway-api.workspace = true
 gateway-messages.workspace = true
 gateway-sp-comms.workspace = true
 gateway-types.workspace = true
+gateway-types-migrations.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true

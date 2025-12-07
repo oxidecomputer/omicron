@@ -2,10 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Ignition types for Gateway API v2.
+//!
+//! This version added the `Cosmo` variant to `SpIgnitionSystemType`.
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::component::SpIdentifier;
+use crate::v1::component::SpIdentifier;
 
 #[derive(
     Debug,
@@ -23,10 +27,16 @@ pub struct SpIgnitionInfo {
     pub details: SpIgnition,
 }
 
+impl From<SpIgnitionInfo> for crate::v1::ignition::SpIgnitionInfo {
+    fn from(s: SpIgnitionInfo) -> Self {
+        Self { id: s.id, details: s.details.into() }
+    }
+}
+
 /// State of an ignition target.
-///
-/// TODO: Ignition returns much more information than we're reporting here: do
-/// we want to expand this?
+//
+// TODO: Ignition returns much more information than we're reporting here: do
+// we want to expand this?
 #[derive(
     Debug,
     Clone,
@@ -48,9 +58,13 @@ pub enum SpIgnition {
         power: bool,
         ctrl_detect_0: bool,
         ctrl_detect_1: bool,
+        /// Fault from the A3 power domain
         flt_a3: bool,
+        /// Fault from the A2 power domain
         flt_a2: bool,
+        /// Fault from the RoT
         flt_rot: bool,
+        /// Fault from the SP
         flt_sp: bool,
     },
 }
@@ -79,7 +93,33 @@ impl From<gateway_messages::IgnitionState> for SpIgnition {
     }
 }
 
-/// TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?
+impl From<SpIgnition> for crate::v1::ignition::SpIgnition {
+    fn from(state: SpIgnition) -> Self {
+        match state {
+            SpIgnition::Absent => Self::Absent,
+            SpIgnition::Present {
+                id,
+                power,
+                ctrl_detect_0,
+                ctrl_detect_1,
+                flt_a3,
+                flt_a2,
+                flt_rot,
+                flt_sp,
+            } => Self::Present {
+                id: id.into(),
+                power,
+                ctrl_detect_0,
+                ctrl_detect_1,
+                flt_a3,
+                flt_a2,
+                flt_rot,
+                flt_sp,
+            },
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -98,6 +138,7 @@ pub enum SpIgnitionSystemType {
     Sidecar,
     Psc,
     Unknown { id: u16 },
+    Cosmo,
 }
 
 impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
@@ -108,8 +149,20 @@ impl From<gateway_messages::ignition::SystemType> for SpIgnitionSystemType {
             SystemType::Sidecar => Self::Sidecar,
             SystemType::Psc => Self::Psc,
             SystemType::Unknown(id) => Self::Unknown { id },
-            // `0x4` is the ignition value per RFD 142
-            SystemType::Cosmo => Self::Unknown { id: 0x4 },
+            SystemType::Cosmo => Self::Cosmo,
+        }
+    }
+}
+
+impl From<SpIgnitionSystemType> for crate::v1::ignition::SpIgnitionSystemType {
+    fn from(st: SpIgnitionSystemType) -> Self {
+        match st {
+            SpIgnitionSystemType::Gimlet => Self::Gimlet,
+            SpIgnitionSystemType::Sidecar => Self::Sidecar,
+            SpIgnitionSystemType::Psc => Self::Psc,
+            // Cosmo system id is 0x4
+            SpIgnitionSystemType::Cosmo => Self::Unknown { id: 0x4 },
+            SpIgnitionSystemType::Unknown { id } => Self::Unknown { id },
         }
     }
 }
