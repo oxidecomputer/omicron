@@ -247,7 +247,7 @@ impl DataStore {
         paginated(case_dsl::fm_case, case_dsl::id, &pagparams)
             .filter(case_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
             .select(model::fm::CaseMetadata::as_select())
-            .load_async::<model::fm::CaseMetadata>(&*conn)
+            .load_async::<model::fm::CaseMetadata>(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -271,7 +271,7 @@ impl DataStore {
                 .filter(case_ereport_dsl::case_id.eq(case.id))
                 .filter(case_ereport_dsl::sitrep_id.eq(case.sitrep_id))
                 .select(model::fm::CaseEreport::as_select())
-                .load_async(&*conn)
+                .load_async(conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
