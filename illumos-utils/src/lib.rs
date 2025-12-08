@@ -5,7 +5,7 @@
 //! Wrappers around illumos-specific commands.
 
 use dropshot::HttpError;
-use slog_error_chain::InlineErrorChain;
+use slog_error_chain::{InlineErrorChain, SlogInlineError};
 #[allow(unused)]
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -57,7 +57,7 @@ impl std::fmt::Display for CommandFailureInfo {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, SlogInlineError)]
 pub enum ExecutionError {
     #[error("Failed to start execution of [{command}]: {err}")]
     ExecutionStart { command: String, err: std::io::Error },

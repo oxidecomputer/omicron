@@ -8816,6 +8816,7 @@ dependencies = [
  "sled-agent-api",
  "sled-agent-client",
  "sled-agent-config-reconciler",
+ "sled-agent-health-monitor",
  "sled-agent-types",
  "sled-agent-zone-images",
  "sled-diagnostics",
@@ -12932,6 +12933,28 @@ dependencies = [
  "tufaceous-artifact",
  "xshell",
  "zone 0.3.1",
+]
+
+[[package]]
+name = "sled-agent-health-monitor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "derive_more 0.99.20",
+ "dropshot",
+ "futures",
+ "illumos-utils",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "serde",
+ "sled-agent-api",
+ "sled-agent-types",
+ "slog",
+ "slog-error-chain",
+ "thiserror 2.0.17",
+ "tokio",
 ]
 
 [[package]]

@@ -381,7 +381,7 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<Inventory>, HttpError> {
         let sa = rqctx.context();
         Ok(HttpResponseOk(
-            sa.inventory(rqctx.server.local_addr).await.map_err(|e| {
+            sa.inventory(rqctx.server.local_addr).map_err(|e| {
                 HttpError::for_internal_error(format!("{:#}", e))
             })?,
         ))

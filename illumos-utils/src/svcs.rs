@@ -92,6 +92,7 @@ impl From<String> for SvcState {
     }
 }
 
+// TODO-K: Change to SvcInMaintenance?
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 /// Information about an SMF service that is enabled but not running
@@ -111,7 +112,8 @@ impl SvcNotRunning {
     // marked as a configuration option based on target OS because they are not
     // Illumos specific themselves. We mark them as unused instead.
     #[allow(dead_code)]
-    fn new() -> SvcNotRunning {
+    // TODO-K: Remove pub
+    pub fn new() -> SvcNotRunning {
         SvcNotRunning {
             fmri: String::new(),
             zone: String::new(),

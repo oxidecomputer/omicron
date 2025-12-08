@@ -58,6 +58,7 @@ use propolis_client::{
 use range_requests::PotentialRange;
 use sled_agent_api::LocalStorageDatasetEnsureRequest;
 use sled_agent_api::SupportBundleMetadata;
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -75,8 +76,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tufaceous_artifact::ArtifactHash;
 use uuid::Uuid;
-
-use illumos_utils::svcs::Svcs;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -115,6 +114,9 @@ pub struct SledAgent {
     pub(super) repo_depot:
         dropshot::HttpServer<ArtifactStore<SimArtifactStorage>>,
     pub log: Logger,
+
+    // TODO-K: Removeme
+    health_monitor: HealthMonitorHandle,
 }
 
 impl SledAgent {
@@ -198,8 +200,13 @@ impl SledAgent {
             }),
             instance_ensure_state_error: Mutex::new(None),
             repo_depot,
-            log,
+            // TODO-K: Remove clone
+            log: log.clone(),
             bootstore_network_config,
+            // TODO-K: Removeme
+            health_monitor:
+                crate::long_running_tasks::spawn_health_monitor_tasks(&log)
+                    .await,
         })
     }
 
@@ -793,10 +800,7 @@ impl SledAgent {
         Ok(addr)
     }
 
-    pub async fn inventory(
-        &self,
-        addr: SocketAddr,
-    ) -> anyhow::Result<Inventory> {
+    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
@@ -804,8 +808,10 @@ impl SledAgent {
             SocketAddr::V6(v6) => v6,
         };
 
+        // TODO-K: Don't actually call svcs
         let smf_services_enabled_not_running =
-            Svcs::enabled_not_running(&self.log).await?;
+            //Svcs::enabled_not_running(&self.log).await?;
+            self.health_monitor.to_inventory();
 
         let storage = self.storage.lock();
 

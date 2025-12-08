@@ -27,6 +27,8 @@ use sled_agent_config_reconciler::{
     ConfigReconcilerHandle, ConfigReconcilerSpawnToken, RawDisksSender,
     TimeSyncConfig,
 };
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
+use sled_agent_health_monitor::handle::poll_smf_services_in_maintenance;
 use sled_agent_types::zone_bundle::CleanupContext;
 use sled_agent_zone_images::ZoneImageSourceResolver;
 use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
@@ -63,6 +65,9 @@ pub struct LongRunningTaskHandles {
     /// looks like one from the outside, and is convenient to put here. (If it
     /// had any async involved within it, it would be a task.)
     pub zone_image_resolver: ZoneImageSourceResolver,
+
+    // TODO-K: Should I only have one or various handles for each health check?
+    pub health_monitor: HealthMonitorHandle,
 }
 
 /// Spawn all long running tasks
@@ -121,6 +126,7 @@ pub async fn spawn_all_longrunning_tasks(
 
     let zone_bundler = spawn_zone_bundler_tasks(log, &config_reconciler).await;
     let zone_image_resolver = ZoneImageSourceResolver::new(log, internal_disks);
+    let health_monitor = spawn_health_monitor_tasks(log).await;
 
     (
         LongRunningTaskHandles {
@@ -130,6 +136,7 @@ pub async fn spawn_all_longrunning_tasks(
             bootstore,
             zone_bundler,
             zone_image_resolver,
+            health_monitor,
         },
         config_reconciler_spawn_token,
         sled_agent_started_tx,
@@ -145,6 +152,8 @@ fn spawn_key_manager(log: &Logger) -> StorageKeyRequester {
     tokio::spawn(async move { key_manager.run().await });
     storage_key_requester
 }
+
+// TODO-K: Do the long running task here. Poll about every minute?
 
 async fn spawn_hardware_manager(
     log: &Logger,
@@ -214,6 +223,26 @@ async fn spawn_bootstore_tasks(
     });
 
     node_handle
+}
+
+// TODO-K: remove pub
+pub async fn spawn_health_monitor_tasks(log: &Logger) -> HealthMonitorHandle {
+    // TODO-K: This is a bit vague, should this log say something else?
+    info!(log, "Starting health monitor");
+    let health_handle = HealthMonitorHandle::new(log);
+
+    info!(log, "Starting SMF service health poller");
+    let health_handle2 = health_handle.clone();
+    let log = log.new(o!("component" => "smf_services_in_maintenance_poller"));
+    tokio::spawn(async move {
+        poll_smf_services_in_maintenance(
+            log,
+            health_handle2.smf_services_in_maintenance_tx,
+        )
+        .await
+    });
+
+    health_handle
 }
 
 // `ZoneBundler::new` spawns a periodic cleanup task that runs indefinitely

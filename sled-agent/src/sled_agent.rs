@@ -32,7 +32,6 @@ use futures::stream::FuturesUnordered;
 use iddqd::IdHashMap;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::RunningZone;
-use illumos_utils::svcs::Svcs;
 use illumos_utils::zfs::CanMount;
 use illumos_utils::zfs::DatasetEnsureArgs;
 use illumos_utils::zfs::Mountpoint;
@@ -69,6 +68,7 @@ use sled_agent_config_reconciler::{
     InternalDisksReceiver, LedgerNewConfigError, LedgerTaskError,
     ReconcilerInventory, SledAgentArtifactStore, SledAgentFacilities,
 };
+use sled_agent_health_monitor::handle::HealthMonitorHandle;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
@@ -376,6 +376,9 @@ struct SledAgentInner {
 
     // A handle to the hardware monitor.
     hardware_monitor: HardwareMonitorHandle,
+
+    // A handle to the health monitor.
+    health_monitor: HealthMonitorHandle,
 
     // Object handling production of metrics for oximeter.
     _metrics_manager: MetricsManager,
@@ -686,6 +689,9 @@ impl SledAgent {
                 bootstore: long_running_task_handles.bootstore.clone(),
                 hardware_monitor: long_running_task_handles
                     .hardware_monitor
+                    .clone(),
+                health_monitor: long_running_task_handles
+                    .health_monitor
                     .clone(),
                 _metrics_manager: metrics_manager,
                 repo_depot,
@@ -1132,9 +1138,8 @@ impl SledAgent {
             if is_scrimlet { SledRole::Scrimlet } else { SledRole::Gimlet };
         let zone_image_resolver =
             self.inner.services.zone_image_resolver().status().to_inventory();
-
         let smf_services_enabled_not_running =
-            Svcs::enabled_not_running(&self.log).await?;
+            self.inner.health_monitor.to_inventory();
 
         let ReconcilerInventory {
             disks,
