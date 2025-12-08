@@ -281,9 +281,39 @@ pub struct SupportBundleCollectionReport {
     /// True iff the bundle was successfully made 'active' in the database.
     pub activated_in_db_ok: bool,
 
+    /// All steps taken, alongside their timing information, when collecting the
+    /// bundle.
+    pub steps: Vec<SupportBundleCollectionStep>,
+
     /// Status of ereport collection, or `None` if no ereports were requested
     /// for this support bundle.
     pub ereports: Option<SupportBundleEreportStatus>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SupportBundleCollectionStep {
+    pub name: String,
+    pub start: DateTime<Utc>,
+    pub end: DateTime<Utc>,
+    pub status: SupportBundleCollectionStepStatus,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SupportBundleCollectionStepStatus {
+    Ok,
+    Skipped,
+    Failed(String),
+}
+
+impl std::fmt::Display for SupportBundleCollectionStepStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        use SupportBundleCollectionStepStatus::*;
+        match self {
+            Ok => write!(f, "ok"),
+            Skipped => write!(f, "skipped"),
+            Failed(why) => write!(f, "failed: {why}"),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -309,6 +339,7 @@ impl SupportBundleCollectionReport {
             listed_in_service_sleds: false,
             listed_sps: false,
             activated_in_db_ok: false,
+            steps: vec![],
             ereports: None,
         }
     }

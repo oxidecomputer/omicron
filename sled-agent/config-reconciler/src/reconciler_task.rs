@@ -42,7 +42,7 @@ use crate::InternalDisksReceiver;
 use crate::SledAgentArtifactStore;
 use crate::TimeSyncConfig;
 use crate::dataset_serialization_task::DatasetTaskHandle;
-use crate::dump_setup_task::FormerZoneRootArchiver;
+use crate::debug_collector_task::FormerZoneRootArchiver;
 use crate::host_phase_2::BootPartitionReconciler;
 use crate::ledger::CurrentSledConfig;
 use crate::raw_disks::RawDisksReceiver;

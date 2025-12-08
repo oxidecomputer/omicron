@@ -84,6 +84,7 @@ serde_human_bytes.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 sha2.workspace = true
 sha3.workspace = true
+signal-hook.workspace = true
 sled-agent-api.workspace = true
 sled-agent-client.workspace = true
 sled-agent-config-reconciler.workspace = true
@@ -110,6 +111,8 @@ tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
 toml.workspace = true
+trust-quorum.workspace = true
+trust-quorum-protocol.workspace = true
 tufaceous-artifact.workspace = true
 tufaceous-brand-metadata.workspace = true
 usdt.workspace = true

@@ -94,6 +94,11 @@ impl NexusSaga for SagaDiskDelete {
                     "params_for_volume_delete_subsaga",
                 ));
             }
+
+            datastore::Disk::LocalStorage(_) => {
+                // XXX nothing to do here yet, need the delegate_zvol branch to
+                // merge first.
+            }
         }
 
         Ok(builder.build()?)

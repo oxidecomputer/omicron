@@ -76,8 +76,12 @@ impl ExternalNetworkingAllocator {
     /// Construct an `ExternalNetworkingAllocator` that hands out IPs based on
     /// `external_ip_policy`, treating any IPs used by in-service zones
     /// in `blueprint` as already-in-use.
-    #[cfg(test)]
-    pub(crate) fn from_blueprint(
+    ///
+    /// This is mostly useful for tests that are starting from an established
+    /// blueprint; the real planner will typically use
+    /// [`ExternalNetworkingAllocator::from_current_zones()`] at an appropriate
+    /// stage of planning (e.g., after handling expungements).
+    pub fn from_blueprint(
         blueprint: &nexus_types::deployment::Blueprint,
         external_ip_policy: &ExternalIpPolicy,
     ) -> anyhow::Result<Self> {

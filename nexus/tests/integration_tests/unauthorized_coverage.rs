@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 #[test]
 fn test_unauthorized_coverage() {
     // Load the OpenAPI schema for Nexus's public API.
-    let schema_path = "../openapi/nexus.json";
+    let schema_path = "../openapi/nexus/nexus-latest.json";
     let schema_contents = std::fs::read_to_string(&schema_path)
         .expect("failed to read Nexus OpenAPI spec");
     let spec: OpenAPI = serde_json::from_str(&schema_contents)

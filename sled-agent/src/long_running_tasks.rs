@@ -13,9 +13,10 @@
 //! handles are dropped.
 
 use crate::bootstrap::bootstore_setup::{
-    new_bootstore_config, poll_ddmd_for_bootstore_peer_update,
+    new_bootstore_config, poll_ddmd_for_bootstore_and_tq_peer_update,
 };
 use crate::bootstrap::secret_retriever::LrtqOrHardcodedSecretRetriever;
+use crate::bootstrap::trust_quorum_setup::new_trust_quorum_config;
 use crate::config::Config;
 use crate::hardware_monitor::{HardwareMonitor, HardwareMonitorHandle};
 use crate::services::ServiceManager;
@@ -33,9 +34,11 @@ use sled_hardware::{HardwareManager, SledMode, UnparsedDisk};
 use sled_storage::config::MountConfig;
 use sled_storage::disk::RawSyntheticDisk;
 use slog::{Logger, info};
+use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use tokio::sync::oneshot;
+use trust_quorum;
 
 /// A mechanism for interacting with all long running tasks that can be shared
 /// between the bootstrap-agent and sled-agent code.
@@ -63,6 +66,9 @@ pub struct LongRunningTaskHandles {
     /// looks like one from the outside, and is convenient to put here. (If it
     /// had any async involved within it, it would be a task.)
     pub zone_image_resolver: ZoneImageSourceResolver,
+
+    /// A handle for interacting with the trust quorum
+    pub trust_quorum: trust_quorum::NodeTaskHandle,
 }
 
 /// Spawn all long running tasks
@@ -111,11 +117,21 @@ pub async fn spawn_all_longrunning_tasks(
     let internal_disks = config_reconciler.wait_for_boot_disk().await;
     info!(log, "Found boot disk {:?}", internal_disks.boot_disk_id());
 
+    let trust_quorum = spawn_trust_quorum_task(
+        log,
+        &config_reconciler,
+        &hardware_manager,
+        global_zone_bootstrap_ip,
+        config.sprockets.clone(),
+    )
+    .await;
+
     let bootstore = spawn_bootstore_tasks(
         log,
         &config_reconciler,
         &hardware_manager,
         global_zone_bootstrap_ip,
+        trust_quorum.clone(),
     )
     .await;
 
@@ -130,6 +146,7 @@ pub async fn spawn_all_longrunning_tasks(
             bootstore,
             zone_bundler,
             zone_image_resolver,
+            trust_quorum,
         },
         config_reconciler_spawn_token,
         sled_agent_started_tx,
@@ -183,11 +200,45 @@ fn spawn_hardware_monitor(
     (monitor, sled_agent_started_tx, service_manager_ready_tx)
 }
 
+async fn spawn_trust_quorum_task(
+    log: &Logger,
+    config_reconciler: &ConfigReconcilerHandle,
+    hardware_manager: &HardwareManager,
+    global_zone_bootstrap_ip: Ipv6Addr,
+    sprockets_config: SprocketsConfig,
+) -> trust_quorum::NodeTaskHandle {
+    info!(
+        log,
+        "Using sprockets config for trust-quorum: {sprockets_config:#?}"
+    );
+    let cluster_dataset_paths = config_reconciler
+        .internal_disks_rx()
+        .current()
+        .all_cluster_datasets()
+        .collect::<Vec<_>>();
+    let baseboard_id =
+        hardware_manager.baseboard().try_into().expect("known baseboard type");
+    let config = new_trust_quorum_config(
+        &cluster_dataset_paths,
+        baseboard_id,
+        global_zone_bootstrap_ip,
+        sprockets_config,
+    )
+    .expect("valid trust quorum config");
+
+    info!(log, "Starting trust quorum node task");
+
+    let (mut node, handle) = trust_quorum::NodeTask::new(config, log).await;
+    tokio::spawn(async move { node.run().await });
+    handle
+}
+
 async fn spawn_bootstore_tasks(
     log: &Logger,
     config_reconciler: &ConfigReconcilerHandle,
     hardware_manager: &HardwareManager,
     global_zone_bootstrap_ip: Ipv6Addr,
+    tq_handle: trust_quorum::NodeTaskHandle,
 ) -> bootstore::NodeHandle {
     let config = new_bootstore_config(
         &config_reconciler
@@ -210,7 +261,8 @@ async fn spawn_bootstore_tasks(
     let log = log.new(o!("component" => "bootstore_ddmd_poller"));
     let node_handle2 = node_handle.clone();
     tokio::spawn(async move {
-        poll_ddmd_for_bootstore_peer_update(log, node_handle2).await
+        poll_ddmd_for_bootstore_and_tq_peer_update(log, node_handle2, tq_handle)
+            .await
     });
 
     node_handle
