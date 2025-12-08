@@ -343,7 +343,7 @@ E2E_TLS_CERT="/opt/oxide/sled-agent/pkg/initial-tls-cert.pem"
 #
 pfexec mkdir -p /usr/oxide
 pfexec curl -sSfL -o /usr/oxide/oxide \
-	http://catacomb.eng.oxide.computer:12346/oxide-v0.1.1
+	http://catacomb.eng.oxide.computer:12346/oxide-v2025112000
 pfexec chmod +x /usr/oxide/oxide
 
 curl -sSfL -o debian-11-genericcloud-amd64.raw \
