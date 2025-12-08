@@ -6855,21 +6855,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
 
     de omicron.public.diagnosis_engine NOT NULL,
 
-    time_created TIMESTAMPTZ NOT NULL,
     -- UUID of the sitrep in which the case was created.
     created_sitrep_id UUID NOT NULL,
 
-    -- Time when the case was closed (if not null).
-    time_closed TIMESTAMPTZ,
-    -- UUID of the sitrep in which the case was closed.
+    -- UUID of the sitrep in which the case was closed. If this is not NULL,
+    -- then the case has been closed.
     closed_sitrep_id UUID,
 
     comment TEXT NOT NULL,
-
-    CONSTRAINT closed_case_validity CHECK (
-        (closed_sitrep_id IS NULL AND time_closed IS NULL) OR
-        (closed_sitrep_id IS NOT NULL AND time_closed IS NOT NULL)
-    ),
 
     PRIMARY KEY (sitrep_id, id)
 );
