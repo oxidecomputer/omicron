@@ -7540,8 +7540,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     PRIMARY KEY (rack_id, epoch)
 );
 
-
-
 -- Total group membership in trust quorum for a given epoch
 CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
     -- Foreign key into the rack table
