@@ -7458,14 +7458,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.lrtq_members (
     rack_id UUID NOT NULL,
 
     -- Foreign key into the `hw_baseboard_id` table
-    hw_baseboard_id UUID NOT NULL,
+    -- A sled can only be in one rack, hence the UNIQUE constraint.
+    hw_baseboard_id UUID NOT NULL UNIQUE,
 
     PRIMARY KEY (rack_id, hw_baseboard_id)
 );
-
--- A sled can't be in more than one rack
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_lrtq_members_by_hw_baseboard_id
-ON omicron.public.lrtq_members (hw_baseboard_id);
 
 -- The state of a given trust quorum configuration
 CREATE TYPE IF NOT EXISTS omicron.public.trust_quorum_configuration_state AS ENUM (
@@ -7494,7 +7491,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     -- The number of shares needed to compute the rack secret
     --
     -- In some documentation we call this the `K` parameter.
-    threshold INT2 NOT NULL,
+    threshold INT2 NOT NULL CHECK (threshold > 0),
 
     -- The number of additional nodes beyond threshold to commit 
     --
@@ -7507,7 +7504,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     -- fault tolerance during the prepare phase and also during unlock.
     --
     -- In some documentation we call this the `Z` parameter.
-    commit_crash_tolerance INT2 NOT NULL,
+    commit_crash_tolerance INT2 NOT NULL CHECK commit_crash_tolerance >= 0),
 
     -- Which member is coordinating the prepare phase of the protocol this epoch
     -- Foreign key into the `hw_baseboard_id` table
@@ -7522,6 +7519,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     -- Each rack has its own trust quorum
     PRIMARY KEY (rack_id, epoch)
 );
+
+
 
 -- Total group membership in trust quorum for a given epoch
 CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_member (
