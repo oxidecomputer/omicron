@@ -78,6 +78,8 @@ use zip::ZipArchive;
 use zip::ZipWriter;
 use zip::write::FullFileOptions;
 
+use super::support_bundle::perfetto;
+
 // We use "/var/tmp" to use Nexus' filesystem for temporary storage,
 // rather than "/tmp", which would keep this collected data in-memory.
 const TEMPDIR: &str = "/var/tmp";
@@ -1088,27 +1090,27 @@ impl BundleCollection {
                     .max(0);
                 let step_id = i + 1;
 
-                json!({
-                    "name": step.name,
-                    "cat": "bundle_collection",
-                    "ph": "X",  // Complete event (has duration)
-                    "ts": start_us,
-                    "dur": duration_us,
-                    "pid": 1,
-                    "tid": step_id,
-                    "args": {
+                perfetto::TraceEvent {
+                    name: step.name.clone(),
+                    cat: "bundle_collection".to_string(),
+                    ph: "X".to_string(),
+                    ts: start_us,
+                    dur: duration_us,
+                    pid: 1,
+                    tid: step_id,
+                    args: json!({
                         "status": step.status.to_string(),
-                    }
-                })
+                    }),
+                }
             })
             .collect();
 
-        let trace_json = json!({
-            "traceEvents": trace_events,
-            "displayTimeUnit": "ms",
-        });
+        let trace = perfetto::Trace {
+            trace_events,
+            display_time_unit: "ms".to_string(),
+        };
 
-        let trace_content = serde_json::to_string_pretty(&trace_json)
+        let trace_content = serde_json::to_string_pretty(&trace)
             .context("Failed to serialize trace JSON")?;
 
         tokio::fs::write(&trace_path, trace_content).await.with_context(
@@ -1119,7 +1121,7 @@ impl BundleCollection {
             self.log,
             "Wrote trace file";
             "path" => %trace_path,
-            "num_events" => trace_events.len()
+            "num_events" => trace.trace_events.len()
         );
 
         Ok(())
@@ -2669,64 +2671,51 @@ mod test {
             .await
             .expect("Should be able to download trace file");
 
-        // Parse the trace file as JSON
+        // Parse the trace file using our Perfetto structs
         let body_bytes =
             response.into_body().collect().await.unwrap().to_bytes();
-        let trace_json: serde_json::Value = serde_json::from_slice(&body_bytes)
-            .expect("Trace file should be valid JSON");
+        let trace: perfetto::Trace = serde_json::from_slice(&body_bytes)
+            .expect("Trace file should be valid Perfetto JSON");
 
-        // Verify the structure matches Perfetto Trace Event format
-        let trace_events = trace_json
-            .get("traceEvents")
-            .expect("Should have traceEvents field")
-            .as_array()
-            .expect("traceEvents should be an array");
+        // Verify display time unit
+        assert_eq!(
+            trace.display_time_unit, "ms",
+            "Display time unit should be milliseconds"
+        );
 
         // We should have at least the main collection steps
         assert!(
-            !trace_events.is_empty(),
+            !trace.trace_events.is_empty(),
             "Should have at least one trace event"
         );
 
-        // Verify each event has the expected fields
-        for event in trace_events {
-            assert!(event.get("name").is_some(), "Event should have name");
+        // Verify each event has the expected structure
+        for event in &trace.trace_events {
+            // Verify category
             assert_eq!(
-                event.get("cat").and_then(|v| v.as_str()),
-                Some("bundle_collection"),
+                event.cat, "bundle_collection",
                 "Event should have category 'bundle_collection'"
             );
-            assert_eq!(
-                event.get("ph").and_then(|v| v.as_str()),
-                Some("X"),
-                "Event should be Complete event type"
-            );
-            assert!(
-                event.get("ts").and_then(|v| v.as_i64()).is_some(),
-                "Event should have timestamp"
-            );
-            assert!(
-                event.get("dur").and_then(|v| v.as_i64()).is_some(),
-                "Event should have duration"
-            );
-            assert!(
-                event.get("args").is_some(),
-                "Event should have args field"
-            );
+            // Verify phase type
+            assert_eq!(event.ph, "X", "Event should be Complete event type");
+            // Verify timestamps are positive
+            assert!(event.ts >= 0, "Event timestamp should be non-negative");
+            assert!(event.dur >= 0, "Event duration should be non-negative");
+            // Verify process and thread IDs are set
+            assert_eq!(event.pid, 1, "All events should have pid=1");
+            assert!(event.tid > 0, "Event thread ID should be positive");
         }
 
         // Verify we have the same number of events as steps in the report
         assert_eq!(
-            trace_events.len(),
+            trace.trace_events.len(),
             report.steps.len(),
             "Number of events should match number of steps"
         );
 
         // Verify step names match between report and trace
-        let trace_names: std::collections::HashSet<_> = trace_events
-            .iter()
-            .filter_map(|e| e.get("name").and_then(|v| v.as_str()))
-            .collect();
+        let trace_names: std::collections::HashSet<_> =
+            trace.trace_events.iter().map(|e| e.name.as_str()).collect();
         let report_names: std::collections::HashSet<_> =
             report.steps.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(
