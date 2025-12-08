@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.lrtq_members (
     rack_id UUID NOT NULL,
 
     -- Foreign key into the `hw_baseboard_id` table
-    hw_baseboard_id UUID NOT NULL,
+    -- A sled can only be in one rack, hence the UNIQUE constraint.
+    hw_baseboard_id UUID NOT NULL UNIQUE,
 
     PRIMARY KEY (rack_id, hw_baseboard_id)
 );
