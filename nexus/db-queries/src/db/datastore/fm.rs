@@ -12,9 +12,14 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::datastore::RunnableQuery;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::model;
+use crate::db::model::DbTypedUuid;
 use crate::db::model::SqlU32;
+use crate::db::model::ereport::DbEna;
+use crate::db::pagination::Paginator;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::raw_query_builder::QueryBuilder;
 use crate::db::raw_query_builder::TypedSqlQuery;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -26,6 +31,9 @@ use dropshot::PaginationOrder;
 use nexus_db_errors::ErrorHandler;
 use nexus_db_errors::public_error_from_diesel;
 use nexus_db_lookup::DbConnection;
+use nexus_db_schema::schema::fm_alert_request::dsl as alert_req_dsl;
+use nexus_db_schema::schema::fm_case::dsl as case_dsl;
+use nexus_db_schema::schema::fm_ereport_in_case::dsl as case_ereport_dsl;
 use nexus_db_schema::schema::fm_sitrep::dsl as sitrep_dsl;
 use nexus_db_schema::schema::fm_sitrep_history::dsl as history_dsl;
 use nexus_types::fm;
@@ -33,8 +41,10 @@ use nexus_types::fm::Sitrep;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_uuid_kinds::CaseKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SitrepUuid;
+use std::sync::Arc;
 use uuid::Uuid;
 
 impl DataStore {
@@ -139,14 +149,176 @@ impl DataStore {
         let metadata =
             self.fm_sitrep_metadata_read_on_conn(id, &conn).await?.into();
 
-        // TODO(eliza): this is where we would read all the other sitrep data,
-        // if there was any.
+        let mut all_ereports = iddqd::IdOrdMap::<Arc<fm::Ereport>>::new();
+        let cases = {
+            let mut cases = iddqd::IdOrdMap::new();
+            let mut paginator =
+                Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+            while let Some(p) = paginator.next() {
+                let batch = self
+                    .fm_sitrep_cases_list_on_conn(
+                        id,
+                        &p.current_pagparams(),
+                        &conn,
+                    )
+                    .await
+                    .map_err(|e| {
+                        e.internal_context("failed to list sitrep cases")
+                    })?;
+                paginator = p.found_batch(&batch, &|case| case.id);
 
-        Ok(Sitrep {
-            metadata,
-            // TODO(eliza) read these
-            cases: Default::default(),
-        })
+                for case in batch {
+                    // TODO(eliza): consider using a `ParallelTaskSet` to fetch the
+                    // cases in parallel here.
+                    let (ereport_assignments, alerts_requested) =
+                        self.fm_case_read_on_conn(&case, conn).await?;
+
+                    // Fetch ereports assigned to this case.
+                    let mut ereports = iddqd::IdOrdMap::with_capacity(
+                        ereport_assignments.len(),
+                    );
+                    for model::fm::CaseEreport {
+                        restart_id,
+                        ena: DbEna(ena),
+                        ..
+                    } in ereport_assignments
+                    {
+                        let ereport_id = fm::EreportId {
+                            restart_id: restart_id.into(),
+                            ena,
+                        };
+                        let ereport = match all_ereports.entry(&ereport_id) {
+                            iddqd::id_ord_map::Entry::Occupied(entry) => {
+                                entry.get().clone()
+                            }
+                            iddqd::id_ord_map::Entry::Vacant(entry) => {
+                                let ereport: fm::Ereport = self.ereport_fetch_on_conn(conn, ereport_id)
+                                    .await
+                                    .map_err(|e| e.internal_context(format!(
+                                        "failed to fetch ereport {ereport_id} for case {}",
+                                        case.id,
+                                    )))?
+                                    .into();
+                                entry.insert(Arc::new(ereport)).clone()
+                            }
+                        };
+                        ereports.insert_unique(ereport).unwrap();
+                    }
+
+                    cases
+                        .insert_unique(fm::Case {
+                            id: case.id.into(),
+                            created_sitrep_id: case.created_sitrep_id.into(),
+                            time_created: case.time_created.into(),
+                            time_closed: case.time_closed.map(Into::into),
+                            closed_sitrep_id: case
+                                .closed_sitrep_id
+                                .map(Into::into),
+                            de: case.de.into(),
+                            comment: case.comment,
+                            ereports,
+                            alerts_requested,
+                        })
+                        .expect("case UUIDs should be unique");
+                }
+            }
+
+            cases
+        };
+
+        Ok(Sitrep { metadata, cases })
+    }
+
+    async fn fm_sitrep_cases_list_on_conn(
+        &self,
+        sitrep_id: SitrepUuid,
+        pagparams: &DataPageParams<'_, DbTypedUuid<CaseKind>>,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> ListResultVec<model::fm::CaseMetadata> {
+        paginated(case_dsl::fm_case, case_dsl::id, &pagparams)
+            .filter(case_dsl::sitrep_id.eq(sitrep_id.into_untyped_uuid()))
+            .select(model::fm::CaseMetadata::as_select())
+            .load_async::<model::fm::CaseMetadata>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    async fn fm_case_read_on_conn(
+        &self,
+        case: &model::fm::CaseMetadata,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        (Vec<model::fm::CaseEreport>, iddqd::IdOrdMap<fm::AlertRequest>),
+        Error,
+    > {
+        // Read ereports assigned to this case.
+        let ereports = {
+            let mut ereports = Vec::new();
+            let mut paginator =
+                Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    case_ereport_dsl::fm_ereport_in_case,
+                    (case_ereport_dsl::restart_id, case_ereport_dsl::ena),
+                    &p.current_pagparams(),
+                )
+                .filter(case_ereport_dsl::case_id.eq(case.id))
+                .filter(case_ereport_dsl::sitrep_id.eq(case.sitrep_id))
+                .select(model::fm::CaseEreport::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(format!(
+                            "failed to list ereports assigned to case {}",
+                            case.id
+                        ))
+                })?;
+
+                paginator = p.found_batch(&batch, &|ereport| {
+                    (ereport.restart_id, ereport.ena)
+                });
+                ereports.extend(batch);
+            }
+            ereports
+        };
+
+        // Read alerts requested for this case.
+        let alerts_requested = {
+            let mut alerts = iddqd::IdOrdMap::new();
+            let mut paginator =
+                Paginator::new(SQL_BATCH_SIZE, PaginationOrder::Descending);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    alert_req_dsl::fm_alert_request,
+                    alert_req_dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(alert_req_dsl::case_id.eq(case.id))
+                .filter(alert_req_dsl::sitrep_id.eq(case.sitrep_id))
+                .select(model::fm::AlertRequest::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                        .internal_context(format!(
+                            "failed to list alerts requested for case {}",
+                            case.id
+                        ))
+                })?;
+
+                paginator = p.found_batch(&batch, &|req| req.id);
+                for alert in batch {
+                    alerts
+                        .insert_unique(alert.try_into()?)
+                        .expect("alert UUIDs should be unique");
+                }
+            }
+
+            alerts
+        };
+
+        Ok((ereports, alerts_requested))
     }
 
     /// Insert the provided [`Sitrep`] into the database, and attempt to mark it
@@ -1056,7 +1228,7 @@ mod tests {
     ) -> Result<BTreeSet<SitrepUuid>, Error> {
         let mut listed_orphans = BTreeSet::new();
         let mut paginator = Paginator::new(
-            crate::db::datastore::SQL_BATCH_SIZE,
+            crate::dbSQL_BATC::datastore::H_SIZE,
             dropshot::PaginationOrder::Descending,
         );
         while let Some(p) = paginator.next() {

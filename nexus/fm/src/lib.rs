@@ -81,6 +81,7 @@ impl<'a> SitrepBuilder<'a> {
                     id,
                     created_sitrep_id: self.sitrep_id,
                     time_created: chrono::Utc::now(),
+                    closed_sitrep_id: None,
                     time_closed: None,
                     de,
                     comment: String::new(),
@@ -169,6 +170,7 @@ impl CaseBuilder {
 
     pub fn close(&mut self) {
         self.case.time_closed = Some(Utc::now());
+        self.case.closed_sitrep_id = Some(self.sitrep_id);
 
         slog::info!(&self.log, "case closed");
     }

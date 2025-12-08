@@ -6842,17 +6842,84 @@ CREATE UNIQUE INDEX IF NOT EXISTS
     lookup_sitrep_version_by_id
 ON omicron.public.fm_sitrep_history (sitrep_id);
 
+CREATE TYPE IF NOT EXISTS omicron.public.diagnosis_engine AS ENUM (
+    'power_shelf',
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.fm_case (
     -- Case UUID
     id UUID NOT NULL,
     -- UUID of the sitrep in which the case had this state.
     sitrep_id UUID NOT NULL,
+
+    de omicron.public.diagnosis_engine NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL,
     -- UUID of the sitrep in which the case was created.
     created_sitrep_id UUID NOT NULL,
 
-    time_created TIMESTAMPTZ NOT NULL,
+    -- Time when the case was closed (if not null).
     time_closed TIMESTAMPTZ,
+    -- UUID of the sitrep in which the case was closed.
+    closed_sitrep_id UUID,
+
+    comment TEXT NOT NULL,
+
+    CONSTRAINT closed_case_validity CHECK (
+        (closed_sitrep_id IS NULL AND time_closed IS NULL) OR
+        (closed_sitrep_id IS NOT NULL AND time_closed IS NOT NULL)
+    ),
+
+    PRIMARY KEY (sitrep_id, id)
 );
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_cases_for_sitrep
+ON omicron.public.fm_case (sitrep_id);
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_ereport_in_case (
+    -- The ereport's identity.
+    restart_id UUID NOT NULL,
+    ena INT8 NOT NULL,
+
+    -- UUID of the case the ereport is assigned to.
+    case_id UUID NOT NULL,
+
+    -- UUID of the sitrep in which this assignment exists.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the sitrep in which the ereport was initially assigned to this
+    -- case.
+    assigned_sitrep_id UUID NOT NULL,
+
+    PRIMARY KEY (sitrep_id, restart_id, ena)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_ereports_assigned_to_fm_case
+ON omicron.public.fm_ereport_in_case (sitrep_id, case_id);
+
+
+CREATE TABLE IF NOT EXISTS omicron.public.fm_alert_request (
+    -- Requested alert UUID
+    id UUID NOT NULL,
+    -- UUID of the sitrep in which the alert is requested.
+    sitrep_id UUID NOT NULL,
+    -- UUID of the sitrep in which the alert request was created.
+    requested_sitrep_id UUID NOT NULL,
+    -- UUID of the case to which this alert request belongs.
+    case_id UUID NOT NULL,
+
+    -- The class of alert that was requested
+    alert_class omicron.public.alert_class NOT NULL,
+    -- Actual alert data. The structure of this depends on the alert class.
+    payload JSONB NOT NULL,
+
+    PRIMARY KEY (sitrep_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS
+    lookup_fm_alert_requests_for_case
+ON omicron.public.fm_alert_request (sitrep_id, case_id);
 
 /*
  * List of datasets available to be sliced up and passed to VMMs for instance

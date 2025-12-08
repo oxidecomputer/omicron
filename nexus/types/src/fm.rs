@@ -123,6 +123,8 @@ pub struct Case {
     pub id: CaseUuid,
     pub created_sitrep_id: SitrepUuid,
     pub time_created: DateTime<Utc>,
+
+    pub closed_sitrep_id: Option<SitrepUuid>,
     pub time_closed: Option<DateTime<Utc>>,
 
     pub de: DiagnosisEngine,
