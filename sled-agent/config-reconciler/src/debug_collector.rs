@@ -186,7 +186,7 @@ trait GetMountpoint: AsRef<ZpoolName> {
 }
 
 #[derive(Debug)]
-enum DumpSetupCmd {
+enum DebugCollectorCmd {
     ArchiveFormerZoneRoot {
         zone_root: Utf8PathBuf,
         zone_name: String,
@@ -200,7 +200,7 @@ enum DumpSetupCmd {
     },
 }
 
-struct DumpSetupWorker {
+struct DebugCollectorWorker {
     core_dataset_names: Vec<CoreZpool>,
     debug_dataset_names: Vec<DebugZpool>,
 
@@ -215,32 +215,32 @@ struct DumpSetupWorker {
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
-    rx: Receiver<DumpSetupCmd>,
+    rx: Receiver<DebugCollectorCmd>,
     coredumpadm_invoker: Box<dyn CoreDumpAdmInvoker + Send + Sync>,
     zfs_invoker: Box<dyn ZfsInvoker + Send + Sync>,
     zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
 }
 
-pub struct DumpSetup {
-    tx: tokio::sync::mpsc::Sender<DumpSetupCmd>,
+pub struct DebugCollector {
+    tx: tokio::sync::mpsc::Sender<DebugCollectorCmd>,
     mount_config: Arc<MountConfig>,
     _poller: tokio::task::JoinHandle<()>,
     log: Logger,
 }
 
-impl DumpSetup {
+impl DebugCollector {
     pub fn new(log: &Logger, mount_config: Arc<MountConfig>) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(16);
-        let worker = DumpSetupWorker::new(
+        let worker = DebugCollectorWorker::new(
             Box::new(RealCoreDumpAdm {}),
             Box::new(RealZfs {}),
             Box::new(RealZone {}),
-            log.new(o!("component" => "DumpSetup-worker")),
+            log.new(o!("component" => "DebugCollector-worker")),
             rx,
         );
         let _poller =
             tokio::spawn(async move { worker.poll_file_archival().await });
-        let log = log.new(o!("component" => "DumpSetup"));
+        let log = log.new(o!("component" => "DebugCollector"));
         Self { tx, mount_config, _poller, log }
     }
 
@@ -249,7 +249,7 @@ impl DumpSetup {
     ///
     /// This function returns only once this request has been handled, which
     /// can be used as a signal by callers that any "old disks" are no longer
-    /// being used by [DumpSetup].
+    /// being used by [DebugCollector].
     pub async fn update_dumpdev_setup(
         &self,
         disks: impl Iterator<Item = &Disk>,
@@ -290,7 +290,8 @@ impl DumpSetup {
                         } else {
                             warn!(
                                 log,
-                                "Zpool {name:?} not online, won't attempt to save process core dumps there"
+                                "Zpool {name:?} not online, won't attempt to \
+                                 save process core dumps there"
                             );
                         }
                     }
@@ -309,7 +310,8 @@ impl DumpSetup {
                         } else {
                             warn!(
                                 log,
-                                "Zpool {name:?} not online, won't attempt to save kernel core dumps there"
+                                "Zpool {name:?} not online, won't attempt to \
+                                 save kernel core dumps there"
                             );
                         }
                     }
@@ -320,7 +322,7 @@ impl DumpSetup {
         let (tx, rx) = oneshot::channel();
         if let Err(err) = self
             .tx
-            .send(DumpSetupCmd::UpdateDumpdevSetup {
+            .send(DebugCollectorCmd::UpdateDumpdevSetup {
                 dump_slices: m2_dump_slices,
                 debug_datasets: u2_debug_datasets,
                 core_datasets: m2_core_datasets,
@@ -328,11 +330,11 @@ impl DumpSetup {
             })
             .await
         {
-            error!(log, "DumpSetup channel closed: {:?}", err.0);
+            error!(log, "DebugCollector channel closed: {:?}", err.0);
         };
 
         if let Err(err) = rx.await {
-            error!(log, "DumpSetup failed to await update"; "err" => ?err);
+            error!(log, "DebugCollector failed to await update"; "err" => ?err);
         }
     }
 
@@ -381,7 +383,7 @@ impl DumpSetup {
         info!(log, "requesting archive of former zone root");
         let zone_root = zone_root.to_owned();
         let zone_name = file_name.to_string();
-        let cmd = DumpSetupCmd::ArchiveFormerZoneRoot {
+        let cmd = DebugCollectorCmd::ArchiveFormerZoneRoot {
             zone_root,
             zone_name,
             completion_tx,
@@ -390,7 +392,7 @@ impl DumpSetup {
             error!(
                 log,
                 "failed to request archive of former zone root";
-                "error" => "DumpSetup channel closed"
+                "error" => "DebugCollector channel closed"
             );
         }
     }
@@ -401,7 +403,8 @@ enum ZfsGetError {
     #[error("Error executing 'zfs get' command: {0}")]
     IoError(#[from] std::io::Error),
     #[error(
-        "Output of 'zfs get' was not only not an integer string, it wasn't even UTF-8: {0}"
+        "Output of 'zfs get' was not only not an integer string, it wasn't \
+         even UTF-8: {0}"
     )]
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("Error parsing output of 'zfs get' command as integer: {0}")]
@@ -526,9 +529,9 @@ impl CoreDumpAdmInvoker for RealCoreDumpAdm {
         // Compress crash dumps:
         cmd.compress(true);
 
-        // Do not run savecore(8) automatically on boot (irrelevant anyhow, as the
-        // config file being mutated by dumpadm won't survive reboots on gimlets).
-        // The sled-agent will invoke it manually instead.
+        // Do not run savecore(8) automatically on boot (irrelevant anyhow, as
+        // the config file being mutated by dumpadm won't survive reboots on
+        // gimlets).  The sled-agent will invoke it manually instead.
         cmd.no_boot_time_savecore();
 
         cmd.execute()?;
@@ -600,13 +603,13 @@ fn safe_to_delete(path: &Utf8Path, meta: &std::fs::Metadata) -> bool {
     return true;
 }
 
-impl DumpSetupWorker {
+impl DebugCollectorWorker {
     fn new(
         coredumpadm_invoker: Box<dyn CoreDumpAdmInvoker + Send + Sync>,
         zfs_invoker: Box<dyn ZfsInvoker + Send + Sync>,
         zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
         log: Logger,
-        rx: Receiver<DumpSetupCmd>,
+        rx: Receiver<DebugCollectorCmd>,
     ) -> Self {
         Self {
             core_dataset_names: vec![],
@@ -627,7 +630,7 @@ impl DumpSetupWorker {
     }
 
     async fn poll_file_archival(mut self) {
-        info!(self.log, "DumpSetup poll loop started.");
+        info!(self.log, "DebugCollector poll loop started.");
 
         // A oneshot which helps callers track when updates have propagated.
         //
@@ -639,7 +642,7 @@ impl DumpSetupWorker {
         loop {
             match tokio::time::timeout(ARCHIVAL_INTERVAL, self.rx.recv()).await
             {
-                Ok(Some(DumpSetupCmd::UpdateDumpdevSetup {
+                Ok(Some(DebugCollectorCmd::UpdateDumpdevSetup {
                     dump_slices,
                     debug_datasets,
                     core_datasets,
@@ -653,7 +656,7 @@ impl DumpSetupWorker {
                         core_datasets,
                     );
                 }
-                Ok(Some(DumpSetupCmd::ArchiveFormerZoneRoot {
+                Ok(Some(DebugCollectorCmd::ArchiveFormerZoneRoot {
                     zone_root,
                     zone_name,
                     completion_tx,
@@ -705,7 +708,11 @@ impl DumpSetupWorker {
 
             if let Some(tx) = evaluation_and_archiving_complete_tx.take() {
                 if let Err(err) = tx.send(()) {
-                    error!(self.log, "DumpDevice failed to notify caller"; "err" => ?err);
+                    error!(
+                        self.log,
+                        "DumpDevice failed to notify caller";
+                        "err" => ?err
+                    );
                 }
             }
         }
@@ -755,13 +762,20 @@ impl DumpSetupWorker {
         // below a certain usage threshold.
         self.known_debug_dirs.sort_by_cached_key(
             |mountpoint: &DebugDataset| {
-                match self.zfs_invoker.below_thresh(mountpoint.as_ref(), DATASET_USAGE_PERCENT_CHOICE) {
+                match self.zfs_invoker.below_thresh(
+                    mountpoint.as_ref(),
+                    DATASET_USAGE_PERCENT_CHOICE,
+                ) {
                     Ok((below, used)) => {
                         let priority = if below { 0 } else { 1 };
                         (priority, used, mountpoint.clone())
                     }
                     Err(err) => {
-                        error!(self.log, "Could not query zfs properties of debug dump dir: {err:?}");
+                        error!(
+                            self.log,
+                            "Could not query zfs properties of debug dump dir: \
+                             {err:?}"
+                        );
                         // deprioritize anything we get errors querying.
                         (usize::MAX, u64::MAX, mountpoint.clone())
                     }
@@ -781,7 +795,8 @@ impl DumpSetupWorker {
             if !self.known_debug_dirs.contains(x) {
                 warn!(
                     self.log,
-                    "Previously-chosen debug/dump dir {x:?} no longer exists in our view of reality"
+                    "Previously-chosen debug/dump dir {x:?} no longer exists \
+                     in our view of reality"
                 );
                 self.chosen_debug_dir = None;
             } else {
@@ -802,18 +817,22 @@ impl DumpSetupWorker {
                         }) {
                             info!(
                                 self.log,
-                                "Previously-chosen debug/dump dir {x:?} is over usage threshold, choosing a more vacant disk"
+                                "Previously-chosen debug/dump dir {x:?} is \
+                                 over usage threshold, choosing a more \
+                                 vacant disk"
                             );
                             self.chosen_debug_dir = None;
                         } else {
                             warn!(
                                 self.log,
-                                "All candidate debug/dump dirs are over usage threshold, removing older archived files"
+                                "All candidate debug/dump dirs are over usage \
+                                 threshold, removing older archived files"
                             );
                             if let Err(err) = self.cleanup().await {
                                 error!(
                                     self.log,
-                                    "Couldn't clean up any debug/dump dirs, may hit dataset quota in {x:?}: {err:?}"
+                                    "Couldn't clean up any debug/dump dirs, \
+                                     may hit dataset quota in {x:?}: {err:?}"
                                 );
                             } else {
                                 self.chosen_debug_dir = None;
@@ -823,7 +842,9 @@ impl DumpSetupWorker {
                     Err(err) => {
                         error!(
                             self.log,
-                            "Previously-chosen debug/dump dir {x:?} couldn't be queried for zfs properties!  Choosing another. {err:?}"
+                            "Previously-chosen debug/dump dir {x:?} couldn't \
+                             be queried for zfs properties!  Choosing another. \
+                             {err:?}"
                         );
                         self.chosen_debug_dir = None;
                     }
@@ -834,7 +855,8 @@ impl DumpSetupWorker {
             if !self.known_dump_slices.contains(x) {
                 warn!(
                     self.log,
-                    "Previously-chosen dump slice {x:?} no longer exists in our view of reality"
+                    "Previously-chosen dump slice {x:?} no longer exists in \
+                     our view of reality"
                 );
                 self.chosen_dump_slice = None;
             }
@@ -843,7 +865,8 @@ impl DumpSetupWorker {
             if !self.known_core_dirs.contains(x) {
                 warn!(
                     self.log,
-                    "Previously-chosen core dir {x:?} no longer exists in our view of reality"
+                    "Previously-chosen core dir {x:?} no longer exists in our \
+                     view of reality"
                 );
                 self.chosen_core_dir = None;
             }
@@ -868,7 +891,8 @@ impl DumpSetupWorker {
                     Err(err) => {
                         error!(
                             self.log,
-                            "Couldn't configure process core dump directory to {core_dir:?}: {err:?}"
+                            "Couldn't configure process core dump directory to \
+                            {core_dir:?}: {err:?}"
                         );
                     }
                 }
@@ -878,7 +902,8 @@ impl DumpSetupWorker {
         if self.chosen_dump_slice.is_none() {
             if self.chosen_debug_dir.is_some() {
                 for dump_slice in self.known_dump_slices.clone() {
-                    // Let's try to see if it appears to have a kernel dump already
+                    // Let's try to see if it appears to have a kernel dump
+                    // already
                     match illumos_utils::dumpadm::dump_flag_is_valid(
                         dump_slice.as_ref(),
                     )
@@ -887,19 +912,22 @@ impl DumpSetupWorker {
                         Ok(true) => {
                             debug!(
                                 self.log,
-                                "Dump slice {dump_slice:?} appears to have a valid header; will attempt to savecore"
+                                "Dump slice {dump_slice:?} appears to have a \
+                                 valid header; will attempt to savecore"
                             );
                         }
                         Ok(false) => {
                             info!(
                                 self.log,
-                                "Dump slice {dump_slice:?} appears to have already been saved"
+                                "Dump slice {dump_slice:?} appears to have \
+                                 already been saved"
                             );
                         }
                         Err(err) => {
                             debug!(
                                 self.log,
-                                "Dump slice {dump_slice:?} appears to be unused: {err:?}"
+                                "Dump slice {dump_slice:?} appears to be \
+                                 unused: {err:?}"
                             );
                         }
                     }
@@ -909,7 +937,9 @@ impl DumpSetupWorker {
                         if let Some(out) = saved {
                             info!(
                                 self.log,
-                                "Previous dump on slice {dump_slice:?} saved, configured slice as target for new dumps. {out:?}"
+                                "Previous dump on slice {dump_slice:?} saved, \
+                                 configured slice as target for new dumps. \
+                                 {out:?}"
                             );
                         }
                         self.chosen_dump_slice = Some(dump_slice);
@@ -927,8 +957,9 @@ impl DumpSetupWorker {
                     .await
                     {
                         Ok(false) => {
-                            // Have dumpadm write the config for crash dumps to be
-                            // on this slice, at least, until a U.2 comes along.
+                            // Have dumpadm write the config for crash dumps to
+                            // be on this slice, at least, until a U.2 comes
+                            // along.
                             match self
                                 .coredumpadm_invoker
                                 .dumpadm(dump_slice.as_ref(), None)
@@ -937,7 +968,9 @@ impl DumpSetupWorker {
                                 Ok(_) => {
                                     info!(
                                         self.log,
-                                        "Using dump device {dump_slice:?} with no savecore destination (no U.2 debug zvol yet)"
+                                        "Using dump device {dump_slice:?} with \
+                                         no savecore destination (no U.2 debug \
+                                         zvol yet)"
                                     );
                                     self.chosen_dump_slice =
                                         Some(dump_slice.clone());
@@ -946,7 +979,8 @@ impl DumpSetupWorker {
                                 Err(err) => {
                                     warn!(
                                         self.log,
-                                        "Could not configure {dump_slice:?} as dump device: {err:?}"
+                                        "Could not configure {dump_slice:?} as \
+                                         dump device: {err:?}"
                                     );
                                 }
                             }
@@ -954,13 +988,16 @@ impl DumpSetupWorker {
                         Ok(true) => {
                             warn!(
                                 self.log,
-                                "Not configuring {dump_slice:?} as it appears to contain a dump we cannot yet send to a U.2 debug zvol"
+                                "Not configuring {dump_slice:?} as it appears \
+                                 to contain a dump we cannot yet send to a \
+                                 U.2 debug zvol"
                             );
                         }
                         Err(err) => {
                             debug!(
                                 self.log,
-                                "Dump slice {dump_slice:?} appears to be unused : {err:?}",
+                                "Dump slice {dump_slice:?} appears to be \
+                                 unused : {err:?}",
                             );
                         }
                     }
@@ -973,14 +1010,16 @@ impl DumpSetupWorker {
             for dump_slice in self.known_dump_slices.clone() {
                 if !self.savecored_slices.contains(&dump_slice) {
                     changed_slice = true;
-                    // temporarily changes the system's dump slice so savecore(8)
-                    // can update the header in the slice when it finishes...
+                    // temporarily changes the system's dump slice so
+                    // savecore(8) can update the header in the slice when it
+                    // finishes...
                     match self.dumpadm_and_savecore(&dump_slice).await {
                         Ok(saved) => {
                             if let Some(stdout) = &saved {
                                 info!(
                                     self.log,
-                                    "Saved dump from {dump_slice:?} to {debug_dir:?}: {stdout:?}"
+                                    "Saved dump from {dump_slice:?} to \
+                                     {debug_dir:?}: {stdout:?}"
                                 );
                             } else {
                                 info!(
@@ -992,7 +1031,9 @@ impl DumpSetupWorker {
                         Err(err) => {
                             warn!(
                                 self.log,
-                                "Could not configure {dump_slice:?} as dump device with {debug_dir:?} as savecore destination: {err:?}"
+                                "Could not configure {dump_slice:?} as dump \
+                                 device with {debug_dir:?} as savecore \
+                                 destination: {err:?}"
                             );
                         }
                     }
@@ -1010,7 +1051,8 @@ impl DumpSetupWorker {
                     {
                         error!(
                             self.log,
-                            "Could not restore dump slice to {dump_slice:?}: {err:?}"
+                            "Could not restore dump slice to {dump_slice:?}: \
+                             {err:?}"
                         );
                     }
                 }
@@ -1046,7 +1088,8 @@ impl DumpSetupWorker {
                         } else {
                             error!(
                                 self.log,
-                                "Non-UTF8 path found while archiving core dumps: {entry:?}"
+                                "Non-UTF8 path found while archiving core \
+                                 dumps: {entry:?}"
                             );
                         }
                     }
@@ -1063,7 +1106,8 @@ impl DumpSetupWorker {
             if !matches!(err, ArchiveLogsError::NoDebugDirYet) {
                 error!(
                     self.log,
-                    "Failure while trying to archive logs to debug dataset: {err:?}"
+                    "Failure while trying to archive logs to debug dataset: \
+                     {err:?}"
                 );
             }
         }
@@ -1261,7 +1305,8 @@ impl DumpSetupWorker {
                 Err(err) => {
                     error!(
                         self.log,
-                        "Could not analyze {dir:?} for debug dataset cleanup task: {err:?}"
+                        "Could not analyze {dir:?} for debug dataset cleanup \
+                         task: {err:?}"
                     );
                 }
             }
@@ -1289,7 +1334,8 @@ impl DumpSetupWorker {
                 if let Err(err) = tokio::fs::remove_file(&path).await {
                     error!(
                         self.log,
-                        "Couldn't delete {path} from debug dataset, skipping {dir:?}. {err:?}"
+                        "Couldn't delete {path} from debug dataset, skipping \
+                         {dir:?}. {err:?}"
                     );
                     continue 'next_debug_dir;
                 }
@@ -1332,7 +1378,8 @@ impl DumpSetupWorker {
                 {
                     info!(
                         self.log,
-                        "File was removed before metadata could be read - ignoring";
+                        "File was removed before metadata could be read - \
+                         ignoring";
                         "path" => %path
                     );
                     continue;
@@ -1492,7 +1539,8 @@ mod tests {
                 .get(property)
                 .unwrap_or_else(|| {
                     panic!(
-                        "Test did not provide property {property} for fake zpool {}",
+                        "Test did not provide property {property} for fake \
+                         zpool {}",
                         mountpoint_or_name
                     )
                 })
@@ -1538,7 +1586,7 @@ mod tests {
         );
         const NOT_MOUNTED_INTERNAL: &str =
             "oxi_acab2069-6e63-6c75-de73-20c06c756db0";
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [(
@@ -1593,7 +1641,7 @@ mod tests {
             name: ZpoolName::from_str(ERROR_INTERNAL).unwrap(),
         };
         const ZPOOL_MNT: &str = "/path/to/internal/zpool";
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [
@@ -1653,7 +1701,8 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    // we make these so illumos_utils::dumpadm::dump_flag_is_valid returns what we want
+    // we make these so illumos_utils::dumpadm::dump_flag_is_valid returns what
+    // we want
     async fn populate_tempdir_with_fake_dumps(
         tempdir: &Utf8TempDir,
     ) -> (DumpSlicePath, DumpSlicePath) {
@@ -1683,7 +1732,7 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_savecore_and_dumpadm_not_called_when_occupied_and_no_dir",
         );
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::<FakeZfs>::default(),
             Box::<FakeZone>::default(),
@@ -1711,7 +1760,7 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_dumpadm_called_when_vacant_slice_but_no_dir",
         );
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::<FakeZfs>::default(),
             Box::<FakeZone>::default(),
@@ -1735,15 +1784,14 @@ mod tests {
     // but we also have somewhere to unload them,
     // call dumpadm and savecore.
     #[tokio::test]
-    async fn test_savecore_and_dumpadm_invoked_when_slices_occupied_and_dir_is_available()
-     {
+    async fn test_dumps_saved_when_space_available() {
         let logctx = omicron_test_utils::dev::test_setup_log(
-            "test_savecore_and_dumpadm_invoked_when_slices_occupied_and_dir_is_available",
+            "test_dumps_saved_when_space_available",
         );
         const MOUNTED_EXTERNAL: &str =
             "oxp_446f6e74-4469-6557-6f6e-646572696e67";
         const ZPOOL_MNT: &str = "/path/to/external/zpool";
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [(
@@ -1805,7 +1853,7 @@ mod tests {
             "oxi_474e554e-6174-616c-6965-4e677579656e";
         const MOUNTED_EXTERNAL: &str =
             "oxp_446f6e74-4469-6557-6f6e-646572696e67";
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [
@@ -1933,15 +1981,15 @@ mod tests {
             }
         }
 
-        async fn new_dump_setup_worker(
+        async fn new_debug_collector_worker(
             &self,
             used: u64,
             available: u64,
-        ) -> DumpSetupWorker {
+        ) -> DebugCollectorWorker {
             let tempdir_path = self.tempdir.path().to_string();
             const MOUNTED_EXTERNAL: &str =
                 "oxp_446f6e74-4469-6557-6f6e-646572696e67";
-            let mut worker = DumpSetupWorker::new(
+            let mut worker = DebugCollectorWorker::new(
                 Box::<FakeCoreDumpAdm>::default(),
                 Box::new(FakeZfs {
                     zpool_props: [
@@ -1994,7 +2042,8 @@ mod tests {
         fn add_file(&mut self, path: impl AsRef<Utf8Path>) -> &mut TestFile {
             assert!(
                 path.as_ref().is_relative(),
-                "We need to put this file inside a debug dir, it should be relative"
+                "We need to put this file inside a debug dir, it should be \
+                 relative"
             );
 
             self.files.push(TestFile::new(
@@ -2026,7 +2075,8 @@ mod tests {
                 assert!(
                     used - cumulative_space_removed
                         > capacity * DATASET_USAGE_PERCENT_CHOICE / 100,
-                    "Deleting files from largest -> smallest might clear dataset usage threshold unexpectedly early",
+                    "Deleting files from largest -> smallest might clear \
+                     dataset usage threshold unexpectedly early",
                 );
 
                 cumulative_space_removed += file_size;
@@ -2034,7 +2084,8 @@ mod tests {
             assert!(
                 used - cumulative_space_removed
                     < capacity * DATASET_USAGE_PERCENT_CHOICE / 100,
-                "Deleting marked files won't reduce space usage below threshold",
+                "Deleting marked files won't reduce space usage below \
+                 threshold",
             );
         }
 
@@ -2139,7 +2190,7 @@ mod tests {
             USED, CAPACITY,
         );
 
-        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+        let worker = files.new_debug_collector_worker(USED, AVAILABLE).await;
 
         // Before we cleanup: All files in "debug" exist
         files.check_all_files_exist();
@@ -2181,7 +2232,7 @@ mod tests {
             USED, CAPACITY,
         );
 
-        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+        let worker = files.new_debug_collector_worker(USED, AVAILABLE).await;
 
         // Before we cleanup: All files in "debug" exist
         files.check_all_files_exist();
@@ -2239,7 +2290,7 @@ mod tests {
             USED, CAPACITY,
         );
 
-        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+        let worker = files.new_debug_collector_worker(USED, AVAILABLE).await;
 
         // Before we cleanup: All files in "debug" exist
         files.check_all_files_exist();
@@ -2300,7 +2351,7 @@ mod tests {
             USED, CAPACITY,
         );
 
-        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+        let worker = files.new_debug_collector_worker(USED, AVAILABLE).await;
 
         // Before we cleanup: All files in "debug" exist
         files.check_all_files_exist();

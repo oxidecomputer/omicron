@@ -8,17 +8,14 @@
 
 use std::net::IpAddr;
 
-use gateway_test_utils::setup::DEFAULT_SP_SIM_CONFIG;
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_project, object_create, object_get,
 };
-use nexus_test_utils::{load_test_config, test_setup_with_config};
 use nexus_types::external_api::params::MulticastGroupCreate;
 use nexus_types::external_api::views::MulticastGroup;
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, Instance, InstanceState, NameOrId,
 };
-use omicron_sled_agent::sim;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 
 use super::*;
@@ -34,19 +31,15 @@ const GROUP_NAME: &str = "test-group";
 /// and no multicast members are ever created.
 #[tokio::test]
 async fn test_multicast_enablement() {
-    // Create custom config with multicast disabled (simulating PROD, for now)
-    let mut config = load_test_config();
-    config.pkg.multicast.enabled = false;
-
-    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
-        "test_multicast_enablement",
-        &mut config,
-        sim::SimMode::Explicit,
-        None,
-        0,
-        DEFAULT_SP_SIM_CONFIG.into(),
-    )
-    .await;
+    let cptestctx =
+        nexus_test_utils::ControlPlaneBuilder::new("test_multicast_enablement")
+            .customize_nexus_config(&|config| {
+                // Create custom config with multicast disabled (simulating
+                // PROD, for now)
+                config.pkg.multicast.enabled = false;
+            })
+            .start::<omicron_nexus::Server>()
+            .await;
 
     let client = &cptestctx.external_client;
 

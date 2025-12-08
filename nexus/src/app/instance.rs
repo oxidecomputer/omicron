@@ -569,18 +569,21 @@ impl super::Nexus {
                 MAX_DISKS_PER_INSTANCE
             )));
         }
+
         for disk in all_disks.iter() {
             if let params::InstanceDiskAttachment::Create(create) = disk {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
         }
+
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
                 "An instance may not have more than {} external IP addresses",
                 MAX_EXTERNAL_IPS_PER_INSTANCE,
             )));
         }
+
         if params
             .external_ips
             .iter()
@@ -593,6 +596,7 @@ impl super::Nexus {
                 MAX_EPHEMERAL_IPS_PER_INSTANCE,
             )));
         }
+
         if let params::InstanceNetworkInterfaceAttachment::Create(ref ifaces) =
             params.network_interfaces
         {
@@ -780,6 +784,32 @@ impl super::Nexus {
         Ok(())
     }
 
+    /// Returns true if any of the attached disks are type LocalStorage
+    pub(crate) async fn instance_uses_local_storage(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> Result<bool, Error> {
+        let disks = self
+            .db_datastore
+            .instance_list_disks(
+                opctx,
+                authz_instance,
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_DISKS_PER_INSTANCE)
+                        .unwrap(),
+                }),
+            )
+            .await?;
+
+        Ok(disks.into_iter().any(|disk| match disk {
+            db::datastore::Disk::LocalStorage(_) => true,
+            db::datastore::Disk::Crucible(_) => false,
+        }))
+    }
+
     pub(crate) async fn instance_migrate(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -790,6 +820,14 @@ impl super::Nexus {
             .instance_id(id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
+
+        // Cannot migrate instance if it has local storage
+        if self.instance_uses_local_storage(opctx, &authz_instance).await? {
+            return Err(Error::invalid_request(format!(
+                "cannot migrate instance {} as it uses local storage",
+                authz_instance.id()
+            )));
+        }
 
         let state = self
             .db_datastore

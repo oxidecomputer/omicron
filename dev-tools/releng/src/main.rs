@@ -715,9 +715,17 @@ async fn main() -> Result<()> {
     .after("host-package")
     .after("recovery-package");
 
-    for (name, base_url) in [
-        ("staging", "https://permslip-staging.corp.oxide.computer"),
-        ("production", "https://signer-us-west.corp.oxide.computer"),
+    for (name, base_url, name_check) in [
+        (
+            "staging",
+            "https://permslip-staging.corp.oxide.computer",
+            "staging-devel",
+        ),
+        (
+            "production",
+            "https://signer-us-west.corp.oxide.computer",
+            "production-release",
+        ),
     ] {
         jobs.push(
             format!("hubris-{}", name),
@@ -727,6 +735,7 @@ async fn main() -> Result<()> {
                 client.clone(),
                 WORKSPACE_DIR.join(format!("tools/permslip_{}", name)),
                 args.output_dir.join(format!("hubris-{}", name)),
+                name_check,
             ),
         );
     }

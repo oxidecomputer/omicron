@@ -72,6 +72,7 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
+use crate::bootstrap::trust_quorum_setup::TRUST_QUORUM_INTEGRATION_ENABLED;
 use crate::rack_setup::plan::service::PlanError as ServicePlanError;
 use crate::rack_setup::plan::sled::Plan as SledPlan;
 use bootstore::schemes::v0 as bootstore;
@@ -102,6 +103,7 @@ use omicron_common::disk::DatasetKind;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::RackUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -116,6 +118,7 @@ use sled_agent_types::rack_init::{
     RackInitializeRequestParams,
 };
 use sled_agent_types::rack_ops::RssStep;
+use sled_agent_types::sled::BaseboardId;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Logger;
@@ -127,6 +130,8 @@ use std::net::SocketAddrV6;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::watch;
+use trust_quorum::{NodeApiError, ProxyError};
+use trust_quorum_protocol::CommitError;
 
 pub(crate) use crate::rack_setup::plan::service::Plan as ServicePlan;
 pub(crate) use crate::rack_setup::plan::service::PlannedSledDescription;
@@ -236,6 +241,15 @@ pub enum SetupServiceError {
 
     #[error("Rack initialization was interrupted. Clean-slate required")]
     RackInitInterrupted,
+
+    #[error("Trust quorum error")]
+    TrustQuorum(#[from] NodeApiError),
+
+    #[error("Trust quorum proxy commit error")]
+    TrustQuorumProxy(#[from] ProxyError<CommitError>),
+
+    #[error("Trust quorum proxy commit incorrectly 'pending' from {0}")]
+    TrustQuorumProxyCommitPending(BaseboardId),
 }
 
 // The workload / information allocated to a single sled.
@@ -259,12 +273,14 @@ impl RackSetupService {
     /// - `local_bootstrap_agent`: Communication channel by which we can send
     ///   commands to our local bootstrap-agent (e.g., to start sled-agents)
     /// - `bootstore` - A handle to call bootstore APIs
+    /// - `trust_quorum` - A handle to the trust qurom task
     pub(crate) fn new(
         log: Logger,
         request: RackInitializeRequestParams,
         internal_disks_rx: InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
+        trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
@@ -275,11 +291,12 @@ impl RackSetupService {
                     &internal_disks_rx,
                     local_bootstrap_agent,
                     bootstore,
+                    trust_quorum,
                     step_tx,
                 )
                 .await
             {
-                warn!(log, "RSS injection failed: {}", e);
+                error!(log, "RSS injection failed"; &e);
                 Err(e)
             } else {
                 Ok(())
@@ -1175,6 +1192,7 @@ impl ServiceInner {
         internal_disks_rx: &InternalDisksReceiver,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
+        trust_quorum: trust_quorum::NodeTaskHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", request);
@@ -1276,6 +1294,18 @@ impl ServiceInner {
             bootstore
                 .init_rack(sled_plan.rack_id.into(), initial_membership)
                 .await?;
+
+            if TRUST_QUORUM_INTEGRATION_ENABLED {
+                let tq_members: BTreeSet<BaseboardId> = peers
+                    .iter()
+                    .cloned()
+                    .map(|id| id.try_into().expect("known baseboard type"))
+                    .collect();
+                let rack_id = RackUuid::from_untyped_uuid(sled_plan.rack_id);
+
+                init_trust_quorum(&self.log, trust_quorum, tq_members, rack_id)
+                    .await?;
+            }
         }
 
         // Save the relevant network config in the bootstore. We want this to
@@ -1468,6 +1498,96 @@ impl ServiceInner {
 
         Ok(())
     }
+}
+
+async fn init_trust_quorum(
+    log: &Logger,
+    trust_quorum_handle: trust_quorum::NodeTaskHandle,
+    members: BTreeSet<BaseboardId>,
+    rack_id: RackUuid,
+) -> Result<(), SetupServiceError> {
+    let threshold = trust_quorum_protocol::Threshold(
+        u8::try_from(members.len()).unwrap() / 2 + 1,
+    );
+
+    let initial_epoch = trust_quorum_protocol::Epoch(1);
+
+    let msg = trust_quorum_protocol::ReconfigureMsg {
+        rack_id,
+        epoch: initial_epoch,
+        last_committed_epoch: None,
+        members: members.clone(),
+        threshold,
+    };
+
+    // Start the initial configuration with this node as coordinator
+    trust_quorum_handle.reconfigure(msg).await?;
+
+    // Poll indefinitely until all nodes have prepared
+    info!(log, "RSS: Starting to prepare trust quorum initial configuration");
+    loop {
+        let status = trust_quorum_handle
+            .coordinator_status()
+            .await?
+            .expect("This node is a coordinator");
+
+        if status.acked_prepares == members {
+            info!(log, "RSS: trust quorum prepared at all nodes");
+            break;
+        }
+
+        let mut still_waiting = String::new();
+        for member in members.difference(&status.acked_prepares) {
+            still_waiting.push_str(&member.to_string());
+            still_waiting.push(',');
+        }
+        let _ = still_waiting.strip_suffix(",");
+
+        info!(
+            log,
+            "RSS: Trust quorum coordinator waiting for PrepareAcks";
+            "waiting_for" => still_waiting
+        );
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    info!(log, "RSS: Starting to commit trust quorum initial configuration");
+    // Continue to commit at all nodes until done
+
+    // Commit at this node.
+    trust_quorum_handle.commit(rack_id, initial_epoch).await?;
+
+    // Proxy commit at the rest of the nodes
+    //
+    // At this point we know that all nodes are connected because they have
+    // acknowledged their `Prepare` from this node. Therefore we can attempt
+    // to proxy commit. Any failure should be treated seriously as there is no
+    // reason for a sprockets connection to be torn down during RSS.
+    let mut acked = BTreeSet::new();
+    let proxy = trust_quorum_handle.proxy();
+    for id in
+        members.iter().filter(|&id| id != trust_quorum_handle.baseboard_id())
+    {
+        info!(log, "RSS: Attempting to commit initial trust quorum at {id}");
+        match proxy.commit(id.clone(), rack_id, initial_epoch).await? {
+            trust_quorum::CommitStatus::Committed => {
+                info!(log, "RSS: Committed initial trust quorum at {id}");
+                let _ = acked.insert(id.clone());
+            }
+            trust_quorum::CommitStatus::Pending => {
+                error!(
+                    log,
+                    "RSS: Failed to commit {id} to trust quorum: Pending"
+                );
+                return Err(SetupServiceError::TrustQuorumProxyCommitPending(
+                    id.clone(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// The service plan describes all the zones that we will eventually

@@ -2567,7 +2567,6 @@ pub mod test {
     use crate::example::ExampleSystemBuilder;
     use crate::example::SimRngState;
     use crate::example::example;
-    use crate::planner::test::assert_planning_makes_no_changes;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_reconfigurator_blippy::Blippy;
@@ -2590,10 +2589,7 @@ pub mod test {
 
     /// Checks various conditions that should be true for all blueprints
     #[track_caller]
-    pub fn verify_blueprint(
-        blueprint: &Blueprint,
-        planning_input: &PlanningInput,
-    ) {
+    fn verify_blueprint(blueprint: &Blueprint, planning_input: &PlanningInput) {
         let blippy_report = Blippy::new(blueprint, planning_input)
             .into_report(BlippyReportSortKey::Kind);
         if !blippy_report.notes().is_empty() {
@@ -2771,15 +2767,6 @@ pub mod test {
                 .keys()
                 .map(|id| { ZpoolName::new_external(*id) })
                 .collect()
-        );
-
-        // Test a no-op planning iteration.
-        assert_planning_makes_no_changes(
-            &logctx.log,
-            &blueprint3,
-            &input,
-            &example.collection,
-            TEST_NAME,
         );
 
         logctx.cleanup_successful();
@@ -3378,7 +3365,6 @@ pub mod test {
         // Start with an example system (no CRDB zones).
         let (example, parent) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
-        let collection = example.collection;
         let input = example.input;
 
         // Ensure no CRDB zones (currently `ExampleSystemBuilder` never
@@ -3436,15 +3422,6 @@ pub mod test {
                 })
                 .count(),
             num_sled_zpools
-        );
-
-        // Test a no-op planning iteration.
-        assert_planning_makes_no_changes(
-            &logctx.log,
-            &blueprint,
-            &input,
-            &collection,
-            TEST_NAME,
         );
 
         // If we instead ask for one more zone than there are zpools, we should
