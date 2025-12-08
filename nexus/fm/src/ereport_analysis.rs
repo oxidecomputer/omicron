@@ -4,8 +4,13 @@
 
 //! Ereport analysis tools.
 
+use nexus_types::fm as types;
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use std::sync::Arc;
+
 /// Metadata that should be present in *all* hubris ereports.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize)]
 pub(crate) struct HubrisMetadata {
     pub hubris_archive_id: String,
     pub hubris_task_gen: u16,
@@ -18,7 +23,7 @@ pub(crate) struct HubrisMetadata {
     pub version: Option<usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Deserialize)]
 pub(crate) struct Baseboard {
     #[serde(rename = "baseboard_part_number")]
     pub part_number: String,
@@ -28,14 +33,38 @@ pub(crate) struct Baseboard {
     pub serial_number: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ParsedEreport<D> {
-    #[serde(flatten)]
+    pub ereport: Arc<types::Ereport>,
     pub hubris_metadata: Option<HubrisMetadata>,
-    #[serde(flatten)]
     pub baseboard: Option<Baseboard>,
-    #[serde(flatten)]
     pub report: D,
+}
+
+impl<D: DeserializeOwned> ParsedEreport<D> {
+    pub(crate) fn from_raw(
+        ereport: &Arc<types::Ereport>,
+    ) -> Result<Self, serde_json::Error> {
+        let fields: EreportFields<D> =
+            serde_json::from_value(ereport.data.report.clone())?;
+        let EreportFields { hubris_metadata, baseboard, report } = fields;
+        Ok(Self {
+            ereport: ereport.clone(),
+            hubris_metadata,
+            baseboard,
+            report,
+        })
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct EreportFields<D> {
+    #[serde(flatten)]
+    hubris_metadata: Option<HubrisMetadata>,
+    #[serde(flatten)]
+    baseboard: Option<Baseboard>,
+    #[serde(flatten)]
+    report: D,
 }
 
 #[cfg(test)]

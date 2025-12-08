@@ -9,6 +9,7 @@ use crate::CaseBuilder;
 use crate::SitrepBuilder;
 use crate::alert;
 use crate::ereport_analysis;
+use crate::ereport_analysis::ParsedEreport;
 use nexus_types::fm::DiagnosisEngineKind;
 use nexus_types::fm::Ereport;
 use nexus_types::fm::case::CaseEreport;
@@ -355,9 +356,7 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
                     continue;
                 };
 
-                let parsed_ereport: ereport_analysis::ParsedEreport<
-                    PscEreport,
-                > = match serde_json::from_value(ereport.report.clone()) {
+                let parsed_ereport = match ParsedEreport::from_raw(&ereport) {
                     Ok(e) => e,
                     Err(err) => {
                         slog::warn!(
@@ -479,6 +478,42 @@ impl DiagnosisEngine for PowerShelfDiagnosis {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+enum Shelf {
+    Power0 = 0,
+    Power1 = 1,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+enum ShelfComponent {
+    Unknown,
+    Psc,
+    MultiplePsus,
+    SpecificPsu(Psu),
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[repr(u8)]
+enum Psu {
+    Psu0 = 0,
+    Psu1 = 1,
+    Psu2 = 2,
+    Psu3 = 3,
+    Psu4 = 4,
+    Psu5 = 5,
+}
+
 fn ereport_psu_slot(ereport: &Ereport, log: &slog::Logger) -> Option<usize> {
     let slot =
         grab_json_value::<usize>(&ereport, "slot", &ereport.report, log)?;
@@ -532,6 +567,35 @@ fn grab_json_value<T: DeserializeOwned>(
     }
 }
 
+impl ParsedEreport<PscEreport> {
+    fn psc_location(&self) -> anyhow::Result<(Shelf, ShelfComponent)> {
+        let shelf = match self.ereport.reporter {
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: 0 } => {
+                Shelf::Power0
+            }
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot: 1 } => {
+                Shelf::Power1
+            }
+            ereport::Reporter::Sp { sp_type: SpType::Power, slot } => {
+                anyhow::bail!(
+                    "I only know about power shelves 0 and 1, but ereport {} \
+                     was (allegedly) reported by a power shelf in slot {slot}",
+                    self.ereport.id
+                )
+            }
+            other_thing => {
+                anyhow::bail!(
+                    "weird: ereport {} has a PSC-related ereport class, but \
+                     was reported by {other_thing}",
+                    self.ereport.id
+                )
+            }
+        };
+
+        Ok((shelf, ShelfComponent::SpecificPsu(self.report.psu.refdes)))
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, serde::Deserialize)]
 struct PscEreport {
     #[serde(flatten)]
@@ -555,7 +619,7 @@ enum EreportClass {
 
 #[derive(Debug, Eq, PartialEq, serde::Deserialize)]
 struct PsuId {
-    refdes: String,
+    refdes: Psu,
     rail: String,
     slot: u8,
     fruid: PsuFruid,
@@ -607,17 +671,27 @@ mod test {
 
     #[test]
     fn test_pwr_bad_ereport() {
-        let json_value: serde_json::Value =
-            serde_json::from_str(ereport_analysis::test::PSU_PWR_BAD_JSON)
-                .expect("JSON should parse");
-        let ereport: ereport_analysis::ParsedEreport<PscEreport> =
-            match serde_json::from_value(dbg!(json_value)) {
+        let FmTest { mut reporters, .. } = FmTest::new("test_pwr_bad_ereport");
+
+        let mut reporter = reporters
+            .reporter(Reporter::Sp { sp_type: SpType::Power, slot: 0 });
+
+        let ereport = Arc::new(reporter.parse_ereport(
+            DateTime::<Utc>::MIN_UTC,
+            ereport_test::PSU_REMOVE_JSON,
+        ));
+        let ereport =
+            match ParsedEreport::<PscEreport>::from_raw(dbg!(&ereport)) {
                 Ok(ereport) => ereport,
                 Err(e) => {
                     panic!("ereport could not be  {e}")
                 }
             };
-        dbg!(ereport);
+        dbg!(&ereport);
+        assert_eq!(
+            dbg!(ereport.psc_location()).unwrap(),
+            (Shelf::Power0, ShelfComponent::SpecificPsu(Psu::Psu4))
+        )
     }
 
     #[test]
