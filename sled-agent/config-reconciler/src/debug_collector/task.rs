@@ -5,8 +5,8 @@
 //! Long-running tokio task responsible for updating the dump device setup in
 //! response to changes in available disks.
 
+use super::worker::DebugCollector;
 use crate::InternalDisksReceiver;
-use crate::debug_collector::DebugCollector;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use sled_storage::config::MountConfig;
