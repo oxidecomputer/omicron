@@ -6,8 +6,8 @@ use end_to_end_tests::helpers::{
 use omicron_test_utils::dev::poll::{CondCheckError, wait_for_condition};
 use oxide_client::types::{
     ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
-    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, IpPoolType,
-    IpVersion, NameOrId, SiloQuotasUpdate,
+    DiskBackend, DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo,
+    IpPoolType, IpVersion, NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
     ClientConsoleAuthExt, ClientDisksExt, ClientProjectsExt,
@@ -98,9 +98,9 @@ async fn run_test() -> Result<()> {
                 .body(DiskCreate {
                     name: disk_name.clone(),
                     description: String::new(),
-                    disk_source: DiskSource::Blank {
+                    disk_backend: DiskBackend::Distributed(DiskSource::Blank {
                         block_size: 512.try_into().unwrap(),
-                    },
+                    }),
                     size: ByteCount(1024 * 1024 * 1024),
                 })
                 .send()

@@ -186,7 +186,7 @@ trait GetMountpoint: AsRef<ZpoolName> {
 }
 
 #[derive(Debug)]
-enum DumpSetupCmd {
+enum DebugCollectorCmd {
     ArchiveFormerZoneRoot {
         zone_root: Utf8PathBuf,
         zone_name: String,
@@ -200,7 +200,7 @@ enum DumpSetupCmd {
     },
 }
 
-struct DumpSetupWorker {
+struct DebugCollectorWorker {
     core_dataset_names: Vec<CoreZpool>,
     debug_dataset_names: Vec<DebugZpool>,
 
@@ -215,32 +215,32 @@ struct DumpSetupWorker {
     savecored_slices: HashSet<DumpSlicePath>,
 
     log: Logger,
-    rx: Receiver<DumpSetupCmd>,
+    rx: Receiver<DebugCollectorCmd>,
     coredumpadm_invoker: Box<dyn CoreDumpAdmInvoker + Send + Sync>,
     zfs_invoker: Box<dyn ZfsInvoker + Send + Sync>,
     zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
 }
 
-pub struct DumpSetup {
-    tx: tokio::sync::mpsc::Sender<DumpSetupCmd>,
+pub struct DebugCollector {
+    tx: tokio::sync::mpsc::Sender<DebugCollectorCmd>,
     mount_config: Arc<MountConfig>,
     _poller: tokio::task::JoinHandle<()>,
     log: Logger,
 }
 
-impl DumpSetup {
+impl DebugCollector {
     pub fn new(log: &Logger, mount_config: Arc<MountConfig>) -> Self {
         let (tx, rx) = tokio::sync::mpsc::channel(16);
-        let worker = DumpSetupWorker::new(
+        let worker = DebugCollectorWorker::new(
             Box::new(RealCoreDumpAdm {}),
             Box::new(RealZfs {}),
             Box::new(RealZone {}),
-            log.new(o!("component" => "DumpSetup-worker")),
+            log.new(o!("component" => "DebugCollector-worker")),
             rx,
         );
         let _poller =
             tokio::spawn(async move { worker.poll_file_archival().await });
-        let log = log.new(o!("component" => "DumpSetup"));
+        let log = log.new(o!("component" => "DebugCollector"));
         Self { tx, mount_config, _poller, log }
     }
 
@@ -249,7 +249,7 @@ impl DumpSetup {
     ///
     /// This function returns only once this request has been handled, which
     /// can be used as a signal by callers that any "old disks" are no longer
-    /// being used by [DumpSetup].
+    /// being used by [DebugCollector].
     pub async fn update_dumpdev_setup(
         &self,
         disks: impl Iterator<Item = &Disk>,
@@ -322,7 +322,7 @@ impl DumpSetup {
         let (tx, rx) = oneshot::channel();
         if let Err(err) = self
             .tx
-            .send(DumpSetupCmd::UpdateDumpdevSetup {
+            .send(DebugCollectorCmd::UpdateDumpdevSetup {
                 dump_slices: m2_dump_slices,
                 debug_datasets: u2_debug_datasets,
                 core_datasets: m2_core_datasets,
@@ -330,11 +330,11 @@ impl DumpSetup {
             })
             .await
         {
-            error!(log, "DumpSetup channel closed: {:?}", err.0);
+            error!(log, "DebugCollector channel closed: {:?}", err.0);
         };
 
         if let Err(err) = rx.await {
-            error!(log, "DumpSetup failed to await update"; "err" => ?err);
+            error!(log, "DebugCollector failed to await update"; "err" => ?err);
         }
     }
 
@@ -383,7 +383,7 @@ impl DumpSetup {
         info!(log, "requesting archive of former zone root");
         let zone_root = zone_root.to_owned();
         let zone_name = file_name.to_string();
-        let cmd = DumpSetupCmd::ArchiveFormerZoneRoot {
+        let cmd = DebugCollectorCmd::ArchiveFormerZoneRoot {
             zone_root,
             zone_name,
             completion_tx,
@@ -392,7 +392,7 @@ impl DumpSetup {
             error!(
                 log,
                 "failed to request archive of former zone root";
-                "error" => "DumpSetup channel closed"
+                "error" => "DebugCollector channel closed"
             );
         }
     }
@@ -603,13 +603,13 @@ fn safe_to_delete(path: &Utf8Path, meta: &std::fs::Metadata) -> bool {
     return true;
 }
 
-impl DumpSetupWorker {
+impl DebugCollectorWorker {
     fn new(
         coredumpadm_invoker: Box<dyn CoreDumpAdmInvoker + Send + Sync>,
         zfs_invoker: Box<dyn ZfsInvoker + Send + Sync>,
         zone_invoker: Box<dyn ZoneInvoker + Send + Sync>,
         log: Logger,
-        rx: Receiver<DumpSetupCmd>,
+        rx: Receiver<DebugCollectorCmd>,
     ) -> Self {
         Self {
             core_dataset_names: vec![],
@@ -630,7 +630,7 @@ impl DumpSetupWorker {
     }
 
     async fn poll_file_archival(mut self) {
-        info!(self.log, "DumpSetup poll loop started.");
+        info!(self.log, "DebugCollector poll loop started.");
 
         // A oneshot which helps callers track when updates have propagated.
         //
@@ -642,7 +642,7 @@ impl DumpSetupWorker {
         loop {
             match tokio::time::timeout(ARCHIVAL_INTERVAL, self.rx.recv()).await
             {
-                Ok(Some(DumpSetupCmd::UpdateDumpdevSetup {
+                Ok(Some(DebugCollectorCmd::UpdateDumpdevSetup {
                     dump_slices,
                     debug_datasets,
                     core_datasets,
@@ -656,7 +656,7 @@ impl DumpSetupWorker {
                         core_datasets,
                     );
                 }
-                Ok(Some(DumpSetupCmd::ArchiveFormerZoneRoot {
+                Ok(Some(DebugCollectorCmd::ArchiveFormerZoneRoot {
                     zone_root,
                     zone_name,
                     completion_tx,
@@ -1586,7 +1586,7 @@ mod tests {
         );
         const NOT_MOUNTED_INTERNAL: &str =
             "oxi_acab2069-6e63-6c75-de73-20c06c756db0";
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [(
@@ -1641,7 +1641,7 @@ mod tests {
             name: ZpoolName::from_str(ERROR_INTERNAL).unwrap(),
         };
         const ZPOOL_MNT: &str = "/path/to/internal/zpool";
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [
@@ -1732,7 +1732,7 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_savecore_and_dumpadm_not_called_when_occupied_and_no_dir",
         );
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::<FakeZfs>::default(),
             Box::<FakeZone>::default(),
@@ -1760,7 +1760,7 @@ mod tests {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_dumpadm_called_when_vacant_slice_but_no_dir",
         );
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::<FakeZfs>::default(),
             Box::<FakeZone>::default(),
@@ -1791,7 +1791,7 @@ mod tests {
         const MOUNTED_EXTERNAL: &str =
             "oxp_446f6e74-4469-6557-6f6e-646572696e67";
         const ZPOOL_MNT: &str = "/path/to/external/zpool";
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [(
@@ -1853,7 +1853,7 @@ mod tests {
             "oxi_474e554e-6174-616c-6965-4e677579656e";
         const MOUNTED_EXTERNAL: &str =
             "oxp_446f6e74-4469-6557-6f6e-646572696e67";
-        let mut worker = DumpSetupWorker::new(
+        let mut worker = DebugCollectorWorker::new(
             Box::<FakeCoreDumpAdm>::default(),
             Box::new(FakeZfs {
                 zpool_props: [
@@ -1981,15 +1981,15 @@ mod tests {
             }
         }
 
-        async fn new_dump_setup_worker(
+        async fn new_debug_collector_worker(
             &self,
             used: u64,
             available: u64,
-        ) -> DumpSetupWorker {
+        ) -> DebugCollectorWorker {
             let tempdir_path = self.tempdir.path().to_string();
             const MOUNTED_EXTERNAL: &str =
                 "oxp_446f6e74-4469-6557-6f6e-646572696e67";
-            let mut worker = DumpSetupWorker::new(
+            let mut worker = DebugCollectorWorker::new(
                 Box::<FakeCoreDumpAdm>::default(),
                 Box::new(FakeZfs {
                     zpool_props: [
@@ -2190,7 +2190,7 @@ mod tests {
             USED, CAPACITY,
         );
 
-        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+        let worker = files.new_debug_collector_worker(USED, AVAILABLE).await;
 
         // Before we cleanup: All files in "debug" exist
         files.check_all_files_exist();
@@ -2232,7 +2232,7 @@ mod tests {
             USED, CAPACITY,
         );
 
-        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+        let worker = files.new_debug_collector_worker(USED, AVAILABLE).await;
 
         // Before we cleanup: All files in "debug" exist
         files.check_all_files_exist();
@@ -2290,7 +2290,7 @@ mod tests {
             USED, CAPACITY,
         );
 
-        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+        let worker = files.new_debug_collector_worker(USED, AVAILABLE).await;
 
         // Before we cleanup: All files in "debug" exist
         files.check_all_files_exist();
@@ -2351,7 +2351,7 @@ mod tests {
             USED, CAPACITY,
         );
 
-        let worker = files.new_dump_setup_worker(USED, AVAILABLE).await;
+        let worker = files.new_debug_collector_worker(USED, AVAILABLE).await;
 
         // Before we cleanup: All files in "debug" exist
         files.check_all_files_exist();
