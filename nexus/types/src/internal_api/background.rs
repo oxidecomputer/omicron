@@ -15,6 +15,7 @@ use omicron_uuid_kinds::AlertReceiverUuid;
 use omicron_uuid_kinds::AlertUuid;
 use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::SitrepUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::TufRepoUuid;
@@ -883,6 +884,25 @@ pub enum SitrepLoadStatus {
 pub struct SitrepGcStatus {
     pub orphaned_sitreps_found: usize,
     pub orphaned_sitreps_deleted: usize,
+    pub errors: Vec<String>,
+}
+
+/// The status of a `fm_sitrep_execution` background task activation.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SitrepExecutionStatus {
+    NoSitrep,
+    Executed { sitrep_id: SitrepUuid, alerts: SitrepAlertRequestStatus },
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SitrepAlertRequestStatus {
+    /// The total number of alerts requested by the current sitrep.
+    pub total_alerts_requested: usize,
+    /// The total number of alerts which were *first* requested in the current sitrep.
+    pub current_sitrep_alerts_requested: usize,
+    /// The number of alerts created by this activation.
+    pub alerts_created: usize,
+    /// Errors that occurred during this activation.
     pub errors: Vec<String>,
 }
 
