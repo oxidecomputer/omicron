@@ -2,7 +2,7 @@
 -- 
 -- LRTQ configurations are always epoch 1, and any subsequent trust quorum
 -- configuration must have epoch > 1.
-CREATE TABLE IF NOT EXISTS omicron.public.lrtq_members (
+CREATE TABLE IF NOT EXISTS omicron.public.lrtq_member (
     -- Foreign key into the rack table
     rack_id UUID NOT NULL,
 

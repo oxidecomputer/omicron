@@ -87,6 +87,7 @@ mod silo_auth_settings;
 mod switch_interface;
 mod switch_port;
 mod target_release;
+mod trust_quorum;
 mod v2p_mapping;
 mod vmm_state;
 mod webhook_delivery;
