@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     --
     -- Salt is a hex-encoded string
     encrypted_rack_secrets_salt: String(64),
-    encrypted_rack_secrets TEXT,
+    encrypted_rack_secrets BYTES,
 
     -- Each rack has its own trust quorum
     PRIMARY KEY (rack_id, epoch)
