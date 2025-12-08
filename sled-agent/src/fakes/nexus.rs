@@ -19,7 +19,7 @@ use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use sled_agent_api::VmmPathParam;
+use sled_agent_types_migrations::v1::params::VmmPathParam;
 
 /// Implements a fake Nexus.
 ///

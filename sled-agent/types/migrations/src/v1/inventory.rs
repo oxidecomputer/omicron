@@ -2,7 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Inventory types shared between Nexus and sled-agent.
+//! Inventory types for Sled Agent API versions 1-3.
+//!
+//! This module contains:
+//! - v1-specific types: `Inventory`, `OmicronSledConfig`, `OmicronZoneConfig`,
+//!   `OmicronZoneType` (without `lockstep_port` in Nexus variant), and related
+//!   types that use NetworkInterface v1 (single IP, not dual-stack).
+//! - Shared types that are identical across all versions: `InventoryDisk`,
+//!   `InventoryZpool`, `InventoryDataset`, `SledRole`, `ZoneKind`, etc.
+//!
+//! Per RFD 619, types are defined in the earliest version they appear in.
+//! Later versions (v9, v10) re-export unchanged types from here.
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Write};
@@ -16,33 +26,29 @@ use iddqd::IdOrdItem;
 use iddqd::IdOrdMap;
 use iddqd::id_upcast;
 use indent_write::fmt::IndentWriter;
-use omicron_common::disk::{DatasetKind, DatasetName, M2Slot};
-use omicron_common::ledger::Ledgerable;
+use omicron_common::api::external::{ByteCount, Generation};
+use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
+use omicron_common::disk::{
+    DatasetConfig, DatasetName, DiskVariant, M2Slot, OmicronPhysicalDiskConfig,
+};
 use omicron_common::snake_case_result;
 use omicron_common::snake_case_result::SnakeCaseResult;
-use omicron_common::update::OmicronZoneManifestSource;
-use omicron_common::{
-    api::{
-        external::{ByteCount, Generation},
-        internal::shared::{NetworkInterface, SourceNatConfig},
-    },
-    disk::{DatasetConfig, DiskVariant, OmicronPhysicalDiskConfig},
-    update::ArtifactId,
-    zpool_name::ZpoolName,
-};
+use omicron_common::update::{ArtifactId, OmicronZoneManifestSource};
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::{
-    DatasetUuid, InternalZpoolUuid, MupdateUuid, OmicronZoneUuid,
+    DatasetUuid, InternalZpoolUuid, MupdateOverrideUuid, MupdateUuid,
+    OmicronZoneUuid, PhysicalDiskUuid, SledUuid, ZpoolUuid,
 };
-use omicron_uuid_kinds::{MupdateOverrideUuid, PhysicalDiskUuid};
-use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::schema::{Schema, SchemaObject};
-use schemars::{JsonSchema, SchemaGenerator};
+use schemars::{JsonSchema, r#gen::SchemaGenerator};
 use serde::{Deserialize, Serialize};
+use tufaceous_artifact::KnownArtifactKind;
 // Export these types for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
 pub use sled_hardware_types::{Baseboard, SledCpuFamily};
 use strum::EnumIter;
-use tufaceous_artifact::{ArtifactHash, KnownArtifactKind};
+use tufaceous_artifact::ArtifactHash;
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -110,143 +116,89 @@ impl From<illumos_utils::zfs::DatasetProperties> for InventoryDataset {
     }
 }
 
-/// Identity and basic status information about this sled agent
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Inventory {
-    pub sled_id: SledUuid,
-    pub sled_agent_address: SocketAddrV6,
-    pub sled_role: SledRole,
-    pub baseboard: Baseboard,
-    pub usable_hardware_threads: u32,
-    pub usable_physical_ram: ByteCount,
-    pub cpu_family: SledCpuFamily,
-    pub reservoir_size: ByteCount,
-    pub disks: Vec<InventoryDisk>,
-    pub zpools: Vec<InventoryZpool>,
-    pub datasets: Vec<InventoryDataset>,
-    pub ledgered_sled_config: Option<OmicronSledConfig>,
-    pub reconciler_status: ConfigReconcilerInventoryStatus,
-    pub last_reconciliation: Option<ConfigReconcilerInventory>,
-    pub zone_image_resolver: ZoneImageResolverInventory,
-}
-
-/// Describes the last attempt made by the sled-agent-config-reconciler to
-/// reconcile the current sled config against the actual state of the sled.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+/// Describes the role of the sled within the rack.
+///
+/// Note that this may change if the sled is physically moved
+/// within the rack.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
-pub struct ConfigReconcilerInventory {
-    pub last_reconciled_config: OmicronSledConfig,
-    pub external_disks:
-        BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
-    pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
-    pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
-    pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
-    pub boot_partitions: BootPartitionContents,
-    /// The result of removing the mupdate override file on disk.
-    ///
-    /// `None` if `remove_mupdate_override` was not provided in the sled config.
-    pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
+pub enum SledRole {
+    /// The sled is a general compute sled.
+    Gimlet,
+    /// The sled is attached to the network switch, and has additional
+    /// responsibilities.
+    Scrimlet,
 }
 
-impl ConfigReconcilerInventory {
-    /// Iterate over all running zones as reported by the last reconciliation
-    /// result.
+/// Describes the desired contents of a host phase 2 slot (i.e., the boot
+/// partition on one of the internal M.2 drives).
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum HostPhase2DesiredContents {
+    /// Do not change the current contents.
     ///
-    /// This includes zones that are both present in `last_reconciled_config`
-    /// and whose status in `zones` indicates "successfully running".
-    pub fn running_omicron_zones(
-        &self,
-    ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.zones.iter().filter_map(|(zone_id, result)| match result {
-            ConfigReconcilerInventoryResult::Ok => {
-                self.last_reconciled_config.zones.get(zone_id)
-            }
-            ConfigReconcilerInventoryResult::Err { .. } => None,
-        })
-    }
+    /// We use this value when we've detected a sled has been mupdated (and we
+    /// don't want to overwrite phase 2 images until we understand how to
+    /// recover from that mupdate) and as the default value when reading an
+    /// [`OmicronSledConfig`] that was ledgered before this concept existed.
+    CurrentContents,
 
-    /// Iterate over all zones contained in the most-recently-reconciled sled
-    /// config and report their status as of that reconciliation.
-    pub fn reconciled_omicron_zones(
-        &self,
-    ) -> impl Iterator<Item = (&OmicronZoneConfig, &ConfigReconcilerInventoryResult)>
-    {
-        // `self.zones` may contain zone IDs that aren't present in
-        // `last_reconciled_config` at all, if we failed to _shut down_ zones
-        // that are no longer present in the config. We use `filter_map` to
-        // strip those out, and only report on the configured zones.
-        self.zones.iter().filter_map(|(zone_id, result)| {
-            let config = self.last_reconciled_config.zones.get(zone_id)?;
-            Some((config, result))
-        })
-    }
-
-    /// Given a sled config, produce a reconciler result that sled-agent could
-    /// have emitted if reconciliation succeeded.
+    /// Set the phase 2 slot to the given artifact.
     ///
-    /// This method should only be used by tests and dev tools; real code should
-    /// look at the actual `last_reconciliation` value from the parent
-    /// [`Inventory`].
-    pub fn debug_assume_success(config: OmicronSledConfig) -> Self {
-        let mut ret = Self {
-            // These fields will be filled in by `debug_update_assume_success`.
-            last_reconciled_config: OmicronSledConfig::default(),
-            external_disks: BTreeMap::new(),
-            datasets: BTreeMap::new(),
-            orphaned_datasets: IdOrdMap::new(),
-            zones: BTreeMap::new(),
-            remove_mupdate_override: None,
+    /// The artifact will come from an unpacked and distributed TUF repo.
+    Artifact { hash: ArtifactHash },
+}
 
-            // These fields will not.
-            boot_partitions: BootPartitionContents::debug_assume_success(),
-        };
-
-        ret.debug_update_assume_success(config);
-
-        ret
+impl HostPhase2DesiredContents {
+    /// The artifact hash described by `self`, if it has one.
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        match self {
+            Self::CurrentContents => None,
+            Self::Artifact { hash } => Some(*hash),
+        }
     }
+}
 
-    /// Given a sled config, update an existing reconciler result to simulate an
-    /// output that sled-agent could have emitted if reconciliation succeeded.
-    ///
-    /// This method should only be used by tests and dev tools; real code should
-    /// look at the actual `last_reconciliation` value from the parent
-    /// [`Inventory`].
-    pub fn debug_update_assume_success(&mut self, config: OmicronSledConfig) {
-        let external_disks = config
-            .disks
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let datasets = config
-            .datasets
-            .iter()
-            .map(|d| (d.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let zones = config
-            .zones
-            .iter()
-            .map(|z| (z.id, ConfigReconcilerInventoryResult::Ok))
-            .collect();
-        let remove_mupdate_override =
-            config.remove_mupdate_override.map(|_| {
-                RemoveMupdateOverrideInventory {
-                    boot_disk_result: Ok(
-                        RemoveMupdateOverrideBootSuccessInventory::Removed,
-                    ),
-                    non_boot_message: "mupdate override successfully removed \
-                                       on non-boot disks"
-                        .to_owned(),
-                }
-            });
+/// Describes the desired contents for both host phase 2 slots.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct HostPhase2DesiredSlots {
+    pub slot_a: HostPhase2DesiredContents,
+    pub slot_b: HostPhase2DesiredContents,
+}
 
-        self.last_reconciled_config = config;
-        self.external_disks = external_disks;
-        self.datasets = datasets;
-        self.orphaned_datasets = IdOrdMap::new();
-        self.zones = zones;
-        self.remove_mupdate_override = remove_mupdate_override;
+impl HostPhase2DesiredSlots {
+    /// Return a `HostPhase2DesiredSlots` with both slots set to
+    /// [`HostPhase2DesiredContents::CurrentContents`]; i.e., "make no changes
+    /// to the current contents of either slot".
+    pub const fn current_contents() -> Self {
+        Self {
+            slot_a: HostPhase2DesiredContents::CurrentContents,
+            slot_b: HostPhase2DesiredContents::CurrentContents,
+        }
     }
+}
+
+/// Describes a persistent ZFS dataset associated with an Omicron zone
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Diffable,
+)]
+pub struct OmicronZoneDataset {
+    pub pool_name: ZpoolName,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
@@ -393,28 +345,6 @@ impl From<Result<(), String>> for ConfigReconcilerInventoryResult {
             Err(message) => Self::Err { message },
         }
     }
-}
-
-/// Status of the sled-agent-config-reconciler task.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum ConfigReconcilerInventoryStatus {
-    /// The reconciler task has not yet run for the first time since sled-agent
-    /// started.
-    NotYetRun,
-    /// The reconciler task is actively running.
-    Running {
-        config: Box<OmicronSledConfig>,
-        started_at: DateTime<Utc>,
-        running_for: Duration,
-    },
-    /// The reconciler task is currently idle, but previously did complete a
-    /// reconciliation attempt.
-    ///
-    /// This variant does not include the `OmicronSledConfig` used in the last
-    /// attempt, because that's always available via
-    /// [`ConfigReconcilerInventory::last_reconciled_config`].
-    Idle { completed_at: DateTime<Utc>, ran_for: Duration },
 }
 
 /// Inventory representation of zone image resolver status and health.
@@ -957,193 +887,7 @@ impl fmt::Display for MupdateOverrideNonBootInventoryDisplay<'_> {
     }
 }
 
-/// Describes the role of the sled within the rack.
-///
-/// Note that this may change if the sled is physically moved
-/// within the rack.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum SledRole {
-    /// The sled is a general compute sled.
-    Gimlet,
-    /// The sled is attached to the network switch, and has additional
-    /// responsibilities.
-    Scrimlet,
-}
-
-/// Describes the desired contents of a host phase 2 slot (i.e., the boot
-/// partition on one of the internal M.2 drives).
-#[derive(
-    Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum HostPhase2DesiredContents {
-    /// Do not change the current contents.
-    ///
-    /// We use this value when we've detected a sled has been mupdated (and we
-    /// don't want to overwrite phase 2 images until we understand how to
-    /// recover from that mupdate) and as the default value when reading an
-    /// [`OmicronSledConfig`] that was ledgered before this concept existed.
-    CurrentContents,
-
-    /// Set the phase 2 slot to the given artifact.
-    ///
-    /// The artifact will come from an unpacked and distributed TUF repo.
-    Artifact { hash: ArtifactHash },
-}
-
-impl HostPhase2DesiredContents {
-    /// The artifact hash described by `self`, if it has one.
-    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
-        match self {
-            Self::CurrentContents => None,
-            Self::Artifact { hash } => Some(*hash),
-        }
-    }
-}
-
-/// Describes the desired contents for both host phase 2 slots.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub struct HostPhase2DesiredSlots {
-    pub slot_a: HostPhase2DesiredContents,
-    pub slot_b: HostPhase2DesiredContents,
-}
-
-impl HostPhase2DesiredSlots {
-    /// Return a `HostPhase2DesiredSlots` with both slots set to
-    /// [`HostPhase2DesiredContents::CurrentContents`]; i.e., "make no changes
-    /// to the current contents of either slot".
-    pub const fn current_contents() -> Self {
-        Self {
-            slot_a: HostPhase2DesiredContents::CurrentContents,
-            slot_b: HostPhase2DesiredContents::CurrentContents,
-        }
-    }
-}
-
-/// Describes the set of Reconfigurator-managed configuration elements of a sled
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct OmicronSledConfig {
-    pub generation: Generation,
-    // Serialize and deserialize disks, datasets, and zones as maps for
-    // backwards compatibility. Newer IdOrdMaps should not use IdOrdMapAsMap.
-    #[serde(
-        with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronPhysicalDiskConfig>"
-    )]
-    pub disks: IdOrdMap<OmicronPhysicalDiskConfig>,
-    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<DatasetConfig>")]
-    pub datasets: IdOrdMap<DatasetConfig>,
-    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronZoneConfig>")]
-    pub zones: IdOrdMap<OmicronZoneConfig>,
-    pub remove_mupdate_override: Option<MupdateOverrideUuid>,
-    #[serde(default = "HostPhase2DesiredSlots::current_contents")]
-    pub host_phase_2: HostPhase2DesiredSlots,
-}
-
-impl Default for OmicronSledConfig {
-    fn default() -> Self {
-        Self {
-            generation: Generation::new(),
-            disks: IdOrdMap::default(),
-            datasets: IdOrdMap::default(),
-            zones: IdOrdMap::default(),
-            remove_mupdate_override: None,
-            host_phase_2: HostPhase2DesiredSlots::current_contents(),
-        }
-    }
-}
-
-impl Ledgerable for OmicronSledConfig {
-    fn is_newer_than(&self, other: &Self) -> bool {
-        self.generation > other.generation
-    }
-
-    fn generation_bump(&mut self) {
-        // DO NOTHING!
-        //
-        // Generation bumps must only ever come from nexus and will be encoded
-        // in the struct itself
-    }
-}
-
-/// Describes the set of Omicron-managed zones running on a sled
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronZonesConfig {
-    /// generation number of this configuration
-    ///
-    /// This generation number is owned by the control plane (i.e., RSS or
-    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
-    /// should not be bumped within Sled Agent.
-    ///
-    /// Sled Agent rejects attempts to set the configuration to a generation
-    /// older than the one it's currently running.
-    pub generation: Generation,
-
-    /// list of running zones
-    pub zones: Vec<OmicronZoneConfig>,
-}
-
-impl OmicronZonesConfig {
-    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
-    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
-}
-
-/// Describes one Omicron-managed zone running on a sled
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-pub struct OmicronZoneConfig {
-    pub id: OmicronZoneUuid,
-
-    /// The pool on which we'll place this zone's root filesystem.
-    ///
-    /// Note that the root filesystem is transient -- the sled agent is
-    /// permitted to destroy this dataset each time the zone is initialized.
-    pub filesystem_pool: Option<ZpoolName>,
-    pub zone_type: OmicronZoneType,
-    // Use `InstallDataset` if this field is not present in a deserialized
-    // blueprint or ledger.
-    #[serde(default = "OmicronZoneImageSource::deserialize_default")]
-    pub image_source: OmicronZoneImageSource,
-}
-
-impl IdOrdItem for OmicronZoneConfig {
-    type Key<'a> = OmicronZoneUuid;
-
-    fn key(&self) -> Self::Key<'_> {
-        self.id
-    }
-
-    id_upcast!();
-}
-
-impl OmicronZoneConfig {
-    /// Returns the underlay IP address associated with this zone.
-    ///
-    /// Assumes all zone have exactly one underlay IP address (which is
-    /// currently true).
-    pub fn underlay_ip(&self) -> Ipv6Addr {
-        self.zone_type.underlay_ip()
-    }
-
-    pub fn zone_name(&self) -> String {
-        illumos_utils::running_zone::InstalledZone::get_zone_name(
-            self.zone_type.kind().zone_prefix(),
-            Some(self.id),
-        )
-    }
-
-    pub fn dataset_name(&self) -> Option<DatasetName> {
-        self.zone_type.dataset_name()
-    }
-}
-
-/// Describes a persistent ZFS dataset associated with an Omicron zone
+/// Where Sled Agent should get the image for a zone.
 #[derive(
     Clone,
     Debug,
@@ -1152,329 +896,49 @@ impl OmicronZoneConfig {
     JsonSchema,
     PartialEq,
     Eq,
+    Hash,
     PartialOrd,
     Ord,
-    Hash,
     Diffable,
 )]
-pub struct OmicronZoneDataset {
-    pub pool_name: ZpoolName,
-}
-
-/// Describes what kind of zone this is (i.e., what component is running in it)
-/// as well as any type-specific configuration
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum OmicronZoneType {
-    BoundaryNtp {
-        address: SocketAddrV6,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        domain: Option<String>,
-        /// The service vNIC providing outbound connectivity using OPTE.
-        nic: NetworkInterface,
-        /// The SNAT configuration for outbound connections.
-        snat_cfg: SourceNatConfig,
-    },
-
-    /// Type of clickhouse zone used for a single node clickhouse deployment
-    Clickhouse {
-        address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
-    },
-
-    /// A zone used to run a Clickhouse Keeper node
+pub enum OmicronZoneImageSource {
+    /// This zone's image source is whatever happens to be on the sled's
+    /// "install" dataset.
     ///
-    /// Keepers are only used in replicated clickhouse setups
-    ClickhouseKeeper {
-        address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
-    },
-
-    /// A zone used to run a Clickhouse Server in a replicated deployment
-    ClickhouseServer {
-        address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
-    },
-
-    CockroachDb {
-        address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
-    },
-
-    Crucible {
-        address: SocketAddrV6,
-        dataset: OmicronZoneDataset,
-    },
-    CruciblePantry {
-        address: SocketAddrV6,
-    },
-    ExternalDns {
-        dataset: OmicronZoneDataset,
-        /// The address at which the external DNS server API is reachable.
-        http_address: SocketAddrV6,
-        /// The address at which the external DNS server is reachable.
-        dns_address: SocketAddr,
-        /// The service vNIC providing external connectivity using OPTE.
-        nic: NetworkInterface,
-    },
-    InternalDns {
-        dataset: OmicronZoneDataset,
-        http_address: SocketAddrV6,
-        dns_address: SocketAddrV6,
-        /// The addresses in the global zone which should be created
-        ///
-        /// For the DNS service, which exists outside the sleds's typical subnet
-        /// - adding an address in the GZ is necessary to allow inter-zone
-        /// traffic routing.
-        gz_address: Ipv6Addr,
-
-        /// The address is also identified with an auxiliary bit of information
-        /// to ensure that the created global zone address can have a unique
-        /// name.
-        gz_address_index: u32,
-    },
-    InternalNtp {
-        address: SocketAddrV6,
-    },
-    Nexus {
-        /// The address at which the internal nexus server is reachable.
-        internal_address: SocketAddrV6,
-        /// The port at which the internal lockstep server is reachable. This
-        /// shares the same IP address with `internal_address`.
-        #[serde(default = "default_nexus_lockstep_port")]
-        lockstep_port: u16,
-        /// The address at which the external nexus server is reachable.
-        external_ip: IpAddr,
-        /// The service vNIC providing external connectivity using OPTE.
-        nic: NetworkInterface,
-        /// Whether Nexus's external endpoint should use TLS
-        external_tls: bool,
-        /// External DNS servers Nexus can use to resolve external hosts.
-        external_dns_servers: Vec<IpAddr>,
-    },
-    Oximeter {
-        address: SocketAddrV6,
-    },
+    /// This is whatever was put in place at the factory or by the latest
+    /// MUPdate. The image used here can vary by sled and even over time (if the
+    /// sled gets MUPdated again).
+    ///
+    /// Historically, this was the only source for zone images. In an system
+    /// with automated control-plane-driven update we expect to only use this
+    /// variant in emergencies where the system had to be recovered via MUPdate.
+    InstallDataset,
+    /// This zone's image source is the artifact matching this hash from the TUF
+    /// artifact store (aka "TUF repo depot").
+    ///
+    /// This originates from TUF repos uploaded to Nexus which are then
+    /// replicated out to all sleds.
+    Artifact { hash: ArtifactHash },
 }
 
-impl OmicronZoneType {
-    /// Returns the [`ZoneKind`] corresponding to this variant.
-    pub fn kind(&self) -> ZoneKind {
-        match self {
-            OmicronZoneType::BoundaryNtp { .. } => ZoneKind::BoundaryNtp,
-            OmicronZoneType::Clickhouse { .. } => ZoneKind::Clickhouse,
-            OmicronZoneType::ClickhouseKeeper { .. } => {
-                ZoneKind::ClickhouseKeeper
-            }
-            OmicronZoneType::ClickhouseServer { .. } => {
-                ZoneKind::ClickhouseServer
-            }
-            OmicronZoneType::CockroachDb { .. } => ZoneKind::CockroachDb,
-            OmicronZoneType::Crucible { .. } => ZoneKind::Crucible,
-            OmicronZoneType::CruciblePantry { .. } => ZoneKind::CruciblePantry,
-            OmicronZoneType::ExternalDns { .. } => ZoneKind::ExternalDns,
-            OmicronZoneType::InternalDns { .. } => ZoneKind::InternalDns,
-            OmicronZoneType::InternalNtp { .. } => ZoneKind::InternalNtp,
-            OmicronZoneType::Nexus { .. } => ZoneKind::Nexus,
-            OmicronZoneType::Oximeter { .. } => ZoneKind::Oximeter,
+impl OmicronZoneImageSource {
+    /// Return the artifact hash used for the zone image, if the zone's image
+    /// source is from the artifact store.
+    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
+        if let OmicronZoneImageSource::Artifact { hash } = self {
+            Some(*hash)
+        } else {
+            None
         }
     }
 
-    /// Does this zone require time synchronization before it is initialized?"
-    ///
-    /// This function is somewhat conservative - the set of services
-    /// that can be launched before timesync has completed is intentionally kept
-    /// small, since it would be easy to add a service that expects time to be
-    /// reasonably synchronized.
-    pub fn requires_timesync(&self) -> bool {
-        match self {
-            // These zones can be initialized and started before time has been
-            // synchronized. For the NTP zones, this should be self-evident --
-            // we need the NTP zone to actually perform time synchronization!
-            //
-            // The DNS zone is a bit of an exception here, since the NTP zone
-            // itself may rely on DNS lookups as a dependency.
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::InternalDns { .. } => false,
-            _ => true,
-        }
+    // See `OmicronZoneConfig`. This is a separate function instead of being
+    // `impl Default` because we don't want to accidentally use this default
+    // outside of `serde(default)`.
+    pub fn deserialize_default() -> Self {
+        OmicronZoneImageSource::InstallDataset
     }
-
-    /// Returns the underlay IP address associated with this zone.
-    ///
-    /// Assumes all zone have exactly one underlay IP address (which is
-    /// currently true).
-    pub fn underlay_ip(&self) -> Ipv6Addr {
-        match self {
-            OmicronZoneType::BoundaryNtp { address, .. }
-            | OmicronZoneType::Clickhouse { address, .. }
-            | OmicronZoneType::ClickhouseKeeper { address, .. }
-            | OmicronZoneType::ClickhouseServer { address, .. }
-            | OmicronZoneType::CockroachDb { address, .. }
-            | OmicronZoneType::Crucible { address, .. }
-            | OmicronZoneType::CruciblePantry { address }
-            | OmicronZoneType::ExternalDns { http_address: address, .. }
-            | OmicronZoneType::InternalNtp { address }
-            | OmicronZoneType::Nexus { internal_address: address, .. }
-            | OmicronZoneType::Oximeter { address } => *address.ip(),
-            OmicronZoneType::InternalDns {
-                http_address: address,
-                dns_address,
-                ..
-            } => {
-                // InternalDns is the only variant that carries two
-                // `SocketAddrV6`s that are both on the underlay network. We
-                // expect these to have the same IP address.
-                debug_assert_eq!(address.ip(), dns_address.ip());
-                *address.ip()
-            }
-        }
-    }
-
-    /// Identifies whether this is an NTP zone
-    pub fn is_ntp(&self) -> bool {
-        match self {
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. } => true,
-
-            OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::ExternalDns { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// Identifies whether this is a boundary NTP zone
-    pub fn is_boundary_ntp(&self) -> bool {
-        matches!(self, OmicronZoneType::BoundaryNtp { .. })
-    }
-
-    /// Identifies whether this is a Nexus zone
-    pub fn is_nexus(&self) -> bool {
-        match self {
-            OmicronZoneType::Nexus { .. } => true,
-
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::ExternalDns { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// Identifies whether this a Crucible (not Crucible pantry) zone
-    pub fn is_crucible(&self) -> bool {
-        match self {
-            OmicronZoneType::Crucible { .. } => true,
-
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::ExternalDns { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. } => false,
-        }
-    }
-
-    /// This zone's external IP
-    pub fn external_ip(&self) -> Option<IpAddr> {
-        match self {
-            OmicronZoneType::Nexus { external_ip, .. } => Some(*external_ip),
-            OmicronZoneType::ExternalDns { dns_address, .. } => {
-                Some(dns_address.ip())
-            }
-            OmicronZoneType::BoundaryNtp { snat_cfg, .. } => Some(snat_cfg.ip),
-
-            OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => None,
-        }
-    }
-
-    /// The service vNIC providing external connectivity to this zone
-    pub fn service_vnic(&self) -> Option<&NetworkInterface> {
-        match self {
-            OmicronZoneType::Nexus { nic, .. }
-            | OmicronZoneType::ExternalDns { nic, .. }
-            | OmicronZoneType::BoundaryNtp { nic, .. } => Some(nic),
-
-            OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Clickhouse { .. }
-            | OmicronZoneType::ClickhouseKeeper { .. }
-            | OmicronZoneType::ClickhouseServer { .. }
-            | OmicronZoneType::CockroachDb { .. }
-            | OmicronZoneType::Crucible { .. }
-            | OmicronZoneType::CruciblePantry { .. }
-            | OmicronZoneType::InternalDns { .. }
-            | OmicronZoneType::Oximeter { .. } => None,
-        }
-    }
-
-    /// If this kind of zone has an associated dataset, return the dataset's
-    /// name. Otherwise, return `None`.
-    pub fn dataset_name(&self) -> Option<DatasetName> {
-        let (dataset, dataset_kind) = match self {
-            OmicronZoneType::BoundaryNtp { .. }
-            | OmicronZoneType::InternalNtp { .. }
-            | OmicronZoneType::Nexus { .. }
-            | OmicronZoneType::Oximeter { .. }
-            | OmicronZoneType::CruciblePantry { .. } => None,
-            OmicronZoneType::Clickhouse { dataset, .. } => {
-                Some((dataset, DatasetKind::Clickhouse))
-            }
-            OmicronZoneType::ClickhouseKeeper { dataset, .. } => {
-                Some((dataset, DatasetKind::ClickhouseKeeper))
-            }
-            OmicronZoneType::ClickhouseServer { dataset, .. } => {
-                Some((dataset, DatasetKind::ClickhouseServer))
-            }
-            OmicronZoneType::CockroachDb { dataset, .. } => {
-                Some((dataset, DatasetKind::Cockroach))
-            }
-            OmicronZoneType::Crucible { dataset, .. } => {
-                Some((dataset, DatasetKind::Crucible))
-            }
-            OmicronZoneType::ExternalDns { dataset, .. } => {
-                Some((dataset, DatasetKind::ExternalDns))
-            }
-            OmicronZoneType::InternalDns { dataset, .. } => {
-                Some((dataset, DatasetKind::InternalDns))
-            }
-        }?;
-
-        Some(DatasetName::new(dataset.pool_name, dataset_kind))
-    }
-}
-
-fn default_nexus_lockstep_port() -> u16 {
-    omicron_common::address::NEXUS_LOCKSTEP_PORT
 }
 
 /// Like [`OmicronZoneType`], but without any associated data.
@@ -1719,111 +1183,235 @@ impl ZoneKind {
     }
 }
 
-/// Where Sled Agent should get the image for a zone.
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Diffable,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum OmicronZoneImageSource {
-    /// This zone's image source is whatever happens to be on the sled's
-    /// "install" dataset.
-    ///
-    /// This is whatever was put in place at the factory or by the latest
-    /// MUPdate. The image used here can vary by sled and even over time (if the
-    /// sled gets MUPdated again).
-    ///
-    /// Historically, this was the only source for zone images. In an system
-    /// with automated control-plane-driven update we expect to only use this
-    /// variant in emergencies where the system had to be recovered via MUPdate.
-    InstallDataset,
-    /// This zone's image source is the artifact matching this hash from the TUF
-    /// artifact store (aka "TUF repo depot").
-    ///
-    /// This originates from TUF repos uploaded to Nexus which are then
-    /// replicated out to all sleds.
-    Artifact { hash: ArtifactHash },
-}
-
-impl OmicronZoneImageSource {
-    /// Return the artifact hash used for the zone image, if the zone's image
-    /// source is from the artifact store.
-    pub fn artifact_hash(&self) -> Option<ArtifactHash> {
-        if let OmicronZoneImageSource::Artifact { hash } = self {
-            Some(*hash)
-        } else {
-            None
-        }
-    }
-
-    // See `OmicronZoneConfig`. This is a separate function instead of being
-    // `impl Default` because we don't want to accidentally use this default
-    // outside of `serde(default)`.
-    pub fn deserialize_default() -> Self {
-        OmicronZoneImageSource::InstallDataset
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use omicron_common::api::external::Name;
-    use strum::IntoEnumIterator;
-
-    use super::*;
-
-    #[test]
-    fn test_name_prefixes() {
-        for zone_kind in ZoneKind::iter() {
-            let name_prefix = zone_kind.name_prefix();
-            name_prefix.parse::<Name>().unwrap_or_else(|e| {
-                panic!(
-                    "failed to parse name prefix {:?} for zone kind {:?}: {}",
-                    name_prefix, zone_kind, e
-                );
-            });
-        }
-    }
-
-    #[test]
-    fn test_zone_prefix_matches_artifact_in_install_dataset() {
-        for zone_kind in ZoneKind::iter() {
-            let zone_prefix = zone_kind.zone_prefix();
-            let expected_artifact = format!("{zone_prefix}.tar.gz");
-            assert_eq!(
-                expected_artifact,
-                zone_kind.artifact_in_install_dataset()
-            );
-        }
-    }
-
-    #[test]
-    fn test_artifact_id_to_install_dataset_file() {
-        for zone_kind in ZoneKind::iter() {
-            let artifact_id_name = zone_kind.artifact_id_name();
-            let expected_file = zone_kind.artifact_in_install_dataset();
-            assert_eq!(
-                Some(expected_file),
-                ZoneKind::artifact_id_name_to_install_dataset_file(
-                    artifact_id_name
-                )
-            );
-        }
-    }
-}
-
 // Used for schemars to be able to be used with camino:
 // See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
 fn path_schema(generator: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(generator).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
+}
+
+/// Identity and basic status information about this sled agent
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct Inventory {
+    pub sled_id: SledUuid,
+    pub sled_agent_address: SocketAddrV6,
+    pub sled_role: SledRole,
+    pub baseboard: Baseboard,
+    pub usable_hardware_threads: u32,
+    pub usable_physical_ram: ByteCount,
+    pub cpu_family: SledCpuFamily,
+    pub reservoir_size: ByteCount,
+    pub disks: Vec<InventoryDisk>,
+    pub zpools: Vec<InventoryZpool>,
+    pub datasets: Vec<InventoryDataset>,
+    pub ledgered_sled_config: Option<OmicronSledConfig>,
+    pub reconciler_status: ConfigReconcilerInventoryStatus,
+    pub last_reconciliation: Option<ConfigReconcilerInventory>,
+    pub zone_image_resolver: ZoneImageResolverInventory,
+}
+
+/// Describes the set of Reconfigurator-managed configuration elements of a sled
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct OmicronSledConfig {
+    pub generation: Generation,
+    // Serialize and deserialize disks, datasets, and zones as maps for
+    // backwards compatibility. Newer IdOrdMaps should not use IdOrdMapAsMap.
+    #[serde(
+        with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronPhysicalDiskConfig>"
+    )]
+    pub disks: IdOrdMap<OmicronPhysicalDiskConfig>,
+    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<DatasetConfig>")]
+    pub datasets: IdOrdMap<DatasetConfig>,
+    #[serde(with = "iddqd::id_ord_map::IdOrdMapAsMap::<OmicronZoneConfig>")]
+    pub zones: IdOrdMap<OmicronZoneConfig>,
+    pub remove_mupdate_override: Option<MupdateOverrideUuid>,
+    #[serde(default = "HostPhase2DesiredSlots::current_contents")]
+    pub host_phase_2: HostPhase2DesiredSlots,
+}
+
+/// Describes one Omicron-managed zone running on a sled
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct OmicronZoneConfig {
+    pub id: OmicronZoneUuid,
+
+    /// The pool on which we'll place this zone's root filesystem.
+    ///
+    /// Note that the root filesystem is transient -- the sled agent is
+    /// permitted to destroy this dataset each time the zone is initialized.
+    pub filesystem_pool: Option<ZpoolName>,
+    pub zone_type: OmicronZoneType,
+    // Use `InstallDataset` if this field is not present in a deserialized
+    // blueprint or ledger.
+    #[serde(default = "OmicronZoneImageSource::deserialize_default")]
+    pub image_source: OmicronZoneImageSource,
+}
+
+impl IdOrdItem for OmicronZoneConfig {
+    type Key<'a> = OmicronZoneUuid;
+
+    fn key(&self) -> Self::Key<'_> {
+        self.id
+    }
+
+    id_upcast!();
+}
+
+/// Describes what kind of zone this is (i.e., what component is running in it)
+/// as well as any type-specific configuration.
+///
+/// Note: This version does NOT have `lockstep_port` in the Nexus variant.
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OmicronZoneType {
+    BoundaryNtp {
+        address: SocketAddrV6,
+        ntp_servers: Vec<String>,
+        dns_servers: Vec<IpAddr>,
+        domain: Option<String>,
+        /// The service vNIC providing outbound connectivity using OPTE.
+        nic: NetworkInterface,
+        /// The SNAT configuration for outbound connections.
+        snat_cfg: SourceNatConfig,
+    },
+
+    /// Type of clickhouse zone used for a single node clickhouse deployment
+    Clickhouse {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    /// A zone used to run a Clickhouse Keeper node
+    ///
+    /// Keepers are only used in replicated clickhouse setups
+    ClickhouseKeeper {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    /// A zone used to run a Clickhouse Server in a replicated deployment
+    ClickhouseServer {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    CockroachDb {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+
+    Crucible {
+        address: SocketAddrV6,
+        dataset: OmicronZoneDataset,
+    },
+    CruciblePantry {
+        address: SocketAddrV6,
+    },
+    ExternalDns {
+        dataset: OmicronZoneDataset,
+        /// The address at which the external DNS server API is reachable.
+        http_address: SocketAddrV6,
+        /// The address at which the external DNS server is reachable.
+        dns_address: SocketAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+    },
+    InternalDns {
+        dataset: OmicronZoneDataset,
+        http_address: SocketAddrV6,
+        dns_address: SocketAddrV6,
+        /// The addresses in the global zone which should be created
+        ///
+        /// For the DNS service, which exists outside the sleds's typical subnet
+        /// - adding an address in the GZ is necessary to allow inter-zone
+        /// traffic routing.
+        gz_address: Ipv6Addr,
+
+        /// The address is also identified with an auxiliary bit of information
+        /// to ensure that the created global zone address can have a unique
+        /// name.
+        gz_address_index: u32,
+    },
+    InternalNtp {
+        address: SocketAddrV6,
+    },
+    /// Note: This variant does NOT have `lockstep_port` (added in v4).
+    Nexus {
+        /// The address at which the internal nexus server is reachable.
+        internal_address: SocketAddrV6,
+        /// The address at which the external nexus server is reachable.
+        external_ip: IpAddr,
+        /// The service vNIC providing external connectivity using OPTE.
+        nic: NetworkInterface,
+        /// Whether Nexus's external endpoint should use TLS
+        external_tls: bool,
+        /// External DNS servers Nexus can use to resolve external hosts.
+        external_dns_servers: Vec<IpAddr>,
+    },
+    Oximeter {
+        address: SocketAddrV6,
+    },
+}
+
+/// Describes the last attempt made by the sled-agent-config-reconciler to
+/// reconcile the current sled config against the actual state of the sled.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ConfigReconcilerInventory {
+    pub last_reconciled_config: OmicronSledConfig,
+    pub external_disks:
+        BTreeMap<PhysicalDiskUuid, ConfigReconcilerInventoryResult>,
+    pub datasets: BTreeMap<DatasetUuid, ConfigReconcilerInventoryResult>,
+    pub orphaned_datasets: IdOrdMap<OrphanedDataset>,
+    pub zones: BTreeMap<OmicronZoneUuid, ConfigReconcilerInventoryResult>,
+    pub boot_partitions: BootPartitionContents,
+    /// The result of removing the mupdate override file on disk.
+    ///
+    /// `None` if `remove_mupdate_override` was not provided in the sled config.
+    pub remove_mupdate_override: Option<RemoveMupdateOverrideInventory>,
+}
+
+/// Status of the sled-agent-config-reconciler task.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, JsonSchema, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ConfigReconcilerInventoryStatus {
+    /// The reconciler task has not yet run for the first time since sled-agent
+    /// started.
+    NotYetRun,
+    /// The reconciler task is actively running.
+    Running {
+        config: Box<OmicronSledConfig>,
+        started_at: DateTime<Utc>,
+        running_for: Duration,
+    },
+    /// The reconciler task is currently idle, but previously did complete a
+    /// reconciliation attempt.
+    ///
+    /// This variant does not include the `OmicronSledConfig` used in the last
+    /// attempt, because that's always available via
+    /// [`ConfigReconcilerInventory::last_reconciled_config`].
+    Idle { completed_at: DateTime<Utc>, ran_for: Duration },
+}
+
+/// Describes the set of Omicron-managed zones running on a sled
+#[derive(
+    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
+)]
+pub struct OmicronZonesConfig {
+    /// generation number of this configuration
+    ///
+    /// This generation number is owned by the control plane (i.e., RSS or
+    /// Nexus, depending on whether RSS-to-Nexus handoff has happened).  It
+    /// should not be bumped within Sled Agent.
+    ///
+    /// Sled Agent rejects attempts to set the configuration to a generation
+    /// older than the one it's currently running.
+    pub generation: Generation,
+
+    /// list of running zones
+    pub zones: Vec<OmicronZoneConfig>,
 }

@@ -16,16 +16,16 @@ use gateway_types::component::SpType;
 use iddqd::IdOrdMap;
 use indent_write::fmt::IndentWriter;
 use itertools::Itertools;
-use nexus_sled_agent_shared::inventory::{
+use omicron_common::disk::M2Slot;
+use omicron_uuid_kinds::{
+    DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
+};
+use sled_agent_types_migrations::latest::inventory::{
     BootImageHeader, BootPartitionContents, BootPartitionDetails,
     ConfigReconcilerInventory, ConfigReconcilerInventoryResult,
     ConfigReconcilerInventoryStatus, HostPhase2DesiredContents,
     OmicronSledConfig, OmicronZoneImageSource, OrphanedDataset,
     RemoveMupdateOverrideBootSuccessInventory,
-};
-use omicron_common::disk::M2Slot;
-use omicron_uuid_kinds::{
-    DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid, ZpoolUuid,
 };
 use std::collections::HashMap;
 use strum::IntoEnumIterator;

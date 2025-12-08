@@ -30,7 +30,6 @@ use nexus_lockstep_client::types::{
     IpRange, Ipv4Range, Ipv6Range, RackInitializationRequest,
     RackNetworkConfigV2,
 };
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::{
     BlueprintPhysicalDiskConfig, BlueprintPhysicalDiskDisposition,
     BlueprintZoneImageSource, blueprint_zone_type,
@@ -59,6 +58,7 @@ use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use rand::seq::IndexedRandom;
 use sled_agent_types::rack_init::RecoverySiloConfig;
+use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
 use slog::{Drain, Logger, info};
 use std::collections::HashMap;
 use std::net::IpAddr;

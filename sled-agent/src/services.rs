@@ -60,9 +60,6 @@ use internal_dns_resolver::Resolver;
 use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
 use internal_dns_types::names::DNS_ZONE;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
-use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, ZoneKind,
-};
 use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::LLDP_PORT;
@@ -92,6 +89,9 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use sled_agent_types::sled::SWITCH_ZONE_BASEBOARD_FILE;
 use sled_agent_types::zone_images::{
     MupdateOverrideReadError, PreparedOmicronZone,
+};
+use sled_agent_types_migrations::latest::inventory::{
+    OmicronZoneConfig, OmicronZoneType, ZoneKind,
 };
 use sled_agent_zone_images::{ZoneImageSourceResolver, ramdisk_file_source};
 use sled_hardware::DendriteAsic;

@@ -383,13 +383,13 @@ mod test {
     use clickhouse_admin_types::ClickhouseHost;
     use clickhouse_admin_types::KeeperId;
     use clickhouse_admin_types::ServerId;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::inventory::ZpoolName;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
     use std::collections::BTreeSet;
 
     fn test_data() -> (Vec<BlueprintZoneConfig>, ClickhouseClusterConfig) {

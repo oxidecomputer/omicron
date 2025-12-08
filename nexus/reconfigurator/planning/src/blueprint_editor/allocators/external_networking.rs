@@ -5,7 +5,6 @@
 use anyhow::bail;
 use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
@@ -23,6 +22,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::internal::shared::PrivateIpConfig;
 use omicron_common::api::internal::shared::PrivateIpConfigError;
 use omicron_common::api::internal::shared::SourceNatConfigError;
+use sled_agent_types_migrations::latest::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -676,7 +676,6 @@ impl TryFrom<(u16, u16)> for SnatPortRange {
 pub mod test {
     use super::*;
     use illumos_utils::zpool::ZpoolName;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneImageSource;
     use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
@@ -692,6 +691,7 @@ pub mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
     use slog_error_chain::InlineErrorChain;
     use std::net::SocketAddr;
     use test_strategy::proptest;

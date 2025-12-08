@@ -27,7 +27,6 @@ use nexus_db_schema::schema::{
     bp_pending_mgs_update_sp, bp_sled_metadata, bp_target,
     debug_log_blueprint_planning,
 };
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintPhysicalDiskDisposition;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
@@ -68,6 +67,7 @@ use omicron_uuid_kinds::{
     GenericUuid, MupdateOverrideKind, OmicronZoneKind, OmicronZoneUuid,
     PhysicalDiskKind, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
 };
+use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
 use std::net::{IpAddr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;

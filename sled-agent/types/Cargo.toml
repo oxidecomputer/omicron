@@ -15,10 +15,6 @@ camino.workspace = true
 chrono.workspace = true
 daft.workspace = true
 iddqd.workspace = true
-nexus-sled-agent-shared.workspace = true
-# Note: we're trying to avoid a dependency from sled-agent-types to nexus-types
-# because the correct direction of dependency is unclear. If there are types
-# common to both, put them in `omicron-common` or `nexus-sled-agent-shared`.
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true
@@ -29,6 +25,7 @@ serde.workspace = true
 serde_human_bytes.workspace = true
 serde_json.workspace = true
 sha3.workspace = true
+sled-agent-types-migrations.workspace = true
 sled-hardware-types.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true

@@ -34,7 +34,6 @@ use nexus_reconfigurator_simulation::{
 };
 use nexus_reconfigurator_simulation::{SimStateBuilder, SimTufRepoSource};
 use nexus_reconfigurator_simulation::{SimTufRepoDescription, Simulator};
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
 use nexus_types::deployment::execution::blueprint_internal_dns_config;
@@ -68,6 +67,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::{BlueprintUuid, MupdateOverrideUuid};
 use omicron_uuid_kinds::{CollectionUuid, MupdateUuid};
+use sled_agent_types_migrations::latest::inventory::ZoneKind;
 use slog_error_chain::InlineErrorChain;
 use std::borrow::Cow;
 use std::collections::BTreeSet;

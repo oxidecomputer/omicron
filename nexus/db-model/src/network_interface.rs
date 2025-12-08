@@ -16,7 +16,6 @@ use ipnetwork::IpNetwork;
 use nexus_db_schema::schema::instance_network_interface;
 use nexus_db_schema::schema::network_interface;
 use nexus_db_schema::schema::service_network_interface;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
@@ -31,6 +30,7 @@ use omicron_uuid_kinds::VnicUuid;
 use oxnet::IpNet;
 use oxnet::Ipv4Net;
 use oxnet::Ipv6Net;
+use sled_agent_types_migrations::latest::inventory::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
 

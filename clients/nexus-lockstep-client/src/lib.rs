@@ -64,7 +64,7 @@ progenitor::generate_api!(
         ReconfiguratorConfig = nexus_types::deployment::ReconfiguratorConfig,
         ReconfiguratorConfigParam = nexus_types::deployment::ReconfiguratorConfigParam,
         ReconfiguratorConfigView = nexus_types::deployment::ReconfiguratorConfigView,
-        RecoverySiloConfig = nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig,
+        RecoverySiloConfig = sled_agent_types_migrations::latest::rack_init::RecoverySiloConfig,
         SledAgentUpdateStatus = nexus_types::internal_api::views::SledAgentUpdateStatus,
         UpdateStatus = nexus_types::internal_api::views::UpdateStatus,
         ZoneStatus = nexus_types::internal_api::views::ZoneStatus,

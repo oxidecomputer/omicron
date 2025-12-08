@@ -823,7 +823,6 @@ mod tests {
     use nexus_db_model::IpPoolResourceType;
     use nexus_db_model::IpVersion;
     use nexus_db_model::Name;
-    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
     use nexus_types::deployment::OmicronZoneExternalSnatIp;
@@ -838,6 +837,7 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use sled_agent_types_migrations::latest::inventory::ZoneKind;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;

@@ -7,7 +7,6 @@
 
 use crate::blueprint_builder::BlueprintBuilder;
 use itertools::Itertools;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::CockroachdbUnsafeToShutdown;
@@ -16,6 +15,7 @@ use nexus_types::deployment::ZoneUnsafeToShutdown;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types_migrations::latest::inventory::ZoneKind;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 

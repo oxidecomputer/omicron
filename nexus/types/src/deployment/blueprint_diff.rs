@@ -21,11 +21,11 @@ use super::{
     zone_sort_key,
 };
 use daft::{Diffable, Leaf};
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::{CompressionAlgorithm, DatasetName};
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid, PhysicalDiskUuid};
+use sled_agent_types_migrations::latest::inventory::ZoneKind;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
 

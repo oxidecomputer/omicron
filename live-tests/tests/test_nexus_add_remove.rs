@@ -19,7 +19,6 @@ use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::planner::PlannerRng;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlannerConfig;
@@ -28,6 +27,7 @@ use nexus_types::deployment::blueprint_zone_type;
 use omicron_common::address::NEXUS_LOCKSTEP_PORT;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::poll::wait_for_condition;
+use sled_agent_types_migrations::latest::inventory::ZoneKind;
 use slog::{debug, info};
 use std::net::SocketAddrV6;
 use std::time::Duration;

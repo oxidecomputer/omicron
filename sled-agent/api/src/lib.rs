@@ -2,9 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::time::Duration;
-
 use camino::Utf8PathBuf;
 use dropshot::{
     Body, FreeformBody, Header, HttpError, HttpResponseAccepted,
@@ -13,54 +10,15 @@ use dropshot::{
     StreamingBody, TypedBody,
 };
 use dropshot_api_manager_types::api_versions;
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, SledRole,
-};
-use omicron_common::{
-    api::external::ByteCount,
-    api::external::Generation,
-    api::internal::{
-        nexus::{DiskRuntimeState, SledVmmState},
-        shared::{
-            ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
-            SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
-        },
-    },
-    disk::DiskVariant,
-    ledger::Ledgerable,
-};
-use omicron_uuid_kinds::{
-    DatasetUuid, ExternalZpoolUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
-};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use sled_agent_types::inventory::v9;
-use sled_agent_types::probes;
-use sled_agent_types::{
-    bootstore::BootstoreStatus,
-    disk::DiskEnsureBody,
-    early_networking::EarlyNetworkConfig,
-    firewall_rules::VpcFirewallRulesEnsureBody,
-    instance::{
-        InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastBody,
-        VmmPutStateBody, VmmPutStateResponse, VmmUnregisterResponse,
-    },
-    sled::AddSledRequest,
-    zone_bundle::{
-        BundleUtilization, CleanupContext, CleanupCount, PriorityOrder,
-        ZoneBundleId, ZoneBundleMetadata,
+use omicron_common::api::internal::{
+    nexus::{DiskRuntimeState, SledVmmState},
+    shared::{
+        ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+        SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
     },
 };
+use sled_agent_types_migrations::{v1, v3, v4, v6, v7, v9, v10};
 use sled_diagnostics::SledDiagnosticsQueryOutput;
-use tufaceous_artifact::ArtifactHash;
-use uuid::Uuid;
-
-/// Copies of data types that changed between v3 and v4.
-mod v3;
-/// Copies of data types that changed between v6 and v7.
-mod v6;
-/// Copies of data types that changed between v8 and v9.
-mod v8;
 
 api_versions!([
     // WHEN CHANGING THE API (part 1 of 2):
@@ -120,8 +78,11 @@ pub trait SledAgentApi {
     }]
     async fn zone_bundle_list_all(
         rqctx: RequestContext<Self::Context>,
-        query: Query<ZoneBundleFilter>,
-    ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError>;
+        query: Query<v1::params::ZoneBundleFilter>,
+    ) -> Result<
+        HttpResponseOk<Vec<v1::zone_bundle::ZoneBundleMetadata>>,
+        HttpError,
+    >;
 
     /// List the zone bundles that are available for a running zone.
     #[endpoint {
@@ -130,8 +91,11 @@ pub trait SledAgentApi {
     }]
     async fn zone_bundle_list(
         rqctx: RequestContext<Self::Context>,
-        params: Path<ZonePathParam>,
-    ) -> Result<HttpResponseOk<Vec<ZoneBundleMetadata>>, HttpError>;
+        params: Path<v1::params::ZonePathParam>,
+    ) -> Result<
+        HttpResponseOk<Vec<v1::zone_bundle::ZoneBundleMetadata>>,
+        HttpError,
+    >;
 
     /// Fetch the binary content of a single zone bundle.
     #[endpoint {
@@ -140,7 +104,7 @@ pub trait SledAgentApi {
     }]
     async fn zone_bundle_get(
         rqctx: RequestContext<Self::Context>,
-        params: Path<ZoneBundleId>,
+        params: Path<v1::zone_bundle::ZoneBundleId>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
 
     /// Delete a zone bundle.
@@ -150,7 +114,7 @@ pub trait SledAgentApi {
     }]
     async fn zone_bundle_delete(
         rqctx: RequestContext<Self::Context>,
-        params: Path<ZoneBundleId>,
+        params: Path<v1::zone_bundle::ZoneBundleId>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     /// Return utilization information about all zone bundles.
@@ -161,7 +125,12 @@ pub trait SledAgentApi {
     async fn zone_bundle_utilization(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<
-        HttpResponseOk<BTreeMap<Utf8PathBuf, BundleUtilization>>,
+        HttpResponseOk<
+            std::collections::BTreeMap<
+                Utf8PathBuf,
+                v1::zone_bundle::BundleUtilization,
+            >,
+        >,
         HttpError,
     >;
 
@@ -172,7 +141,7 @@ pub trait SledAgentApi {
     }]
     async fn zone_bundle_cleanup_context(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<CleanupContext>, HttpError>;
+    ) -> Result<HttpResponseOk<v1::zone_bundle::CleanupContext>, HttpError>;
 
     /// Update context used by the zone-bundle cleanup task.
     #[endpoint {
@@ -181,7 +150,7 @@ pub trait SledAgentApi {
     }]
     async fn zone_bundle_cleanup_context_update(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<CleanupContextUpdate>,
+        body: TypedBody<v1::params::CleanupContextUpdate>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Trigger a zone bundle cleanup.
@@ -191,7 +160,15 @@ pub trait SledAgentApi {
     }]
     async fn zone_bundle_cleanup(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BTreeMap<Utf8PathBuf, CleanupCount>>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<
+            std::collections::BTreeMap<
+                Utf8PathBuf,
+                v1::zone_bundle::CleanupCount,
+            >,
+        >,
+        HttpError,
+    >;
 
     /// List the zones that are currently managed by the sled agent.
     #[endpoint {
@@ -209,8 +186,11 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<SupportBundleListPathParam>,
-    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError>;
+        path_params: Path<v1::params::SupportBundleListPathParam>,
+    ) -> Result<
+        HttpResponseOk<Vec<v1::support_bundle::SupportBundleMetadata>>,
+        HttpError,
+    >;
 
     /// Starts creation of a support bundle within a particular dataset
     ///
@@ -229,8 +209,11 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_start_creation(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<SupportBundlePathParam>,
-    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
+        path_params: Path<v1::params::SupportBundlePathParam>,
+    ) -> Result<
+        HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
+        HttpError,
+    >;
 
     /// Transfers a chunk of a support bundle within a particular dataset
     #[endpoint {
@@ -240,10 +223,13 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_transfer(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleTransferQueryParams>,
+        path_params: Path<v1::params::SupportBundlePathParam>,
+        query_params: Query<v1::params::SupportBundleTransferQueryParams>,
         body: StreamingBody,
-    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
+    ) -> Result<
+        HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
+        HttpError,
+    >;
 
     /// Finalizes the creation of a support bundle
     ///
@@ -255,9 +241,12 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_finalize(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleFinalizeQueryParams>,
-    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
+        path_params: Path<v1::params::SupportBundlePathParam>,
+        query_params: Query<v1::params::SupportBundleFinalizeQueryParams>,
+    ) -> Result<
+        HttpResponseCreated<v1::support_bundle::SupportBundleMetadata>,
+        HttpError,
+    >;
 
     /// Fetch a support bundle from a particular dataset
     #[endpoint {
@@ -266,8 +255,8 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_download(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequestHeaders>,
-        path_params: Path<SupportBundlePathParam>,
+        headers: Header<v1::params::RangeRequestHeaders>,
+        path_params: Path<v1::params::SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
     /// Fetch a file within a support bundle from a particular dataset
@@ -277,8 +266,8 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_download_file(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequestHeaders>,
-        path_params: Path<SupportBundleFilePathParam>,
+        headers: Header<v1::params::RangeRequestHeaders>,
+        path_params: Path<v1::params::SupportBundleFilePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
     /// Fetch the index (list of files within a support bundle)
@@ -288,8 +277,8 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_index(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequestHeaders>,
-        path_params: Path<SupportBundlePathParam>,
+        headers: Header<v1::params::RangeRequestHeaders>,
+        path_params: Path<v1::params::SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
     /// Fetch metadata about a support bundle from a particular dataset
@@ -299,8 +288,8 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_head(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequestHeaders>,
-        path_params: Path<SupportBundlePathParam>,
+        headers: Header<v1::params::RangeRequestHeaders>,
+        path_params: Path<v1::params::SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
     /// Fetch metadata about a file within a support bundle from a particular dataset
@@ -310,8 +299,8 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_head_file(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequestHeaders>,
-        path_params: Path<SupportBundleFilePathParam>,
+        headers: Header<v1::params::RangeRequestHeaders>,
+        path_params: Path<v1::params::SupportBundleFilePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
     /// Fetch metadata about the list of files within a support bundle
@@ -321,8 +310,8 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_head_index(
         rqctx: RequestContext<Self::Context>,
-        headers: Header<RangeRequestHeaders>,
-        path_params: Path<SupportBundlePathParam>,
+        headers: Header<v1::params::RangeRequestHeaders>,
+        path_params: Path<v1::params::SupportBundlePathParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
     /// Delete a support bundle from a particular dataset
@@ -332,7 +321,7 @@ pub trait SledAgentApi {
     }]
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<SupportBundlePathParam>,
+        path_params: Path<v1::params::SupportBundlePathParam>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
     #[endpoint {
@@ -342,7 +331,7 @@ pub trait SledAgentApi {
     }]
     async fn omicron_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<OmicronSledConfig>,
+        body: TypedBody<v10::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -351,11 +340,11 @@ pub trait SledAgentApi {
         versions =
             VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
-    async fn v9_omicron_config_put(
+    async fn v4_omicron_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v9::OmicronSledConfig>,
+        body: TypedBody<v4::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(OmicronSledConfig::try_from)?;
+        let body = body.try_map(v10::inventory::OmicronSledConfig::try_from)?;
         Self::omicron_config_put(rqctx, body).await
     }
 
@@ -365,11 +354,11 @@ pub trait SledAgentApi {
         path = "/omicron-config",
         versions = ..VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY,
     }]
-    async fn v3_omicron_config_put(
+    async fn v1_omicron_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<v3::OmicronSledConfig>,
+        body: TypedBody<v1::inventory::OmicronSledConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        Self::v9_omicron_config_put(rqctx, body.map(Into::into)).await
+        Self::v4_omicron_config_put(rqctx, body.map(Into::into)).await
     }
 
     #[endpoint {
@@ -379,7 +368,7 @@ pub trait SledAgentApi {
     }]
     async fn sled_role_get(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<SledRole>, HttpError>;
+    ) -> Result<HttpResponseOk<v1::inventory::SledRole>, HttpError>;
 
     #[endpoint {
         operation_id = "vmm_register",
@@ -389,8 +378,8 @@ pub trait SledAgentApi {
     }]
     async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceEnsureBody>,
+        path_params: Path<v1::params::VmmPathParam>,
+        body: TypedBody<v10::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
 
     #[endpoint {
@@ -402,12 +391,10 @@ pub trait SledAgentApi {
     }]
     async fn v9_vmm_register(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<v9::InstanceEnsureBody>,
+        path_params: Path<v1::params::VmmPathParam>,
+        body: TypedBody<v9::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
-        let body = body.try_map(
-            sled_agent_types::instance::InstanceEnsureBody::try_from,
-        )?;
+        let body = body.try_map(v10::instance::InstanceEnsureBody::try_from)?;
         Self::vmm_register(rqctx, path_params, body).await
     }
 
@@ -419,8 +406,8 @@ pub trait SledAgentApi {
     }]
     async fn v8_vmm_register(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<v8::InstanceEnsureBody>,
+        path_params: Path<v1::params::VmmPathParam>,
+        body: TypedBody<v7::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         Self::v9_vmm_register(rqctx, path_params, body.map(Into::into)).await
     }
@@ -431,10 +418,10 @@ pub trait SledAgentApi {
         operation_id = "vmm_register",
         versions = ..VERSION_MULTICAST_SUPPORT
     }]
-    async fn v6_vmm_register(
+    async fn v1_vmm_register(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<v6::InstanceEnsureBody>,
+        path_params: Path<v1::params::VmmPathParam>,
+        body: TypedBody<v1::instance::InstanceEnsureBody>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         Self::v8_vmm_register(rqctx, path_params, body.map(Into::into)).await
     }
@@ -445,8 +432,8 @@ pub trait SledAgentApi {
     }]
     async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-    ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError>;
+        path_params: Path<v1::params::VmmPathParam>,
+    ) -> Result<HttpResponseOk<v1::instance::VmmUnregisterResponse>, HttpError>;
 
     #[endpoint {
         method = PUT,
@@ -454,9 +441,9 @@ pub trait SledAgentApi {
     }]
     async fn vmm_put_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<VmmPutStateBody>,
-    ) -> Result<HttpResponseOk<VmmPutStateResponse>, HttpError>;
+        path_params: Path<v1::params::VmmPathParam>,
+        body: TypedBody<v1::instance::VmmPutStateBody>,
+    ) -> Result<HttpResponseOk<v1::instance::VmmPutStateResponse>, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -464,7 +451,7 @@ pub trait SledAgentApi {
     }]
     async fn vmm_get_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
+        path_params: Path<v1::params::VmmPathParam>,
     ) -> Result<HttpResponseOk<SledVmmState>, HttpError>;
 
     #[endpoint {
@@ -473,8 +460,8 @@ pub trait SledAgentApi {
     }]
     async fn vmm_put_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceExternalIpBody>,
+        path_params: Path<v1::params::VmmPathParam>,
+        body: TypedBody<v1::instance::InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -483,8 +470,8 @@ pub trait SledAgentApi {
     }]
     async fn vmm_delete_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceExternalIpBody>,
+        path_params: Path<v1::params::VmmPathParam>,
+        body: TypedBody<v1::instance::InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -494,8 +481,8 @@ pub trait SledAgentApi {
     }]
     async fn vmm_join_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceMulticastBody>,
+        path_params: Path<v1::params::VmmPathParam>,
+        body: TypedBody<v7::instance::InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -505,8 +492,8 @@ pub trait SledAgentApi {
     }]
     async fn vmm_leave_multicast_group(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmPathParam>,
-        body: TypedBody<InstanceMulticastBody>,
+        path_params: Path<v1::params::VmmPathParam>,
+        body: TypedBody<v7::instance::InstanceMulticastBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -515,8 +502,8 @@ pub trait SledAgentApi {
     }]
     async fn disk_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<DiskPathParam>,
-        body: TypedBody<DiskEnsureBody>,
+        path_params: Path<v1::params::DiskPathParam>,
+        body: TypedBody<v1::disk::DiskEnsureBody>,
     ) -> Result<HttpResponseOk<DiskRuntimeState>, HttpError>;
 
     #[endpoint {
@@ -525,7 +512,7 @@ pub trait SledAgentApi {
     }]
     async fn artifact_config_get(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ArtifactConfig>, HttpError>;
+    ) -> Result<HttpResponseOk<v1::artifact::ArtifactConfig>, HttpError>;
 
     #[endpoint {
         method = PUT,
@@ -533,7 +520,7 @@ pub trait SledAgentApi {
     }]
     async fn artifact_config_put(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<ArtifactConfig>,
+        body: TypedBody<v1::artifact::ArtifactConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -542,7 +529,7 @@ pub trait SledAgentApi {
     }]
     async fn artifact_list(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ArtifactListResponse>, HttpError>;
+    ) -> Result<HttpResponseOk<v1::views::ArtifactListResponse>, HttpError>;
 
     #[endpoint {
         method = POST,
@@ -550,10 +537,13 @@ pub trait SledAgentApi {
     }]
     async fn artifact_copy_from_depot(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<ArtifactPathParam>,
-        query_params: Query<ArtifactQueryParam>,
-        body: TypedBody<ArtifactCopyFromDepotBody>,
-    ) -> Result<HttpResponseAccepted<ArtifactCopyFromDepotResponse>, HttpError>;
+        path_params: Path<v1::params::ArtifactPathParam>,
+        query_params: Query<v1::params::ArtifactQueryParam>,
+        body: TypedBody<v1::params::ArtifactCopyFromDepotBody>,
+    ) -> Result<
+        HttpResponseAccepted<v1::views::ArtifactCopyFromDepotResponse>,
+        HttpError,
+    >;
 
     #[endpoint {
         method = PUT,
@@ -562,10 +552,10 @@ pub trait SledAgentApi {
     }]
     async fn artifact_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<ArtifactPathParam>,
-        query_params: Query<ArtifactQueryParam>,
+        path_params: Path<v1::params::ArtifactPathParam>,
+        query_params: Query<v1::params::ArtifactQueryParam>,
         body: StreamingBody,
-    ) -> Result<HttpResponseOk<ArtifactPutResponse>, HttpError>;
+    ) -> Result<HttpResponseOk<v1::views::ArtifactPutResponse>, HttpError>;
 
     /// Take a snapshot of a disk that is attached to an instance
     #[endpoint {
@@ -574,9 +564,12 @@ pub trait SledAgentApi {
     }]
     async fn vmm_issue_disk_snapshot_request(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VmmIssueDiskSnapshotRequestPathParam>,
-        body: TypedBody<VmmIssueDiskSnapshotRequestBody>,
-    ) -> Result<HttpResponseOk<VmmIssueDiskSnapshotRequestResponse>, HttpError>;
+        path_params: Path<v1::params::VmmIssueDiskSnapshotRequestPathParam>,
+        body: TypedBody<v1::params::VmmIssueDiskSnapshotRequestBody>,
+    ) -> Result<
+        HttpResponseOk<v1::views::VmmIssueDiskSnapshotRequestResponse>,
+        HttpError,
+    >;
 
     #[endpoint {
         method = PUT,
@@ -585,8 +578,8 @@ pub trait SledAgentApi {
     }]
     async fn vpc_firewall_rules_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VpcPathParam>,
-        body: TypedBody<VpcFirewallRulesEnsureBody>,
+        path_params: Path<v1::params::VpcPathParam>,
+        body: TypedBody<v10::instance::VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -597,10 +590,11 @@ pub trait SledAgentApi {
     }]
     async fn v9_vpc_firewall_rules_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<VpcPathParam>,
-        body: TypedBody<v9::VpcFirewallRulesEnsureBody>,
+        path_params: Path<v1::params::VpcPathParam>,
+        body: TypedBody<v9::instance::VpcFirewallRulesEnsureBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(VpcFirewallRulesEnsureBody::try_from)?;
+        let body =
+            body.try_map(v10::instance::VpcFirewallRulesEnsureBody::try_from)?;
         Self::vpc_firewall_rules_put(rqctx, path_params, body).await
     }
 
@@ -656,7 +650,10 @@ pub trait SledAgentApi {
     }]
     async fn read_network_bootstore_config_cache(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<EarlyNetworkConfig>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<v1::early_networking::EarlyNetworkConfig>,
+        HttpError,
+    >;
 
     #[endpoint {
         method = PUT,
@@ -664,7 +661,7 @@ pub trait SledAgentApi {
     }]
     async fn write_network_bootstore_config(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<EarlyNetworkConfig>,
+        body: TypedBody<v1::early_networking::EarlyNetworkConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Add a sled to a rack that was already initialized via RSS
@@ -674,7 +671,7 @@ pub trait SledAgentApi {
     }]
     async fn sled_add(
         rqctx: RequestContext<Self::Context>,
-        body: TypedBody<AddSledRequest>,
+        body: TypedBody<v1::sled::AddSledRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Fetch basic information about this sled
@@ -685,7 +682,7 @@ pub trait SledAgentApi {
     }]
     async fn inventory(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Inventory>, HttpError>;
+    ) -> Result<HttpResponseOk<v10::inventory::Inventory>, HttpError>;
 
     /// Fetch basic information about this sled
     #[endpoint {
@@ -695,9 +692,9 @@ pub trait SledAgentApi {
         versions =
             VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
-    async fn v9_inventory(
+    async fn v4_inventory(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v9::Inventory>, HttpError> {
+    ) -> Result<HttpResponseOk<v4::inventory::Inventory>, HttpError> {
         let HttpResponseOk(inventory) = Self::inventory(rqctx).await?;
         inventory.try_into().map_err(HttpError::from).map(HttpResponseOk)
     }
@@ -709,12 +706,12 @@ pub trait SledAgentApi {
         path = "/inventory",
         versions = ..VERSION_ADD_NEXUS_LOCKSTEP_PORT_TO_INVENTORY,
     }]
-    async fn v3_inventory(
+    async fn v1_inventory(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<v3::Inventory>, HttpError> {
-        Self::v9_inventory(rqctx)
-            .await
-            .map(|HttpResponseOk(inv)| HttpResponseOk(v3::Inventory::from(inv)))
+    ) -> Result<HttpResponseOk<v1::inventory::Inventory>, HttpError> {
+        Self::v4_inventory(rqctx).await.map(|HttpResponseOk(inv)| {
+            HttpResponseOk(v1::inventory::Inventory::from(inv))
+        })
     }
 
     /// Fetch sled identifiers
@@ -733,7 +730,7 @@ pub trait SledAgentApi {
     }]
     async fn bootstore_status(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<BootstoreStatus>, HttpError>;
+    ) -> Result<HttpResponseOk<v1::bootstore::BootstoreStatus>, HttpError>;
 
     /// Get the current versions of VPC routing rules.
     #[endpoint {
@@ -861,8 +858,8 @@ pub trait SledAgentApi {
     }]
     async fn support_logs_download(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<SledDiagnosticsLogsDownloadPathParm>,
-        query_params: Query<SledDiagnosticsLogsDownloadQueryParam>,
+        path_params: Path<v1::params::SledDiagnosticsLogsDownloadPathParam>,
+        query_params: Query<v1::params::SledDiagnosticsLogsDownloadQueryParam>,
     ) -> Result<http::Response<Body>, HttpError>;
 
     /// This endpoint reports the status of the `destroy_orphaned_datasets`
@@ -874,7 +871,10 @@ pub trait SledAgentApi {
     }]
     async fn chicken_switch_destroy_orphaned_datasets_get(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ChickenSwitchDestroyOrphanedDatasets>, HttpError>;
+    ) -> Result<
+        HttpResponseOk<v1::shared::ChickenSwitchDestroyOrphanedDatasets>,
+        HttpError,
+    >;
 
     /// This endpoint sets the `destroy_orphaned_datasets` chicken switch
     /// (allowing sled-agent to delete datasets it believes are orphaned). It
@@ -889,7 +889,7 @@ pub trait SledAgentApi {
     }]
     async fn chicken_switch_destroy_orphaned_datasets_put(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<ChickenSwitchDestroyOrphanedDatasets>,
+        body: TypedBody<v1::shared::ChickenSwitchDestroyOrphanedDatasets>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// A debugging endpoint only used by `omdb` that allows us to test
@@ -902,7 +902,7 @@ pub trait SledAgentApi {
     }]
     async fn debug_operator_switch_zone_policy_get(
         request_context: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OperatorSwitchZonePolicy>, HttpError>;
+    ) -> Result<HttpResponseOk<v3::shared::OperatorSwitchZonePolicy>, HttpError>;
 
     /// A debugging endpoint only used by `omdb` that allows us to test
     /// restarting the switch zone without restarting sled-agent. See
@@ -919,7 +919,7 @@ pub trait SledAgentApi {
     }]
     async fn debug_operator_switch_zone_policy_put(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<OperatorSwitchZonePolicy>,
+        body: TypedBody<v3::shared::OperatorSwitchZonePolicy>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Update the entire set of probe zones on this sled.
@@ -934,7 +934,7 @@ pub trait SledAgentApi {
     }]
     async fn probes_put(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<probes::ProbeSet>,
+        body: TypedBody<v10::probes::ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Update the entire set of probe zones on this sled.
@@ -948,11 +948,11 @@ pub trait SledAgentApi {
         versions =
             VERSION_ADD_PROBE_PUT_ENDPOINT..VERSION_ADD_DUAL_STACK_SHARED_NETWORK_INTERFACES,
     }]
-    async fn v9_probes_put(
+    async fn v6_probes_put(
         request_context: RequestContext<Self::Context>,
-        body: TypedBody<probes::v1::ProbeSet>,
+        body: TypedBody<v6::probes::ProbeSet>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-        let body = body.try_map(TryInto::try_into)?;
+        let body = body.try_map(v10::probes::ProbeSet::try_from)?;
         Self::probes_put(request_context, body).await
     }
 
@@ -964,8 +964,8 @@ pub trait SledAgentApi {
     }]
     async fn local_storage_dataset_ensure(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
-        body: TypedBody<LocalStorageDatasetEnsureRequest>,
+        path_params: Path<v9::params::LocalStoragePathParam>,
+        body: TypedBody<v9::params::LocalStorageDatasetEnsureRequest>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     /// Delete a local storage dataset
@@ -976,266 +976,6 @@ pub trait SledAgentApi {
     }]
     async fn local_storage_dataset_delete(
         request_context: RequestContext<Self::Context>,
-        path_params: Path<LocalStoragePathParam>,
+        path_params: Path<v9::params::LocalStoragePathParam>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ChickenSwitchDestroyOrphanedDatasets {
-    /// If true, sled-agent will attempt to destroy durable ZFS datasets that it
-    /// believes were associated with now-expunged Omicron zones.
-    pub destroy_orphans: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ZoneBundleFilter {
-    /// An optional substring used to filter zone bundles.
-    pub filter: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ZonePathParam {
-    /// The name of the zone.
-    pub zone_name: String,
-}
-
-/// Parameters used to update the zone bundle cleanup context.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct CleanupContextUpdate {
-    /// The new period on which automatic cleanups are run.
-    pub period: Option<Duration>,
-    /// The priority ordering for preserving old zone bundles.
-    pub priority: Option<PriorityOrder>,
-    /// The new limit on the underlying dataset quota allowed for bundles.
-    pub storage_limit: Option<u8>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct Zpool {
-    pub id: ZpoolUuid,
-    pub disk_type: DiskType,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub enum DiskType {
-    U2,
-    M2,
-}
-
-impl From<DiskVariant> for DiskType {
-    fn from(v: DiskVariant) -> Self {
-        match v {
-            DiskVariant::U2 => Self::U2,
-            DiskVariant::M2 => Self::M2,
-        }
-    }
-}
-
-/// Path parameters for Instance requests (sled agent API)
-#[derive(Deserialize, JsonSchema)]
-pub struct VmmPathParam {
-    pub propolis_id: PropolisUuid,
-}
-
-/// Path parameters for Support Bundle requests (sled agent API)
-#[derive(Deserialize, JsonSchema)]
-pub struct SupportBundleListPathParam {
-    /// The zpool on which this support bundle was provisioned
-    pub zpool_id: ZpoolUuid,
-
-    /// The dataset on which this support bundle was provisioned
-    pub dataset_id: DatasetUuid,
-}
-
-/// Path parameters for Support Bundle requests (sled agent API)
-#[derive(Deserialize, JsonSchema)]
-pub struct SupportBundlePathParam {
-    /// The zpool on which this support bundle was provisioned
-    pub zpool_id: ZpoolUuid,
-
-    /// The dataset on which this support bundle was provisioned
-    pub dataset_id: DatasetUuid,
-
-    /// The ID of the support bundle itself
-    pub support_bundle_id: SupportBundleUuid,
-}
-
-/// Path parameters for Support Bundle requests (sled agent API)
-#[derive(Deserialize, JsonSchema)]
-pub struct SupportBundleFilePathParam {
-    #[serde(flatten)]
-    pub parent: SupportBundlePathParam,
-
-    /// The path of the file within the support bundle to query
-    pub file: String,
-}
-
-/// Metadata about a support bundle transfer
-#[derive(Deserialize, Serialize, JsonSchema)]
-pub struct SupportBundleTransferQueryParams {
-    pub offset: u64,
-}
-
-/// Metadata about a support bundle
-#[derive(Deserialize, Serialize, JsonSchema)]
-pub struct SupportBundleFinalizeQueryParams {
-    pub hash: ArtifactHash,
-}
-
-#[derive(Deserialize, Serialize, JsonSchema)]
-pub struct SupportBundleGetHeaders {
-    range: String,
-}
-
-#[derive(Deserialize, Debug, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum SupportBundleState {
-    Complete,
-    Incomplete,
-}
-
-/// Metadata about a support bundle
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SupportBundleMetadata {
-    pub support_bundle_id: SupportBundleUuid,
-    pub state: SupportBundleState,
-}
-
-/// Range request headers
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
-pub struct RangeRequestHeaders {
-    /// A request to access a portion of the resource, such as `bytes=0-499`
-    ///
-    /// See: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Range>
-    pub range: Option<String>,
-}
-
-/// Path parameters for sled-diagnostics log requests used by support bundles
-/// (sled agent API)
-#[derive(Deserialize, JsonSchema)]
-pub struct SledDiagnosticsLogsDownloadPathParm {
-    /// The zone for which one would like to collect logs for
-    pub zone: String,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct SledDiagnosticsLogsDownloadQueryParam {
-    /// The max number of rotated logs to include in the final support bundle
-    pub max_rotated: usize,
-}
-
-/// Path parameters for Disk requests (sled agent API)
-#[derive(Deserialize, JsonSchema)]
-pub struct DiskPathParam {
-    pub disk_id: Uuid,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
-pub struct ArtifactConfig {
-    pub generation: Generation,
-    pub artifacts: BTreeSet<ArtifactHash>,
-}
-
-impl Ledgerable for ArtifactConfig {
-    fn is_newer_than(&self, other: &ArtifactConfig) -> bool {
-        self.generation > other.generation
-    }
-
-    // No need to do this, the generation number is provided externally.
-    fn generation_bump(&mut self) {}
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ArtifactPathParam {
-    pub sha256: ArtifactHash,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ArtifactQueryParam {
-    pub generation: Generation,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct ArtifactListResponse {
-    pub generation: Generation,
-    pub list: BTreeMap<ArtifactHash, usize>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct ArtifactCopyFromDepotBody {
-    pub depot_base_url: String,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct ArtifactCopyFromDepotResponse {}
-
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct ArtifactPutResponse {
-    /// The number of valid M.2 artifact datasets we found on the sled. There is
-    /// typically one of these datasets for each functional M.2.
-    pub datasets: usize,
-
-    /// The number of valid writes to the M.2 artifact datasets. This should be
-    /// less than or equal to the number of artifact datasets.
-    pub successful_writes: usize,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct VmmIssueDiskSnapshotRequestPathParam {
-    pub propolis_id: PropolisUuid,
-    pub disk_id: Uuid,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub struct VmmIssueDiskSnapshotRequestBody {
-    pub snapshot_id: Uuid,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub struct VmmIssueDiskSnapshotRequestResponse {
-    pub snapshot_id: Uuid,
-}
-
-/// Path parameters for VPC requests (sled agent API)
-#[derive(Deserialize, JsonSchema)]
-pub struct VpcPathParam {
-    pub vpc_id: Uuid,
-}
-
-/// Policy allowing an operator (via `omdb`) to control whether the switch zone
-/// is started or stopped.
-///
-/// This is an _extremely_ dicey operation in general; a stopped switch zone
-/// leaves the rack inoperable! We are only adding this as a workaround and test
-/// tool for handling sidecar resets; see
-/// <https://github.com/oxidecomputer/omicron/issues/8480> for background.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
-)]
-#[serde(tag = "policy", rename_all = "snake_case")]
-pub enum OperatorSwitchZonePolicy {
-    /// Start the switch zone if a switch is present.
-    ///
-    /// This is the default policy.
-    StartIfSwitchPresent,
-
-    /// Even if a switch zone is present, stop the switch zone.
-    StopDespiteSwitchPresence,
-}
-
-/// Path parameters for Local Storage dataset related requests
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct LocalStoragePathParam {
-    pub zpool_id: ExternalZpoolUuid,
-    pub dataset_id: DatasetUuid,
-}
-
-/// Dataset and Volume details for a Local Storage dataset ensure request
-#[derive(Clone, Serialize, Deserialize, JsonSchema)]
-pub struct LocalStorageDatasetEnsureRequest {
-    /// Size of the parent dataset
-    pub dataset_size: ByteCount,
-
-    /// Size of the zvol
-    pub volume_size: ByteCount,
 }

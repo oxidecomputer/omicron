@@ -236,7 +236,6 @@ mod test {
     use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::execution::{
         EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
@@ -260,6 +259,7 @@ mod test {
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use serde_json::json;
+    use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
     use std::collections::BTreeMap;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;

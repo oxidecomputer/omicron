@@ -8,8 +8,8 @@
 
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
-use sled_agent_api::OperatorSwitchZonePolicy;
 use sled_agent_config_reconciler::RawDisksSender;
+use sled_agent_types_migrations::v3::shared::OperatorSwitchZonePolicy;
 use sled_hardware::{HardwareManager, HardwareUpdate};
 use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;

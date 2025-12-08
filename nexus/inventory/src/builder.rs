@@ -17,8 +17,6 @@ use cockroach_admin_types::NodeId;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use iddqd::IdOrdMap;
-use nexus_sled_agent_shared::inventory::Baseboard;
-use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
@@ -41,6 +39,8 @@ use omicron_cockroach_metrics::CockroachMetric;
 use omicron_cockroach_metrics::PrometheusMetrics;
 use omicron_common::disk::M2Slot;
 use omicron_uuid_kinds::CollectionKind;
+use sled_agent_types_migrations::latest::inventory::Baseboard;
+use sled_agent_types_migrations::latest::inventory::Inventory;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -735,10 +735,10 @@ impl CollectionBuilder {
     /// Returns all zones of a kind from the ledgers of observed sleds
     pub fn ledgered_zones_of_kind(
         &self,
-        kind: nexus_sled_agent_shared::inventory::ZoneKind,
+        kind: sled_agent_types_migrations::latest::inventory::ZoneKind,
     ) -> impl Iterator<
-        Item = &nexus_sled_agent_shared::inventory::OmicronZoneConfig,
-    > + '_ {
+        Item = &sled_agent_types_migrations::latest::inventory::OmicronZoneConfig,
+    > + '_{
         self.sleds.iter().flat_map(move |sled| {
             sled.ledgered_sled_config.as_ref().into_iter().flat_map(
                 move |sled_config| {
@@ -756,10 +756,10 @@ impl CollectionBuilder {
     /// created by the sled reconciliation process
     pub fn last_reconciled_zones_of_kind(
         &self,
-        kind: nexus_sled_agent_shared::inventory::ZoneKind,
+        kind: sled_agent_types_migrations::latest::inventory::ZoneKind,
     ) -> impl Iterator<
-        Item = &nexus_sled_agent_shared::inventory::OmicronZoneConfig,
-    > + '_ {
+        Item = &sled_agent_types_migrations::latest::inventory::OmicronZoneConfig,
+    > + '_{
         self.sleds.iter().flat_map(move |sled| {
             sled.last_reconciliation.as_ref().into_iter().flat_map(
                 move |sled_config| {
@@ -798,7 +798,6 @@ mod test {
     use gateway_client::types::SpComponentCaboose;
     use gateway_client::types::SpState;
     use gateway_types::rot::RotSlot;
-    use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
@@ -806,6 +805,7 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use nexus_types::inventory::SpType;
     use omicron_common::api::external::ByteCount;
+    use sled_agent_types_migrations::latest::inventory::SledRole;
 
     // Verify the contents of an empty collection.
     #[test]

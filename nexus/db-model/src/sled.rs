@@ -12,7 +12,6 @@ use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_db_schema::schema::{physical_disk, sled, zpool};
-use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::execution;
 use nexus_types::{
     external_api::{shared, views},
@@ -21,6 +20,7 @@ use nexus_types::{
 };
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
+use sled_agent_types_migrations::latest::inventory::SledRole;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;

@@ -1137,7 +1137,7 @@ async fn test_instance_migration_compatible_cpu_platforms(
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
+        sled_agent_types_migrations::latest::inventory::SledCpuFamily::AmdTurin,
     );
     let new_sled_id = config.id;
 
@@ -1326,7 +1326,7 @@ async fn test_instance_migration_incompatible_cpu_platforms(
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
+        sled_agent_types_migrations::latest::inventory::SledCpuFamily::AmdTurin,
     );
     let turin_sled_id = config.id;
 
@@ -1403,7 +1403,7 @@ async fn test_instance_migration_unknown_sled_type(
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_sled_agent_shared::inventory::SledCpuFamily::Unknown,
+        sled_agent_types_migrations::latest::inventory::SledCpuFamily::Unknown,
     );
     let new_sled_id = config.id;
 
@@ -6750,7 +6750,7 @@ async fn test_can_start_instance_with_cpu_platform(
         Some(nexus_address),
         Some(&camino::Utf8Path::new("/an/unused/update/directory")),
         omicron_sled_agent::sim::ZpoolConfig::None,
-        nexus_sled_agent_shared::inventory::SledCpuFamily::AmdTurin,
+        sled_agent_types_migrations::latest::inventory::SledCpuFamily::AmdTurin,
     );
     let new_sled_id = config.id;
 

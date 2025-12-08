@@ -40,7 +40,6 @@ use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpVersion;
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
@@ -57,6 +56,7 @@ use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use ref_cast::RefCast;
+use sled_agent_types_migrations::latest::inventory::ZoneKind;
 use std::net::IpAddr;
 use uuid::Uuid;
 

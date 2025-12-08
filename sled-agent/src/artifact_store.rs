@@ -37,11 +37,12 @@ use omicron_common::api::external::Generation;
 use omicron_common::ledger::Ledger;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
-use sled_agent_api::{
-    ArtifactConfig, ArtifactListResponse, ArtifactPutResponse,
-};
 use sled_agent_config_reconciler::ConfigReconcilerHandle;
 use sled_agent_config_reconciler::InternalDisksReceiver;
+use sled_agent_types::artifact::ArtifactConfig;
+use sled_agent_types_migrations::v1::views::{
+    ArtifactListResponse, ArtifactPutResponse,
+};
 use slog::{Logger, error, info};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use tokio::fs::File;
@@ -896,7 +897,7 @@ mod test {
     use hex_literal::hex;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_api::ArtifactConfig;
+    use sled_agent_types::artifact::ArtifactConfig;
     use tokio::io::AsyncReadExt;
     use tokio::sync::oneshot;
     use tokio::sync::watch;

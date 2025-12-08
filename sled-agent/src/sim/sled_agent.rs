@@ -24,12 +24,6 @@ use chrono::Utc;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::Stream;
-use nexus_sled_agent_shared::inventory::{
-    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
-    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
-    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
-    ZoneImageResolverInventory,
-};
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -56,16 +50,22 @@ use propolis_client::{
     Client as PropolisClient, types::InstanceInitializationMethod,
 };
 use range_requests::PotentialRange;
-use sled_agent_api::LocalStorageDatasetEnsureRequest;
-use sled_agent_api::SupportBundleMetadata;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
 use sled_agent_types::instance::{
     InstanceEnsureBody, InstanceExternalIpBody, InstanceMulticastMembership,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    VmmPutStateResponse, VmmSpecExt, VmmStateRequested, VmmUnregisterResponse,
 };
+use sled_agent_types::support_bundle::SupportBundleMetadata;
+use sled_agent_types_migrations::latest::inventory::{
+    ConfigReconcilerInventory, ConfigReconcilerInventoryStatus,
+    HostPhase2DesiredSlots, Inventory, InventoryDataset, InventoryDisk,
+    InventoryZpool, OmicronSledConfig, OmicronZonesConfig, SledRole,
+    ZoneImageResolverInventory,
+};
+use sled_agent_types_migrations::v9::params::LocalStorageDatasetEnsureRequest;
 
 use slog::Logger;
 use std::collections::{HashMap, HashSet};

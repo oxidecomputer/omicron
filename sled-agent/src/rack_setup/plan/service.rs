@@ -15,9 +15,6 @@ use internal_dns_types::config::{
     DnsConfigBuilder, DnsConfigParams, Host, Zone,
 };
 use internal_dns_types::names::ServiceName;
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronZoneDataset, SledRole,
-};
 use nexus_types::deployment::{
     Blueprint, BlueprintDatasetConfig, BlueprintDatasetDisposition,
     BlueprintHostPhase2DesiredSlots, BlueprintPhysicalDiskConfig,
@@ -65,6 +62,9 @@ use sled_agent_client::{
 };
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types_migrations::latest::inventory::{
+    Inventory, OmicronZoneDataset, SledRole,
+};
 use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -1301,9 +1301,6 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nexus_sled_agent_shared::inventory::ConfigReconcilerInventoryStatus;
-    use nexus_sled_agent_shared::inventory::SledCpuFamily;
-    use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
     use omicron_common::address::IpRange;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::AllowedSourceIps;
@@ -1311,6 +1308,9 @@ mod tests {
     use oxnet::Ipv6Net;
     use sled_agent_types::rack_init::BootstrapAddressDiscovery;
     use sled_agent_types::rack_init::RecoverySiloConfig;
+    use sled_agent_types_migrations::latest::inventory::ConfigReconcilerInventoryStatus;
+    use sled_agent_types_migrations::latest::inventory::SledCpuFamily;
+    use sled_agent_types_migrations::latest::inventory::ZoneImageResolverInventory;
     use sled_hardware_types::Baseboard;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
@@ -1493,19 +1493,21 @@ mod tests {
 
         const DISK_COUNT: usize = 10;
         let disks: Vec<_> = (0..DISK_COUNT)
-            .map(|i| nexus_sled_agent_shared::inventory::InventoryDisk {
-                identity: omicron_common::disk::DiskIdentity {
-                    vendor: "vendor".to_string(),
-                    model: "model".to_string(),
-                    serial: format!("test-{i}"),
-                },
-                variant: DiskVariant::U2,
-                slot: i as i64,
-                active_firmware_slot: 0,
-                next_active_firmware_slot: None,
-                number_of_firmware_slots: 8,
-                slot1_is_read_only: false,
-                slot_firmware_versions: vec![],
+            .map(|i| {
+                sled_agent_types_migrations::latest::inventory::InventoryDisk {
+                    identity: omicron_common::disk::DiskIdentity {
+                        vendor: "vendor".to_string(),
+                        model: "model".to_string(),
+                        serial: format!("test-{i}"),
+                    },
+                    variant: DiskVariant::U2,
+                    slot: i as i64,
+                    active_firmware_slot: 0,
+                    next_active_firmware_slot: None,
+                    number_of_firmware_slots: 8,
+                    slot1_is_read_only: false,
+                    slot_firmware_versions: vec![],
+                }
             })
             .collect();
 

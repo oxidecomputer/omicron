@@ -34,7 +34,7 @@ nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-db-queries = { workspace = true, features = [ "testing" ] }
 nexus-lockstep-client.workspace = true
-nexus-sled-agent-shared.workspace = true
+sled-agent-types-migrations.workspace = true
 nexus-test-interface.workspace = true
 nexus-types.workspace = true
 omicron-cockroach-admin.workspace = true

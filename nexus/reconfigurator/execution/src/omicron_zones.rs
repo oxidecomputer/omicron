@@ -305,7 +305,6 @@ mod test {
     use httptest::Expectation;
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::{json_encoded, status_code};
-    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
         BlueprintZoneImageSource, blueprint_zone_type,
@@ -315,6 +314,7 @@ mod test {
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
     use std::iter;
     use uuid::Uuid;
 

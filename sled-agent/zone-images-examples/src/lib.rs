@@ -15,7 +15,6 @@ use camino_tempfile_ext::{
     prelude::*,
 };
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::update::{
     MupdateOverrideInfo, OmicronZoneFileMetadata, OmicronZoneManifest,
     OmicronZoneManifestSource,
@@ -27,6 +26,7 @@ use sled_agent_types::zone_images::{
     InstallMetadataReadError, ZoneManifestArtifactResult,
     ZoneManifestArtifactsResult, ZoneManifestZoneHashError,
 };
+use sled_agent_types_migrations::latest::inventory::ZoneKind;
 use tufaceous_artifact::ArtifactHash;
 
 pub struct OverridePaths {

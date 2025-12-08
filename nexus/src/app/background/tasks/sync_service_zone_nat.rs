@@ -16,10 +16,10 @@ use nexus_db_lookup::LookupPath;
 use nexus_db_model::NatEntryValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_types::inventory::Collection;
 use omicron_common::address::{MAX_PORT, MIN_PORT};
 use serde_json::json;
+use sled_agent_types_migrations::latest::inventory::OmicronZoneType;
 use std::sync::Arc;
 use tokio::sync::watch;
 

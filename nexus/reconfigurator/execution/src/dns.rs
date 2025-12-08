@@ -333,11 +333,6 @@ mod test {
     use nexus_reconfigurator_planning::blueprint_editor::ExternalNetworkingAllocator;
     use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_planning::planner::PlannerRng;
-    use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-    use nexus_sled_agent_shared::inventory::OmicronZoneImageSource;
-    use nexus_sled_agent_shared::inventory::OmicronZoneType;
-    use nexus_sled_agent_shared::inventory::SledRole;
-    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
@@ -384,6 +379,11 @@ mod test {
     use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types_migrations::latest::inventory::OmicronZoneConfig;
+    use sled_agent_types_migrations::latest::inventory::OmicronZoneImageSource;
+    use sled_agent_types_migrations::latest::inventory::OmicronZoneType;
+    use sled_agent_types_migrations::latest::inventory::SledRole;
+    use sled_agent_types_migrations::latest::inventory::ZoneKind;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;

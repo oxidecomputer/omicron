@@ -2,21 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Version 1 of types for manipulating networking probe zones.
+//! Probe types for Sled Agent API versions 6-9.
+//!
+//! Probes were introduced in v6 (ADD_PROBE_PUT_ENDPOINT).
+//! Uses NetworkInterface v1 (single IP, not dual-stack).
 
 use iddqd::IdHashItem;
 use iddqd::IdHashMap;
 use iddqd::id_upcast;
-use omicron_common::api::external;
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
 use omicron_uuid_kinds::ProbeUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-
-// Re-export types that haven't changed.
-pub use super::ExternalIp;
-pub use super::IpKind;
+use std::net::IpAddr;
 
 /// Parameters used to create a probe.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -39,16 +38,26 @@ impl IdHashItem for ProbeCreate {
     id_upcast!();
 }
 
-impl TryFrom<ProbeCreate> for super::ProbeCreate {
-    type Error = external::Error;
+/// An external IP address used by a probe.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct ExternalIp {
+    /// The external IP address.
+    pub ip: IpAddr,
+    /// The kind of address this is.
+    pub kind: IpKind,
+    /// The first port used by the address.
+    pub first_port: u16,
+    /// The last port used by the address.
+    pub last_port: u16,
+}
 
-    fn try_from(value: ProbeCreate) -> Result<Self, Self::Error> {
-        value.interface.try_into().map(|interface| Self {
-            id: value.id,
-            external_ips: value.external_ips,
-            interface,
-        })
-    }
+/// The kind of external IP address of a probe.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpKind {
+    Snat,
+    Ephemeral,
+    Floating,
 }
 
 /// A set of probes that the target sled should run.
@@ -56,17 +65,4 @@ impl TryFrom<ProbeCreate> for super::ProbeCreate {
 pub struct ProbeSet {
     /// The exact set of probes to run.
     pub probes: IdHashMap<ProbeCreate>,
-}
-
-impl TryFrom<ProbeSet> for super::ProbeSet {
-    type Error = external::Error;
-
-    fn try_from(value: ProbeSet) -> Result<Self, Self::Error> {
-        value
-            .probes
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()
-            .map(|probes| Self { probes })
-    }
 }

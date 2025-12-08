@@ -15,13 +15,13 @@
 use crate::{MacAddr, Name, SqlU8, SqlU16, SqlU32};
 use anyhow::{Context, anyhow, bail, ensure};
 use ipnetwork::IpNetwork;
-use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::internal::shared::{
     NetworkInterfaceKind, PrivateIpConfig,
 };
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use oxnet::{Ipv4Net, Ipv6Net};
+use sled_agent_types_migrations::latest::inventory::OmicronZoneDataset;
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 

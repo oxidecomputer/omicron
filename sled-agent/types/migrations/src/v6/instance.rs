@@ -2,27 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Sled agent types (version 6)
+//! Instance types for Sled Agent API version 6.
 //!
-//! Version 6 types (before multicast support was added in version 7).
+//! This version does NOT have multicast_groups (added in v7) or
+//! delegated_zvols (added in v9). Uses NetworkInterface v1.
 
-use crate::v8;
+use std::collections::HashSet;
+use std::net::{IpAddr, SocketAddr};
+
 use omicron_common::api::external;
 use omicron_common::api::external::Hostname;
-use omicron_common::api::internal::nexus::HostIdentifier;
-use omicron_common::api::internal::nexus::VmmRuntimeState;
-use omicron_common::api::internal::shared::DhcpConfig;
-use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::nexus::{HostIdentifier, VmmRuntimeState};
 use omicron_common::api::internal::shared::network_interface::v1::NetworkInterface;
+use omicron_common::api::internal::shared::{DhcpConfig, SourceNatConfig};
 use omicron_uuid_kinds::InstanceUuid;
+use propolis_client::instance_spec::InstanceSpecV0;
 use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
-use sled_agent_types::instance::InstanceMetadata;
-use sled_agent_types::instance::VmmSpec;
-use std::collections::HashSet;
-use std::net::IpAddr;
-use std::net::SocketAddr;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// The body of a request to ensure that a instance and VMM are known to a sled
@@ -70,56 +66,17 @@ pub struct InstanceSledLocalConfig {
     pub dhcp_config: DhcpConfig,
 }
 
-impl From<InstanceSledLocalConfig> for v8::InstanceSledLocalConfig {
-    fn from(v6: InstanceSledLocalConfig) -> Self {
-        let InstanceSledLocalConfig {
-            hostname,
-            nics,
-            source_nat,
-            ephemeral_ip,
-            floating_ips,
-            firewall_rules,
-            dhcp_config,
-        } = v6;
-        let firewall_rules =
-            firewall_rules.into_iter().map(Into::into).collect();
-
-        Self {
-            hostname,
-            nics,
-            source_nat,
-            ephemeral_ip,
-            floating_ips,
-            multicast_groups: Vec::new(),
-            firewall_rules,
-            dhcp_config,
-        }
-    }
+/// Metadata used to track statistics about an instance.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InstanceMetadata {
+    pub silo_id: Uuid,
+    pub project_id: Uuid,
 }
 
-impl From<InstanceEnsureBody> for v8::InstanceEnsureBody {
-    fn from(v6: InstanceEnsureBody) -> Self {
-        let InstanceEnsureBody {
-            vmm_spec,
-            local_config,
-            vmm_runtime,
-            instance_id,
-            migration_id,
-            propolis_addr,
-            metadata,
-        } = v6;
-
-        Self {
-            vmm_spec,
-            local_config: local_config.into(),
-            vmm_runtime,
-            instance_id,
-            migration_id,
-            propolis_addr,
-            metadata,
-        }
-    }
-}
+/// Specifies the virtual hardware configuration of a new Propolis VMM in the
+/// form of a Propolis instance specification.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VmmSpec(pub InstanceSpecV0);
 
 /// VPC firewall rule after object name resolution has been performed by Nexus
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
@@ -134,27 +91,57 @@ pub struct ResolvedVpcFirewallRule {
     pub priority: external::VpcFirewallRulePriority,
 }
 
-impl From<ResolvedVpcFirewallRule> for v8::ResolvedVpcFirewallRule {
-    fn from(v6: ResolvedVpcFirewallRule) -> Self {
-        let ResolvedVpcFirewallRule {
-            status,
-            direction,
-            targets,
-            filter_hosts,
-            filter_ports,
-            filter_protocols,
-            action,
-            priority,
-        } = v6;
+impl From<InstanceEnsureBody> for crate::v7::instance::InstanceEnsureBody {
+    fn from(v6: InstanceEnsureBody) -> Self {
         Self {
-            status,
-            direction,
-            targets,
-            filter_hosts,
-            filter_ports,
-            filter_protocols,
-            action,
-            priority,
+            vmm_spec: crate::v7::instance::VmmSpec(v6.vmm_spec.0),
+            local_config: v6.local_config.into(),
+            vmm_runtime: v6.vmm_runtime,
+            instance_id: v6.instance_id,
+            migration_id: v6.migration_id,
+            propolis_addr: v6.propolis_addr,
+            metadata: crate::v7::instance::InstanceMetadata {
+                silo_id: v6.metadata.silo_id,
+                project_id: v6.metadata.project_id,
+            },
+        }
+    }
+}
+
+impl From<InstanceSledLocalConfig>
+    for crate::v7::instance::InstanceSledLocalConfig
+{
+    fn from(v6: InstanceSledLocalConfig) -> Self {
+        Self {
+            hostname: v6.hostname,
+            nics: v6.nics,
+            source_nat: v6.source_nat,
+            ephemeral_ip: v6.ephemeral_ip,
+            floating_ips: v6.floating_ips,
+            multicast_groups: Vec::new(), // Added in v7
+            firewall_rules: v6
+                .firewall_rules
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            dhcp_config: v6.dhcp_config,
+        }
+    }
+}
+
+impl From<ResolvedVpcFirewallRule>
+    for crate::v7::instance::ResolvedVpcFirewallRule
+{
+    fn from(v6: ResolvedVpcFirewallRule) -> Self {
+        Self {
+            status: v6.status,
+            direction: v6.direction,
+            targets: v6.targets,
+            filter_hosts: v6.filter_hosts,
+            filter_ports: v6.filter_ports,
+            filter_protocols: v6.filter_protocols,
+            action: v6.action,
+            priority: v6.priority,
         }
     }
 }

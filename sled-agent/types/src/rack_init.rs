@@ -11,7 +11,6 @@ use std::{
 
 use anyhow::{Result, bail};
 use camino::{Utf8Path, Utf8PathBuf};
-pub use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::{
     address::{
         AZ_PREFIX, IpRange, Ipv6Subnet, RACK_PREFIX, SLED_PREFIX, get_64_subnet,
@@ -23,6 +22,7 @@ use omicron_common::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+pub use sled_agent_types_migrations::latest::rack_init::RecoverySiloConfig;
 use sled_hardware_types::Baseboard;
 
 /// Structures and routines used to maintain backwards compatibility.  The

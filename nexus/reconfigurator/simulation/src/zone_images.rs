@@ -9,11 +9,11 @@ use std::collections::BTreeSet;
 use anyhow::bail;
 use camino::Utf8Path;
 use itertools::Itertools;
-use nexus_sled_agent_shared::inventory::{
-    ZoneArtifactInventory, ZoneKind, ZoneManifestBootInventory,
-};
 use omicron_common::{
     api::external::TufRepoDescription, update::OmicronZoneManifestSource,
+};
+use sled_agent_types_migrations::latest::inventory::{
+    ZoneArtifactInventory, ZoneKind, ZoneManifestBootInventory,
 };
 use swrite::{SWrite, swrite};
 use tufaceous_artifact::KnownArtifactKind;

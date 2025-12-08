@@ -5,8 +5,6 @@
 //! Module for converting older formats of the sled configuration files.
 
 use camino::Utf8PathBuf;
-use nexus_sled_agent_shared::inventory::HostPhase2DesiredSlots;
-use nexus_sled_agent_shared::inventory::OmicronSledConfig;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
@@ -14,8 +12,10 @@ use omicron_common::ledger::Ledger;
 use omicron_common::ledger::Ledgerable;
 use serde::Deserialize;
 use serde::Serialize;
-use sled_agent_types::inventory::v9::OmicronSledConfig as OmicronSledConfigV9;
-use sled_agent_types::inventory::v9::OmicronZoneConfig as OmicronZoneConfigV9;
+use sled_agent_types::inventory::HostPhase2DesiredSlots;
+use sled_agent_types::inventory::OmicronSledConfig;
+use sled_agent_types_migrations::v4::inventory::OmicronSledConfig as OmicronSledConfigV4;
+use sled_agent_types_migrations::v4::inventory::OmicronZoneConfig as OmicronZoneConfigV4;
 use slog::Logger;
 use slog::error;
 use slog::warn;
@@ -47,7 +47,7 @@ pub(super) async fn try_convert_v9_sled_config(
         Ledger::<OmicronSledConfigLocal>::new(log, datasets.clone()).await?;
     let new_config = old.into_inner().0.try_into().unwrap_or_else(|e| {
         panic!(
-            "Failed to convert OmicronSledConfigV9 to the current version: {e}"
+            "Failed to convert OmicronSledConfigV4 to the current version: {e}"
         )
     });
     write_converted_ledger(
@@ -140,7 +140,7 @@ pub(super) async fn convert_legacy_ledgers(
     // again won't change the result.
     let sled_config = OmicronSledConfig::try_from(sled_config)
         .unwrap_or_else(|e| panic!(
-            "Failed to convert OmicronSledConfigV9 to the current version: {e}"
+            "Failed to convert OmicronSledConfigV4 to the current version: {e}"
         ));
 
     // Write the newly-merged config to disk.
@@ -277,8 +277,8 @@ fn merge_old_configs(
     disks: OmicronPhysicalDisksConfig,
     datasets: DatasetsConfig,
     zones: OmicronZonesConfigLocal,
-) -> OmicronSledConfigV9 {
-    OmicronSledConfigV9 {
+) -> OmicronSledConfigV4 {
+    OmicronSledConfigV4 {
         // Take the zone generation as the overall config generation; this is
         // consistent with Reconfigurator's transition from three configs to
         // one.
@@ -317,7 +317,7 @@ impl Ledgerable for OmicronZonesConfigLocal {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(test, derive(schemars::JsonSchema))]
 struct OmicronZoneConfigLocal {
-    zone: OmicronZoneConfigV9,
+    zone: OmicronZoneConfigV4,
     #[serde(rename = "root")]
     #[cfg_attr(test, schemars(with = "String"))]
     _root: Utf8PathBuf,
@@ -325,7 +325,7 @@ struct OmicronZoneConfigLocal {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(transparent)]
-struct OmicronSledConfigLocal(OmicronSledConfigV9);
+struct OmicronSledConfigLocal(OmicronSledConfigV4);
 
 impl Ledgerable for OmicronSledConfigLocal {
     fn is_newer_than(&self, other: &Self) -> bool {
@@ -391,11 +391,11 @@ pub(super) mod tests {
 
         // And make sure it matches the new, directly loaded and converted from
         // disk.
-        let new_as_v9: OmicronSledConfigV9 = serde_json::from_str(
+        let new_as_v4: OmicronSledConfigV4 = serde_json::from_str(
             tokio::fs::read_to_string(dst_file).await.unwrap().as_str(),
         )
         .expect("successfully converted config");
-        let new = OmicronSledConfig::try_from(new_as_v9)
+        let new = OmicronSledConfig::try_from(new_as_v4)
             .expect("successfully converted v9 config");
         assert_eq!(new, converted);
         logctx.cleanup_successful();

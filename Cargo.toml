@@ -73,7 +73,6 @@ members = [
     "live-tests/macros",
     "nexus",
     "nexus-config",
-    "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -131,6 +130,7 @@ members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/types/migrations",
     "sled-agent/zone-images",
     "sled-agent/zone-images-examples",
     "sled-diagnostics",
@@ -235,7 +235,6 @@ default-members = [
     "live-tests/macros",
     "nexus",
     "nexus-config",
-    "nexus-sled-agent-shared",
     "nexus/authz-macros",
     "nexus/auth",
     "nexus/background-task-interface",
@@ -293,6 +292,7 @@ default-members = [
     "sled-agent/config-reconciler",
     "sled-agent/repo-depot-api",
     "sled-agent/types",
+    "sled-agent/types/migrations",
     "sled-agent/zone-images",
     "sled-agent/zone-images-examples",
     "sled-diagnostics",
@@ -568,7 +568,6 @@ nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
 nexus-reconfigurator-rendezvous = { path = "nexus/reconfigurator/rendezvous" }
 nexus-reconfigurator-simulation = { path = "nexus/reconfigurator/simulation" }
 nexus-saga-recovery = { path = "nexus/saga-recovery" }
-nexus-sled-agent-shared = { path = "nexus-sled-agent-shared" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
@@ -712,6 +711,7 @@ sled-agent-api = { path = "sled-agent/api" }
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-agent-config-reconciler = { path = "sled-agent/config-reconciler" }
 sled-agent-types = { path = "sled-agent/types" }
+sled-agent-types-migrations = { path = "sled-agent/types/migrations" }
 sled-agent-zone-images = { path = "sled-agent/zone-images" }
 sled-agent-zone-images-examples = { path = "sled-agent/zone-images-examples" }
 sled-diagnostics = { path = "sled-diagnostics" }
@@ -971,8 +971,9 @@ opt-level = 3
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
 #
-# [patch.crates-io]
+[patch.crates-io]
 # diesel = { path = "../../diesel/diesel" }
+# drift = { path = "../drift" }
 # dropshot = { path = "../dropshot/dropshot" }
 # dropshot_endpoint = { path = "../dropshot/dropshot_endpoint" }
 # dropshot-api-manager = { path = "../dropshot-api-manager/crates/dropshot-api-manager" }

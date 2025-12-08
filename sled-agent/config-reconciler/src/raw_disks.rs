@@ -6,8 +6,8 @@
 //! [`RawDisk`]s sled-agent is aware of.
 
 use iddqd::IdOrdMap;
-use nexus_sled_agent_shared::inventory::InventoryDisk;
 use omicron_common::disk::DiskIdentity;
+use sled_agent_types::inventory::InventoryDisk;
 use sled_storage::disk::RawDisk;
 use slog::Logger;
 use slog::info;

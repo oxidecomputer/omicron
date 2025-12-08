@@ -6,24 +6,24 @@ use std::{fmt, fs::FileType, io, sync::Arc};
 
 use camino::Utf8PathBuf;
 use iddqd::{IdOrdItem, IdOrdMap, id_upcast};
-use nexus_sled_agent_shared::inventory::MupdateOverrideBootInventory;
-use nexus_sled_agent_shared::inventory::MupdateOverrideInventory;
-use nexus_sled_agent_shared::inventory::MupdateOverrideNonBootInventory;
-use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
-use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideBootSuccessInventory;
-use nexus_sled_agent_shared::inventory::RemoveMupdateOverrideInventory;
-use nexus_sled_agent_shared::inventory::ZoneArtifactInventory;
-use nexus_sled_agent_shared::inventory::ZoneImageResolverInventory;
-use nexus_sled_agent_shared::inventory::ZoneKind;
-use nexus_sled_agent_shared::inventory::ZoneManifestBootInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestInventory;
-use nexus_sled_agent_shared::inventory::ZoneManifestNonBootInventory;
 use omicron_common::update::{
     MupdateOverrideInfo, OmicronZoneManifest, OmicronZoneManifestSource,
 };
 use omicron_common::zone_images::ZoneImageFileSource;
 use omicron_uuid_kinds::InternalZpoolUuid;
 use omicron_uuid_kinds::MupdateOverrideUuid;
+use sled_agent_types_migrations::latest::inventory::MupdateOverrideBootInventory;
+use sled_agent_types_migrations::latest::inventory::MupdateOverrideInventory;
+use sled_agent_types_migrations::latest::inventory::MupdateOverrideNonBootInventory;
+use sled_agent_types_migrations::latest::inventory::OmicronZoneConfig;
+use sled_agent_types_migrations::latest::inventory::RemoveMupdateOverrideBootSuccessInventory;
+use sled_agent_types_migrations::latest::inventory::RemoveMupdateOverrideInventory;
+use sled_agent_types_migrations::latest::inventory::ZoneArtifactInventory;
+use sled_agent_types_migrations::latest::inventory::ZoneImageResolverInventory;
+use sled_agent_types_migrations::latest::inventory::ZoneKind;
+use sled_agent_types_migrations::latest::inventory::ZoneManifestBootInventory;
+use sled_agent_types_migrations::latest::inventory::ZoneManifestInventory;
+use sled_agent_types_migrations::latest::inventory::ZoneManifestNonBootInventory;
 use slog::{error, info, o, warn};
 use slog_error_chain::InlineErrorChain;
 use swrite::{SWrite, swriteln};

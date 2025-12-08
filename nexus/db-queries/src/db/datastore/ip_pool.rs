@@ -1984,7 +1984,6 @@ mod test {
     use nexus_db_model::{
         IpPoolIdentity, IpPoolReservationType, IpPoolType, IpVersion,
     };
-    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::{
         OmicronZoneExternalFloatingIp, OmicronZoneExternalIp,
     };
@@ -2000,6 +1999,7 @@ mod test {
     use omicron_uuid_kinds::{
         ExternalIpUuid, GenericUuid as _, OmicronZoneUuid,
     };
+    use sled_agent_types_migrations::latest::inventory::ZoneKind;
 
     #[tokio::test]
     async fn test_default_ip_pools() {

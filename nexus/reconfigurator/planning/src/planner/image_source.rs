@@ -6,10 +6,6 @@ use std::{collections::HashMap, fmt};
 
 use anyhow::anyhow;
 use iddqd::{IdOrdItem, IdOrdMap, id_ord_map::RefMut, id_upcast};
-use nexus_sled_agent_shared::inventory::{
-    BootPartitionContents, BootPartitionDetails, ZoneKind,
-    ZoneManifestBootInventory,
-};
 use nexus_types::{
     deployment::{
         BlueprintArtifactVersion, BlueprintHostPhase2DesiredContents,
@@ -21,6 +17,10 @@ use nexus_types::{
 };
 use omicron_common::api::external::TufArtifactMeta;
 use omicron_uuid_kinds::{MupdateOverrideUuid, OmicronZoneUuid, SledUuid};
+use sled_agent_types_migrations::latest::inventory::{
+    BootPartitionContents, BootPartitionDetails, ZoneKind,
+    ZoneManifestBootInventory,
+};
 use slog::{debug, info, o, warn};
 use tufaceous_artifact::ArtifactHash;
 

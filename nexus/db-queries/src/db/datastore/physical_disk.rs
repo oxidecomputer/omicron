@@ -339,15 +339,15 @@ mod test {
     use crate::db::pub_test_utils::helpers::SledUpdateBuilder;
     use dropshot::PaginationOrder;
     use nexus_db_lookup::LookupPath;
-    use nexus_sled_agent_shared::inventory::{
-        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
-        SledCpuFamily, SledRole, ZoneImageResolverInventory,
-    };
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::ZpoolUuid;
+    use sled_agent_types_migrations::latest::inventory::{
+        Baseboard, ConfigReconcilerInventoryStatus, Inventory, InventoryDisk,
+        SledCpuFamily, SledRole, ZoneImageResolverInventory,
+    };
     use std::num::NonZeroU32;
 
     async fn create_test_sled(db: &DataStore) -> Sled {

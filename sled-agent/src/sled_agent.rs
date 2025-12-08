@@ -40,9 +40,6 @@ use illumos_utils::zfs::Zfs;
 use illumos_utils::zpool::PathInPool;
 use illumos_utils::zpool::ZpoolOrRamdisk;
 use itertools::Itertools as _;
-use nexus_sled_agent_shared::inventory::{
-    Inventory, OmicronSledConfig, SledRole,
-};
 use omicron_common::address::{
     Ipv6Subnet, SLED_PREFIX, get_sled_address, get_switch_zone_address,
 };
@@ -83,6 +80,10 @@ use sled_agent_types::zone_bundle::{
 use sled_agent_types::zone_images::{
     PreparedOmicronZone, RemoveMupdateOverrideResult, ResolverStatus,
 };
+use sled_agent_types_migrations::latest::inventory::{
+    Inventory, OmicronSledConfig, SledRole,
+};
+use sled_agent_types_migrations::v9::params::LocalStorageDatasetEnsureRequest;
 use sled_diagnostics::SledDiagnosticsCmdError;
 use sled_diagnostics::SledDiagnosticsCmdOutput;
 use sled_hardware::{HardwareManager, MemoryReservations, underlay};
@@ -1226,7 +1227,7 @@ impl SledAgent {
         &self,
         zpool_id: ExternalZpoolUuid,
         dataset_id: DatasetUuid,
-        request: sled_agent_api::LocalStorageDatasetEnsureRequest,
+        request: LocalStorageDatasetEnsureRequest,
     ) -> Result<(), HttpError> {
         // Ensure that the local storage dataset we want to use is still present
         let present = self
@@ -1253,10 +1254,8 @@ impl SledAgent {
         let delegated_zvol =
             DelegatedZvol::LocalStorage { zpool_id, dataset_id };
 
-        let sled_agent_api::LocalStorageDatasetEnsureRequest {
-            dataset_size,
-            volume_size,
-        } = request;
+        let LocalStorageDatasetEnsureRequest { dataset_size, volume_size } =
+            request;
 
         Zfs::ensure_dataset(DatasetEnsureArgs {
             name: &delegated_zvol.parent_dataset_name(),
