@@ -2916,7 +2916,7 @@ table! {
 allow_tables_to_appear_in_same_query!(fm_sitrep, fm_sitrep_history);
 
 table! {
-    lrtq_members (rack_id, hw_baseboard_id) {
+    lrtq_member (rack_id, hw_baseboard_id) {
         rack_id -> Uuid,
         hw_baseboard_id -> Uuid,
     }
@@ -2930,7 +2930,8 @@ table! {
         threshold -> Int2,
         commit_crash_tolerance -> Int2,
         coordinator -> Uuid,
-        encrypted_rack_secrets -> Text,
+        encrypted_rack_secrets_salt -> Text,
+        encrypted_rack_secrets -> Binary,
     }
 }
 

@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     --
     -- These are only filled in during a reconfiguration and retrieved
     -- during the prepare phase of the protocol by Nexus from the coordinator.
+    --
+    -- Salt is a hex-encoded string
+    encrypted_rack_secrets_salt: String(64),
     encrypted_rack_secrets TEXT,
 
     -- Each rack has its own trust quorum
