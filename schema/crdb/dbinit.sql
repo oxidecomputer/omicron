@@ -7473,7 +7473,7 @@ WHERE
 -- 
 -- LRTQ configurations are always epoch 1, and any subsequent trust quorum
 -- configuration must have epoch > 1.
-CREATE TABLE IF NOT EXISTS omicron.public.lrtq_members (
+CREATE TABLE IF NOT EXISTS omicron.public.lrtq_member (
     -- Foreign key into the rack table
     rack_id UUID NOT NULL,
 
@@ -7534,7 +7534,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.trust_quorum_configuration (
     --
     -- These are only filled in during a reconfiguration and retrieved
     -- during the prepare phase of the protocol by Nexus from the coordinator.
-    encrypted_rack_secrets TEXT,
+    --
+    -- Salt is a hex-encoded string
+    encrypted_rack_secrets_salt: STRING(64),
+    encrypted_rack_secrets BYTES,
 
     -- Each rack has its own trust quorum
     PRIMARY KEY (rack_id, epoch)
