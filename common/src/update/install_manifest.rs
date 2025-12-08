@@ -10,19 +10,23 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tufaceous_artifact::ArtifactHash;
 
-/// Describes the set of Omicron zones written out into an install dataset.
+/// Describes a set of files written out into an install dataset.
+/// This is currently used for zones and reference measurements
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema)]
-pub struct OmicronZoneManifest {
+pub struct OmicronInstallManifest {
     /// The source of the manifest.
-    pub source: OmicronZoneManifestSource,
+    pub source: OmicronInstallManifestSource,
 
-    /// Omicron zone file names and hashes.
-    pub zones: IdOrdMap<OmicronZoneFileMetadata>,
+    /// Omicron install file names and hashes.
+    pub files: IdOrdMap<OmicronInstallMetadata>,
 }
 
-impl OmicronZoneManifest {
-    /// The name of the file.
-    pub const FILE_NAME: &str = "zones.json";
+impl OmicronInstallManifest {
+    /// The name of the zones file.
+    pub const ZONES_FILE_NAME: &str = "zones.json";
+
+    /// The name of the measurment file
+    pub const MEASUREMENT_FILE_NAME: &str = "measurements.json";
 }
 
 /// The source of truth for an Omicron zone manifest.
@@ -30,7 +34,7 @@ impl OmicronZoneManifest {
     Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize, JsonSchema,
 )]
 #[serde(tag = "source", rename_all = "snake_case")]
-pub enum OmicronZoneManifestSource {
+pub enum OmicronInstallManifestSource {
     /// The manifest was written out by installinator and the mupdate process.
     Installinator {
         /// The UUID of the mupdate.
@@ -43,13 +47,13 @@ pub enum OmicronZoneManifestSource {
     SledAgent,
 }
 
-impl fmt::Display for OmicronZoneManifestSource {
+impl fmt::Display for OmicronInstallManifestSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OmicronZoneManifestSource::Installinator { mupdate_id } => {
+            OmicronInstallManifestSource::Installinator { mupdate_id } => {
                 write!(f, "installinator (mupdate ID: {})", mupdate_id)
             }
-            OmicronZoneManifestSource::SledAgent => {
+            OmicronInstallManifestSource::SledAgent => {
                 write!(f, "sled-agent")
             }
         }
@@ -58,7 +62,7 @@ impl fmt::Display for OmicronZoneManifestSource {
 
 /// Information about an Omicron zone file written out to the install dataset.
 ///
-/// Part of [`OmicronZoneManifest`].
+/// Part of [`OmicronInstallManifest`].
 #[derive(
     Clone,
     Debug,
@@ -70,7 +74,7 @@ impl fmt::Display for OmicronZoneManifestSource {
     Serialize,
     JsonSchema,
 )]
-pub struct OmicronZoneFileMetadata {
+pub struct OmicronInstallMetadata {
     /// The file name.
     pub file_name: String,
 
@@ -81,7 +85,7 @@ pub struct OmicronZoneFileMetadata {
     pub hash: ArtifactHash,
 }
 
-impl IdOrdItem for OmicronZoneFileMetadata {
+impl IdOrdItem for OmicronInstallMetadata {
     type Key<'a> = &'a str;
 
     #[inline]

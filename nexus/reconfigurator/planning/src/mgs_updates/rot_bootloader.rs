@@ -136,7 +136,8 @@ pub(super) fn try_make_update(
                     | KnownArtifactKind::SwitchRot
                     | KnownArtifactKind::GimletSp
                     | KnownArtifactKind::PscSp
-                    | KnownArtifactKind::SwitchSp,
+                    | KnownArtifactKind::SwitchSp
+                    | KnownArtifactKind::MeasurementCorpus,
                 ) => false,
             }
         })
