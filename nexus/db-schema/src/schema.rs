@@ -2939,7 +2939,7 @@ table! {
         rack_id -> Uuid,
         epoch -> Int8,
         hw_baseboard_id -> Uuid,
-        share_digest -> Text
+        share_digest -> Text,
     }
 }
 
