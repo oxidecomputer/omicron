@@ -61,6 +61,7 @@ mod failures;
 mod groups;
 mod instances;
 mod networking_integration;
+mod omdb;
 
 // Timeout constants for test operations
 const POLL_INTERVAL: Duration = Duration::from_millis(80);
