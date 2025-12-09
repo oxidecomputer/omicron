@@ -4,7 +4,7 @@
 
 use dropshot::test_util::ClientTestContext;
 use http::{StatusCode, method::Method};
-use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
+use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::SiloGroupApiOnly;
