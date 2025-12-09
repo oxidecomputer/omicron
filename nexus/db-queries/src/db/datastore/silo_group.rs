@@ -8,6 +8,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db::IncompleteOnConflictExt;
+use crate::db::datastore::DbConnection;
 use crate::db::datastore::RunnableQueryNoReturn;
 use crate::db::model;
 use crate::db::model::Silo;
@@ -373,6 +374,26 @@ impl<'a> SiloGroupLookup<'a> {
 }
 
 impl DataStore {
+    /// Helper function to fetch member counts for a list of groups
+    async fn silo_group_member_counts(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        group_ids: Vec<Uuid>,
+    ) -> Result<std::collections::HashMap<Uuid, i64>, Error> {
+        use nexus_db_schema::schema::silo_group_membership::dsl;
+
+        dsl::silo_group_membership
+            .filter(dsl::silo_group_id.eq_any(group_ids))
+            .group_by(dsl::silo_group_id)
+            .select((
+                dsl::silo_group_id,
+                diesel::dsl::count(dsl::silo_user_id),
+            ))
+            .load_async::<(Uuid, i64)>(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map(|counts| counts.into_iter().collect())
+    }
+
     pub(super) async fn silo_group_ensure_query(
         opctx: &OpContext,
         authz_silo: &authz::Silo,
@@ -598,9 +619,6 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloGroup> {
-        use diesel::dsl::sql;
-        use diesel::sql_types::BigInt;
-
         // Similar to session_hard_delete (see comment there), we do not do a
         // typical authz check, instead effectively encoding the policy here
         // that any user is allowed to fetch their own group memberships
@@ -641,22 +659,8 @@ impl DataStore {
         let group_ids: Vec<Uuid> =
             groups.iter().map(|g| *g.id().as_untyped_uuid()).collect();
 
-        // Now get member counts for these groups
-        let member_counts = sg::dsl::silo_group
-            .filter(sg::id.eq_any(group_ids))
-            .left_join(sgm::table.on(sgm::silo_group_id.eq(sg::id)))
-            .group_by(sg::id)
-            .select((
-                sg::id,
-                sql::<BigInt>(
-                    "CAST(COUNT(silo_group_membership.silo_user_id) AS BIGINT)",
-                ),
-            ))
-            .load_async::<(Uuid, i64)>(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            .into_iter()
-            .collect::<std::collections::HashMap<Uuid, i64>>();
+        let member_counts =
+            DataStore::silo_group_member_counts(&conn, group_ids).await?;
 
         let page = groups
             .into_iter()
@@ -802,10 +806,7 @@ impl DataStore {
         authz_silo: &authz::Silo,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<SiloGroup> {
-        use diesel::dsl::sql;
-        use diesel::sql_types::BigInt;
         use nexus_db_schema::schema::silo_group::dsl as sg_dsl;
-        use nexus_db_schema::schema::silo_group_membership::dsl as sgm_dsl;
 
         opctx.authorize(authz::Action::Read, authz_silo).await?;
 
@@ -843,25 +844,8 @@ impl DataStore {
         let group_ids: Vec<Uuid> =
             groups.iter().map(|g| *g.id().as_untyped_uuid()).collect();
 
-        // Now get member counts for these groups
-        let member_counts = sg_dsl::silo_group
-            .filter(sg_dsl::id.eq_any(group_ids))
-            .left_join(
-                sgm_dsl::silo_group_membership
-                    .on(sgm_dsl::silo_group_id.eq(sg_dsl::id)),
-            )
-            .group_by(sg_dsl::id)
-            .select((
-                sg_dsl::id,
-                sql::<BigInt>(
-                    "CAST(COUNT(silo_group_membership.silo_user_id) AS BIGINT)",
-                ),
-            ))
-            .load_async::<(Uuid, i64)>(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-            .into_iter()
-            .collect::<std::collections::HashMap<Uuid, i64>>();
+        let member_counts =
+            DataStore::silo_group_member_counts(&conn, group_ids).await?;
 
         let page = groups
             .into_iter()
