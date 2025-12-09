@@ -384,10 +384,7 @@ impl DataStore {
         dsl::silo_group_membership
             .filter(dsl::silo_group_id.eq_any(group_ids))
             .group_by(dsl::silo_group_id)
-            .select((
-                dsl::silo_group_id,
-                diesel::dsl::count(dsl::silo_user_id),
-            ))
+            .select((dsl::silo_group_id, diesel::dsl::count(dsl::silo_user_id)))
             .load_async::<(Uuid, i64)>(conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
