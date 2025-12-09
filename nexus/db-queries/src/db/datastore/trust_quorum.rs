@@ -10,11 +10,13 @@ use crate::context::OpContext;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_db_errors::ErrorHandler;
+use nexus_db_errors::OptionalError;
+use nexus_db_errors::TransactionError;
 use nexus_db_errors::public_error_from_diesel;
+use nexus_db_lookup::DbConnection;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::TrustQuorumConfiguration as DbTrustQuorumConfiguration;
 use nexus_db_model::TrustQuorumMember as DbTrustQuorumMember;
-use nexus_types::trust_quorum::BaseboardId;
 use nexus_types::trust_quorum::{
     TrustQuorumConfig, TrustQuorumConfigState, TrustQuorumMemberData,
     TrustQuorumMemberState,
@@ -25,9 +27,9 @@ use omicron_common::api::external::OptionalLookupResult;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::RackUuid;
 use std::collections::{BTreeMap, BTreeSet};
-use trust_quorum_protocol::EncryptedRackSecrets;
-use trust_quorum_protocol::Salt;
-use trust_quorum_protocol::Sha3_256Digest;
+use trust_quorum_protocol::{
+    BaseboardId, EncryptedRackSecrets, Epoch, Salt, Sha3_256Digest, Threshold,
+};
 
 impl DataStore {
     /// Return all `HwBaseboardId`s for a given rack that has run LRTQ
@@ -55,12 +57,13 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    // TODO: Probably abstract out some of this error handling.
     pub async fn tq_latest_config(
         &self,
         opctx: &OpContext,
         rack_id: RackUuid,
     ) -> OptionalLookupResult<TrustQuorumConfig> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = &*self.pool_connection_authorized(opctx).await?;
 
         use nexus_db_schema::schema::hw_baseboard_id::dsl as hw_baseboard_id_dsl;
@@ -144,34 +147,36 @@ impl DataStore {
         };
 
         let encrypted_rack_secrets = if salt.is_some() {
-            let secrets =
-                latest.encrypted_rack_secrets.unwrap_or_else(|| {
-                    // This should never happend due to constraint checks
-                    Error::InternalError {
-                        internal_message: format!(
-                            "salt exists, but secrets do not for TQ:\
-                             rack_id: {}, epoch: {}"
-                            latest.rack_id, latest.epoch
-                        ),
-                    }
-                })?;
-            Some(EncryptedRackSecrets::new(salt, secrets))
+            let Some(secrets) = latest.encrypted_rack_secrets else {
+                // This should never happend due to constraint checks
+                return Err(Error::InternalError {
+                    internal_message: format!(
+                        "salt exists, but secrets do not for TQ:\
+                             rack_id: {}, epoch: {}",
+                        latest.rack_id, latest.epoch
+                    ),
+                });
+            };
+            Some(EncryptedRackSecrets::new(
+                salt.unwrap(),
+                secrets.into_boxed_slice(),
+            ))
         } else {
             None
         };
 
-        let coordinator = coordinator.unwrap_or_else(|| {
+        let Some(coordinator) = coordinator else {
             return Err(Error::InternalError {
                 internal_message: format!(
                     "Failed to find coordinator for id: {}",
                     latest.coordinator
                 ),
             });
-        });
+        };
 
         Ok(Some(TrustQuorumConfig {
             rack_id: latest.rack_id.into(),
-            epoch: latest.epoch.try_into().unwrap(),
+            epoch: Epoch(latest.epoch.try_into().unwrap()),
             state: latest.state.into(),
             threshold: Threshold(latest.threshold.into()),
             commit_crash_tolerance: latest.commit_crash_tolerance.into(),
@@ -179,6 +184,81 @@ impl DataStore {
             encrypted_rack_secrets,
             members: tq_members,
         }))
+    }
+
+    /// Insert a new trust quorum configuration, but only if it is equivalent
+    /// to the highest epoch of the last configuration + 1.
+    pub async fn tq_insert_latest_config(
+        &self,
+        opctx: &OpContext,
+        config: TrustQuorumConfig,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = &*self.pool_connection_authorized(opctx).await?;
+
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("tq_insert_latest_config")
+            .transaction(&conn, |c| {
+
+                let err = err.clone();
+                let config = config.clone();
+
+                async move {
+                let current = self
+                    .tq_get_latest_epoch_in_txn(opctx, &c, config.rack_id)
+                    .await
+                    .map_err(|txn_error| txn_error.into_diesel(&err))?;
+
+                let is_insertable = if let Some(epoch) = current.clone() {
+                    // Only insert if what is in the DB is immediately prior to
+                    // this configuration.
+                    Some(epoch) == config.epoch.previous()
+                } else {
+                    // Unconditional update is fine here, since a config doesn't exist
+                    // TODO: Should we ensure that epoch == 1 || epoch == 2 ?
+                    true
+                };
+
+                if !is_insertable {
+                    return Err(err.bail(TransactionError::CustomError(
+                        Error::conflict(format!(
+                            "expected current TQ epoch for {} be {:?}, found {:?}",
+                            config.rack_id,
+                            config.epoch.previous(),
+                            current
+                        )),
+                    )));
+                }
+
+                // TODO: Do the inserts
+                todo!()
+                }
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(err) => err.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })
+    }
+
+    async fn tq_get_latest_epoch_in_txn(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        rack_id: RackUuid,
+    ) -> Result<Option<Epoch>, TransactionError<Error>> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use nexus_db_schema::schema::trust_quorum_configuration::dsl;
+        let latest_epoch = dsl::trust_quorum_configuration
+            .filter(dsl::rack_id.eq(rack_id.into_untyped_uuid()))
+            .order_by(dsl::epoch.desc())
+            .select(dsl::epoch)
+            .first_async::<i64>(conn)
+            .await
+            .optional()?
+            .map(|epoch| Epoch(epoch.try_into().unwrap()));
+        Ok(latest_epoch)
     }
 }
 
