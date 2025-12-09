@@ -767,10 +767,10 @@ toml_edit = "0.22.27"
 tough = { version = "0.20.0", features = [ "http" ] }
 transceiver-controller = { git = "https://github.com/oxidecomputer/transceiver-control", features = [ "api-traits" ] }
 trybuild = "1.0.106"
-tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus_take_2" }
-tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus_take_2", features = ["proptest", "schemars"] }
-tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus_take_2" }
-tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "measurement_corpus_take_2" }
+tufaceous = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous-artifact = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main", features = ["proptest", "schemars"] }
+tufaceous-brand-metadata = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
+tufaceous-lib = { git = "https://github.com/oxidecomputer/tufaceous", branch = "main" }
 tui-tree-widget = "0.23.1"
 typed-rng = { path = "typed-rng" }
 typify = "0.3.0"
