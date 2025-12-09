@@ -2,10 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Long-running tokio task responsible for updating the dump device setup in
-//! response to changes in available disks.
-
-use super::worker::DebugCollector;
+use super::handle::DebugCollector;
 use crate::InternalDisksReceiver;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
@@ -21,6 +18,9 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 
+/// Set up the debug collector subsystem
+///
+/// See the comment in debug_collector/mod.rs for details.
 pub(crate) fn spawn(
     internal_disks_rx: InternalDisksReceiver,
     external_disks_rx: watch::Receiver<HashSet<Disk>>,
@@ -52,6 +52,15 @@ pub(crate) fn spawn(
     }
 }
 
+/// The `DebugCollectorTask` does two things:
+///
+/// - watches for changes to the disk-related `watch` channels and propagates
+///   them to the `DebugCollectorWorker`
+///
+/// - accepts requests to archive debug data from former zone root filesystems
+///   and propagates them to the `DebugCollectorWorker`
+///
+/// See the comment in debug_collector/mod.rs for details.
 struct DebugCollectorTask {
     // Input channels on which we receive updates about disk changes.
     internal_disks_rx: InternalDisksReceiver,
