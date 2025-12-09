@@ -2943,22 +2943,7 @@ table! {
         rack_id -> Uuid,
         epoch -> Int8,
         hw_baseboard_id -> Uuid,
+        state -> crate::enums::TrustQuorumMemberStateEnum,
         share_digest -> Text,
-    }
-}
-
-table! {
-    trust_quorum_acked_prepare (rack_id, epoch, hw_baseboard_id) {
-        rack_id -> Uuid,
-        epoch -> Int8,
-        hw_baseboard_id -> Uuid,
-    }
-}
-
-table! {
-    trust_quorum_acked_commit (rack_id, epoch, hw_baseboard_id) {
-        rack_id -> Uuid,
-        epoch -> Int8,
-        hw_baseboard_id -> Uuid,
     }
 }
