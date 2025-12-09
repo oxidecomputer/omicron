@@ -938,6 +938,9 @@ pub struct User {
 
     /** Uuid of the silo to which this user belongs */
     pub silo_id: Uuid,
+
+    /** Timestamp when this user was last modified */
+    pub time_modified: DateTime<Utc>,
 }
 
 // SESSION
@@ -975,6 +978,9 @@ pub struct Group {
 
     /// Uuid of the silo to which this group belongs
     pub silo_id: Uuid,
+
+    /// Timestamp when this group was last modified
+    pub time_modified: DateTime<Utc>,
 }
 
 // BUILT-IN USERS

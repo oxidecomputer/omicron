@@ -234,6 +234,7 @@ impl From<SiloUserApiOnly> for views::User {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
+            time_modified: u.time_modified,
         }
     }
 }
@@ -294,6 +295,7 @@ impl From<SiloUserJit> for views::User {
             // TODO the use of external_id as display_name is temporary
             display_name: u.external_id,
             silo_id: u.silo_id,
+            time_modified: u.time_modified,
         }
     }
 }
@@ -365,6 +367,7 @@ impl From<SiloUserScim> for views::User {
             // TODO the use of user_name as display_name is temporary
             display_name: u.user_name,
             silo_id: u.silo_id,
+            time_modified: u.time_modified,
         }
     }
 }
