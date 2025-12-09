@@ -2778,7 +2778,6 @@ table! {
         vni -> Int4,
         multicast_ip -> Inet,
         source_ips -> Array<Inet>,
-        mvlan -> Nullable<Int2>,
         underlay_group_id -> Nullable<Uuid>,
         tag -> Nullable<Text>,
         state -> crate::enums::MulticastGroupStateEnum,

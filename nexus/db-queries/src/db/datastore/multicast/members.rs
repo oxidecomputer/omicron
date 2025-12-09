@@ -926,7 +926,6 @@ mod tests {
             multicast_ip: Some("224.10.1.6".parse().unwrap()),
             source_ips: None,
             // Pool resolved via authz_pool argument to datastore call
-            mvlan: None,
         };
 
         let creating_group = datastore

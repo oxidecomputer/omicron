@@ -1010,7 +1010,6 @@ fn assert_groups_eq(left: &MulticastGroup, right: &MulticastGroup) {
     assert_eq!(left.identity.description, right.identity.description);
     assert_eq!(left.multicast_ip, right.multicast_ip);
     assert_eq!(left.source_ips, right.source_ips);
-    assert_eq!(left.mvlan, right.mvlan);
     assert_eq!(left.ip_pool_id, right.ip_pool_id);
 }
 

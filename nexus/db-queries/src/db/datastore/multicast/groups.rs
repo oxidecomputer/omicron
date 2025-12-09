@@ -34,7 +34,6 @@ use omicron_common::api::external::{
     IdentityMetadataCreateParams, ListResultVec, LookupResult, LookupType,
     ResourceType, UpdateResult,
 };
-use omicron_common::vlan::VlanID;
 use omicron_uuid_kinds::{GenericUuid, MulticastGroupUuid};
 
 use crate::authz;
@@ -56,7 +55,6 @@ pub(crate) struct MulticastGroupAllocationParams {
     pub ip: Option<IpAddr>,
     pub pool: Option<authz::IpPool>,
     pub source_ips: Option<Vec<IpAddr>>,
-    pub mvlan: Option<VlanID>,
 }
 
 impl DataStore {
@@ -165,7 +163,6 @@ impl DataStore {
                 ip: params.multicast_ip,
                 pool: authz_pool,
                 source_ips: params.source_ips.clone(),
-                mvlan: params.mvlan,
             },
         )
         .await
@@ -517,7 +514,6 @@ impl DataStore {
                 ip_pool_id: authz_pool.id(),
                 explicit_address: params.ip,
                 source_ips: source_ip_networks,
-                mvlan: params.mvlan.map(|vlan_id| u16::from(vlan_id) as i16),
                 vni,
                 // Set DPD tag to the group UUID to ensure uniqueness across lifecycle.
                 // This prevents tag collision when group names are reused.
@@ -879,7 +875,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            mvlan: None,
         };
         datastore
             .multicast_group_create(&opctx, &params1, Some(authz_pool.clone()))
@@ -894,7 +889,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            mvlan: None,
         };
         datastore
             .multicast_group_create(&opctx, &params2, Some(authz_pool.clone()))
@@ -909,7 +903,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            mvlan: None,
         };
         let result3 = datastore
             .multicast_group_create(&opctx, &params3, Some(authz_pool.clone()))
@@ -982,7 +975,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            mvlan: None,
         };
 
         let group_default = datastore
@@ -1007,7 +999,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            mvlan: None,
         };
         let group_explicit = datastore
             .multicast_group_create(&opctx, &params_explicit, None)
@@ -1134,7 +1125,6 @@ mod tests {
             },
             multicast_ip: Some("224.1.3.3".parse().unwrap()),
             source_ips: None,
-            mvlan: None,
         };
 
         let external_group = datastore
@@ -1231,7 +1221,6 @@ mod tests {
             },
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
-            mvlan: None,
         };
 
         let group = datastore
@@ -1696,7 +1685,6 @@ mod tests {
             },
             multicast_ip: Some("224.3.1.5".parse().unwrap()),
             source_ips: None,
-            mvlan: None,
         };
 
         let group = datastore
@@ -1828,7 +1816,6 @@ mod tests {
             },
             multicast_ip: None, // Let it allocate from pool
             source_ips: None,
-            mvlan: None,
         };
         let group = datastore
             .multicast_group_create(
@@ -2040,7 +2027,6 @@ mod tests {
             },
             multicast_ip: Some(target_ip),
             source_ips: None,
-            mvlan: None,
         };
 
         let group1 = datastore
@@ -2067,7 +2053,6 @@ mod tests {
             },
             multicast_ip: Some(target_ip),
             source_ips: None,
-            mvlan: None,
         };
 
         let group2 = datastore
@@ -2152,7 +2137,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            mvlan: None,
         };
 
         let group1 = datastore
@@ -2169,7 +2153,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            mvlan: None,
         };
 
         let result2 = datastore
@@ -2199,7 +2182,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            mvlan: None,
         };
 
         let group3 = datastore
@@ -2285,7 +2267,6 @@ mod tests {
             },
             multicast_ip: None,
             source_ips: None,
-            mvlan: None,
         };
 
         let group = datastore
@@ -2412,7 +2393,6 @@ mod tests {
                 "10.0.0.1".parse().unwrap(),
                 "10.0.0.2".parse().unwrap(),
             ]),
-            mvlan: None,
         };
 
         let group = datastore
@@ -2519,7 +2499,6 @@ mod tests {
             },
             multicast_ip: Some("224.100.20.10".parse().unwrap()),
             source_ips: None,
-            mvlan: None,
         };
 
         let params_2 = MulticastGroupCreate {
@@ -2529,7 +2508,6 @@ mod tests {
             },
             multicast_ip: Some("224.100.20.11".parse().unwrap()),
             source_ips: None,
-            mvlan: None,
         };
 
         let params_3 = MulticastGroupCreate {
@@ -2539,7 +2517,6 @@ mod tests {
             },
             multicast_ip: Some("224.100.20.12".parse().unwrap()),
             source_ips: None,
-            mvlan: None,
         };
 
         // Create groups (all are fleet-scoped)
@@ -2647,7 +2624,6 @@ mod tests {
             },
             multicast_ip: Some("224.100.30.5".parse().unwrap()),
             source_ips: None,
-            mvlan: None,
         };
 
         // Create group - starts in "Creating" state
@@ -2914,7 +2890,6 @@ mod tests {
             },
             multicast_ip: None, // No explicit IP - triggers pool auto-selection
             source_ips: Some(vec!["10.0.0.1".parse().unwrap()]), // Has sources
-            mvlan: None,
         };
 
         // This should succeed via ASM fallback (no SSM pool exists)
